@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark id="polygon-1">
+      <name>Area Operasi</name>
+      <ExtendedData><Data name="asset_id"><value>AREA-01</value></Data></ExtendedData>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing><coordinates>110,-7 111,-7 111,-6</coordinates></LinearRing>
+        </outerBoundaryIs>
+        <innerBoundaryIs>
+          <LinearRing><coordinates>110.2,-6.9 110.4,-6.9 110.3,-6.7</coordinates></LinearRing>
+        </innerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  </Document>
+</kml>

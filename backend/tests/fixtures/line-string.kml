@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Folder><name>Fiber Optic</name>
+      <Placemark id="line-1">
+        <name>Backbone FO</name>
+        <ExtendedData><Data name="asset_id"><value>FO-01</value></Data></ExtendedData>
+        <LineString>
+          <altitudeMode>clampToGround</altitudeMode>
+          <coordinates>110.1,-6.1 110.2,-6.2 110.3,-6.3</coordinates>
+        </LineString>
+      </Placemark>
+    </Folder>
+  </Document>
+</kml>

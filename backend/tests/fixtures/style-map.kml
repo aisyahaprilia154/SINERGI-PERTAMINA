@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Style id="asset-normal">
+      <IconStyle><color>ff00ff00</color><scale>1.2</scale><Icon><href>icons/camera.png</href></Icon></IconStyle>
+      <LineStyle><color>ff0000ff</color><width>3</width></LineStyle>
+      <PolyStyle><color>7f00ffff</color><fill>1</fill><outline>0</outline></PolyStyle>
+    </Style>
+    <StyleMap id="asset-map">
+      <Pair><key>normal</key><styleUrl>#asset-normal</styleUrl></Pair>
+      <Pair><key>highlight</key><styleUrl>#asset-normal</styleUrl></Pair>
+    </StyleMap>
+    <Placemark id="styled-1">
+      <name>Styled Asset</name>
+      <styleUrl>#asset-map</styleUrl>
+      <ExtendedData><Data name="asset_id"><value>STYLE-01</value></Data></ExtendedData>
+      <Point><coordinates>110,-7</coordinates></Point>
+    </Placemark>
+  </Document>
+</kml>

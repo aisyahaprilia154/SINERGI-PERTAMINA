@@ -1,0 +1,294 @@
+import path from 'node:path'
+import { adaptKmlImportResult } from '../../../frontend/src/adapters/kml-import-adapter.js'
+import { AppError, asAppError } from '../errors.js'
+import { DatasetVersionValidationService } from './dataset-validation-service.js'
+import { extractKmzArchive, orderKmlCandidates } from './kmz-extractor.js'
+import { parseKmlFile } from './kml-parser.js'
+
+export class ImportPipeline {
+  constructor({
+    repository,
+    fileStore,
+    auditLog,
+    limits,
+    metadataAliases = {},
+    sourceIdentityFallback = 'none',
+    folderMappings = [],
+    relationMappings = [],
+    topology = {},
+    validationService = new DatasetVersionValidationService(),
+    clock = () => new Date(),
+  }) {
+    this.repository = repository
+    this.fileStore = fileStore
+    this.auditLog = auditLog
+    this.limits = limits
+    this.metadataAliases = metadataAliases
+    this.sourceIdentityFallback = sourceIdentityFallback
+    this.folderMappings = folderMappings
+    this.relationMappings = relationMappings
+    this.topology = topology
+    this.validationService = validationService
+    this.clock = clock
+  }
+
+  async process({
+    datasetVersionId,
+    sourcePath,
+    extension,
+    actorId,
+  }) {
+    let workspace = null
+    let resources = []
+    let selectedKmlPath = null
+
+    await this.auditLog.record('dataset_import.processing_started', {
+      actorId,
+      datasetVersionId,
+      outcome: 'processing',
+    })
+
+    try {
+      await this.#progress(datasetVersionId, 20, 'reading_source')
+      let parserOutput
+
+      if (extension === '.kmz') {
+        workspace = await this.fileStore.createWorkspace()
+        await this.#progress(datasetVersionId, 30, 'extracting_kmz')
+        const extracted = await extractKmzArchive(sourcePath, workspace, this.limits)
+        resources = extracted.resources
+        const selection = await selectKmlCandidate(extracted.kmlFiles, {
+          ...this.limits,
+          folderMappings: this.folderMappings,
+        })
+        selectedKmlPath = selection.selected.relativePath
+        parserOutput = selection.parserOutput
+        parserOutput.issues = [
+          ...selection.issues,
+          ...extracted.ignoredEntries.map((entry) => ({
+            severity: 'warning',
+            issueCode: 'ignored_kmz_resource',
+            message: `File ${entry} tidak dieksekusi atau diekstrak karena bukan resource yang diperbolehkan.`,
+            canActivate: true,
+          })),
+        ]
+      } else {
+        selectedKmlPath = path.basename(sourcePath)
+        await this.#progress(datasetVersionId, 50, 'parsing_kml')
+        parserOutput = await parseKmlFile(sourcePath, {
+          ...this.limits,
+          folderMappings: this.folderMappings,
+        })
+      }
+
+      await this.#progress(datasetVersionId, 70, 'validating_import')
+      const current = await this.repository.get(datasetVersionId)
+      const adaptedResult = adaptKmlImportResult({
+        parserOutput,
+        datasetVersion: current.datasetVersion,
+        mapping: {
+          metadataAliases: this.metadataAliases,
+          sourceIdentityFallback: this.sourceIdentityFallback,
+          relationMappings: this.relationMappings,
+          topology: this.topology,
+        },
+      })
+      const sourceSelection = {
+        selectedKmlPath,
+        resources,
+      }
+      const result = this.validationService.validate({
+        result: adaptedResult,
+        parserOutput,
+        sourceSelection,
+        expectedBranchId: current.datasetVersion.branchId,
+      })
+
+      await this.#progress(datasetVersionId, 90, 'persisting_result')
+      const completedAt = this.clock().toISOString()
+      const record = {
+        ...result,
+        sourceSelection,
+        processing: {
+          progress: 100,
+          stage: result.datasetVersion.status,
+          completedAt,
+        },
+      }
+      await this.repository.update(datasetVersionId, () => record)
+      await this.auditLog.record('dataset_import.processing_completed', {
+        actorId,
+        datasetVersionId,
+        branchId: result.datasetVersion.branchId,
+        outcome: result.datasetVersion.status,
+        details: {
+          validationStatus: result.datasetVersion.validationStatus,
+          sourceFilename: result.datasetVersion.sourceFilename,
+          summary: result.datasetVersion.summary,
+        },
+      })
+      return record
+    } catch (error) {
+      const appError = asAppError(error)
+      const failed = await this.#markInvalid(datasetVersionId, appError)
+      await this.auditLog.record('dataset_import.processing_failed', {
+        actorId,
+        datasetVersionId,
+        branchId: failed.datasetVersion.branchId,
+        outcome: 'invalid',
+        details: {
+          errorCode: appError.code,
+          message: appError.expose ? appError.message : 'Internal processing error',
+        },
+      })
+      return failed
+    } finally {
+      await this.fileStore.removeWorkspace(workspace)
+    }
+  }
+
+  async #progress(datasetVersionId, progress, stage) {
+    await this.repository.update(datasetVersionId, (record) => ({
+      ...record,
+      processing: {
+        ...record.processing,
+        progress,
+        stage,
+        updatedAt: this.clock().toISOString(),
+      },
+    }))
+  }
+
+  async #markInvalid(datasetVersionId, error) {
+    return this.repository.update(datasetVersionId, (record) => {
+      const failed = this.validationService.createFailure({ record, error })
+      const summary = {
+        ...emptySummary(),
+        ...(failed.datasetVersion.summary ?? {}),
+      }
+      return {
+        ...failed,
+        datasetVersion: {
+          ...failed.datasetVersion,
+          summary,
+        },
+        layers: failed.layers ?? [],
+        assets: failed.assets ?? [],
+        geometries: failed.geometries ?? [],
+        relations: failed.relations ?? [],
+        processing: {
+          progress: 100,
+          stage: 'invalid',
+          completedAt: this.clock().toISOString(),
+        },
+      }
+    })
+  }
+}
+
+async function selectKmlCandidate(kmlFiles, limits) {
+  const ordered = orderKmlCandidates(kmlFiles)
+  const issues = []
+  let selected = null
+  let parserOutput = null
+
+  if (ordered.length > 1) {
+    issues.push({
+      severity: 'warning',
+      issueCode: 'multiple_kml_candidates',
+      message: `KMZ berisi ${ordered.length} kandidat KML. Pemilihan dilakukan deterministik dengan prioritas doc.kml lalu path alfabetis.`,
+      canActivate: true,
+    })
+  }
+
+  for (const candidate of ordered) {
+    try {
+      const parsed = await parseKmlFile(candidate.absolutePath, limits)
+      if (!selected) {
+        selected = candidate
+        parserOutput = parsed
+      }
+    } catch (error) {
+      if (error.code === 'unsafe_xml_declaration') throw error
+      issues.push({
+        severity: 'warning',
+        issueCode: 'invalid_kml_candidate',
+        message: `Kandidat KML ${candidate.relativePath} tidak valid dan tidak dipilih.`,
+        canActivate: true,
+      })
+    }
+  }
+
+  if (!selected) {
+    throw new AppError('Tidak ada kandidat KML valid di dalam KMZ.', {
+      code: 'kmz_without_valid_kml',
+      statusCode: 422,
+    })
+  }
+  return { selected, parserOutput, issues }
+}
+
+export function createProcessingRecord(datasetVersion, clock = () => new Date()) {
+  return {
+    contractVersion: '1.0.0',
+    datasetVersion: {
+      ...datasetVersion,
+      validationStatus: 'pending',
+      publicationStatus: 'unpublished',
+      status: 'processing',
+      summary: emptySummary(),
+    },
+    layers: [],
+    assets: [],
+    geometries: [],
+    relations: [],
+    issues: [],
+    validation: {
+      schemaVersion: '1.0.0',
+      status: 'pending',
+      canActivate: false,
+      summary: {
+        total: 0,
+        errors: 0,
+        warnings: 0,
+        information: 0,
+        blocking: 0,
+      },
+      facets: {
+        severity: {},
+        scope: {},
+        issueCode: {},
+      },
+      integrity: {
+        datasetVersionId: datasetVersion.id,
+        branchId: datasetVersion.branchId,
+        activeVersionUnchanged: true,
+        userVisible: false,
+        publicationStatus: 'unpublished',
+      },
+    },
+    processing: {
+      progress: 10,
+      stage: 'queued',
+      queuedAt: clock().toISOString(),
+    },
+  }
+}
+
+function emptySummary() {
+  return {
+    totalFolders: 0,
+    totalPlacemarks: 0,
+    totalAssets: 0,
+    totalPoints: 0,
+    totalLines: 0,
+    totalPolygons: 0,
+    totalRelations: 0,
+    newAssets: 0,
+    updatedAssets: 0,
+    unchangedAssets: 0,
+    removedAssets: 0,
+    errors: 0,
+    warnings: 0,
+  }
+}

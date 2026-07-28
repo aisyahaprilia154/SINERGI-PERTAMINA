@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark><name>A</name><ExtendedData><Data name="asset_id"><value>DUP-01</value></Data></ExtendedData><Point><coordinates>110,-7</coordinates></Point></Placemark>
+    <Placemark><name>B</name><ExtendedData><Data name="Asset ID"><value>DUP-01</value></Data></ExtendedData><Point><coordinates>111,-7</coordinates></Point></Placemark>
+  </Document>
+</kml>
