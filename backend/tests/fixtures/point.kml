@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark id="point-1">
+      <name>Camera Gate</name>
+      <description><![CDATA[<script>alert('x')</script><strong>Gerbang Utama</strong>]]></description>
+      <ExtendedData>
+        <Data name="Asset ID"><value>CCTV-01</value></Data>
+        <Data name="asset_type"><value>CCTV</value></Data>
+      </ExtendedData>
+      <Point>
+        <altitudeMode>absolute</altitudeMode>
+        <coordinates>110.4167,-6.9667,12</coordinates>
+      </Point>
+    </Placemark>
+  </Document>
+</kml>

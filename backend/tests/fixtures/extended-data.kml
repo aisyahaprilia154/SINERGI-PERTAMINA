@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Schema id="asset-schema">
+      <SimpleField name="hostname" type="string"/>
+      <SimpleField name="IP Address" type="string"/>
+    </Schema>
+    <Placemark id="switch-1">
+      <name>Fallback Name</name>
+      <ExtendedData>
+        <Data name="kode_aset"><value>SW-01</value></Data>
+        <Data name="nama_aset"><value>Switch Core</value></Data>
+        <Data name="lokasi"><value>Ruang Server</value></Data>
+        <SchemaData schemaUrl="#asset-schema">
+          <SimpleData name="hostname">sw-core-01</SimpleData>
+          <SimpleData name="IP Address">10.42.0.1</SimpleData>
+        </SchemaData>
+      </ExtendedData>
+      <Point><coordinates>110,-7</coordinates></Point>
+    </Placemark>
+  </Document>
+</kml>
