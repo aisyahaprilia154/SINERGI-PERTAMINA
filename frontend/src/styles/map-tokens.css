@@ -1,0 +1,71 @@
+/*
+ * Design foundation khusus network map.
+ * Seluruh token di-scope ke .map-body agar halaman lain tidak ikut berubah.
+ */
+.map-body {
+  --color-page: #f4f7fa;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f8fafc;
+  --color-surface-hover: #f2f5f8;
+  --color-overlay: rgba(15, 23, 42, 0.38);
+
+  --color-text-primary: #172231;
+  --color-text-secondary: #657184;
+  --color-text-muted: #8a94a3;
+  --color-text-inverse: #ffffff;
+
+  --color-primary: #172638;
+  --color-primary-hover: #22354a;
+  --color-primary-pressed: #0f1c2b;
+  --color-primary-soft: #edf1f5;
+
+  --color-border: #dbe2e9;
+  --color-border-strong: #cbd5df;
+  --color-divider: #e7ecf1;
+
+  --color-cctv: #9698f4;
+  --color-fiber-optic: #70cfb5;
+  --color-peripheral: #a88af3;
+  --color-infrastructure: #efc363;
+  --color-lan: #aeb8c5;
+
+  --color-success: #2e9b75;
+  --color-warning: #cc8b25;
+  --color-danger: #c94b55;
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-pill: 999px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --font-family-map: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-size-page-title: 24px;
+  --font-size-section-title: 16px;
+  --font-size-body: 14px;
+  --font-size-caption: 12px;
+  --font-size-micro: 11px;
+
+  --shadow-shell: 0 1px 3px rgba(15, 23, 42, 0.05);
+  --shadow-floating: 0 2px 8px rgba(15, 23, 42, 0.07);
+  --shadow-drawer: 0 10px 28px rgba(15, 23, 42, 0.13);
+  --shadow-popover: 0 8px 22px rgba(15, 23, 42, 0.11);
+
+  --color-map-canvas: #edf1f5;
+  --color-map-road: #ffffff;
+  --color-map-grid: #dbe2e9;
+  --color-map-label: #8a94a3;
+
+  --map-navbar-height: 64px;
+  --map-sidebar-width: 336px;
+  --map-sidebar-collapsed-width: 56px;
+  --map-drawer-width: 400px;
+}

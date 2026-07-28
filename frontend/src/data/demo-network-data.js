@@ -1,0 +1,131 @@
+/**
+ * Data demonstrasi hanya dipakai karena repository saat ini belum menyediakan
+ * endpoint dataset aktif. Ganti ekspor ini dengan adapter API tanpa mengubah
+ * komponen halaman peta.
+ */
+export const activeContext = {
+  branchId: 'semarang',
+  branchName: 'Kantor Cabang Semarang',
+  datasetId: 'dts-smg-2026-07-21',
+  datasetName: 'SMG Network Master',
+  version: 'v12',
+  publishedAt: '21 Jul 2026, 14.35 WIB',
+}
+
+export const networks = [
+  {
+    id: 'backbone-fo',
+    name: 'Backbone Fiber Optic',
+    shortName: 'FO Backbone',
+    color: '#70cfb5',
+    softColor: '#edf8f5',
+    type: 'Fiber optic',
+    assetCount: 8,
+    health: 'Aktif',
+    description: 'Jalur utama fiber optic antar gedung dan ruang perangkat.',
+    nodeIds: ['otb-mdf', 'sw-core', 'otb-a', 'otb-b', 'sw-warehouse', 'srv-dc'],
+    edges: [
+      ['otb-mdf', 'sw-core'],
+      ['sw-core', 'otb-a'],
+      ['otb-a', 'otb-b'],
+      ['otb-b', 'sw-warehouse'],
+      ['sw-core', 'srv-dc'],
+    ],
+  },
+  {
+    id: 'cctv-ring',
+    name: 'CCTV Ring Area Operasi',
+    shortName: 'CCTV Ring',
+    color: '#9698f4',
+    softColor: '#f1f1fe',
+    type: 'CCTV',
+    assetCount: 14,
+    health: 'Aktif',
+    description: 'Ring kamera perimeter, gerbang utama, dan area operasi.',
+    nodeIds: ['nvr-01', 'jb-cctv-01', 'cam-gate', 'cam-yard', 'jb-cctv-02', 'cam-loading'],
+    edges: [
+      ['nvr-01', 'jb-cctv-01'],
+      ['jb-cctv-01', 'cam-gate'],
+      ['jb-cctv-01', 'cam-yard'],
+      ['jb-cctv-01', 'jb-cctv-02'],
+      ['jb-cctv-02', 'cam-loading'],
+    ],
+  },
+  {
+    id: 'lan-office',
+    name: 'LAN Gedung Administrasi',
+    shortName: 'LAN Kantor',
+    color: '#aeb8c5',
+    softColor: '#f1f3f5',
+    type: 'LAN',
+    assetCount: 22,
+    health: 'Aktif',
+    description: 'Distribusi LAN lantai 1–3 untuk perangkat pengguna.',
+    nodeIds: ['sw-core', 'sw-floor-1', 'ap-lobby', 'printer-fin', 'sw-floor-2', 'ap-meeting'],
+    edges: [
+      ['sw-core', 'sw-floor-1'],
+      ['sw-floor-1', 'ap-lobby'],
+      ['sw-floor-1', 'printer-fin'],
+      ['sw-floor-1', 'sw-floor-2'],
+      ['sw-floor-2', 'ap-meeting'],
+    ],
+  },
+  {
+    id: 'server-network',
+    name: 'Server & Data Center',
+    shortName: 'Data Center',
+    color: '#a88af3',
+    softColor: '#f5f1fe',
+    type: 'Server',
+    assetCount: 7,
+    health: 'Aktif',
+    description: 'Koneksi perangkat inti di ruang server dan sistem rekaman.',
+    nodeIds: ['sw-core', 'srv-dc', 'nvr-01', 'srv-backup'],
+    edges: [
+      ['sw-core', 'srv-dc'],
+      ['srv-dc', 'nvr-01'],
+      ['srv-dc', 'srv-backup'],
+    ],
+  },
+  {
+    id: 'wifi-public',
+    name: 'Wi-Fi Area Publik',
+    shortName: 'Wi-Fi Publik',
+    color: '#efc363',
+    softColor: '#fcf6e8',
+    type: 'Access point',
+    assetCount: 9,
+    health: 'Aktif',
+    description: 'Akses nirkabel untuk lobi, ruang rapat, dan area tunggu.',
+    nodeIds: ['sw-floor-1', 'ap-lobby', 'ap-meeting', 'ap-guest'],
+    edges: [
+      ['sw-floor-1', 'ap-lobby'],
+      ['sw-floor-1', 'ap-meeting'],
+      ['sw-floor-1', 'ap-guest'],
+    ],
+  },
+]
+
+export const assets = [
+  { id: 'otb-mdf', name: 'OTB-MDF-01', type: 'OTB', status: 'Online', x: 0.13, y: 0.62, location: 'Ruang MDF', ip: '—', owner: 'IT Infrastructure' },
+  { id: 'sw-core', name: 'SW-CORE-SMG-01', type: 'Core switch', status: 'Online', x: 0.32, y: 0.51, location: 'Ruang Server Lt. 1', ip: '10.42.0.1', owner: 'Network Operation' },
+  { id: 'otb-a', name: 'OTB-GDA-01', type: 'OTB', status: 'Online', x: 0.47, y: 0.30, location: 'Gedung Administrasi', ip: '—', owner: 'IT Infrastructure' },
+  { id: 'otb-b', name: 'OTB-OPS-02', type: 'OTB', status: 'Online', x: 0.66, y: 0.26, location: 'Gedung Operasi', ip: '—', owner: 'IT Infrastructure' },
+  { id: 'sw-warehouse', name: 'SW-WHS-01', type: 'Distribution switch', status: 'Online', x: 0.85, y: 0.37, location: 'Gudang Utama', ip: '10.42.8.2', owner: 'Network Operation' },
+  { id: 'srv-dc', name: 'SRV-APP-01', type: 'Server', status: 'Online', x: 0.38, y: 0.72, location: 'Rak DC-A03', ip: '10.42.1.11', owner: 'System Operation' },
+  { id: 'srv-backup', name: 'SRV-BACKUP-01', type: 'Server', status: 'Online', x: 0.54, y: 0.80, location: 'Rak DC-A04', ip: '10.42.1.21', owner: 'System Operation' },
+  { id: 'nvr-01', name: 'NVR-SMG-01', type: 'NVR', status: 'Online', x: 0.27, y: 0.79, location: 'Ruang Kontrol', ip: '10.42.3.10', owner: 'Security Operation' },
+  { id: 'jb-cctv-01', name: 'JB-CCTV-01', type: 'Junction box', status: 'Online', x: 0.44, y: 0.63, location: 'Koridor Selatan', ip: '—', owner: 'Security Operation' },
+  { id: 'cam-gate', name: 'CCTV-GATE-01', type: 'CCTV', status: 'Online', x: 0.63, y: 0.70, location: 'Gerbang Utama', ip: '10.42.3.31', owner: 'Security Operation' },
+  { id: 'cam-yard', name: 'CCTV-YARD-03', type: 'CCTV', status: 'Perlu cek', x: 0.58, y: 0.52, location: 'Lapangan Operasi', ip: '10.42.3.34', owner: 'Security Operation' },
+  { id: 'jb-cctv-02', name: 'JB-CCTV-02', type: 'Junction box', status: 'Online', x: 0.73, y: 0.58, location: 'Sisi Timur', ip: '—', owner: 'Security Operation' },
+  { id: 'cam-loading', name: 'CCTV-LOAD-02', type: 'CCTV', status: 'Online', x: 0.88, y: 0.66, location: 'Loading Area', ip: '10.42.3.42', owner: 'Security Operation' },
+  { id: 'sw-floor-1', name: 'SW-ADM-L1-01', type: 'Access switch', status: 'Online', x: 0.38, y: 0.39, location: 'Panel Lt. 1', ip: '10.42.4.2', owner: 'Network Operation' },
+  { id: 'sw-floor-2', name: 'SW-ADM-L2-01', type: 'Access switch', status: 'Online', x: 0.51, y: 0.18, location: 'Panel Lt. 2', ip: '10.42.4.3', owner: 'Network Operation' },
+  { id: 'ap-lobby', name: 'AP-LOBBY-01', type: 'Access point', status: 'Online', x: 0.25, y: 0.28, location: 'Lobi Utama', ip: '10.42.5.12', owner: 'Network Operation' },
+  { id: 'printer-fin', name: 'PRN-FIN-01', type: 'Printer', status: 'Online', x: 0.50, y: 0.44, location: 'Ruang Finance', ip: '10.42.6.15', owner: 'General Affairs' },
+  { id: 'ap-meeting', name: 'AP-MEET-02', type: 'Access point', status: 'Online', x: 0.61, y: 0.14, location: 'Ruang Rapat 2', ip: '10.42.5.18', owner: 'Network Operation' },
+  { id: 'ap-guest', name: 'AP-GUEST-01', type: 'Access point', status: 'Online', x: 0.19, y: 0.40, location: 'Area Tunggu', ip: '10.42.5.23', owner: 'Network Operation' },
+]
+
+export const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
