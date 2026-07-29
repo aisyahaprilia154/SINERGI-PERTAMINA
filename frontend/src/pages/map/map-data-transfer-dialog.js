@@ -11,7 +11,12 @@ import {
   validateImportFile,
 } from '../admin/import-dataset-state.js'
 import {
+  collectFocusedAssetIds,
   collectSelectedNetworkAssetIds,
+  collectTraceAssetIds,
+  collectViewportAssetIds,
+  collectVisibleLayerAssetIds,
+  createContextualExportFilename,
   downloadActiveDatasetKml,
 } from './active-dataset-kml-export.js'
 
@@ -19,7 +24,13 @@ export function openMapDataTransferDialog({
   activeContext,
   assets = [],
   networks = [],
+  layers = [],
+  topologyGraph = null,
   selectedNetworkIds = new Set(),
+  selectedAssetId = null,
+  tracePath = [],
+  visibleAssetIds = [],
+  visibleGeometryIds = [],
   initialMode = 'import',
   onActivated,
   onOpenDiagram,
@@ -38,7 +49,9 @@ export function openMapDataTransferDialog({
     uploadPercent: null,
     status: null,
     error: null,
+    exportStatus: null,
     controller: null,
+    exportFormat: 'kml',
   }
 
   document.body.append(dialog)
@@ -62,7 +75,13 @@ export function openMapDataTransferDialog({
       activeContext,
       assets,
       networks,
+      layers,
+      topologyGraph,
       selectedNetworkIds,
+      selectedAssetId,
+      tracePath,
+      visibleAssetIds,
+      visibleGeometryIds,
       state,
     })
     bindEvents()
@@ -129,6 +148,19 @@ export function openMapDataTransferDialog({
     dialog.querySelector('.retry-map-import')?.addEventListener('click', resetImport)
     dialog.querySelector('.export-active-kml')?.addEventListener('click', exportActiveKml)
     dialog.querySelector('.export-selected-kml')?.addEventListener('click', exportSelectedKml)
+    dialog.querySelector('.export-visible-layer')?.addEventListener('click', exportVisibleLayers)
+    dialog.querySelector('.export-focused-depth-1')?.addEventListener('click', () => {
+      exportFocusedAsset(1)
+    })
+    dialog.querySelector('.export-focused-depth-2')?.addEventListener('click', () => {
+      exportFocusedAsset(2)
+    })
+    dialog.querySelector('.export-active-trace')?.addEventListener('click', exportActiveTrace)
+    dialog.querySelector('.export-current-viewport')?.addEventListener('click', exportCurrentViewport)
+    dialog.querySelector('[name="mapExportFormat"]')?.addEventListener('change', (event) => {
+      state.exportFormat = event.target.value === 'kmz' ? 'kmz' : 'kml'
+      render()
+    })
     dialog.querySelector('.download-active-source')?.addEventListener('click', downloadSource)
     dialog.querySelector('.open-map-diagram')?.addEventListener('click', () => {
       close()
@@ -247,18 +279,72 @@ export function openMapDataTransferDialog({
   }
 
   function exportActiveKml() {
-    downloadActiveDatasetKml(
-      { activeContext, assets },
-      createExportFilename(activeContext, 'dataset-aktif'),
-    )
+    exportScope('dataset-aktif', null, 'Dataset aktif')
   }
 
   function exportSelectedKml() {
     const assetIds = collectSelectedNetworkAssetIds(networks, selectedNetworkIds)
-    downloadActiveDatasetKml(
-      { activeContext, assets, assetIds },
-      createExportFilename(activeContext, 'jaringan-terpilih'),
+    exportScope('jaringan-terpilih', assetIds, 'Jaringan terpilih')
+  }
+
+  function exportVisibleLayers() {
+    const layerIds = networks
+      .filter(({ id }) => selectedNetworkIds.has(id))
+      .flatMap(({ layerIds = [] }) => layerIds)
+    exportScope(
+      'layer-terlihat',
+      collectVisibleLayerAssetIds(assets, layerIds),
+      'Layer terlihat',
     )
+  }
+
+  function exportFocusedAsset(depth) {
+    exportScope(
+      `Aset-Fokus-Depth-${depth}`,
+      collectFocusedAssetIds(topologyGraph, selectedAssetId, depth),
+      `Aset ${selectedAssetId || ''} dan relasi depth ${depth}`,
+    )
+  }
+
+  function exportActiveTrace() {
+    exportScope('Trace', collectTraceAssetIds(tracePath), 'Jalur tracing aktif')
+  }
+
+  function exportCurrentViewport() {
+    exportScope(
+      'Viewport',
+      collectViewportAssetIds(assets, visibleAssetIds, visibleGeometryIds),
+      'Area peta saat ini',
+    )
+  }
+
+  function exportScope(filenameScope, assetIds, scopeLabel) {
+    state.error = null
+    state.exportStatus = null
+    try {
+      const scopedIds = assetIds == null ? null : [...new Set(assetIds)]
+      if (scopedIds && !scopedIds.length) {
+        throw new Error('Scope export tidak mempunyai objek Pengapon yang dapat diexport.')
+      }
+      downloadActiveDatasetKml(
+        {
+          activeContext,
+          assets,
+          layers,
+          assetIds: scopedIds,
+          relations: topologyGraph?.edges ?? [],
+          scopeLabel,
+        },
+        createContextualExportFilename(activeContext, filenameScope),
+        state.exportFormat,
+      )
+      state.exportStatus = `${scopeLabel} berhasil disiapkan sebagai ${
+        state.exportFormat.toUpperCase()
+      }.`
+    } catch (error) {
+      state.error = error.message || 'Export tidak dapat diselesaikan.'
+    }
+    render()
   }
 
   async function downloadSource() {
@@ -266,14 +352,18 @@ export function openMapDataTransferDialog({
     if (!activeContext.datasetVersionId || !button) return
     button.disabled = true
     state.error = null
+    state.exportStatus = 'Menyiapkan file sumber asliâ€¦'
     try {
       const source = await downloadDatasetSource({
         token: getDefaultAdminToken(),
         datasetVersionId: activeContext.datasetVersionId,
       })
       downloadBlob(source.blob, source.filename)
+      state.exportStatus = 'File sumber asli berhasil disiapkan.'
+      render()
     } catch (error) {
       state.error = error.message
+      state.exportStatus = null
       render()
     } finally {
       if (button.isConnected) button.disabled = false
@@ -291,6 +381,7 @@ export function openMapDataTransferDialog({
     state.uploadPercent = null
     state.status = null
     state.error = null
+    state.exportStatus = null
     render()
   }
 
@@ -310,7 +401,13 @@ export function renderMapDataTransferDialog({
   activeContext,
   assets,
   networks,
+  layers = [],
+  topologyGraph = null,
   selectedNetworkIds,
+  selectedAssetId = null,
+  tracePath = [],
+  visibleAssetIds = [],
+  visibleGeometryIds = [],
   state,
 }) {
   const importSelected = state.mode === 'import'
@@ -348,8 +445,16 @@ export function renderMapDataTransferDialog({
             activeContext,
             assets,
             networks,
+            layers,
+            topologyGraph,
             selectedNetworkIds,
+            selectedAssetId,
+            tracePath,
+            visibleAssetIds,
+            visibleGeometryIds,
+            exportFormat: state.exportFormat,
             error: state.error,
+            exportStatus: state.exportStatus,
           })}
       </div>
     </div>
@@ -506,32 +611,107 @@ function renderExportPanel({
   activeContext,
   assets,
   networks,
+  topologyGraph,
   selectedNetworkIds,
+  selectedAssetId,
+  tracePath,
+  visibleAssetIds,
+  visibleGeometryIds,
+  exportFormat,
   error,
+  exportStatus,
 }) {
   const hasActiveDataset = Boolean(activeContext.datasetVersionId)
   const selectedAssetIds = collectSelectedNetworkAssetIds(networks, selectedNetworkIds)
+  const visibleLayerIds = networks
+    .filter(({ id }) => selectedNetworkIds.has(id))
+    .flatMap(({ layerIds = [] }) => layerIds)
+  const visibleLayerAssetIds = collectVisibleLayerAssetIds(assets, visibleLayerIds)
+  const focusedDepthOneIds = collectFocusedAssetIds(topologyGraph, selectedAssetId, 1)
+  const focusedDepthTwoIds = collectFocusedAssetIds(topologyGraph, selectedAssetId, 2)
+  const traceAssetIds = collectTraceAssetIds(tracePath)
+  const viewportAssetIds = collectViewportAssetIds(
+    assets,
+    visibleAssetIds,
+    visibleGeometryIds,
+  )
+  const formatLabel = String(exportFormat || 'kml').toUpperCase()
   return `
     <section class="map-export-panel">
       <p class="map-transfer-intro">
         Export hanya membaca dataset aktif. Koordinat geografis dan relasi sumber tidak diubah.
       </p>
+      <label class="map-transfer-field">
+        <span>Format data Google Earth</span>
+        <select name="mapExportFormat">
+          <option value="kml" ${exportFormat === 'kmz' ? '' : 'selected'}>KML</option>
+          <option value="kmz" ${exportFormat === 'kmz' ? 'selected' : ''}>KMZ</option>
+        </select>
+      </label>
       <div class="map-export-options">
         ${renderExportOption({
           icon: 'public',
-          title: 'Dataset aktif ke KML',
+          title: `Dataset aktif ke ${formatLabel}`,
           description: `${assets.length} aset · ${activeContext.version || 'Belum ada versi aktif'}`,
           buttonClass: 'export-active-kml',
-          buttonLabel: 'Export KML',
+          buttonLabel: `Export ${formatLabel}`,
           disabled: !hasActiveDataset || !assets.length,
         })}
         ${renderExportOption({
           icon: 'filter_alt',
-          title: 'Jaringan terpilih ke KML',
+          title: `Jaringan terpilih ke ${formatLabel}`,
           description: `${selectedAssetIds.length} aset dari ${selectedNetworkIds.size} jaringan`,
           buttonClass: 'export-selected-kml',
           buttonLabel: 'Export pilihan',
           disabled: !hasActiveDataset || !selectedAssetIds.length,
+        })}
+        ${renderExportOption({
+          icon: 'layers',
+          title: `Layer terlihat ke ${formatLabel}`,
+          description: `${visibleLayerAssetIds.length} aset dari ${visibleLayerIds.length} layer aktif`,
+          buttonClass: 'export-visible-layer',
+          buttonLabel: 'Export layer',
+          disabled: !hasActiveDataset || !visibleLayerAssetIds.length,
+        })}
+        ${renderExportOption({
+          icon: 'hub',
+          title: `Aset fokus depth 1 ke ${formatLabel}`,
+          description: selectedAssetId
+            ? `${focusedDepthOneIds.length} aset termasuk koneksi langsung`
+            : 'Pilih satu aset pada peta terlebih dahulu',
+          buttonClass: 'export-focused-depth-1',
+          buttonLabel: 'Export depth 1',
+          disabled: !hasActiveDataset || !selectedAssetId || !focusedDepthOneIds.length,
+        })}
+        ${renderExportOption({
+          icon: 'account_tree',
+          title: `Aset fokus depth 2 ke ${formatLabel}`,
+          description: selectedAssetId
+            ? `${focusedDepthTwoIds.length} aset sampai dua tingkat relasi`
+            : 'Pilih satu aset pada peta terlebih dahulu',
+          buttonClass: 'export-focused-depth-2',
+          buttonLabel: 'Export depth 2',
+          disabled: !hasActiveDataset || !selectedAssetId || !focusedDepthTwoIds.length,
+        })}
+        ${renderExportOption({
+          icon: 'route',
+          title: `Jalur tracing aktif ke ${formatLabel}`,
+          description: traceAssetIds.length
+            ? `${traceAssetIds.length} aset pada urutan tracing`
+            : 'Jalankan tracing terlebih dahulu',
+          buttonClass: 'export-active-trace',
+          buttonLabel: 'Export trace',
+          disabled: !hasActiveDataset || traceAssetIds.length < 2,
+        })}
+        ${renderExportOption({
+          icon: 'crop_free',
+          title: `Area peta saat ini ke ${formatLabel}`,
+          description: viewportAssetIds.length
+            ? `${viewportAssetIds.length} aset atau pemilik geometri terlihat`
+            : 'Area peta saat ini tidak mempunyai objek',
+          buttonClass: 'export-current-viewport',
+          buttonLabel: 'Export viewport',
+          disabled: !hasActiveDataset || !viewportAssetIds.length,
         })}
         ${renderExportOption({
           icon: 'source',
@@ -553,6 +733,10 @@ function renderExportPanel({
       ${error ? `<p class="map-transfer-error" role="alert">
         <span class="material-symbols-outlined" aria-hidden="true">error</span>
         ${escapeHtml(error)}
+      </p>` : ''}
+      ${exportStatus ? `<p class="map-transfer-success" role="status" aria-live="polite">
+        <span class="material-symbols-outlined" aria-hidden="true">check_circle</span>
+        ${escapeHtml(exportStatus)}
       </p>` : ''}
     </section>
   `
@@ -608,12 +792,6 @@ function createVersionName(filename = '') {
     year: 'numeric',
   }).format(new Date())
   return source ? `${source} · ${date}` : `Import ${date}`
-}
-
-function createExportFilename(activeContext, scope) {
-  return `sinergi-${activeContext.branchId}-${scope}-${activeContext.version || 'aktif'}`
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9-]+/g, '-')
 }
 
 function downloadBlob(blob, filename) {

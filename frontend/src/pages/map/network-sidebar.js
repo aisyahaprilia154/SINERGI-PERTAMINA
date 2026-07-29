@@ -94,6 +94,9 @@ export function renderNetworkList({
 function renderNetworkItem({ network, assetById, selected, expanded }) {
   const category = getNetworkCategory(network)
   const subcategories = getNetworkSubcategories(network, assetById)
+  const canFocus = Number(network.nodeCount || network.assetCount) > 0
+    || Number(network.lineCount) > 0
+    || Boolean(network.geometryIds?.length)
   const networkId = escapeAttribute(network.id)
   const networkName = escapeHtml(network.name)
 
@@ -114,7 +117,9 @@ function renderNetworkItem({ network, assetById, selected, expanded }) {
         </button>
         <div class="network-row-actions">
           <button class="network-icon-action focus-network" type="button" data-network-focus="${networkId}"
-            aria-label="Fokuskan peta ke ${networkName}" ${network.assetCount ? '' : 'disabled'}>
+            aria-label="Fokuskan peta ke ${networkName}"
+            title="${canFocus ? `Fokuskan peta ke ${networkName}` : 'Jaringan belum mempunyai objek yang dapat difokuskan'}"
+            ${canFocus ? '' : 'disabled'}>
             <span class="material-symbols-outlined" aria-hidden="true">center_focus_strong</span>
           </button>
           <button class="network-icon-action expand-network" type="button" data-network-expand="${networkId}"
@@ -143,7 +148,15 @@ function matchesNetworkSearch(network, assetById, search) {
   return network.nodeIds.some((assetId) => {
     const asset = assetById[assetId]
     if (!asset) return false
-    return `${asset.id} ${asset.name} ${asset.location}`.toLowerCase().includes(search)
+    return [
+      asset.stableId,
+      asset.assetId,
+      asset.sourceName,
+      asset.displayName,
+      asset.shortLabel,
+      asset.name,
+      asset.location,
+    ].filter(Boolean).join(' ').toLowerCase().includes(search)
   })
 }
 

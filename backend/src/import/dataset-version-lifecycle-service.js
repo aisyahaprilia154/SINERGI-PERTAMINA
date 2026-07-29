@@ -283,6 +283,14 @@ function toActiveMapDataset(resolved) {
   const renderableGeometries = (record.geometries ?? []).filter(isRenderableGeometry)
   const renderableNodeIds = new Set(renderableGeometries.map(({ assetNodeId }) => assetNodeId))
   const relations = filterResolvedRelations(record)
+  const issueCountByAssetId = new Map()
+  ;(record.issues ?? [])
+    .filter(({ severity }) => severity === 'error' || severity === 'warning')
+    .forEach((issue) => {
+      const assetId = issue.assetId ?? issue.focus?.assetId
+      if (!assetId) return
+      issueCountByAssetId.set(assetId, (issueCountByAssetId.get(assetId) ?? 0) + 1)
+    })
   return {
     mapView: true,
     activePointer: resolved.pointer,
@@ -309,6 +317,7 @@ function toActiveMapDataset(resolved) {
       location: asset.location,
       status: readAssetProperty(asset, 'status') ?? null,
       visibility: readAssetProperty(asset, 'visibility') ?? null,
+      issueCount: issueCountByAssetId.get(asset.assetId) ?? 0,
       hasRenderableGeometry: renderableNodeIds.has(asset.id),
     })),
     geometries: renderableGeometries.map((geometry) => ({
@@ -331,7 +340,11 @@ function toActiveMapDataset(resolved) {
         ?? relation.metadata?.topology?.relationSource
         ?? 'explicit',
       relationStatus: relation.relationStatus ?? 'confirmed',
+      category: relation.category,
       sourceGeometryId: relation.sourceGeometryId,
+      sourceGeometryIds: relation.sourceGeometryIds
+        ? structuredClone(relation.sourceGeometryIds)
+        : undefined,
       distanceMeters: relation.distanceMeters,
       metadata: relation.metadata ? structuredClone(relation.metadata) : undefined,
     })),

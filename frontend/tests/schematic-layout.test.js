@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { calculateFitScale } from '../src/pages/map/schematic-bounds.js'
+import { routeIntersectsNode } from '../src/pages/map/schematic-edge-routing.js'
 import { calculateSchematicLayout } from '../src/pages/map/schematic-layout.js'
 
 const graph = {
@@ -107,7 +109,7 @@ test('parallel network relations receive separate visual lanes', () => {
   assert.notDeepEqual(layout.edges[0].routePoints, layout.edges[1].routePoints)
 })
 
-test('map-relative layout preserves source orientation and a shared map frame', () => {
+test('source positions never override the hierarchical TopologyGraph layout', () => {
   const mapGraph = {
     status: 'ready',
     mode: 'full-map',
@@ -119,21 +121,183 @@ test('map-relative layout preserves source orientation and a shared map frame', 
     edges: [{ id: 'map-edge', sourceId: 'north-west', targetId: 'south-east' }],
   }
   const fullLayout = calculateSchematicLayout(mapGraph, { preserveMapOrientation: true })
-  const traceLayout = calculateSchematicLayout({
-    ...mapGraph,
-    mode: 'trace',
-    nodes: [mapGraph.nodes[1]],
-    edges: [],
-  }, { preserveMapOrientation: true })
-
   const northWest = fullLayout.nodes.find((node) => node.id === 'north-west')
   const southEast = fullLayout.nodes.find((node) => node.id === 'south-east')
 
-  assert.equal(fullLayout.strategy, 'map-relative')
+  assert.equal(fullLayout.strategy, 'hierarchical-layered')
   assert.ok(northWest.diagram.nodeX < southEast.diagram.nodeX)
-  assert.ok(northWest.diagram.nodeY < southEast.diagram.nodeY)
-  assert.equal(traceLayout.nodes[0].diagram.nodeX, southEast.diagram.nodeX)
-  assert.equal(traceLayout.nodes[0].diagram.nodeY, southEast.diagram.nodeY)
+  assert.notDeepEqual(northWest.sourcePosition, northWest.diagram)
+  assert.notDeepEqual(southEast.sourcePosition, southEast.diagram)
+})
+
+test('linear graph is arranged upstream to downstream from left to right', () => {
+  const linear = fixtureGraph({
+    nodeIds: ['upstream', 'switch', 'downstream'],
+    edges: [
+      ['upstream', 'switch'],
+      ['switch', 'downstream'],
+    ],
+    anchorAssetId: 'upstream',
+  })
+  const layout = calculateSchematicLayout(linear)
+  const positions = Object.fromEntries(layout.nodes.map((node) => [
+    node.id,
+    node.diagram.nodeX,
+  ]))
+
+  assert.ok(positions.upstream < positions.switch)
+  assert.ok(positions.switch < positions.downstream)
+})
+
+test('branched graph keeps leaf nodes near their parent lane', () => {
+  const branched = fixtureGraph({
+    nodeIds: ['core', 'branch-a', 'branch-b', 'leaf-a', 'leaf-b'],
+    edges: [
+      ['core', 'branch-a'],
+      ['core', 'branch-b'],
+      ['branch-a', 'leaf-a'],
+      ['branch-b', 'leaf-b'],
+    ],
+    anchorAssetId: 'core',
+  })
+  const layout = calculateSchematicLayout(branched)
+  const byId = new Map(layout.nodes.map((node) => [node.id, node]))
+
+  assert.equal(byId.get('branch-a').parentId, 'core')
+  assert.equal(byId.get('branch-b').parentId, 'core')
+  assert.equal(byId.get('leaf-a').parentId, 'branch-a')
+  assert.equal(byId.get('leaf-b').parentId, 'branch-b')
+})
+
+test('multiple connected components are rendered in separate sections', () => {
+  const multiple = fixtureGraph({
+    nodeIds: ['a', 'b', 'c', 'd'],
+    edges: [['a', 'b'], ['c', 'd']],
+  })
+  const layout = calculateSchematicLayout(multiple)
+  const components = layout.sections.filter(({ kind }) => kind === 'connected-component')
+
+  assert.equal(components.length, 2)
+  assert.ok(components[0].bounds.y + components[0].bounds.height
+    < components[1].bounds.y)
+})
+
+test('cycle edge uses a compact orthogonal loop lane', () => {
+  const cycle = fixtureGraph({
+    nodeIds: ['a', 'b', 'c'],
+    edges: [['a', 'b'], ['b', 'c'], ['c', 'a']],
+    anchorAssetId: 'a',
+  })
+  const layout = calculateSchematicLayout(cycle)
+  const loop = layout.edges.find(({ routeKind }) => routeKind === 'cycle')
+
+  assert.ok(loop)
+  assert.ok(loop.routePoints.length >= 4)
+  loop.routePoints.slice(1).forEach((point, index) => {
+    const previous = loop.routePoints[index]
+    assert.ok(previous.x === point.x || previous.y === point.y)
+  })
+})
+
+test('virtual junction is compact and never rendered as an inventory-sized node', () => {
+  const virtual = fixtureGraph({
+    nodes: [
+      fixtureNode('a'),
+      {
+        ...fixtureNode('virtual-junction:1'),
+        type: 'Virtual junction',
+        isVirtual: true,
+        isConnector: true,
+      },
+      fixtureNode('b'),
+    ],
+    edges: [['a', 'virtual-junction:1'], ['virtual-junction:1', 'b']],
+  })
+  const layout = calculateSchematicLayout(virtual)
+  const junction = layout.nodes.find(({ isVirtual }) => isVirtual)
+
+  assert.equal(junction.diagram.width, 32)
+  assert.equal(junction.diagram.height, 32)
+  assert.deepEqual(junction.labelLines, [])
+})
+
+test('many isolated nodes become a separate aggregate instead of polluting the network', () => {
+  const isolated = fixtureGraph({
+    nodeIds: Array.from({ length: 14 }, (_, index) => `isolated-${index}`),
+    edges: [],
+  })
+  const layout = calculateSchematicLayout(isolated)
+
+  assert.equal(layout.sections.length, 1)
+  assert.equal(layout.sections[0].kind, 'isolated')
+  assert.equal(layout.nodes.length, 1)
+  assert.equal(layout.nodes[0].isIsolatedAggregate, true)
+  assert.equal(layout.nodes[0].memberCount, 14)
+})
+
+test('edge route does not pass through an unrelated node on a simple fixture', () => {
+  const branched = fixtureGraph({
+    nodeIds: ['core', 'left', 'right'],
+    edges: [['core', 'left'], ['core', 'right']],
+    anchorAssetId: 'core',
+  })
+  const layout = calculateSchematicLayout(branched)
+  const edge = layout.edges.find(({ targetId }) => targetId === 'left')
+  const unrelated = layout.nodes.find(({ id }) => id === 'right')
+
+  assert.equal(routeIntersectsNode(edge.routePoints, unrelated), false)
+})
+
+test('resolved duplicate short labels remain distinct and never fall back to stable IDs', () => {
+  const duplicateLabels = fixtureGraph({
+    nodes: [
+      { ...fixtureNode('src:long-stable-a'), shortLabel: 'JB-002 · A' },
+      { ...fixtureNode('src:long-stable-b'), shortLabel: 'JB-002 · B' },
+    ],
+    edges: [['src:long-stable-a', 'src:long-stable-b']],
+    anchorAssetId: 'src:long-stable-a',
+  })
+  const layout = calculateSchematicLayout(duplicateLabels)
+
+  assert.deepEqual(
+    layout.nodes.map(({ labelLines }) => labelLines.join(' ')),
+    ['JB-002 · A', 'JB-002 · B'],
+  )
+  assert.ok(layout.nodes.every(({ labelLines }) => (
+    !labelLines.join(' ').includes('src:')
+  )))
+})
+
+test('fit scale uses actual diagram bounds and remains within zoom limits', () => {
+  assert.equal(calculateFitScale({
+    bounds: { width: 1000, height: 500 },
+    viewportWidth: 500,
+    viewportHeight: 300,
+    padding: 0,
+  }), .5)
+  assert.equal(calculateFitScale({
+    bounds: { width: 100, height: 100 },
+    viewportWidth: 2000,
+    viewportHeight: 1200,
+  }), 2.5)
+})
+
+test('compact mode lays out 31 to 100 nodes without overlapping cards', () => {
+  const nodeIds = Array.from({ length: 48 }, (_, index) => `node-${index}`)
+  const compact = fixtureGraph({
+    nodeIds,
+    edges: nodeIds.slice(1).map((id, index) => [nodeIds[index], id]),
+  })
+  compact.layoutDensity = 'compact'
+  const layout = calculateSchematicLayout(compact)
+
+  assert.equal(layout.strategy, 'hierarchical-layered')
+  assert.equal(layout.nodes.length, 48)
+  layout.nodes.forEach((node, index) => {
+    layout.nodes.slice(index + 1).forEach((other) => {
+      assert.equal(rectanglesOverlap(node.diagram, other.diagram), false)
+    })
+  })
 })
 
 function rectanglesOverlap(left, right) {
@@ -141,4 +305,42 @@ function rectanglesOverlap(left, right) {
     && left.x + left.width > right.x
     && left.y < right.y + right.height
     && left.y + left.height > right.y
+}
+
+function fixtureGraph({
+  nodeIds = [],
+  nodes = null,
+  edges = [],
+  anchorAssetId = nodeIds[0] || nodes?.[0]?.id,
+}) {
+  const fixtureNodes = nodes || nodeIds.map(fixtureNode)
+  return {
+    status: 'ready',
+    mode: 'focus',
+    title: 'Fixture graph',
+    anchorAssetId,
+    nodes: fixtureNodes.map((node) => ({
+      ...node,
+      isAnchor: node.id === anchorAssetId,
+    })),
+    edges: edges.map(([sourceId, targetId], index) => ({
+      id: `edge-${index}`,
+      sourceId,
+      targetId,
+      networkName: 'Fixture',
+      networkColor: '#9698f4',
+      relationSource: 'explicit',
+    })),
+  }
+}
+
+function fixtureNode(id) {
+  return {
+    id,
+    shortLabel: id,
+    name: id,
+    type: id === 'core' ? 'Core switch' : 'CCTV',
+    category: id === 'core' ? 'infrastructure' : 'cctv',
+    isConnector: id === 'core',
+  }
 }

@@ -1,13 +1,30 @@
+import {
+  calculateCanvasBackingStoreSize,
+  clampMapZoom,
+  createFrameScheduler,
+  createViewportSubscriptionStore,
+  geometryIntersectsGeographicBounds,
+  getMapZoomTier,
+  layoutViewportNodes,
+  markerRadiusForZoom,
+  pointerToCanvasCssPoint,
+  screenViewportToGeographicBounds,
+} from './map-viewport-layout.js'
+import {
+  getAssetRenderLabels,
+  truncateAssetLabel,
+} from '../../domain/asset-display-name.js'
+
 const nodeGlyph = {
   CCTV: 'C',
   OTB: 'O',
   Server: 'S',
   NVR: 'N',
   'Junction box': 'J',
-  'Core switch': '↔',
-  'Distribution switch': '↔',
-  'Access switch': '↔',
-  'Access point': '⌁',
+  'Core switch': 'S',
+  'Distribution switch': 'S',
+  'Access switch': 'S',
+  'Access point': 'A',
   Printer: 'P',
 }
 
@@ -26,6 +43,7 @@ export function createMapCanvas(canvas, {
   geometries = [],
   onSelectAsset,
   onSelectNetwork = () => {},
+  onViewportChange = () => {},
 }) {
   const context = canvas.getContext('2d')
   const tooltip = canvas.parentElement.querySelector('.map-asset-tooltip')
@@ -53,6 +71,7 @@ export function createMapCanvas(canvas, {
   let keyboardFocusAssetId = null
   let traceNodeIds = []
   let connectedNodeIds = []
+  let selectableAssetIds = null
   let dimOthers = true
   let zoom = 1
   let pan = { x: 0, y: 0 }
@@ -61,15 +80,95 @@ export function createMapCanvas(canvas, {
   let dragging = false
   let dragStart = null
   let dragDistance = 0
+  let viewportChangeTimer = null
+  let viewTransformStable = true
+  let renderedGeometryIds = new Set()
+  const simplifiedPointCache = new WeakMap()
+  const viewportSubscriptions = createViewportSubscriptionStore(onViewportChange)
+  const assetById = new Map(assets.map((asset) => [asset.id, asset]))
   const geometryById = new Map(geometries.map((geometry) => [geometry.id, geometry]))
+  const geometriesBySourceId = new Map()
+  geometries.forEach((geometry) => {
+    const sourceId = geometry.sourceGeometryId || geometry.id
+    geometriesBySourceId.set(sourceId, [
+      ...(geometriesBySourceId.get(sourceId) || []),
+      geometry,
+    ])
+  })
+  const networksByAssetId = new Map()
+  networks.forEach((network) => {
+    network.nodeIds.forEach((assetId) => {
+      networksByAssetId.set(assetId, [
+        ...(networksByAssetId.get(assetId) || []),
+        network,
+      ])
+    })
+  })
+  const geometriesByNetworkId = new Map(networks.map((network) => [
+    network.id,
+    network.geometryIds?.length
+      ? network.geometryIds.map((id) => geometryById.get(id)).filter(Boolean)
+      : (network.geometryAssetIds ?? [])
+        .flatMap((assetId) => assetById.get(assetId)?.geometry ?? []),
+  ]))
+  const networkIdsByGeometryId = new Map()
+  networks.forEach((network) => {
+    ;(geometriesByNetworkId.get(network.id) || []).forEach(({ id: geometryId }) => {
+      networkIdsByGeometryId.set(geometryId, [
+        ...(networkIdsByGeometryId.get(geometryId) || []),
+        network.id,
+      ])
+    })
+  })
+  const geographicDataBounds = collectGeographicBounds(geometries)
+  const drawScheduler = createFrameScheduler(
+    window.requestAnimationFrame.bind(window),
+    window.cancelAnimationFrame.bind(window),
+    draw,
+  )
+  const scheduleDraw = () => drawScheduler.schedule()
+  const scheduleViewportChange = () => {
+    viewTransformStable = false
+    window.clearTimeout(viewportChangeTimer)
+    viewportChangeTimer = window.setTimeout(() => {
+      viewportChangeTimer = null
+      viewTransformStable = true
+      scheduleDraw()
+      const bounds = getGeographicViewportBounds()
+      const detail = {
+        visibleAssetIds: getVisibleAssetIds(),
+        visibleGeometryIds: getVisibleGeometryIds(),
+        zoom,
+        zoomTier: getMapZoomTier(zoom),
+      }
+      viewportSubscriptions.notify(bounds, detail)
+    }, 100)
+  }
 
   const resize = () => {
     const rect = canvas.getBoundingClientRect()
-    const ratio = window.devicePixelRatio || 1
-    canvas.width = Math.round(rect.width * ratio)
-    canvas.height = Math.round(rect.height * ratio)
-    context.setTransform(ratio, 0, 0, ratio, 0, 0)
-    draw()
+    const backingStore = calculateCanvasBackingStoreSize({
+      cssWidth: rect.width,
+      cssHeight: rect.height,
+      devicePixelRatio: window.devicePixelRatio,
+    })
+    if (!backingStore.pixelWidth || !backingStore.pixelHeight) return
+    if (canvas.width !== backingStore.pixelWidth) {
+      canvas.width = backingStore.pixelWidth
+    }
+    if (canvas.height !== backingStore.pixelHeight) {
+      canvas.height = backingStore.pixelHeight
+    }
+    context.setTransform(
+      backingStore.ratio,
+      0,
+      0,
+      backingStore.ratio,
+      0,
+      0,
+    )
+    scheduleDraw()
+    scheduleViewportChange()
   }
 
   const mapPoint = (asset, width, height) => ({
@@ -132,10 +231,12 @@ export function createMapCanvas(canvas, {
     drawBackground(width, height)
     renderedNodes = []
     renderedEdges = []
+    renderedGeometryIds = new Set()
 
     const emphasizedNetworkId = hoveredEdgeNetworkId || highlightedNetworkId
     const hasEmphasizedNetwork = Boolean(emphasizedNetworkId)
     const tracingActive = traceNodeIds.length > 0
+    const zoomTier = getMapZoomTier(zoom)
     const traceEdges = new Set(
       traceNodeIds.slice(1).map((id, index) => [traceNodeIds[index], id].sort().join('|')),
     )
@@ -143,7 +244,7 @@ export function createMapCanvas(canvas, {
     const networkStates = networks.map((network) => {
       const active = selectedNetworkIds.has(network.id)
       const emphasized = network.id === emphasizedNetworkId
-      const hasTraceEdge = network.edges.some(([fromId, toId]) =>
+      const hasTraceEdge = (network.edges || []).some(([fromId, toId]) =>
         traceEdges.has([fromId, toId].sort().join('|')),
       )
       return { network, active, emphasized, hasTraceEdge }
@@ -167,8 +268,9 @@ export function createMapCanvas(canvas, {
         height,
         tracingActive,
         hasEmphasizedNetwork,
+        zoomTier,
       }))
-    if (tracingActive) drawTraceRelations(networkStates, traceEdges, width, height)
+    drawLogicalRelations(networkStates, traceEdges, width, height)
 
     const visibleAssetIds = new Set(
       networks
@@ -180,9 +282,10 @@ export function createMapCanvas(canvas, {
     traceNodeIds.forEach((assetId) => visibleAssetIds.add(assetId))
     connectedNodeIds.forEach((assetId) => visibleAssetIds.add(assetId))
 
+    const nodeInputs = []
     assets.forEach((asset) => {
       if (!visibleAssetIds.has(asset.id) || !asset.hasPointGeometry) return
-      const matchingNetworks = networks.filter((network) => network.nodeIds.includes(asset.id))
+      const matchingNetworks = networksByAssetId.get(asset.id) || []
       const activeNetworks = matchingNetworks.filter((network) => selectedNetworkIds.has(network.id))
       const emphasizedNetworks = matchingNetworks.filter((network) => network.id === emphasizedNetworkId)
       const primaryNetwork = emphasizedNetworks[0] || activeNetworks[0] || matchingNetworks[0]
@@ -191,11 +294,11 @@ export function createMapCanvas(canvas, {
       const point = mapPoint(asset, width, height)
       const isSelected = asset.id === selectedAssetId
       const isTraceNode = traceNodeIds.includes(asset.id)
+      const isTraceEndpoint = asset.id === traceNodeIds[0]
+        || asset.id === traceNodeIds.at(-1)
       const isConnected = connectedNodeIds.includes(asset.id) || isTraceNode
       const isKeyboardFocused = asset.id === keyboardFocusAssetId
       const muted = activeNetworks.length === 0 && emphasizedNetworks.length === 0 && !isConnected
-      const baseRadius = connectorTypes.has(asset.type) ? 12 : 10
-      const radius = isSelected || isKeyboardFocused ? baseRadius + 2 : baseRadius
       const nodeAlpha = muted
         ? .22
         : tracingActive && !isTraceNode && !isSelected
@@ -204,39 +307,117 @@ export function createMapCanvas(canvas, {
           ? .3
           : 1
 
-      context.save()
-      context.globalAlpha = nodeAlpha
-      if (isConnected) {
-        drawOuterRing(point, radius + 5, colors.surface, 5)
-        drawOuterRing(point, radius + 5, colors.primary, 1.5)
-      }
-      if (isSelected || isKeyboardFocused) drawOuterRing(point, radius + 5, colors.primarySoft, 5)
-
-      const fillColor = isSelected ? colors.primary : colors.surface
-      const strokeColor = isSelected ? colors.primary : isConnected ? colors.primary : primaryNetwork.color
-      drawNodeShape(asset.type, point, radius, fillColor, strokeColor, isSelected ? 3 : 2.5)
-
-      context.fillStyle = isSelected ? colors.surface : strokeColor
-      context.font = `700 ${connectorTypes.has(asset.type) ? 11 : 10}px Inter, sans-serif`
-      context.textAlign = 'center'
-      context.textBaseline = 'middle'
-      context.fillText(nodeGlyph[asset.type] || '•', point.x, point.y + .5)
-      drawStatusBadge(asset, point, radius)
-      context.restore()
-
-      renderedNodes.push({
+      nodeInputs.push({
         ...point,
         asset,
-        hitRadius: Math.max(17, radius + 5),
+        primaryNetwork,
+        nodeAlpha,
+        selected: isSelected,
+        keyboardFocused: isKeyboardFocused,
         active: activeNetworks.length > 0,
-        connected: isTraceNode,
+        connected: isConnected,
+        traceEndpoint: isTraceEndpoint,
+        degree: Number(asset.relationCount) || 0,
+        core: asset.isCoreNode === true,
         important: connectorTypes.has(asset.type) || asset.type === 'Server',
       })
+    })
+
+    const nodeMarkers = layoutViewportNodes(nodeInputs, {
+      tier: zoomTier,
+      selectedAssetId,
+      hoveredAssetId,
+      keyboardFocusAssetId,
+    })
+    drawDisplacementLeaders(nodeMarkers)
+    nodeMarkers.forEach((marker) => {
+      if (marker.kind === 'cluster') drawClusterMarker(marker, zoomTier)
+      else drawAssetMarker(marker, zoomTier)
+      renderedNodes.push(marker)
     })
 
     drawLabels(width, height)
     context.textAlign = 'start'
     context.textBaseline = 'alphabetic'
+  }
+
+  function drawDisplacementLeaders(markers) {
+    context.save()
+    context.strokeStyle = colors.textSecondary
+    context.lineWidth = 1
+    context.globalAlpha = .58
+    markers
+      .filter((marker) => marker.kind === 'asset' && marker.displaced)
+      .forEach((marker) => {
+        context.beginPath()
+        context.moveTo(marker.originalX, marker.originalY)
+        context.lineTo(marker.x, marker.y)
+        context.stroke()
+      })
+    context.restore()
+  }
+
+  function drawAssetMarker(marker, zoomTier) {
+    const { asset, primaryNetwork } = marker
+    const radius = markerRadiusForZoom(zoom, marker.important)
+      + (marker.selected || marker.keyboardFocused ? 2 : 0)
+    marker.hitRadius = Math.max(20, radius + 6)
+
+    context.save()
+    context.globalAlpha = marker.nodeAlpha
+    if (marker.connected) {
+      drawOuterRing(marker, radius + 5, colors.surface, 5)
+      drawOuterRing(marker, radius + 5, colors.primary, 1.5)
+    }
+    if (marker.selected || marker.keyboardFocused) {
+      drawOuterRing(marker, radius + 5, colors.primarySoft, 5)
+    }
+
+    const fillColor = marker.selected ? colors.primary : colors.surface
+    const strokeColor = marker.selected
+      ? colors.primary
+      : marker.connected
+        ? colors.primary
+        : primaryNetwork.color
+    drawNodeShape(
+      asset.type,
+      marker,
+      radius,
+      fillColor,
+      strokeColor,
+      marker.selected ? 3 : 2.5,
+    )
+
+    context.fillStyle = marker.selected ? colors.surface : strokeColor
+    context.font = `700 ${marker.important && zoomTier !== 'low' ? 11 : 10}px Inter, sans-serif`
+    context.textAlign = 'center'
+    context.textBaseline = 'middle'
+    context.fillText(nodeGlyph[asset.type] || '·', marker.x, marker.y + .5)
+    drawStatusBadge(asset, marker, radius)
+    context.restore()
+  }
+
+  function drawClusterMarker(marker, zoomTier) {
+    const radius = zoomTier === 'low' ? 13 : 15
+    marker.hitRadius = 20
+    marker.active = marker.assets.some((asset) => (
+      (networksByAssetId.get(asset.id) || []).some((network) => selectedNetworkIds.has(network.id))
+    ))
+    context.save()
+    drawOuterRing(marker, radius + 3, colors.surface, 4)
+    context.beginPath()
+    context.arc(marker.x, marker.y, radius, 0, Math.PI * 2)
+    context.fillStyle = colors.primarySoft
+    context.fill()
+    context.strokeStyle = colors.primary
+    context.lineWidth = 2
+    context.stroke()
+    context.fillStyle = colors.primary
+    context.font = '700 11px Inter, sans-serif'
+    context.textAlign = 'center'
+    context.textBaseline = 'middle'
+    context.fillText(String(marker.count), marker.x, marker.y + .5)
+    context.restore()
   }
 
   function drawNetworkPolygons({
@@ -261,7 +442,7 @@ export function createMapCanvas(canvas, {
             : .025
     for (const geometry of geometriesForNetwork(network)) {
       const owner = geometry.assetId
-        ? assets.find((item) => item.id === geometry.assetId)
+        ? assetById.get(geometry.assetId)
         : null
       const isCctvView = `${owner?.name || ''} ${owner?.type || ''} ${geometry.category || ''}`
         .toLowerCase().includes('view')
@@ -270,15 +451,20 @@ export function createMapCanvas(canvas, {
         if (!rings.length) continue
         context.save()
         context.beginPath()
+        let geometryVisible = false
         rings.forEach((ring) => {
           const points = simplifyDisplayPoints(ring)
-          points.forEach((displayPoint, index) => {
-            const point = mapPoint(displayPoint, width, height)
+            .map((displayPoint) => mapPoint(displayPoint, width, height))
+          if (screenPathIntersectsViewport(points, width, height)) {
+            geometryVisible = true
+          }
+          points.forEach((point, index) => {
             if (index) context.lineTo(point.x, point.y)
             else context.moveTo(point.x, point.y)
           })
           context.closePath()
         })
+        if (geometryVisible) renderedGeometryIds.add(geometry.id)
         context.globalAlpha = isCctvView ? Math.min(alpha, .045) : alpha
         context.fillStyle = network.color
         context.fill('evenodd')
@@ -301,9 +487,11 @@ export function createMapCanvas(canvas, {
     height,
     tracingActive,
     hasEmphasizedNetwork,
+    zoomTier,
   }) {
     const lineStyle = getNetworkLineStyle(network)
-    const alpha = emphasized
+    const detailAlpha = lineDetailAlpha(lineStyle.role, zoomTier)
+    const alpha = (emphasized
       ? 1
       : tracingActive && !hasTraceEdge
         ? .12
@@ -311,17 +499,22 @@ export function createMapCanvas(canvas, {
           ? (active ? .25 : .08)
           : active
             ? 1
-            : .14
-    const lineWidth = emphasized
+            : .14) * detailAlpha
+    const tierWidthScale = zoomTier === 'low' ? .82 : zoomTier === 'high' ? 1.06 : 1
+    const lineWidth = (emphasized
       ? lineStyle.width + 2
       : active
         ? lineStyle.width
-        : Math.max(1.2, lineStyle.width - 1)
+        : Math.max(1.2, lineStyle.width - 1)) * tierWidthScale
 
     for (const geometry of geometriesForNetwork(network)) {
       for (const line of displayGeometryParts([geometry], 'line_string')) {
-        const points = simplifyDisplayPoints(line).map((point) => mapPoint(point, width, height))
+        const points = simplifyDisplayPoints(line, zoomTier)
+          .map((point) => mapPoint(point, width, height))
         if (points.length < 2) continue
+        if (screenPathIntersectsViewport(points, width, height)) {
+          renderedGeometryIds.add(geometry.id)
+        }
         context.save()
         context.globalAlpha = alpha
         context.lineCap = 'round'
@@ -345,30 +538,80 @@ export function createMapCanvas(canvas, {
     }
   }
 
-  function drawTraceRelations(networkStates, traceEdges, width, height) {
+  function drawLogicalRelations(networkStates, traceEdges, width, height) {
     const drawn = new Set()
-    networkStates.forEach(({ network }) => {
-      network.edges.forEach(([fromId, toId]) => {
+    networkStates.forEach(({ network, active }) => {
+      const relations = network.relations?.length
+        ? network.relations
+        : (network.edges || []).map(([sourceAssetId, targetAssetId]) => ({
+          sourceAssetId,
+          targetAssetId,
+          relationSource: 'explicit',
+          relationStatus: 'confirmed',
+        }))
+      relations.forEach((relation) => {
+        const fromId = relation.sourceAssetId
+        const toId = relation.targetAssetId
         const key = [fromId, toId].sort().join('|')
-        if (!traceEdges.has(key) || drawn.has(key)) return
-        const from = assets.find((asset) => asset.id === fromId)
-        const to = assets.find((asset) => asset.id === toId)
+        const isTraceEdge = traceEdges.has(key)
+        const touchesSelectedAsset = selectedAssetId
+          && (fromId === selectedAssetId || toId === selectedAssetId)
+        if ((!active && !isTraceEdge && !touchesSelectedAsset)
+          || relation.relationStatus === 'ambiguous'
+          || drawn.has(key)) return
+        const from = assetById.get(fromId)
+        const to = assetById.get(toId)
         if (!from?.renderable || !to?.renderable) return
         drawn.add(key)
-        const start = mapPoint(from, width, height)
-        const end = mapPoint(to, width, height)
+        const sourceGeometryIds = relation.sourceGeometryIds?.length
+          ? relation.sourceGeometryIds
+          : [relation.sourceGeometryId].filter(Boolean)
+        const pathGeometries = sourceGeometryIds.flatMap(
+          (geometryId) => geometriesBySourceId.get(geometryId) || [],
+        )
+        if (pathGeometries.length && active && !isTraceEdge && !touchesSelectedAsset) {
+          return
+        }
+        const alpha = isTraceEdge ? 1 : touchesSelectedAsset ? .74 : .32
+        const color = isTraceEdge ? colors.primary : network.color
+        const lineWidth = isTraceEdge ? 3 : touchesSelectedAsset ? 2.4 : 1.5
         context.save()
+        context.globalAlpha = alpha
         context.lineCap = 'round'
-        context.setLineDash([5, 5])
-        strokeCanvasPath([start, end], colors.surface, 7)
-        strokeCanvasPath([start, end], colors.primary, 3)
+        context.lineJoin = 'round'
+        context.setLineDash(relation.relationSource === 'explicit' ? [5, 5] : [])
+        if (pathGeometries.length) {
+          pathGeometries.forEach((geometry) => {
+            displayGeometryParts([geometry], 'line_string').forEach((line) => {
+              const points = simplifyDisplayPoints(line)
+                .map((point) => mapPoint(point, width, height))
+              if (points.length < 2) return
+              if (screenPathIntersectsViewport(points, width, height)) {
+                renderedGeometryIds.add(geometry.id)
+              }
+              strokeCanvasPath(points, colors.surface, lineWidth + 4)
+              strokeCanvasPath(points, color, lineWidth)
+              addRenderedEdgeSegments(points, network.id, lineWidth)
+            })
+          })
+        } else {
+          const points = [mapPoint(from, width, height), mapPoint(to, width, height)]
+          strokeCanvasPath(points, colors.surface, lineWidth + 4)
+          strokeCanvasPath(points, color, lineWidth)
+          addRenderedEdgeSegments(points, network.id, lineWidth)
+        }
         context.restore()
-        renderedEdges.push({
-          start,
-          end,
-          networkId: network.id,
-          hitWidth: 13,
-        })
+      })
+    })
+  }
+
+  function addRenderedEdgeSegments(points, networkId, lineWidth) {
+    points.slice(1).forEach((end, index) => {
+      renderedEdges.push({
+        start: points[index],
+        end,
+        networkId,
+        hitWidth: Math.max(12, lineWidth + 8),
       })
     })
   }
@@ -387,19 +630,22 @@ export function createMapCanvas(canvas, {
   }
 
   function geometriesForNetwork(network) {
-    if (network.geometryIds?.length) {
-      return network.geometryIds.map((id) => geometryById.get(id)).filter(Boolean)
-    }
-    return (network.geometryAssetIds ?? [])
-      .flatMap((assetId) => assets.find((asset) => asset.id === assetId)?.geometry ?? [])
+    return geometriesByNetworkId.get(network.id) || []
   }
 
-  function simplifyDisplayPoints(points) {
-    if (zoom >= 1.05 || points.length <= 120) return points
-    const step = Math.ceil(points.length / 120)
+  function simplifyDisplayPoints(points, tier = getMapZoomTier(zoom)) {
+    const maximumPoints = tier === 'low' ? 80 : tier === 'medium' ? 180 : Infinity
+    if (points.length <= maximumPoints) return points
+    const cached = simplifiedPointCache.get(points)?.[tier]
+    if (cached) return cached
+    const step = Math.ceil(points.length / maximumPoints)
     const simplified = points.filter((_, index) => index % step === 0)
     const last = points.at(-1)
     if (simplified.at(-1) !== last) simplified.push(last)
+    simplifiedPointCache.set(points, {
+      ...(simplifiedPointCache.get(points) || {}),
+      [tier]: simplified,
+    })
     return simplified
   }
 
@@ -415,25 +661,31 @@ export function createMapCanvas(canvas, {
   }
 
   function drawLabels(width, height) {
+    if (!viewTransformStable) return
     const occupied = []
+    const zoomTier = getMapZoomTier(zoom)
     const candidates = renderedNodes
       .filter((node) => {
-        const focused = node.asset.id === selectedAssetId
-          || node.asset.id === hoveredAssetId
+        if (node.kind !== 'asset') return false
+        if (node.asset.id === selectedAssetId
           || node.asset.id === keyboardFocusAssetId
-        if (focused) return true
+          || node.traceEndpoint
+          || node.core) return true
         if (traceNodeIds.length && !node.connected) return false
-        if (node.important && node.active && zoom >= 1) return true
-        return node.active && zoom >= 1.4
+        if (zoomTier !== 'high') return false
+        if (node.asset.id === hoveredAssetId) return true
+        if (node.degree >= 3) return true
+        if (node.important && node.active) return true
+        return zoom >= 2.4 && node.active
       })
       .sort((a, b) => labelPriority(b) - labelPriority(a))
 
     candidates.forEach((node) => {
       context.font = `${node.asset.id === selectedAssetId ? 700 : 600} 11px Inter, sans-serif`
-      const focused = node.asset.id === selectedAssetId
-        || node.asset.id === hoveredAssetId
-        || node.asset.id === keyboardFocusAssetId
-      const label = focused ? node.asset.id : node.asset.name
+      const label = getAssetRenderLabels(node.asset, {
+        shortMax: 18,
+        displayMax: 30,
+      }).shortLabel
       const textWidth = context.measureText(label).width
       const rect = {
         x: Math.max(4, Math.min(width - textWidth - 16, node.x - textWidth / 2 - 8)),
@@ -442,6 +694,17 @@ export function createMapCanvas(canvas, {
         height: 22,
       }
       if (occupied.some((item) => rectanglesOverlap(item, rect))) return
+      const overlapsMarker = renderedNodes.some((marker) => {
+        if (marker === node) return false
+        const radius = Math.min(marker.hitRadius || 20, 20)
+        return rectanglesOverlap(rect, {
+          x: marker.x - radius,
+          y: marker.y - radius,
+          width: radius * 2,
+          height: radius * 2,
+        })
+      })
+      if (overlapsMarker && labelPriority(node) < 500) return
       occupied.push(rect)
 
       context.fillStyle = colors.surface
@@ -459,10 +722,13 @@ export function createMapCanvas(canvas, {
   }
 
   function labelPriority(node) {
-    if (node.asset.id === selectedAssetId) return 4
-    if (node.asset.id === hoveredAssetId || node.asset.id === keyboardFocusAssetId) return 3
-    if (node.important) return 2
-    return 1
+    if (node.asset.id === selectedAssetId || node.asset.id === keyboardFocusAssetId) return 700
+    if (node.traceEndpoint) return 600
+    if (node.core) return 500
+    if (node.asset.id === hoveredAssetId) return 400
+    if (node.degree >= 3) return 300 + Math.min(node.degree, 99)
+    if (node.important) return 200
+    return 100
   }
 
   function drawNodeShape(type, point, radius, fillColor, strokeColor, lineWidth) {
@@ -507,18 +773,12 @@ export function createMapCanvas(canvas, {
   function drawStatusBadge(asset, point, radius) {
     const status = String(asset.status || '').trim().toLowerCase()
     const online = ['online', 'active', 'aktif', 'normal'].includes(status)
-    const warning = status && ![
-      'status tidak tersedia',
-      'tidak tersedia',
-      'unknown',
-      'n/a',
-      '-',
-    ].includes(status)
+    const warning = asset.hasIssue === true || Number(asset.issueCount) > 0
     if (!online && !warning) return
     const x = point.x + radius - 1
     const y = point.y - radius + 1
     context.beginPath()
-    if (online) {
+    if (online && !warning) {
       context.arc(x, y, 4.5, 0, Math.PI * 2)
     } else {
       context.moveTo(x, y - 5)
@@ -526,7 +786,7 @@ export function createMapCanvas(canvas, {
       context.lineTo(x - 5, y + 4)
       context.closePath()
     }
-    context.fillStyle = online ? colors.success : colors.warning
+    context.fillStyle = online && !warning ? colors.success : colors.warning
     context.fill()
     context.strokeStyle = colors.surface
     context.lineWidth = 1.5
@@ -535,7 +795,7 @@ export function createMapCanvas(canvas, {
     context.strokeStyle = colors.surface
     context.lineWidth = 1.3
     context.lineCap = 'round'
-    if (online) {
+    if (online && !warning) {
       context.moveTo(x - 2.2, y)
       context.lineTo(x - .4, y + 1.8)
       context.lineTo(x + 2.5, y - 1.8)
@@ -550,11 +810,25 @@ export function createMapCanvas(canvas, {
 
   function showTooltip(node) {
     if (!node || !tooltip) return
-    tooltip.innerHTML = `
-      <strong>${escapeHtml(node.asset.id)}</strong>
-      <span>${escapeHtml(node.asset.name)}</span>
-      <small>${escapeHtml(node.asset.type)} · ${escapeHtml(node.asset.location)}</small>
-    `
+    if (node.kind === 'cluster') {
+      tooltip.innerHTML = `
+        <strong>${node.count} aset berdekatan</strong>
+        <span>Klik untuk menguraikan marker</span>
+        <small>Posisi geografis asli tidak berubah</small>
+      `
+    } else {
+      const labels = getAssetRenderLabels(node.asset, {
+        shortMax: 18,
+        displayMax: 48,
+      })
+      tooltip.innerHTML = `
+        <strong>${escapeHtml(labels.fullShortLabel)}</strong>
+        <span>${escapeHtml(labels.fullDisplayName)}</span>
+        <small>${escapeHtml(node.asset.type)} · ${escapeHtml(
+          truncateAssetLabel(node.asset.location, 42),
+        )}</small>
+      `
+    }
     tooltip.hidden = false
     const tooltipWidth = 220
     const left = Math.max(8, Math.min(canvas.clientWidth - tooltipWidth - 8, node.x + 16))
@@ -572,7 +846,12 @@ export function createMapCanvas(canvas, {
   }
 
   function findNodeAt(x, y) {
-    return renderedNodes.find((node) => Math.hypot(node.x - x, node.y - y) <= node.hitRadius)
+    return [...renderedNodes]
+      .reverse()
+      .find((node) => (
+        (node.kind !== 'asset' || !selectableAssetIds || selectableAssetIds.has(node.asset.id))
+        && Math.hypot(node.x - x, node.y - y) <= node.hitRadius
+      ))
   }
 
   function findEdgeAt(x, y) {
@@ -581,33 +860,55 @@ export function createMapCanvas(canvas, {
     )
   }
 
+  function eventToCanvasPoint(event) {
+    return pointerToCanvasCssPoint({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      rect: canvas.getBoundingClientRect(),
+      cssWidth: canvas.clientWidth,
+      cssHeight: canvas.clientHeight,
+    })
+  }
+
   canvas.addEventListener('pointerdown', (event) => {
+    const point = eventToCanvasPoint(event)
     dragging = true
     dragDistance = 0
-    dragStart = { x: event.clientX - pan.x, y: event.clientY - pan.y }
+    dragStart = {
+      point,
+      lastPoint: point,
+      pan: { ...pan },
+    }
     canvas.setPointerCapture(event.pointerId)
     if (!keyboardFocusAssetId) hideTooltip()
   })
 
   canvas.addEventListener('pointermove', (event) => {
-    const rect = canvas.getBoundingClientRect()
-    const x = event.clientX - rect.left
-    const y = event.clientY - rect.top
+    const point = eventToCanvasPoint(event)
+    const { x, y } = point
 
     if (dragging) {
-      const moved = Math.abs(event.movementX) + Math.abs(event.movementY)
+      const moved = Math.hypot(
+        point.x - dragStart.lastPoint.x,
+        point.y - dragStart.lastPoint.y,
+      )
       dragDistance += moved
+      dragStart.lastPoint = point
       if (moved > 1) {
-        pan = { x: event.clientX - dragStart.x, y: event.clientY - dragStart.y }
+        viewTransformStable = false
+        pan = {
+          x: dragStart.pan.x + point.x - dragStart.point.x,
+          y: dragStart.pan.y + point.y - dragStart.point.y,
+        }
         hideTooltip()
-        draw()
+        scheduleDraw()
       }
       return
     }
 
     const node = findNodeAt(x, y)
     const edge = node ? null : findEdgeAt(x, y)
-    const nextHoveredAssetId = node?.asset.id || null
+    const nextHoveredAssetId = node?.kind === 'asset' ? node.asset.id : null
     const nextHoveredNetworkId = edge?.networkId || null
     const hoverChanged = nextHoveredAssetId !== hoveredAssetId
       || nextHoveredNetworkId !== hoveredEdgeNetworkId
@@ -617,7 +918,7 @@ export function createMapCanvas(canvas, {
 
     if (node) showTooltip(node)
     else if (!keyboardFocusAssetId) hideTooltip()
-    if (hoverChanged) draw()
+    if (hoverChanged) scheduleDraw()
   })
 
   canvas.addEventListener('pointerleave', () => {
@@ -626,18 +927,23 @@ export function createMapCanvas(canvas, {
     hoveredEdgeNetworkId = null
     canvas.classList.remove('is-interactive-target')
     if (!keyboardFocusAssetId) hideTooltip()
-    draw()
+    scheduleDraw()
   })
 
   canvas.addEventListener('pointerup', (event) => {
     dragging = false
-    const rect = canvas.getBoundingClientRect()
-    const x = event.clientX - rect.left
-    const y = event.clientY - rect.top
-    if (dragDistance >= 5) return
+    const { x, y } = eventToCanvasPoint(event)
+    if (dragDistance >= 5) {
+      scheduleViewportChange()
+      return
+    }
 
     const node = findNodeAt(x, y)
     if (node) {
+      if (node.kind === 'cluster') {
+        expandCluster(node)
+        return
+      }
       onSelectAsset(node.asset.id)
       return
     }
@@ -645,33 +951,48 @@ export function createMapCanvas(canvas, {
     if (edge) onSelectNetwork(edge.networkId)
   })
 
+  canvas.addEventListener('pointercancel', () => {
+    const moved = dragDistance >= 1
+    dragging = false
+    dragStart = null
+    if (moved) scheduleViewportChange()
+  })
+
   canvas.addEventListener('wheel', (event) => {
     event.preventDefault()
-    zoom = Math.max(.75, Math.min(1.8, zoom + (event.deltaY > 0 ? -.08 : .08)))
-    draw()
+    const point = eventToCanvasPoint(event)
+    setZoomAroundPoint(zoom * Math.exp(-event.deltaY * .0012), point)
   }, { passive: false })
 
   canvas.addEventListener('keydown', (event) => {
     const navigationKeys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End']
     if (navigationKeys.includes(event.key)) {
       event.preventDefault()
-      if (!renderedNodes.length) return
-      const currentIndex = renderedNodes.findIndex((node) => node.asset.id === keyboardFocusAssetId)
+      const keyboardNodes = renderedNodes.filter((node) => (
+        node.kind === 'asset'
+        && (!selectableAssetIds || selectableAssetIds.has(node.asset.id))
+      ))
+      if (!keyboardNodes.length) return
+      const currentIndex = keyboardNodes.findIndex((node) => (
+        node.asset.id === keyboardFocusAssetId
+      ))
       let nextIndex = currentIndex < 0 ? 0 : currentIndex
       if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
-        nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % renderedNodes.length
+        nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % keyboardNodes.length
       } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
         nextIndex = currentIndex < 0
-          ? renderedNodes.length - 1
-          : (currentIndex - 1 + renderedNodes.length) % renderedNodes.length
+          ? keyboardNodes.length - 1
+          : (currentIndex - 1 + keyboardNodes.length) % keyboardNodes.length
       } else if (event.key === 'Home') {
         nextIndex = 0
       } else if (event.key === 'End') {
-        nextIndex = renderedNodes.length - 1
+        nextIndex = keyboardNodes.length - 1
       }
-      keyboardFocusAssetId = renderedNodes[nextIndex].asset.id
+      keyboardFocusAssetId = keyboardNodes[nextIndex].asset.id
       draw()
-      showTooltip(renderedNodes.find((node) => node.asset.id === keyboardFocusAssetId))
+      showTooltip(renderedNodes.find((node) => (
+        node.kind === 'asset' && node.asset.id === keyboardFocusAssetId
+      )))
       return
     }
 
@@ -691,6 +1012,120 @@ export function createMapCanvas(canvas, {
     draw()
   })
 
+  function expandCluster(cluster) {
+    const centerX = cluster.assets.reduce((sum, asset) => sum + asset.x, 0) / cluster.assets.length
+    const centerY = cluster.assets.reduce((sum, asset) => sum + asset.y, 0) / cluster.assets.length
+    const targetZoom = getMapZoomTier(zoom) === 'low' ? 1.18 : 1.72
+    zoom = clampMapZoom(Math.max(zoom, targetZoom))
+    pan = {
+      x: -(centerX * canvas.clientWidth - canvas.clientWidth / 2) * zoom,
+      y: -(centerY * canvas.clientHeight - canvas.clientHeight / 2) * zoom,
+    }
+    hideTooltip()
+    scheduleDraw()
+    scheduleViewportChange()
+  }
+
+  function setZoomAroundPoint(nextZoom, point) {
+    const clampedZoom = clampMapZoom(nextZoom)
+    if (Math.abs(clampedZoom - zoom) < .001) return
+    const width = canvas.clientWidth
+    const height = canvas.clientHeight
+    const mapX = (point.x - width / 2 - pan.x) / zoom + width / 2
+    const mapY = (point.y - height / 2 - pan.y) / zoom + height / 2
+    pan = {
+      x: point.x - width / 2 - (mapX - width / 2) * clampedZoom,
+      y: point.y - height / 2 - (mapY - height / 2) * clampedZoom,
+    }
+    zoom = clampedZoom
+    hideTooltip()
+    scheduleDraw()
+    scheduleViewportChange()
+  }
+
+  function setZoomAroundCenter(nextZoom) {
+    setZoomAroundPoint(nextZoom, {
+      x: canvas.clientWidth / 2,
+      y: canvas.clientHeight / 2,
+    })
+  }
+
+  function getViewportBounds() {
+    const width = canvas.clientWidth
+    const height = canvas.clientHeight
+    const unproject = (screenX, screenY) => ({
+      x: ((screenX - width / 2 - pan.x) / zoom + width / 2) / width,
+      y: ((screenY - height / 2 - pan.y) / zoom + height / 2) / height,
+    })
+    const topLeft = unproject(0, 0)
+    const bottomRight = unproject(width, height)
+    return {
+      minX: Math.min(topLeft.x, bottomRight.x),
+      maxX: Math.max(topLeft.x, bottomRight.x),
+      minY: Math.min(topLeft.y, bottomRight.y),
+      maxY: Math.max(topLeft.y, bottomRight.y),
+    }
+  }
+
+  function getGeographicViewportBounds() {
+    return screenViewportToGeographicBounds({
+      width: canvas.clientWidth,
+      height: canvas.clientHeight,
+      zoom,
+      pan,
+      dataBounds: geographicDataBounds,
+    })
+  }
+
+  function getVisibleAssetIds() {
+    const width = canvas.clientWidth
+    const height = canvas.clientHeight
+    const emphasizedNetworkId = hoveredEdgeNetworkId || highlightedNetworkId
+    return assets
+      .filter((asset) => asset.hasPointGeometry)
+      .filter((asset) => {
+        const assetNetworks = networksByAssetId.get(asset.id) || []
+        return !dimOthers
+          || assetNetworks.some(({ id }) => selectedNetworkIds.has(id))
+          || assetNetworks.some(({ id }) => id === emphasizedNetworkId)
+          || traceNodeIds.includes(asset.id)
+          || connectedNodeIds.includes(asset.id)
+      })
+      .filter((asset) => {
+        const point = mapPoint(asset, width, height)
+        return point.x >= 0 && point.x <= width
+          && point.y >= 0 && point.y <= height
+      })
+      .map(({ id }) => id)
+      .sort()
+  }
+
+  function getVisibleGeometryIds() {
+    const bounds = getGeographicViewportBounds()
+    if (!bounds) return [...renderedGeometryIds].sort()
+    const emphasizedNetworkId = hoveredEdgeNetworkId || highlightedNetworkId
+    const ids = geometries
+      .filter((geometry) => {
+        const networkIds = networkIdsByGeometryId.get(geometry.id) || []
+        return !dimOthers
+          || networkIds.some((id) => selectedNetworkIds.has(id))
+          || networkIds.includes(emphasizedNetworkId)
+          || renderedGeometryIds.has(geometry.id)
+      })
+      .filter((geometry) => (
+        geometryIntersectsGeographicBounds(geometry.coordinates, bounds)
+      ))
+      .map(({ id }) => id)
+    return [...new Set(ids)].sort()
+  }
+
+  function subscribeViewportChange(callback) {
+    if (typeof callback !== 'function') {
+      throw new TypeError('Viewport subscriber harus berupa function.')
+    }
+    return viewportSubscriptions.subscribe(callback)
+  }
+
   function focusNetworkBounds(networkId) {
     const network = networks.find((item) => item.id === networkId)
     if (network?.displayBounds) {
@@ -709,17 +1144,18 @@ export function createMapCanvas(canvas, {
     const width = canvas.clientWidth
     const height = canvas.clientHeight
 
-    zoom = Math.max(.75, Math.min(1.8, .72 / rangeX, .72 / rangeY))
+    zoom = clampMapZoom(Math.min(.72 / rangeX, .72 / rangeY))
     pan = {
       x: -(centerX * width - width / 2) * zoom,
       y: -(centerY * height - height / 2) * zoom,
     }
-    draw()
+    scheduleDraw()
+    scheduleViewportChange()
   }
 
   function focusAssetBounds(assetIds) {
     const focusedAssets = assetIds
-      .map((assetId) => assets.find((asset) => asset.id === assetId))
+      .map((assetId) => assetById.get(assetId))
       .filter((asset) => asset?.renderable)
     if (!focusedAssets.length) return
 
@@ -736,16 +1172,21 @@ export function createMapCanvas(canvas, {
     const width = canvas.clientWidth
     const height = canvas.clientHeight
 
-    zoom = Math.max(.75, Math.min(1.8, .72 / rangeX, .72 / rangeY))
+    zoom = clampMapZoom(Math.min(.72 / rangeX, .72 / rangeY))
     pan = {
       x: -(centerX * width - width / 2) * zoom,
       y: -(centerY * height - height / 2) * zoom,
     }
-    draw()
+    scheduleDraw()
+    scheduleViewportChange()
   }
 
-  const observer = new ResizeObserver(resize)
-  observer.observe(canvas)
+  const observer = typeof ResizeObserver === 'function'
+    ? new ResizeObserver(resize)
+    : null
+  observer?.observe(canvas)
+  window.addEventListener('resize', resize)
+  resize()
 
   return {
     invalidateSize() {
@@ -756,40 +1197,102 @@ export function createMapCanvas(canvas, {
       if ('selectedAssetId' in next) selectedAssetId = next.selectedAssetId
       if (next.traceNodeIds) traceNodeIds = next.traceNodeIds
       if (next.connectedNodeIds) connectedNodeIds = next.connectedNodeIds
+      if ('selectableAssetIds' in next) {
+        selectableAssetIds = next.selectableAssetIds
+          ? new Set(next.selectableAssetIds)
+          : null
+      }
       if ('dimOthers' in next) dimOthers = next.dimOthers
-      draw()
+      scheduleDraw()
     },
     setHighlightedNetworkId(networkId) {
       highlightedNetworkId = networks.some((network) => network.id === networkId) ? networkId : null
-      draw()
+      scheduleDraw()
     },
     focusNetworkBounds,
     focusAssetBounds,
+    getViewportBounds,
+    getGeographicViewportBounds,
+    getVisibleAssetIds,
+    getVisibleGeometryIds,
+    subscribeViewportChange,
     zoomIn() {
-      zoom = Math.min(1.8, zoom + .15)
-      draw()
+      setZoomAroundCenter(zoom * 1.22)
     },
     zoomOut() {
-      zoom = Math.max(.75, zoom - .15)
-      draw()
+      setZoomAroundCenter(zoom / 1.22)
     },
     reset() {
       zoom = 1
       pan = { x: 0, y: 0 }
-      draw()
+      scheduleDraw()
+      scheduleViewportChange()
     },
     destroy() {
-      observer.disconnect()
+      drawScheduler.cancel()
+      window.clearTimeout(viewportChangeTimer)
+      observer?.disconnect()
+      viewportSubscriptions.clear()
+      window.removeEventListener('resize', resize)
     },
   }
 }
 
+function collectGeographicBounds(geometries) {
+  const coordinates = geometries.flatMap((geometry) => (
+    flattenGeographicCoordinates(geometry.coordinates)
+  )).filter(([longitude, latitude]) => (
+    Number.isFinite(longitude) && Number.isFinite(latitude)
+  ))
+  if (!coordinates.length) return null
+  return {
+    west: Math.min(...coordinates.map(([longitude]) => longitude)),
+    east: Math.max(...coordinates.map(([longitude]) => longitude)),
+    south: Math.min(...coordinates.map(([, latitude]) => latitude)),
+    north: Math.max(...coordinates.map(([, latitude]) => latitude)),
+  }
+}
+
+function flattenGeographicCoordinates(value) {
+  if (!Array.isArray(value)) return []
+  if (value.length >= 2 && Number.isFinite(Number(value[0])) && Number.isFinite(Number(value[1]))) {
+    return [[Number(value[0]), Number(value[1])]]
+  }
+  return value.flatMap(flattenGeographicCoordinates)
+}
+
 function getNetworkLineStyle(network) {
-  if (network.lineRole === 'fiber-backbone') return { width: 6, dash: [] }
-  if (network.lineRole === 'fiber-distribution') return { width: 4.5, dash: [] }
-  if (network.lineRole === 'cctv-cable') return { width: 4, dash: [] }
-  if (network.lineRole === 'lan') return { width: 2.5, dash: [9, 7] }
-  return { width: 3, dash: [] }
+  if (network.lineRole === 'fiber-backbone') {
+    return { role: 'backbone', width: 6, dash: [] }
+  }
+  if (network.lineRole === 'fiber-distribution') {
+    return { role: 'distribution', width: 4.5, dash: [] }
+  }
+  if (network.lineRole === 'cctv-cable') {
+    return { role: 'distribution', width: 4, dash: [] }
+  }
+  if (network.lineRole === 'lan') return { role: 'minor', width: 2.5, dash: [9, 7] }
+  return { role: 'standard', width: 3, dash: [] }
+}
+
+function lineDetailAlpha(role, tier) {
+  if (tier !== 'low') return 1
+  if (role === 'backbone') return 1
+  if (role === 'distribution') return .42
+  if (role === 'standard') return .34
+  return .2
+}
+
+function screenPathIntersectsViewport(points, width, height) {
+  if (!points.length) return false
+  if (points.some(({ x, y }) => (
+    x >= 0 && x <= width && y >= 0 && y <= height
+  ))) return true
+  const minX = Math.min(...points.map(({ x }) => x))
+  const maxX = Math.max(...points.map(({ x }) => x))
+  const minY = Math.min(...points.map(({ y }) => y))
+  const maxY = Math.max(...points.map(({ y }) => y))
+  return maxX >= 0 && minX <= width && maxY >= 0 && minY <= height
 }
 
 function distanceToSegment(point, start, end) {

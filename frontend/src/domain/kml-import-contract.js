@@ -114,6 +114,11 @@ export const IMPORT_ISSUE_SEVERITIES = Object.freeze(['error', 'warning', 'infor
  * @property {string} relationType
  * @property {string=} pathAssetId
  * @property {string=} sourceMetadataKey
+ * @property {'explicit'|'inferred_endpoint'|'inferred_line_intersection'|'inferred_point_on_line'=} relationSource
+ * @property {'confirmed'|'confirmed_inferred'=} relationStatus
+ * @property {string=} sourceGeometryId
+ * @property {string[]=} sourceGeometryIds
+ * @property {number=} distanceMeters
  * @property {Record<string, unknown>=} metadata
  */
 
@@ -140,6 +145,7 @@ export const IMPORT_ISSUE_SEVERITIES = Object.freeze(['error', 'warning', 'infor
  * @property {AssetGeometry[]} geometries
  * @property {AssetRelation[]} relations
  * @property {ImportIssue[]} issues
+ * @property {Record<string, unknown>=} topologyGraph
  */
 
 const SUMMARY_FIELDS = [
@@ -288,6 +294,13 @@ export function isAssetGeometry(value) {
 }
 
 export function isAssetRelation(value) {
+  const validRelationSource = value?.relationSource === undefined
+    || [
+      'explicit',
+      'inferred_endpoint',
+      'inferred_line_intersection',
+      'inferred_point_on_line',
+    ].includes(value.relationSource)
   return isPlainRecord(value)
     && isNonEmptyString(value.id)
     && isNonEmptyString(value.datasetVersionId)
@@ -296,6 +309,23 @@ export function isAssetRelation(value) {
     && isNonEmptyString(value.relationType)
     && isOptionalString(value.pathAssetId)
     && isOptionalString(value.sourceMetadataKey)
+    && validRelationSource
+    && (
+      value.relationStatus === undefined
+      || ['confirmed', 'confirmed_inferred'].includes(value.relationStatus)
+    )
+    && isOptionalString(value.sourceGeometryId)
+    && (
+      value.sourceGeometryIds === undefined
+      || (
+        Array.isArray(value.sourceGeometryIds)
+        && value.sourceGeometryIds.every(isNonEmptyString)
+      )
+    )
+    && (
+      value.distanceMeters === undefined
+      || (Number.isFinite(value.distanceMeters) && value.distanceMeters >= 0)
+    )
     && (value.metadata === undefined || isPlainRecord(value.metadata))
 }
 

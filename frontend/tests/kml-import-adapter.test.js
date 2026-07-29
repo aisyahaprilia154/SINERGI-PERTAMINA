@@ -508,7 +508,7 @@ test('persists confirmed endpoint topology without changing source LineString', 
   assert.deepEqual(parserOutput, snapshot)
   assert.equal(result.relations.length, 1)
   assert.equal(result.relations[0].relationSource, 'inferred_endpoint')
-  assert.equal(result.relations[0].relationStatus, 'confirmed')
+  assert.equal(result.relations[0].relationStatus, 'confirmed_inferred')
   assert.equal(result.relations[0].sourceGeometryId, result.geometries[2].id)
   assert.equal(result.topologyGraph.edges.length, 1)
 })

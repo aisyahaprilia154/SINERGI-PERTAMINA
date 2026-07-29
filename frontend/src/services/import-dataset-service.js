@@ -166,13 +166,26 @@ export function parseAttachmentFilename(contentDisposition, fallback) {
     .match(/filename\*=UTF-8''([^;]+)/i)?.[1]
   if (extended) {
     try {
-      return decodeURIComponent(extended)
+      return sanitizeAttachmentFilename(decodeURIComponent(extended), fallback)
     } catch {
       // Continue with the safe ASCII filename.
     }
   }
   const ascii = String(contentDisposition ?? '').match(/filename="([^"]+)"/i)?.[1]
-  return ascii || fallback
+  return sanitizeAttachmentFilename(ascii || fallback, fallback)
+}
+
+function sanitizeAttachmentFilename(value, fallback) {
+  const filename = String(value ?? '')
+    .replaceAll('\\', '/')
+    .split('/')
+    .filter(Boolean)
+    .at(-1)
+    ?.normalize('NFKC')
+    .replace(/[<>:"|?*\u0000-\u001f]/g, '-')
+    .replace(/^\.+/, '')
+    .trim()
+  return filename || String(fallback || 'source-file')
 }
 
 async function requestJson(url, {

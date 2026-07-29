@@ -183,6 +183,13 @@ test('attachment filename prefers UTF-8 Content-Disposition safely', () => {
     parseAttachmentFilename('attachment; filename="network.kmz"', 'fallback.kmz'),
     'network.kmz',
   )
+  assert.equal(
+    parseAttachmentFilename(
+      'attachment; filename="../storage/private/source.kml"',
+      'fallback.kml',
+    ),
+    'source.kml',
+  )
 })
 
 function asset(id, assetId, type, category) {

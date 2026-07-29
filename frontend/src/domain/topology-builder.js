@@ -1,3 +1,12 @@
+import {
+  TOPOLOGY_COMPATIBILITY_CONFIG,
+  areTopologyLinesCompatible,
+  classifyTopologyLine,
+  classifyTopologyNode,
+  isTopologyPointLineCompatible,
+  normalizeTopologyMetadataKey,
+} from './topology-compatibility.js'
+
 const EARTH_RADIUS_METERS = 6371008.8
 
 export const DEFAULT_TOPOLOGY_CONFIG = Object.freeze({
@@ -20,8 +29,15 @@ export function buildTopologyGraph({
   relations = [],
   layers = [],
   config = {},
+  siteScopeId = null,
+  datasetVersionId = null,
 } = {}) {
   const settings = normalizeConfig(config)
+  const graphContext = resolveGraphContext({
+    assets,
+    siteScopeId,
+    datasetVersionId,
+  })
   const layerById = new Map(layers.map((layer) => [layer.id, layer]))
   const ownerByNodeId = new Map(assets.map((asset) => [asset.id, asset]))
   const visibleOwners = new Map(assets
@@ -35,9 +51,9 @@ export function buildTopologyGraph({
     }))
     .filter(({ owner }) => owner && visibleOwners.has(owner.id))
 
-  const nodes = createAssetNodes(parts)
+  const nodes = createAssetNodes(parts, graphContext)
   const nodeById = new Map(nodes.map((node) => [node.id, node]))
-  const lines = createTopologyLines(parts)
+  const lines = createTopologyLines(parts, graphContext)
   const unresolvedEndpoints = []
   const ambiguousConnections = []
   const virtualJunctions = []
@@ -71,6 +87,7 @@ export function buildTopologyGraph({
       settings,
       anchorsByLineId,
       virtualJunctions,
+      graphContext,
     })
   }
 
@@ -80,12 +97,22 @@ export function buildTopologyGraph({
     inventoryNodeIds: new Set(nodes.map(({ id }) => id)),
     virtualNodeIds: new Set(virtualJunctions.map(({ id }) => id)),
   })
+  const explicitRelations = collectExplicitRelations({
+    assets,
+    relations,
+    nodeById,
+    settings,
+    graphContext,
+    unresolvedEndpoints,
+  })
   const edges = mergeConfirmedEdges({
-    explicitRelations: relations,
+    explicitRelations,
     inferredEdges,
     nodeById,
+    graphContext,
   })
   const connectedComponents = findConnectedComponents(nodes, edges)
+  const adjacency = buildAdjacencyIndex(nodes, edges)
   const connectedNodeIds = new Set(edges.flatMap(({ sourceNodeId, targetNodeId }) => (
     [sourceNodeId, targetNodeId]
   )))
@@ -96,17 +123,21 @@ export function buildTopologyGraph({
   return {
     nodes,
     edges,
+    adjacency,
     unresolvedEndpoints,
+    ambiguousCandidates: ambiguousConnections,
     ambiguousConnections,
     isolatedNodes,
     connectedComponents,
     virtualJunctions,
     internalEdges,
     settings,
+    siteScopeId: graphContext.siteScopeId,
+    datasetVersionId: graphContext.datasetVersionId,
   }
 }
 
-function createAssetNodes(parts) {
+function createAssetNodes(parts, graphContext) {
   const nodes = new Map()
   parts.forEach((geometry) => {
     if (geometry.geometryType !== 'point' || !validCoordinate(geometry.coordinates)) return
@@ -123,12 +154,15 @@ function createAssetNodes(parts) {
       coordinate: cloneCoordinate(geometry.coordinates),
       geometryId: geometry.id,
       isVirtual: false,
+      nodeRole: classifyTopologyNode(owner),
+      siteScopeId: owner.siteScopeId || graphContext.siteScopeId,
+      datasetVersionId: owner.datasetVersionId || graphContext.datasetVersionId,
     })
   })
   return [...nodes.values()]
 }
 
-function createTopologyLines(parts) {
+function createTopologyLines(parts, graphContext) {
   return parts
     .filter((geometry) => (
       geometry.geometryType === 'line_string'
@@ -145,7 +179,7 @@ function createTopologyLines(parts) {
       segmentLengths.forEach((length) => {
         cumulativeLengths.push(cumulativeLengths.at(-1) + length)
       })
-      return {
+      const line = {
         id: geometry.id,
         sourceGeometryId: geometry.sourceGeometryId || geometry.id,
         ownerAssetId: geometry.owner.assetId,
@@ -156,6 +190,12 @@ function createTopologyLines(parts) {
         segmentLengths,
         cumulativeLengths,
         totalLengthMeters: cumulativeLengths.at(-1),
+        siteScopeId: geometry.owner.siteScopeId || graphContext.siteScopeId,
+        datasetVersionId: geometry.owner.datasetVersionId || graphContext.datasetVersionId,
+      }
+      return {
+        ...line,
+        lineRole: classifyTopologyLine(line),
       }
     })
 }
@@ -180,7 +220,7 @@ function resolveLineEndpoints({
 
   endpoints.forEach((endpoint) => {
     const candidates = nodes
-      .filter((node) => pointLineCompatible(node, line))
+      .filter((node) => isTopologyPointLineCompatible(node, line))
       .map((node) => ({
         nodeId: node.id,
         distanceMeters: geographicDistanceMeters(endpoint.coordinate, node.coordinate),
@@ -229,7 +269,7 @@ function resolvePointsOnLines({
 }) {
   nodes.forEach((node) => {
     const candidates = lines
-      .filter((line) => pointLineCompatible(node, line))
+      .filter((line) => isTopologyPointLineCompatible(node, line))
       .map((line) => {
         const nearest = nearestPointOnLine(node.coordinate, line)
         return { line, ...nearest }
@@ -277,13 +317,14 @@ function resolveLineIntersections({
   settings,
   anchorsByLineId,
   virtualJunctions,
+  graphContext,
 }) {
   const junctionByCoordinate = new Map()
   for (let leftIndex = 0; leftIndex < lines.length; leftIndex += 1) {
     const left = lines[leftIndex]
     for (let rightIndex = leftIndex + 1; rightIndex < lines.length; rightIndex += 1) {
       const right = lines[rightIndex]
-      if (!lineIntersectionCompatible(left, right)) continue
+      if (!areTopologyLinesCompatible(left, right)) continue
       if (!boundingBoxesOverlap(lineBounds(left), lineBounds(right))) continue
 
       for (let leftSegment = 0; leftSegment < left.coordinates.length - 1; leftSegment += 1) {
@@ -302,8 +343,8 @@ function resolveLineIntersections({
 
           const matchingNodes = nodes
             .filter((node) => (
-              pointLineCompatible(node, left)
-              && pointLineCompatible(node, right)
+              isTopologyPointLineCompatible(node, left)
+              && isTopologyPointLineCompatible(node, right)
             ))
             .map((node) => ({
               nodeId: node.id,
@@ -329,6 +370,8 @@ function resolveLineIntersections({
                 id: junctionId,
                 coordinate: cloneCoordinate(intersection.coordinate),
                 isVirtual: true,
+                siteScopeId: graphContext.siteScopeId,
+                datasetVersionId: graphContext.datasetVersionId,
               })
             }
           }
@@ -372,9 +415,11 @@ function createInternalEdges(lines, anchorsByLineId) {
         pathAssetId: line.ownerAssetId,
         category: line.category,
         relationSource,
-        relationStatus: 'confirmed',
+        relationStatus: 'confirmed_inferred',
         distanceMeters: Math.max(source.distanceMeters || 0, target.distanceMeters || 0),
         pathLengthMeters: Math.max(0, target.measureMeters - source.measureMeters),
+        siteScopeId: line.siteScopeId,
+        datasetVersionId: line.datasetVersionId,
       })
     })
   })
@@ -435,12 +480,12 @@ function collapsePath(sourceNodeId, targetNodeId, path) {
     relationSource === 'inferred_point_on_line'
   ))
     ? 'inferred_point_on_line'
-    : path.some(({ relationSource }) => relationSource === 'inferred_line_intersection')
-      ? 'inferred_line_intersection'
+    : path.some(({ relationSource }) => relationSource === 'inferred_intersection')
+      ? 'inferred_intersection'
       : 'inferred_endpoint'
   const relationType = {
     inferred_endpoint: 'line-endpoint',
-    inferred_line_intersection: 'line-intersection',
+    inferred_intersection: 'line-intersection',
     inferred_point_on_line: 'point-on-line',
   }[relationSource]
   return {
@@ -451,7 +496,8 @@ function collapsePath(sourceNodeId, targetNodeId, path) {
     targetAssetId: targetNodeId,
     relationType,
     relationSource,
-    relationStatus: 'confirmed',
+    relationStatus: 'confirmed_inferred',
+    pathGeometryId: sourceGeometryIds.length === 1 ? sourceGeometryIds[0] : undefined,
     sourceGeometryId: sourceGeometryIds.length === 1 ? sourceGeometryIds[0] : undefined,
     sourceGeometryIds,
     pathAssetId: pathAssetIds.length === 1 ? pathAssetIds[0] : undefined,
@@ -459,10 +505,17 @@ function collapsePath(sourceNodeId, targetNodeId, path) {
     networkId: `network:${semanticFamily(path[0]?.category)}`,
     distanceMeters: Math.max(...path.map(({ distanceMeters = 0 }) => distanceMeters)),
     pathLengthMeters: path.reduce((total, edge) => total + edge.pathLengthMeters, 0),
+    siteScopeId: path[0]?.siteScopeId ?? null,
+    datasetVersionId: path[0]?.datasetVersionId ?? null,
   }
 }
 
-function mergeConfirmedEdges({ explicitRelations, inferredEdges, nodeById }) {
+function mergeConfirmedEdges({
+  explicitRelations,
+  inferredEdges,
+  nodeById,
+  graphContext,
+}) {
   const edges = new Map()
   explicitRelations.forEach((relation, index) => {
     const sourceNodeId = relation.sourceNodeId || relation.sourceAssetId
@@ -478,23 +531,264 @@ function mergeConfirmedEdges({ explicitRelations, inferredEdges, nodeById }) {
       sourceAssetId: sourceNodeId,
       targetAssetId: targetNodeId,
       relationType: relation.relationType || 'connected-to',
-      relationSource: 'explicit',
-      relationStatus: 'confirmed',
+      relationSource: relation.relationSource || 'explicit',
+      relationStatus: relation.relationStatus || 'confirmed',
       pathAssetId: relation.pathAssetId,
+      pathGeometryId: relation.pathGeometryId || relation.sourceGeometryId,
       sourceGeometryId: relation.sourceGeometryId,
       sourceGeometryIds: relation.sourceGeometryIds
         || [relation.sourceGeometryId].filter(Boolean),
       category,
       networkId: relation.networkId || `network:${semanticFamily(category, source.assetType)}`,
       distanceMeters: relation.distanceMeters,
+      siteScopeId: relation.siteScopeId || graphContext.siteScopeId,
+      datasetVersionId: relation.datasetVersionId || graphContext.datasetVersionId,
       metadata: relation.metadata ? structuredClone(relation.metadata) : undefined,
     })
   })
   inferredEdges.forEach((edge) => {
     const key = undirectedEdgeKey(edge.sourceNodeId, edge.targetNodeId)
-    if (!edges.has(key)) edges.set(key, edge)
+    if (!edges.has(key)) {
+      edges.set(key, {
+        ...edge,
+        siteScopeId: edge.siteScopeId || graphContext.siteScopeId,
+        datasetVersionId: edge.datasetVersionId || graphContext.datasetVersionId,
+      })
+    }
   })
   return [...edges.values()].sort((left, right) => left.id.localeCompare(right.id))
+}
+
+function collectExplicitRelations({
+  assets,
+  relations,
+  nodeById,
+  settings,
+  graphContext,
+  unresolvedEndpoints,
+}) {
+  const aliasToNodeId = createAssetAliasIndex(assets, nodeById)
+  const candidates = [
+    ...relations
+      .filter((relation) => !relation.relationSource || relation.relationSource === 'explicit')
+      .map((relation) => ({
+        ...structuredClone(relation),
+        relationSource: 'explicit',
+        relationStatus: 'confirmed',
+      })),
+    ...extractMetadataRelations(assets),
+  ]
+  const confirmed = []
+  const seenCandidateIds = new Set()
+
+  candidates.forEach((candidate, index) => {
+    const rawSourceId = candidate.sourceNodeId || candidate.sourceAssetId
+    const rawTargetId = candidate.targetNodeId || candidate.targetAssetId
+    const sourceNodeId = resolveAssetReference(rawSourceId, aliasToNodeId)
+    const targetNodeId = resolveAssetReference(rawTargetId, aliasToNodeId)
+    const diagnosticBase = {
+      kind: 'explicit_relation',
+      relationId: candidate.id || `explicit-candidate:${index}`,
+      sourceAssetId: rawSourceId || null,
+      targetAssetId: rawTargetId || null,
+      relationSource: 'explicit',
+    }
+
+    if (!sourceNodeId || !targetNodeId) {
+      unresolvedEndpoints.push({
+        ...diagnosticBase,
+        endpoint: !sourceNodeId ? 'source' : 'target',
+        reason: 'explicit_reference_not_found',
+      })
+      return
+    }
+    const source = nodeById.get(sourceNodeId)
+    const target = nodeById.get(targetNodeId)
+    if (!sameGraphScope(source, target, graphContext)) {
+      unresolvedEndpoints.push({
+        ...diagnosticBase,
+        endpoint: 'target',
+        reason: 'cross_site_relation_rejected',
+      })
+      return
+    }
+    if (sourceNodeId === targetNodeId
+      && !settings.allowedSelfRelationTypes.includes(candidate.relationType)) {
+      unresolvedEndpoints.push({
+        ...diagnosticBase,
+        endpoint: 'target',
+        reason: 'self_relation_rejected',
+      })
+      return
+    }
+
+    const id = candidate.id
+      || `explicit:${slugify(sourceNodeId)}:${slugify(targetNodeId)}:${index}`
+    if (seenCandidateIds.has(id)) return
+    seenCandidateIds.add(id)
+    confirmed.push({
+      ...candidate,
+      id,
+      sourceNodeId,
+      targetNodeId,
+      sourceAssetId: sourceNodeId,
+      targetAssetId: targetNodeId,
+      relationType: candidate.relationType || 'connected-to',
+      relationSource: 'explicit',
+      relationStatus: 'confirmed',
+      siteScopeId: candidate.siteScopeId || graphContext.siteScopeId,
+      datasetVersionId: candidate.datasetVersionId || graphContext.datasetVersionId,
+    })
+  })
+  return confirmed
+}
+
+function extractMetadataRelations(assets) {
+  const relations = []
+  assets.forEach((asset) => {
+    const metadata = collectAssetMetadata(asset)
+    const explicitRelationType = readMetadataAlias(
+      metadata,
+      TOPOLOGY_COMPATIBILITY_CONFIG.explicitMetadataAliases.relationType,
+    )
+    const explicitSource = readMetadataAlias(
+      metadata,
+      TOPOLOGY_COMPATIBILITY_CONFIG.explicitMetadataAliases.sourceAssetId,
+    )
+    const explicitTarget = readMetadataAlias(
+      metadata,
+      TOPOLOGY_COMPATIBILITY_CONFIG.explicitMetadataAliases.targetAssetId,
+    )
+
+    if (explicitSource || explicitTarget) {
+      relations.push({
+        id: `explicit-metadata:${slugify(explicitSource || asset.assetId)}:${slugify(explicitTarget || 'missing')}`,
+        sourceAssetId: explicitSource || asset.assetId,
+        targetAssetId: explicitTarget,
+        relationType: explicitRelationType || 'connected-to',
+        sourceMetadataKey: 'source_asset_id,target_asset_id',
+        metadata: { origin: 'asset-metadata' },
+      })
+    }
+
+    const ownerTargets = [
+      ['connectedTo', 'connected-to'],
+      ['parentAssetId', 'parent'],
+      ['upstreamAssetId', 'upstream'],
+      ['downstreamAssetId', 'downstream'],
+    ]
+    ownerTargets.forEach(([field, fallbackType]) => {
+      const rawTargets = readMetadataAlias(
+        metadata,
+        TOPOLOGY_COMPATIBILITY_CONFIG.explicitMetadataAliases[field],
+      )
+      splitReferences(rawTargets).forEach((targetAssetId, index) => {
+        relations.push({
+          id: `explicit-metadata:${slugify(asset.assetId)}:${field}:${slugify(targetAssetId)}:${index}`,
+          sourceAssetId: asset.assetId,
+          targetAssetId,
+          relationType: explicitRelationType || fallbackType,
+          sourceMetadataKey: TOPOLOGY_COMPATIBILITY_CONFIG
+            .explicitMetadataAliases[field][0],
+          metadata: { origin: 'asset-metadata' },
+        })
+      })
+    })
+  })
+  return relations
+}
+
+function collectAssetMetadata(asset) {
+  const records = [
+    asset?.properties?.extendedData,
+    asset?.properties?.sourceExtendedData,
+    asset?.properties?.semanticMetadata?.values,
+    asset?.properties?.semanticMetadata,
+    asset?.properties,
+  ]
+  const result = new Map()
+  records.forEach((record) => {
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return
+    Object.entries(record).forEach(([key, value]) => {
+      if (value == null || typeof value === 'object') return
+      const normalizedKey = normalizeTopologyMetadataKey(key)
+      if (!result.has(normalizedKey)) result.set(normalizedKey, String(value).trim())
+    })
+  })
+  return result
+}
+
+function readMetadataAlias(metadata, aliases) {
+  for (const alias of aliases) {
+    const value = metadata.get(normalizeTopologyMetadataKey(alias))
+    if (value) return value
+  }
+  return null
+}
+
+function splitReferences(value) {
+  return String(value ?? '').split(/[,;|\n]+/).map((item) => item.trim()).filter(Boolean)
+}
+
+function createAssetAliasIndex(assets, nodeById) {
+  const aliases = new Map()
+  assets.forEach((asset) => {
+    const nodeId = nodeById.has(asset.assetId)
+      ? asset.assetId
+      : nodeById.has(asset.id) ? asset.id : null
+    if (!nodeId) return
+    const candidates = [
+      asset.id,
+      asset.assetId,
+      asset.properties?.semanticMetadata?.assetId,
+      asset.properties?.semanticMetadata?.values?.assetId,
+    ]
+    candidates.filter(Boolean).forEach((candidate) => {
+      aliases.set(normalizeAssetReference(candidate), nodeId)
+    })
+  })
+  return aliases
+}
+
+function resolveAssetReference(value, aliasToNodeId) {
+  if (!value) return null
+  return aliasToNodeId.get(normalizeAssetReference(value)) || null
+}
+
+function normalizeAssetReference(value) {
+  return String(value ?? '').trim().toLocaleLowerCase('id')
+}
+
+function sameGraphScope(source, target, graphContext) {
+  if (!source || !target) return false
+  const sourceSite = source.siteScopeId || graphContext.siteScopeId
+  const targetSite = target.siteScopeId || graphContext.siteScopeId
+  const sourceVersion = source.datasetVersionId || graphContext.datasetVersionId
+  const targetVersion = target.datasetVersionId || graphContext.datasetVersionId
+  return (!sourceSite || !targetSite || sourceSite === targetSite)
+    && (!sourceVersion || !targetVersion || sourceVersion === targetVersion)
+}
+
+function buildAdjacencyIndex(nodes, edges) {
+  const adjacency = Object.fromEntries(nodes.map(({ id }) => [id, []]))
+  edges.forEach((edge) => {
+    adjacency[edge.sourceNodeId]?.push({
+      nodeId: edge.targetNodeId,
+      edgeId: edge.id,
+      relationSource: edge.relationSource,
+      relationStatus: edge.relationStatus,
+    })
+    adjacency[edge.targetNodeId]?.push({
+      nodeId: edge.sourceNodeId,
+      edgeId: edge.id,
+      relationSource: edge.relationSource,
+      relationStatus: edge.relationStatus,
+    })
+  })
+  Object.values(adjacency).forEach((records) => records.sort((left, right) => (
+    left.nodeId.localeCompare(right.nodeId) || left.edgeId.localeCompare(right.edgeId)
+  )))
+  return adjacency
 }
 
 function findConnectedComponents(nodes, edges) {
@@ -624,40 +918,6 @@ function segmentIntersection(leftStart, leftEnd, rightStart, rightEnd) {
   }
 }
 
-function pointLineCompatible(node, line) {
-  const lineFamily = semanticFamily(line.category, line.assetType)
-  const nodeFamily = semanticFamily(node.category, node.assetType)
-  const type = String(node.assetType || '').toLowerCase()
-  if (lineFamily === 'cctv-cable' || lineFamily === 'cctv') {
-    return nodeFamily === 'cctv'
-      || (nodeFamily === 'infrastructure'
-        && /(junction|\bjb\b|switch|nvr|server|router)/.test(type))
-  }
-  if (lineFamily === 'fiber-optic') {
-    return nodeFamily === 'fiber-optic'
-      || (nodeFamily === 'infrastructure'
-        && /(otb|junction|\bjb\b|switch|router|core)/.test(type))
-  }
-  if (lineFamily === 'lan') {
-    return ['lan', 'infrastructure', 'peripheral'].includes(nodeFamily)
-      && /(switch|router|access point|\bap\b|printer|server|device|lan)/.test(type)
-  }
-  if (lineFamily === 'infrastructure') return nodeFamily === 'infrastructure'
-  if (lineFamily === 'peripheral') {
-    return nodeFamily === 'peripheral' || nodeFamily === 'infrastructure'
-  }
-  return false
-}
-
-function lineIntersectionCompatible(left, right) {
-  const leftFamily = semanticFamily(left.category, left.assetType)
-  const rightFamily = semanticFamily(right.category, right.assetType)
-  if (leftFamily === 'unmapped' || rightFamily === 'unmapped') return false
-  if (leftFamily === rightFamily) return true
-  return new Set([leftFamily, rightFamily]).size === 2
-    && [leftFamily, rightFamily].every((family) => ['cctv', 'cctv-cable'].includes(family))
-}
-
 function semanticFamily(...values) {
   const value = values.filter(Boolean).join(' ').toLowerCase()
   if (value.includes('cctv') && /(cable|kabel|backbone)/.test(value)) return 'cctv-cable'
@@ -709,6 +969,20 @@ function normalizeConfig(config) {
     inferLineEndpoints: config.inferLineEndpoints !== false,
     inferLineIntersections: config.inferLineIntersections !== false,
     inferPointsOnLines: config.inferPointsOnLines !== false,
+    allowedSelfRelationTypes: Array.isArray(config.allowedSelfRelationTypes)
+      ? [...new Set(config.allowedSelfRelationTypes.filter(Boolean))]
+      : [],
+  }
+}
+
+function resolveGraphContext({ assets, siteScopeId, datasetVersionId }) {
+  return {
+    siteScopeId: siteScopeId
+      || assets.find((asset) => asset?.siteScopeId)?.siteScopeId
+      || null,
+    datasetVersionId: datasetVersionId
+      || assets.find((asset) => asset?.datasetVersionId)?.datasetVersionId
+      || null,
   }
 }
 
@@ -732,7 +1006,7 @@ function internalRelationSource(source, target) {
     return 'inferred_point_on_line'
   }
   if ([source.source, target.source].includes('line_intersection')) {
-    return 'inferred_line_intersection'
+    return 'inferred_intersection'
   }
   return 'inferred_endpoint'
 }

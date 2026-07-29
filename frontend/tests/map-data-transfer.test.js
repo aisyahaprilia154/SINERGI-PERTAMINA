@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  collectFocusedAssetIds,
   collectSelectedNetworkAssetIds,
+  collectViewportAssetIds,
+  createContextualExportFilename,
   serializeActiveDatasetKml,
 } from '../src/pages/map/active-dataset-kml-export.js'
 import { renderMapDataTransferDialog } from '../src/pages/map/map-data-transfer-dialog.js'
@@ -94,8 +97,42 @@ test('map data transfer dialog exposes direct import and complete export choices
   assert.match(html, /Import KML\/KMZ/)
   assert.match(html, /Dataset aktif ke KML/)
   assert.match(html, /Jaringan terpilih ke KML/)
+  assert.match(html, /Layer terlihat ke KML/)
+  assert.match(html, /Aset fokus depth 1 ke KML/)
+  assert.match(html, /Aset fokus depth 2 ke KML/)
+  assert.match(html, /Jalur tracing aktif ke KML/)
+  assert.match(html, /Area peta saat ini ke KML/)
+  assert.match(html, /value="kmz"/)
   assert.match(html, /File sumber asli/)
   assert.match(html, /Diagram skematik 2D/)
+})
+
+test('focused and viewport export scopes remain bounded to graph depth and visible geometry', () => {
+  const topologyGraph = {
+    edges: [
+      { sourceNodeId: 'a', targetNodeId: 'b' },
+      { sourceNodeId: 'b', targetNodeId: 'c' },
+      { sourceNodeId: 'c', targetNodeId: 'd' },
+      { sourceNodeId: 'd', targetNodeId: 'b' },
+    ],
+  }
+  assert.deepEqual(collectFocusedAssetIds(topologyGraph, 'a', 1), ['a', 'b'])
+  assert.deepEqual(collectFocusedAssetIds(topologyGraph, 'a', 2), ['a', 'b', 'c', 'd'])
+
+  assert.deepEqual(collectViewportAssetIds([
+    { id: 'point', geometry: [{ id: 'point-geometry' }] },
+    { id: 'line-owner', geometry: [{ id: 'line-part', sourceGeometryId: 'line-source' }] },
+    { id: 'outside', geometry: [{ id: 'outside-geometry' }] },
+  ], ['point'], ['line-source']), ['point', 'line-owner'])
+})
+
+test('contextual filename uses the site, scope, version, and export date safely', () => {
+  assert.equal(createContextualExportFilename({
+    siteScopeName: 'Pengapon',
+    version: 'v2.4.0',
+  }, 'CCTV Trace', '2026-07-29T08:00:00.000Z'), (
+    'SINERGI_Pengapon_CCTV-Trace_v2.4.0_2026-07-29'
+  ))
 })
 
 test('map context and toolbar present a compact branch name and admin data action', () => {

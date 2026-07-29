@@ -22,11 +22,11 @@ export function renderNetworkMapCanvas(activeContext, {
       ${renderMapContextPill(activeContext)}
       ${renderMapFloatingControls(activeContext)}
 
-      <div class="trace-banner" hidden>
+      <div class="trace-banner" role="status" aria-live="polite" hidden>
         <span class="trace-step">1</span>
         <div>
           <strong>Pilih titik awal</strong>
-          <span>Klik aset pada peta untuk memulai tracing.</span>
+          <span class="trace-description">Klik aset pada peta untuk memulai tracing.</span>
         </div>
         <button class="icon-button cancel-trace" type="button" aria-label="Batalkan tracing">
           <span class="material-symbols-outlined" aria-hidden="true">close</span>
@@ -49,12 +49,13 @@ export function renderNetworkMapCanvas(activeContext, {
 
 export function renderMapContextPill(activeContext) {
   const branchName = formatBranchName(activeContext.branchName)
+  const contextLabel = activeContext.siteScopeName ? 'Site' : 'Kantor cabang'
   return `
     <section class="map-context-pill" aria-label="Konteks peta aktif">
       <span class="context-branch">
         <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
         <span>
-          <small>Kantor cabang</small>
+          <small>${contextLabel}</small>
           <strong title="${escapeHtml(branchName)}">${escapeHtml(branchName)}</strong>
         </span>
       </span>
@@ -80,19 +81,23 @@ export function renderMapFloatingControls() {
       </button>
 
       <div class="map-action-group" aria-label="Aksi peta">
-        <button class="tool-button data-transfer-toggle" type="button">
+        <button class="tool-button data-transfer-toggle" type="button"
+          aria-label="Buka import dan export" title="Import / Export">
           <span class="material-symbols-outlined" aria-hidden="true">swap_vert</span>
           <span>Import / Export</span>
         </button>
-        <button class="tool-button trace-toggle" type="button">
+        <button class="tool-button trace-toggle" type="button"
+          aria-label="Mulai tracing jaringan" title="Tracing">
           <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>
           <span>Tracing</span>
         </button>
-        <button class="tool-button diagram-toggle" type="button">
+        <button class="tool-button diagram-toggle" type="button"
+          aria-label="Buka Diagram 2D" title="Diagram 2D">
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
           <span>Diagram 2D</span>
         </button>
-        <button class="tool-button dim-toggle" type="button" aria-pressed="true">
+        <button class="tool-button dim-toggle" type="button" aria-pressed="true"
+          aria-label="Redupkan jaringan lainnya" title="Redupkan lainnya">
           <span class="material-symbols-outlined" aria-hidden="true">contrast</span>
           <span>Redupkan lainnya</span>
         </button>
