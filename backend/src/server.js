@@ -10,6 +10,7 @@ import { TokenAuthenticator } from './security/authorization.js'
 import { JsonLinesAuditLog } from './storage/audit-log.js'
 import { JsonDatasetVersionRepository } from './storage/dataset-version-repository.js'
 import { ImportFileStore } from './storage/file-store.js'
+import { TopologyService } from './topology/topology-service.js'
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url))
 const config = createConfig(process.env, {
@@ -26,6 +27,11 @@ const jobQueue = new BackgroundJobQueue({ concurrency: 1 })
 const lifecycleService = new DatasetVersionLifecycleService({
   repository,
   auditLog,
+})
+const topologyService = new TopologyService({
+  repository,
+  auditLog,
+  config: config.topology,
 })
 const importPipeline = new ImportPipeline({
   repository,
@@ -53,6 +59,7 @@ const app = createApp({
   jobQueue,
   importPipeline,
   lifecycleService,
+  topologyService,
 })
 
 app.listen(config.port, config.host, () => {

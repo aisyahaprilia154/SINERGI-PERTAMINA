@@ -99,7 +99,7 @@ test('diagram uses the same confirmed topology edges as tracing and map', () => 
   assert.equal(graph.edges[0].relationSource, 'inferred_endpoint')
 })
 
-test('builder rejects an overly dense scope instead of generating unreadable output', () => {
+test('builder keeps the complete branch scope without an arbitrary asset limit', () => {
   const manyAssets = Array.from({ length: 31 }, (_, index) => ({
     id: `asset-${index}`,
     name: `Asset ${index}`,
@@ -116,9 +116,8 @@ test('builder rejects an overly dense scope instead of generating unreadable out
     selectedNetworkIds: ['large'],
   })
 
-  assert.equal(graph.status, 'too-dense')
-  assert.match(graph.message, /Cakupan terlalu luas/)
-  assert.equal(graph.nodes.length, 0)
+  assert.equal(graph.status, 'ready')
+  assert.equal(graph.nodes.length, 31)
 })
 
 test('builder never writes diagram coordinates into source assets', () => {

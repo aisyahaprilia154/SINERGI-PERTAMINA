@@ -4,16 +4,20 @@ import { AppError } from '../errors.js'
 
 const UNSUPPORTED_ELEMENTS = new Set([
   'NetworkLink',
-  'GroundOverlay',
   'PhotoOverlay',
   'ScreenOverlay',
   'Model',
   'Track',
   'MultiTrack',
   'Tour',
-  'LabelStyle',
   'BalloonStyle',
   'ListStyle',
+])
+const CRITICAL_UNSUPPORTED_ELEMENTS = new Set([
+  'NetworkLink',
+  'Model',
+  'Track',
+  'MultiTrack',
 ])
 
 export async function parseKmlFile(filePath, {
@@ -62,6 +66,7 @@ export function parseKmlText(source, { folderMappings = [] } = {}) {
   const parserOutput = {
     folders: [],
     placemarks: [],
+    overlays: [],
     styles: [],
     styleMaps: [],
     issues: [],
@@ -71,13 +76,27 @@ export function parseKmlText(source, { folderMappings = [] } = {}) {
       documentCount: 0,
       folderCount: 0,
       placemarkCount: 0,
+      overlayCount: 0,
     },
+  }
+  const namespace = kmlNamespace(kmlRoot)
+  parserOutput.namespace = namespace || undefined
+  if (namespace && namespace !== 'http://www.opengis.net/kml/2.2') {
+    parserOutput.issues.push({
+      severity: 'error',
+      issueCode: 'unsupported_kml_namespace',
+      message: `Namespace KML "${namespace}" belum didukung; gunakan KML 2.2.`,
+      canActivate: false,
+    })
   }
 
   const documentNodes = children(kmlRoot, 'Document')
   collectStyles(kmlRoot, parserOutput)
   children(kmlRoot, 'Placemark').forEach((placemark, index) => {
     parserOutput.placemarks.push(parsePlacemark(placemark, '/', index, parserOutput.issues))
+  })
+  children(kmlRoot, 'GroundOverlay').forEach((overlay, index) => {
+    parserOutput.overlays.push(parseGroundOverlay(overlay, '/', index, parserOutput.issues))
   })
   children(kmlRoot, 'Folder').forEach((folder, index) => {
     parserOutput.folders.push(parseFolder(
@@ -97,6 +116,14 @@ export function parseKmlText(source, { folderMappings = [] } = {}) {
         parserOutput.issues,
       ))
     })
+    children(documentNode, 'GroundOverlay').forEach((overlay, overlayIndex) => {
+      parserOutput.overlays.push(parseGroundOverlay(
+        overlay,
+        '/',
+        overlayIndex,
+        parserOutput.issues,
+      ))
+    })
     children(documentNode, 'Folder').forEach((folder, folderIndex) => {
       parserOutput.folders.push(parseFolder(
         folder,
@@ -109,12 +136,17 @@ export function parseKmlText(source, { folderMappings = [] } = {}) {
   })
 
   collectUnsupportedElements(kmlRoot, parserOutput.unsupportedElements)
+  resolveFeatureStyles(parserOutput)
   parserOutput.structure = {
     hasKmlRoot: true,
     documentCount: documentNodes.length,
     folderCount: countElements(kmlRoot, 'Folder'),
     placemarkCount: countElements(kmlRoot, 'Placemark'),
+    overlayCount: countElements(kmlRoot, 'GroundOverlay'),
+    styleCount: parserOutput.styles.length,
+    styleMapCount: parserOutput.styleMaps.length,
   }
+  parserOutput.coverage = buildParserCoverage(parserOutput)
   return parserOutput
 }
 
@@ -153,6 +185,7 @@ function parseXml(xml) {
         'Style',
         'StyleMap',
         'Pair',
+        'GroundOverlay',
       ].includes(localName(name)),
     }).parse(xml)
   } catch (error) {
@@ -193,6 +226,14 @@ function parseFolder(folder, parentPath, index, issues, folderMappings) {
         issues,
       ),
     ),
+    overlays: children(folder, 'GroundOverlay').map(
+      (overlay, overlayIndex) => parseGroundOverlay(
+        overlay,
+        sourceFolderPath,
+        overlayIndex,
+        issues,
+      ),
+    ),
     children: children(folder, 'Folder').map(
       (child, childIndex) => parseFolder(
         child,
@@ -219,6 +260,8 @@ function parsePlacemark(placemark, sourceFolderPath, index, issues) {
   const geometry = parsePlacemarkGeometry(placemark, geometryContext)
   const sourceDescription = textValue(firstChild(placemark, 'description'))
   const styleUrl = normalizedText(firstChild(placemark, 'styleUrl'))
+  const inlineStyleNode = firstChild(placemark, 'Style')
+  const inlineStyle = inlineStyleNode ? parseStyle(inlineStyleNode) : undefined
 
   return {
     id: sourcePlacemarkId,
@@ -242,8 +285,101 @@ function parsePlacemark(placemark, sourceFolderPath, index, issues) {
       sourceNameMissing: !sourceName,
       visibility: parseVisibility(firstChild(placemark, 'visibility')),
     },
+    ...(inlineStyle ? { inlineStyle } : {}),
     ...(geometry ? { geometry } : {}),
   }
+}
+
+function parseGroundOverlay(overlay, sourceFolderPath, index, issues) {
+  const name = normalizedText(firstChild(overlay, 'name')) || `GroundOverlay ${index + 1}`
+  const latLonBox = firstChild(overlay, 'LatLonBox')
+  const latLonQuad = firstChild(overlay, 'LatLonQuad')
+  const iconHref = normalizedText(firstChild(firstChild(overlay, 'Icon'), 'href')) || undefined
+  const parsed = {
+    id: attribute(overlay, 'id') || undefined,
+    name,
+    sourceFolderPath,
+    visibility: parseVisibility(firstChild(overlay, 'visibility')),
+    drawOrder: optionalNumber(firstChild(overlay, 'drawOrder')),
+    iconHref,
+    altitude: optionalNumber(firstChild(overlay, 'altitude')),
+    altitudeMode: normalizedText(firstChild(overlay, 'altitudeMode')) || undefined,
+    sourceOverlay: structuredClone(overlay),
+  }
+
+  if (latLonBox) {
+    parsed.latLonBox = {
+      north: optionalNumber(firstChild(latLonBox, 'north')),
+      south: optionalNumber(firstChild(latLonBox, 'south')),
+      east: optionalNumber(firstChild(latLonBox, 'east')),
+      west: optionalNumber(firstChild(latLonBox, 'west')),
+      rotation: optionalNumber(firstChild(latLonBox, 'rotation')) ?? 0,
+    }
+    if (!validLatLonBox(parsed.latLonBox)) {
+      issues.push({
+        severity: 'error',
+        issueCode: 'invalid_ground_overlay_bounds',
+        message: `GroundOverlay "${name}" memiliki LatLonBox yang tidak valid.`,
+        sourceFolderPath,
+        canActivate: false,
+      })
+      parsed.valid = false
+    }
+  } else if (latLonQuad) {
+    const sequence = parseCoordinateSequence(firstChild(latLonQuad, 'coordinates'))
+    parsed.latLonQuad = {
+      coordinates: sequence.coordinates,
+      sourceCoordinates: sequence.sourceCoordinates,
+    }
+    const validQuad = sequence.coordinates.length === 4
+      && sequence.coordinates.every((position) => !invalidPositionReason(position))
+    if (!validQuad) {
+      issues.push({
+        severity: 'error',
+        issueCode: 'invalid_ground_overlay_quad',
+        message: `GroundOverlay "${name}" harus memiliki empat koordinat gx:LatLonQuad yang valid.`,
+        sourceFolderPath,
+        canActivate: false,
+      })
+      parsed.valid = false
+    }
+  } else {
+    issues.push({
+      severity: 'error',
+      issueCode: 'ground_overlay_position_missing',
+      message: `GroundOverlay "${name}" tidak memiliki LatLonBox atau gx:LatLonQuad.`,
+      sourceFolderPath,
+      canActivate: false,
+    })
+    parsed.valid = false
+  }
+
+  if (!iconHref) {
+    issues.push({
+      severity: 'error',
+      issueCode: 'ground_overlay_resource_missing',
+      message: `GroundOverlay "${name}" tidak memiliki Icon.href.`,
+      sourceFolderPath,
+      canActivate: false,
+    })
+    parsed.valid = false
+  }
+  if (parsed.valid !== false) parsed.valid = true
+  return parsed
+}
+
+function validLatLonBox(box) {
+  return Number.isFinite(box.north)
+    && Number.isFinite(box.south)
+    && Number.isFinite(box.east)
+    && Number.isFinite(box.west)
+    && box.north >= box.south
+    && box.north <= 90
+    && box.south >= -90
+    && box.east >= -180
+    && box.east <= 180
+    && box.west >= -180
+    && box.west <= 180
 }
 
 function parsePlacemarkGeometry(placemark, context) {
@@ -273,8 +409,9 @@ function parseGeometry(type, geometry, context) {
   const altitudeMode = normalizedText(firstChild(geometry, 'altitudeMode')) || undefined
   if (type === 'Point') {
     const sequence = parseCoordinateSequence(firstChild(geometry, 'coordinates'))
-    validatePositions(sequence.coordinates, context)
+    let valid = validatePositions(sequence.coordinates, context)
     if (sequence.coordinates.length !== 1) {
+      valid = false
       addGeometryIssue(context, {
         issueCode: 'invalid_point_coordinate_count',
         message: 'Point harus memiliki tepat satu tuple koordinat.',
@@ -284,13 +421,15 @@ function parseGeometry(type, geometry, context) {
       type,
       coordinates: sequence.coordinates[0] ?? [],
       sourceCoordinates: sequence.sourceCoordinates,
+      valid,
       ...(altitudeMode ? { altitudeMode } : {}),
     }
   }
   if (type === 'LineString') {
     const sequence = parseCoordinateSequence(firstChild(geometry, 'coordinates'))
-    validatePositions(sequence.coordinates, context)
+    let valid = validatePositions(sequence.coordinates, context)
     if (sequence.coordinates.length < 2) {
+      valid = false
       addGeometryIssue(context, {
         issueCode: 'line_too_short',
         message: 'LineString minimal harus memiliki dua koordinat.',
@@ -300,14 +439,17 @@ function parseGeometry(type, geometry, context) {
       type,
       coordinates: sequence.coordinates,
       sourceCoordinates: sequence.sourceCoordinates,
+      valid,
       ...(altitudeMode ? { altitudeMode } : {}),
     }
   }
   if (type === 'Polygon') {
     const rings = []
     const sourceRings = []
+    let valid = true
     const outer = firstChild(firstChild(geometry, 'outerBoundaryIs'), 'LinearRing')
     if (!outer) {
+      valid = false
       addGeometryIssue(context, {
         issueCode: 'polygon_missing_outer_ring',
         message: 'Polygon tidak memiliki outerBoundaryIs yang valid.',
@@ -315,14 +457,17 @@ function parseGeometry(type, geometry, context) {
     } else {
       const sequence = parseCoordinateSequence(firstChild(outer, 'coordinates'))
       sourceRings.push(sequence.sourceCoordinates)
-      rings.push(normalizePolygonRing(sequence.coordinates, {
+      const normalizedRing = normalizePolygonRing(sequence.coordinates, {
         ...context,
         geometryReference: `${context.geometryReference}.outerBoundaryIs`,
-      }))
+      })
+      rings.push(normalizedRing.coordinates)
+      valid = valid && normalizedRing.valid
     }
     children(geometry, 'innerBoundaryIs').forEach((boundary, index) => {
       const ring = firstChild(boundary, 'LinearRing')
       if (!ring) {
+        valid = false
         addGeometryIssue(context, {
           issueCode: 'polygon_invalid_inner_ring',
           message: `innerBoundaryIs ke-${index + 1} tidak memiliki LinearRing.`,
@@ -331,15 +476,18 @@ function parseGeometry(type, geometry, context) {
       }
       const sequence = parseCoordinateSequence(firstChild(ring, 'coordinates'))
       sourceRings.push(sequence.sourceCoordinates)
-      rings.push(normalizePolygonRing(sequence.coordinates, {
+      const normalizedRing = normalizePolygonRing(sequence.coordinates, {
         ...context,
         geometryReference: `${context.geometryReference}.innerBoundaryIs[${index}]`,
-      }))
+      })
+      rings.push(normalizedRing.coordinates)
+      valid = valid && normalizedRing.valid
     })
     return {
       type,
       coordinates: rings,
       sourceCoordinates: sourceRings,
+      valid,
       ...(altitudeMode ? { altitudeMode } : {}),
     }
   }
@@ -363,6 +511,7 @@ function parseGeometry(type, geometry, context) {
     return {
       type,
       geometries,
+      valid: geometries.length > 0 && geometries.every((item) => item.valid !== false),
       ...(altitudeMode ? { altitudeMode } : {}),
     }
   }
@@ -414,16 +563,17 @@ function invalidPositionReason(position) {
 
 function normalizePolygonRing(inputPositions, context) {
   const positions = inputPositions.map((position) => [...position])
-  const coordinatesAreValid = validatePositions(positions, context)
+  let valid = validatePositions(positions, context)
   if (positions.length < 3) {
+    valid = false
     addGeometryIssue(context, {
       issueCode: 'polygon_ring_too_short',
       message: 'Ring polygon minimal harus memiliki tiga vertex sebelum penutupan.',
     })
-    return positions
+    return { coordinates: positions, valid }
   }
 
-  if (coordinatesAreValid && !samePosition(positions[0], positions.at(-1))) {
+  if (valid && !samePosition(positions[0], positions.at(-1))) {
     positions.push([...positions[0]])
     context.issues.push({
       severity: 'information',
@@ -439,12 +589,13 @@ function normalizePolygonRing(inputPositions, context) {
   if (positions.length < 4 || new Set(
     positions.slice(0, -1).map((position) => `${position[0]},${position[1]}`),
   ).size < 3 || Math.abs(signedRingArea(positions)) < Number.EPSILON) {
+    valid = false
     addGeometryIssue(context, {
       issueCode: 'invalid_polygon_ring',
       message: 'Ring polygon tidak memiliki minimal tiga vertex unik.',
     })
   }
-  return positions
+  return { coordinates: positions, valid }
 }
 
 function signedRingArea(positions) {
@@ -524,6 +675,7 @@ function parseStyle(style) {
   const iconStyle = firstChild(style, 'IconStyle')
   const lineStyle = firstChild(style, 'LineStyle')
   const polyStyle = firstChild(style, 'PolyStyle')
+  const labelStyle = firstChild(style, 'LabelStyle')
   return {
     id: attribute(style, 'id') || undefined,
     type: 'Style',
@@ -554,6 +706,14 @@ function parseStyle(style) {
         },
       }
       : {}),
+    ...(labelStyle
+      ? {
+        labelStyle: {
+          color: normalizedText(firstChild(labelStyle, 'color')) || undefined,
+          scale: optionalNumber(firstChild(labelStyle, 'scale')),
+        },
+      }
+      : {}),
     sourceStyle: structuredClone(style),
   }
 }
@@ -567,6 +727,110 @@ function parseStyleMap(styleMap) {
       styleUrl: normalizedText(firstChild(pair, 'styleUrl')),
     })),
     sourceStyle: structuredClone(styleMap),
+  }
+}
+
+function resolveFeatureStyles(output) {
+  const styles = new Map(output.styles.map((style) => [style.id, style]))
+  const styleMaps = new Map(output.styleMaps.map((styleMap) => [styleMap.id, styleMap]))
+  const resolve = (styleUrl, inlineStyle, trail = []) => {
+    if (inlineStyle) return resolvedStyle(inlineStyle, [...trail, 'inline:Style'])
+    const id = stripStyleReference(styleUrl)
+    if (!id) return null
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(styleUrl)) {
+      return { externalStyleUrl: styleUrl, resolutionPath: [...trail, styleUrl] }
+    }
+    if (trail.includes(id)) {
+      output.issues.push({
+        severity: 'error',
+        issueCode: 'circular_style_reference',
+        message: `Referensi StyleMap berputar pada "${id}".`,
+        canActivate: false,
+      })
+      return { resolutionPath: [...trail, id], unresolved: true }
+    }
+    if (styles.has(id)) return resolvedStyle(styles.get(id), [...trail, id])
+    const styleMap = styleMaps.get(id)
+    if (styleMap) {
+      const pair = styleMap.pairs.find(({ key }) => key === 'normal') ?? styleMap.pairs[0]
+      if (pair?.styleUrl) return resolve(pair.styleUrl, null, [...trail, id])
+    }
+    output.issues.push({
+      severity: 'warning',
+      issueCode: 'missing_style_reference',
+      message: `Referensi style "${styleUrl}" tidak ditemukan.`,
+      canActivate: true,
+    })
+    return { resolutionPath: [...trail, id], unresolved: true }
+  }
+
+  walkFeatures(output, (feature) => {
+    const resolution = resolve(feature.properties?.styleUrl, feature.inlineStyle)
+    if (resolution) feature.resolvedStyle = resolution
+  })
+}
+
+function resolvedStyle(style, resolutionPath) {
+  return {
+    resolvedStyleId: style.id,
+    resolvedIconHref: style.iconStyle?.iconHref,
+    resolvedIconColor: style.iconStyle?.color,
+    resolvedIconScale: style.iconStyle?.scale,
+    resolvedLineColor: style.lineStyle?.color,
+    resolvedLineWidth: style.lineStyle?.width,
+    resolvedPolygonColor: style.polyStyle?.color,
+    resolvedFill: style.polyStyle?.fill,
+    resolvedOutline: style.polyStyle?.outline,
+    resolvedLabelColor: style.labelStyle?.color,
+    resolvedLabelScale: style.labelStyle?.scale,
+    resolutionPath,
+  }
+}
+
+function walkFeatures(output, visitor) {
+  output.placemarks.forEach(visitor)
+  const visitFolder = (folder) => {
+    folder.placemarks.forEach(visitor)
+    folder.children.forEach(visitFolder)
+  }
+  output.folders.forEach(visitFolder)
+}
+
+function buildParserCoverage(output) {
+  const geometryCountByType = {}
+  let invalidGeometryCount = 0
+  walkFeatures(output, (feature) => {
+    visitGeometry(feature.geometry, (geometry) => {
+      geometryCountByType[geometry.type] = (geometryCountByType[geometry.type] ?? 0) + 1
+      if (geometry.valid === false) invalidGeometryCount += 1
+    })
+  })
+  return {
+    documentCount: output.structure.documentCount,
+    folderCount: output.structure.folderCount,
+    placemarkCount: output.structure.placemarkCount,
+    geometryCountByType,
+    overlayCount: output.structure.overlayCount,
+    styleCount: output.styles.length,
+    styleMapCount: output.styleMaps.length,
+    unsupportedCountByType: Object.fromEntries(
+      [...new Set(output.unsupportedElements.map(({ name }) => name))]
+        .sort()
+        .map((name) => [
+          name,
+          output.unsupportedElements.filter((item) => item.name === name).length,
+        ]),
+    ),
+    invalidGeometryCount,
+  }
+}
+
+function visitGeometry(geometry, visitor) {
+  if (!geometry) return
+  visitor(geometry)
+  if (geometry.type === 'MultiGeometry') {
+    geometry.geometries.forEach((item) => visitGeometry(item, visitor))
+    return
   }
 }
 
@@ -603,7 +867,7 @@ function collectUnsupportedElements(node, output, path = '/') {
         output.push({
           name,
           geometryReference: nextPath,
-          canActivate: name !== 'NetworkLink',
+          canActivate: !CRITICAL_UNSUPPORTED_ELEMENTS.has(name),
         })
       }
       collectUnsupportedElements(value, output, nextPath)
@@ -718,4 +982,13 @@ function joinFolderPath(parentPath, name) {
 
 function localName(name) {
   return String(name).split(':').at(-1)
+}
+
+function kmlNamespace(kmlRoot) {
+  if (!kmlRoot || typeof kmlRoot !== 'object') return ''
+  const entry = Object.entries(kmlRoot).find(([key, value]) => (
+    key.startsWith('@_xmlns')
+    && String(value).includes('/kml/')
+  ))
+  return normalizedText(entry?.[1])
 }

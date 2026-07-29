@@ -2,7 +2,9 @@ import http from 'node:http'
 import path from 'node:path'
 import { AppError, asAppError } from './errors.js'
 import { receiveImportUpload } from './http/multipart-upload.js'
+import { createOpenFreeMapProxy } from './http/openfreemap-proxy.js'
 import { createProcessingRecord } from './import/import-pipeline.js'
+import { readKmzResourceBuffer } from './import/kmz-extractor.js'
 import {
   requireAdministrator,
   requireDatasetSourceDownload,
@@ -22,8 +24,11 @@ export function createApp({
   jobQueue,
   importPipeline,
   lifecycleService,
+  topologyService,
+  basemapFetch = globalThis.fetch,
   clock = () => new Date(),
 }) {
+  const openFreeMapProxy = createOpenFreeMapProxy({ fetchImpl: basemapFetch })
   return http.createServer(async (request, response) => {
     setSecurityHeaders(response)
     const url = new URL(request.url, 'http://localhost')
@@ -31,6 +36,11 @@ export function createApp({
     try {
       if (request.method === 'GET' && url.pathname === '/health') {
         return sendJson(response, 200, { status: 'ok' })
+      }
+      if (request.method === 'GET'
+        && url.pathname.startsWith('/api/basemap/openfreemap/')
+        && await openFreeMapProxy.handle(url.pathname, response)) {
+        return
       }
       if (request.method === 'GET' && url.pathname === '/api/admin/import-config') {
         requireAdministrator(request, authenticator)
@@ -80,6 +90,152 @@ export function createApp({
           url.searchParams.get('view') === 'map'
             ? await lifecycleService.getActiveMapDataset(context)
             : await lifecycleService.getActiveDataset(context),
+        )
+      }
+      const parserProjectionMatch = request.method === 'GET'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/(readiness|source-features|geometries|overlays|classification-issues)$/,
+        )
+        : null
+      const overlayResourceMatch = request.method === 'GET'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/overlay-resources\/([^/]+)$/,
+        )
+        : null
+      if (overlayResourceMatch) {
+        authenticator.authenticate(request)
+        const record = await repository.get(overlayResourceMatch[1])
+        const resourceId = decodePathSegment(overlayResourceMatch[2])
+        const resource = (record.sourceResources ?? []).find(({ resourceId: id }) => (
+          id === resourceId
+        ))
+        const referenced = (record.sourceOverlays ?? []).some((overlay) => (
+          overlay.resourceId === resourceId
+          && overlay.resourceResolutionStatus === 'resolved'
+        ))
+        if (!resource || !referenced) {
+          throw new AppError('Resource overlay tidak ditemukan.', {
+            code: 'overlay_resource_not_found',
+            statusCode: 404,
+          })
+        }
+        if (!String(record.datasetVersion.sourceFilename ?? '').toLowerCase().endsWith('.kmz')) {
+          throw new AppError('Resource overlay hanya tersedia dari package KMZ.', {
+            code: 'overlay_resource_package_unavailable',
+            statusCode: 404,
+          })
+        }
+        const source = await fileStore.readVerifiedOriginal({
+          storageKey: record.datasetVersion.sourceStorageKey,
+          expectedSize: record.datasetVersion.sourceSize,
+          expectedChecksum: record.datasetVersion.checksum,
+        })
+        const extracted = await readKmzResourceBuffer(
+          source.bytes,
+          resource.relativePaths ?? [resource.relativePath],
+          config.upload,
+        )
+        response.writeHead(200, {
+          'content-type': imageContentType(extracted.extension),
+          'content-length': String(extracted.size),
+          'cache-control': 'private, max-age=3600',
+          'x-content-type-options': 'nosniff',
+        })
+        response.end(extracted.bytes)
+        return
+      }
+      if (parserProjectionMatch) {
+        if (parserProjectionMatch[2] === 'overlays') {
+          authenticator.authenticate(request)
+        } else {
+          requireAdministrator(request, authenticator)
+        }
+        const record = await repository.get(parserProjectionMatch[1])
+        return sendJson(
+          response,
+          200,
+          parserProjection(record, parserProjectionMatch[2]),
+        )
+      }
+      const topologyProjectionMatch = request.method === 'GET'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/(summary|candidates|graph)$/,
+        )
+        : null
+      if (topologyProjectionMatch) {
+        if (topologyProjectionMatch[2] === 'candidates') {
+          requireAdministrator(request, authenticator)
+        } else {
+          authenticator.authenticate(request)
+        }
+        assertTopologyService(topologyService)
+        const method = {
+          summary: 'getSummary',
+          candidates: 'getCandidates',
+          graph: 'getGraph',
+        }[topologyProjectionMatch[2]]
+        return sendJson(
+          response,
+          200,
+          await topologyService[method](topologyProjectionMatch[1]),
+        )
+      }
+      const regenerateTopologyMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/regenerate$/,
+        )
+        : null
+      if (regenerateTopologyMatch) {
+        const user = requireAdministrator(request, authenticator)
+        assertTopologyService(topologyService)
+        const body = await readJsonBody(request)
+        const record = await topologyService.regenerate(
+          regenerateTopologyMatch[1],
+          user.id,
+          body,
+        )
+        return sendJson(response, 200, {
+          datasetVersionId: record.datasetVersion.id,
+          summary: record.topologySummary,
+          readiness: record.topologyReadiness,
+          topologyRuleSetVersion: record.topologyRuleSetVersion,
+        })
+      }
+      const candidateActionMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/topology\/candidates\/([^/]+)\/(confirm|reject|skip|select-target)$/,
+        )
+        : null
+      if (candidateActionMatch) {
+        const user = requireAdministrator(request, authenticator)
+        assertTopologyService(topologyService)
+        const candidateId = decodePathSegment(candidateActionMatch[1])
+        const body = await readJsonBody(request)
+        const action = candidateActionMatch[2]
+        const result = action === 'select-target'
+          ? await topologyService.selectTarget(candidateId, user.id, body)
+          : await topologyService[{
+            confirm: 'confirmCandidate',
+            reject: 'rejectCandidate',
+            skip: 'skipCandidate',
+          }[action]](candidateId, user.id, body)
+        return sendJson(response, 200, result)
+      }
+      const revokeRelationMatch = request.method === 'POST'
+        ? url.pathname.match(/^\/api\/topology\/relations\/([^/]+)\/revoke$/)
+        : null
+      if (revokeRelationMatch) {
+        const user = requireAdministrator(request, authenticator)
+        assertTopologyService(topologyService)
+        const body = await readJsonBody(request)
+        return sendJson(
+          response,
+          200,
+          await topologyService.revokeRelation(
+            decodePathSegment(revokeRelationMatch[1]),
+            user.id,
+            body,
+          ),
         )
       }
       if (request.method === 'POST' && url.pathname === '/api/admin/imports') {
@@ -174,6 +330,63 @@ export function createApp({
       })
     }
   })
+}
+
+function assertTopologyService(topologyService) {
+  if (!topologyService) {
+    throw new AppError('Topology service belum dikonfigurasi.', {
+      code: 'topology_service_unavailable',
+      statusCode: 503,
+    })
+  }
+}
+
+function parserProjection(record, projection) {
+  if (projection === 'readiness') {
+    return {
+      datasetVersionId: record.datasetVersion.id,
+      readiness: record.readiness ?? null,
+      coverage: record.parserCoverage ?? null,
+      versions: record.parserVersions ?? null,
+    }
+  }
+  if (projection === 'source-features') {
+    return {
+      datasetVersionId: record.datasetVersion.id,
+      items: record.sourceFeatures ?? [],
+    }
+  }
+  if (projection === 'geometries') {
+    return {
+      datasetVersionId: record.datasetVersion.id,
+      items: record.sourceGeometries ?? [],
+    }
+  }
+  if (projection === 'overlays') {
+    return {
+      datasetVersionId: record.datasetVersion.id,
+      items: (record.sourceOverlays ?? []).map((overlay) => ({
+        ...structuredClone(overlay),
+        ...(overlay.resourceResolutionStatus === 'resolved' && overlay.resourceId
+          ? {
+            resourceUrl: `/api/dataset-versions/${encodeURIComponent(
+              record.datasetVersion.id,
+            )}/overlay-resources/${encodeURIComponent(overlay.resourceId)}`,
+          }
+          : {}),
+      })),
+      resources: record.sourceResources ?? [],
+    }
+  }
+  return {
+    datasetVersionId: record.datasetVersion.id,
+    items: (record.classifiedObjects ?? []).filter(({ classificationStatus }) => (
+      classificationStatus !== 'classified'
+    )),
+    issues: (record.canonicalParser?.issues ?? []).filter(({ scope }) => (
+      scope === 'classification'
+    )),
+  }
 }
 
 function normalizeExpectedActiveVersion(body) {
@@ -435,6 +648,16 @@ function sourceContentType(datasetVersion) {
     : 'application/vnd.google-earth.kml+xml'
 }
 
+function imageContentType(extension) {
+  return {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+  }[String(extension).toLowerCase()] ?? 'application/octet-stream'
+}
+
 function contentDisposition(filename) {
   const asciiFilename = filename
     .replace(/[^\x20-\x7e]/g, '_')
@@ -496,6 +719,11 @@ function toStatusResponse(record) {
     },
     sourceSelection: record.sourceSelection ?? null,
     sourceStyles: record.sourceStyles ?? { styles: [], styleMaps: [] },
+    parserCoverage: record.parserCoverage ?? null,
+    readiness: record.readiness ?? null,
+    parserVersions: record.parserVersions ?? null,
+    sourceOverlays: record.sourceOverlays ?? [],
+    sourceResources: record.sourceResources ?? [],
     canActivate: record.validation?.canActivate === true
       && record.datasetVersion.status === 'valid',
     active: record.datasetVersion.status === 'active',

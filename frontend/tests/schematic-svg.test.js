@@ -65,6 +65,7 @@ test('SVG renderer includes context, asset identity, legend, and schematic discl
   assert.match(svg, /fill:#f8fafc/)
   assert.match(svg, /fill:#172231/)
   assert.match(svg, /diagram-edge-underlay/)
+  assert.match(svg, /diagram-category-sections/)
   assert.match(svg, /class="node-ring"/)
   assert.match(svg, /10\.42\.3\.31/)
   assert.match(svg, /CCTV-GATE-01/)

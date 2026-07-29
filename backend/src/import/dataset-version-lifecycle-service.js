@@ -29,6 +29,16 @@ export class DatasetVersionLifecycleService {
       geometries: candidate.geometries ?? [],
       relations: candidate.relations ?? [],
       sourceStyles: candidate.sourceStyles ?? { styles: [], styleMaps: [] },
+      sourceFeatures: candidate.sourceFeatures ?? [],
+      sourceGeometries: candidate.sourceGeometries ?? [],
+      sourceMetadataEntries: candidate.sourceMetadataEntries ?? [],
+      sourceOverlays: candidate.sourceOverlays ?? [],
+      sourceResources: candidate.sourceResources ?? [],
+      classifiedObjects: candidate.classifiedObjects ?? [],
+      topologyInputBundle: candidate.topologyInputBundle ?? null,
+      parserCoverage: candidate.parserCoverage ?? null,
+      readiness: candidate.readiness ?? null,
+      parserVersions: candidate.parserVersions ?? null,
       sourceSelection: candidate.sourceSelection ?? null,
       comparison,
       activeDatasetVersion: active
@@ -60,6 +70,7 @@ export class DatasetVersionLifecycleService {
       assets: record.assets ?? [],
       geometries: record.geometries ?? [],
       relations: record.relations ?? [],
+      topologyGraph: record.topologyGraph ?? null,
     }
   }
 
@@ -335,6 +346,7 @@ function toActiveMapDataset(resolved) {
       distanceMeters: relation.distanceMeters,
       metadata: relation.metadata ? structuredClone(relation.metadata) : undefined,
     })),
+    topologyGraph: record.topologyGraph ? structuredClone(record.topologyGraph) : null,
     renderingSummary: {
       totalAssets: (record.assets ?? []).length,
       assetsWithoutGeometry: (record.assets ?? []).length - renderableNodeIds.size,
@@ -369,6 +381,8 @@ function filterResolvedRelations(record) {
   const assetIds = new Set((record.assets ?? []).map(({ assetId }) => assetId))
   return (record.relations ?? []).filter((relation) => (
     (!relation.datasetVersionId || relation.datasetVersionId === record.datasetVersion.id)
+    && (relation.verificationStatus === 'confirmed'
+      || (!relation.verificationStatus && relation.relationStatus === 'confirmed'))
     && assetIds.has(relation.sourceAssetId)
     && assetIds.has(relation.targetAssetId)
     && relation.sourceAssetId !== relation.targetAssetId

@@ -1,5 +1,3 @@
-import { buildTopologyGraph } from '../domain/topology-builder.js'
-
 const CATEGORY_STYLE = Object.freeze({
   cctv: { color: '#9698f4', softColor: '#f1f1fe', type: 'CCTV', order: 1 },
   'cctv-cable': { color: '#9698f4', softColor: '#f1f1fe', type: 'CCTV cable', order: 2 },
@@ -58,15 +56,13 @@ export function adaptActiveDatasetForMap(payload) {
     .filter((asset) => asset.sourceStatus === 'visible')
     .map((asset) => createMapNode(asset))
     .filter(Boolean)
+  const diagramAssets = exportAssets
+    .filter((asset) => asset.sourceStatus === 'visible' && asset.geometry.length)
+    .map(createDiagramAsset)
+    .filter(Boolean)
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
   const validNodeIds = new Set(assets.map(({ id }) => id))
-  const topologyGraph = buildTopologyGraph({
-    assets: payload.assets,
-    geometries: payload.geometries ?? [],
-    relations: payload.relations ?? [],
-    layers,
-    config: payload.topologyConfig ?? {},
-  })
+  const topologyGraph = confirmedTopologyProjection(payload)
   const relations = topologyGraph.edges
     .filter((edge) => (
       validNodeIds.has(edge.sourceNodeId)
@@ -85,6 +81,11 @@ export function adaptActiveDatasetForMap(payload) {
     topologyGraph,
     featureByAssetId,
     layerById,
+  })
+  const locationGroups = createLocationGroups({
+    assets,
+    geometries,
+    layers,
   })
   const networkIdsByAssetId = new Map()
   networks.forEach((network) => {
@@ -130,10 +131,12 @@ export function adaptActiveDatasetForMap(payload) {
       activePointerRevision: payload.activePointer?.revision,
     },
     assets,
+    diagramAssets,
     assetById,
     geometries,
     exportAssets,
     networks,
+    locationGroups,
     topologyGraph,
     layers,
     counts,
@@ -144,6 +147,52 @@ export function adaptActiveDatasetForMap(payload) {
     },
     hasRenderableData: geometries.length > 0,
   }
+}
+
+function confirmedTopologyProjection(payload) {
+  const source = payload.topologyGraph
+  if (source && Array.isArray(source.nodes) && Array.isArray(source.edges)) {
+    return {
+      ...structuredClone(source),
+      edges: source.edges.filter(isConfirmedRelation),
+    }
+  }
+  const nodes = payload.assets.map((asset) => ({
+    id: asset.assetId,
+    assetId: asset.assetId,
+    sourceNodeId: asset.id,
+  }))
+  const validIds = new Set(nodes.map(({ id }) => id))
+  const edges = (payload.relations ?? [])
+    .filter((relation) => (
+      isConfirmedRelation(relation)
+      && validIds.has(relation.sourceAssetId)
+      && validIds.has(relation.targetAssetId)
+      && relation.sourceAssetId !== relation.targetAssetId
+    ))
+    .map((relation) => ({
+      ...structuredClone(relation),
+      id: relation.id,
+      sourceNodeId: relation.sourceAssetId,
+      targetNodeId: relation.targetAssetId,
+      verificationStatus: 'confirmed',
+      relationStatus: 'confirmed',
+    }))
+  return {
+    datasetVersionId: payload.datasetVersion.id,
+    nodes,
+    edges,
+    components: [],
+    degreeByNode: {},
+    isolatedNodeIds: [],
+  }
+}
+
+function isConfirmedRelation(relation) {
+  if (relation.verificationStatus !== undefined) {
+    return relation.verificationStatus === 'confirmed'
+  }
+  return relation.relationStatus === undefined || relation.relationStatus === 'confirmed'
 }
 
 export function adaptActiveAssetDetail(payload, mapAsset) {
@@ -172,6 +221,7 @@ function createOwnerFeature({ asset, layer, geometries }) {
   const category = normalizeCategory(asset.category, asset.type, layer)
   const type = normalizeAssetType(asset.type, asset.category || category, layer)
   const explicitStatus = readProperty(asset, 'status')
+  const locationGroup = locationGroupFor(layer?.sourceFolderPath)
   return {
     id: asset.assetId,
     assetId: asset.assetId,
@@ -188,6 +238,8 @@ function createOwnerFeature({ asset, layer, geometries }) {
       || 'Lokasi tidak tersedia',
     datasetVersionId: asset.datasetVersionId,
     layerId: asset.layerId,
+    sourceFolderPath: layer?.sourceFolderPath ?? null,
+    ...locationGroup,
     networkIds: [],
     geometry: geometries.map((geometry) => structuredClone(geometry)),
   }
@@ -205,6 +257,22 @@ function createMapNode(owner) {
     y: display.y,
     renderable: true,
     hasPointGeometry: true,
+    isCoreNode: isCoreNode(owner.type),
+    relationCount: 0,
+  }
+}
+
+function createDiagramAsset(owner) {
+  const positions = owner.geometry.flatMap(extractDisplayPositions)
+  if (!positions.length) return null
+  const x = positions.reduce((total, position) => total + position.x, 0) / positions.length
+  const y = positions.reduce((total, position) => total + position.y, 0) / positions.length
+  return {
+    ...owner,
+    x,
+    y,
+    renderable: true,
+    hasPointGeometry: owner.geometry.some(({ geometryType }) => geometryType === 'point'),
     isCoreNode: isCoreNode(owner.type),
     relationCount: 0,
   }
@@ -286,6 +354,10 @@ function createSemanticNetworks({
       const bounds = geometryBounds(networkGeometries)
       const displayBounds = geometryDisplayBounds(networkGeometries)
       const subcategories = summarizeNetworkContent(networkNodes, lineCount, polygonCount)
+      const locationGroupKeys = [...new Set([
+        ...networkNodes.map(({ locationGroupKey }) => locationGroupKey),
+        ...networkGeometries.map(({ locationGroupKey }) => locationGroupKey),
+      ].filter(Boolean))]
       return {
         id: networkId,
         layerId: null,
@@ -316,6 +388,7 @@ function createSemanticNetworks({
         relations: networkRelations,
         relationIds: networkRelations.map(({ id }) => id),
         subcategories,
+        locationGroupKeys,
         lineRole: lineRoleFor(
           group.key,
           networkGeometries,
@@ -361,6 +434,7 @@ function splitGeometryRecord(geometry) {
 function toMapGeometry(geometry, bounds) {
   const owner = geometry.owner
   const category = normalizeCategory(owner?.category, owner?.type, geometry.layer)
+  const locationGroup = locationGroupFor(geometry.layer?.sourceFolderPath)
   return {
     id: geometry.id,
     sourceGeometryId: geometry.sourceGeometryId,
@@ -373,10 +447,82 @@ function toMapGeometry(geometry, bounds) {
     coordinates: structuredClone(geometry.coordinates),
     displayCoordinates: projectGeometryCoordinates(geometry, bounds),
     layerId: owner?.layerId ?? geometry.layer?.id ?? null,
+    sourceFolderPath: geometry.layer?.sourceFolderPath ?? null,
+    ...locationGroup,
     category,
     sourceStatus: geometry.sourceStatus,
     ...(geometry.altitudeMode ? { altitudeMode: geometry.altitudeMode } : {}),
     sourceGeometry: structuredClone(geometry.sourceGeometry),
+  }
+}
+
+function createLocationGroups({ assets, geometries, layers }) {
+  const layerOrder = new Map(layers.map((layer, index) => [layer.id, index]))
+  const groups = new Map()
+  const ensureGroup = ({ locationGroupKey: key, locationGroupName: name }, layerId) => {
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        name,
+        assetIds: new Set(),
+        geometryIds: new Set(),
+        positions: [],
+        order: layerOrder.get(layerId) ?? Number.MAX_SAFE_INTEGER,
+      })
+    }
+    const group = groups.get(key)
+    group.order = Math.min(group.order, layerOrder.get(layerId) ?? Number.MAX_SAFE_INTEGER)
+    return group
+  }
+
+  assets.forEach((asset) => {
+    ensureGroup(asset, asset.layerId).assetIds.add(asset.id)
+  })
+  geometries.forEach((geometry) => {
+    const group = ensureGroup(geometry, geometry.layerId)
+    group.geometryIds.add(geometry.id)
+    group.positions.push(...extractPositions(geometry))
+  })
+
+  return [...groups.values()]
+    .sort((left, right) => left.order - right.order
+      || left.name.localeCompare(right.name, 'id'))
+    .map((group) => {
+      const bounds = positionBounds(group.positions)
+      return {
+        key: group.key,
+        name: group.name,
+        assetIds: [...group.assetIds],
+        geometryIds: [...group.geometryIds],
+        bounds: bounds
+          ? [bounds.west, bounds.south, bounds.east, bounds.north]
+          : null,
+      }
+    })
+}
+
+export function locationGroupFor(sourceFolderPath) {
+  const segments = String(sourceFolderPath ?? '')
+    .replaceAll('\\', '/')
+    .split('/')
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+  const rjbtIndex = segments.findIndex((segment) => segment.toUpperCase() === 'RJBT')
+  const name = rjbtIndex >= 0 ? segments[rjbtIndex + 1] : null
+  if (!name) {
+    return {
+      locationGroupKey: 'lainnya',
+      locationGroupName: 'Lainnya',
+    }
+  }
+  const key = name.toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return {
+    locationGroupKey: key || 'lainnya',
+    locationGroupName: name,
   }
 }
 

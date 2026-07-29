@@ -32,6 +32,9 @@ export function renderSchematicSvg({
           .diagram-grid{fill:url(#topology-grid);opacity:.32}
           .diagram-title{font:700 19px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.text}}
           .diagram-meta{font:500 11px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.textSecondary}}
+          .category-section{stroke-width:1.5}
+          .category-section-title{font:700 14px Inter,ui-sans-serif,system-ui}
+          .category-section-count{font:600 10px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.textSecondary}}
           .diagram-edge-underlay{fill:none;stroke:${SVG_THEME.edgeUnderlay};stroke-width:6;stroke-linecap:round;stroke-linejoin:round}
           .diagram-edge{fill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
           .diagram-edge.trace{stroke-width:4}
@@ -66,6 +69,10 @@ export function renderSchematicSvg({
           ${escapeXml(context.branchName)} · Dataset ${escapeXml(context.version)} · ${layout.nodes.length} aset · ${modeLabel(graph.mode)}
         </text>
         <line class="diagram-divider" x1="32" y1="78" x2="${layout.width - 32}" y2="78"/>
+      </g>
+
+      <g class="diagram-category-sections" aria-label="Section kategori aset">
+        ${renderCategorySections(layout.sections ?? [])}
       </g>
 
       <g class="diagram-edges" aria-label="Relasi aset">
@@ -111,7 +118,8 @@ function renderNode(node, selectedAssetId) {
     node.isAnchor ? 'anchor' : '',
     node.id === selectedAssetId ? 'selected' : '',
   ].filter(Boolean).join(' ')
-  const detailLabel = node.ip || node.shortName
+  const detailLabel = node.ip || shortAssetId(node.id)
+  const displayName = shortenNodeLabel(node.name)
 
   return `
     <g class="${classes}" data-asset-id="${escapeAttribute(node.id)}" tabindex="0"
@@ -135,7 +143,7 @@ function renderNode(node, selectedAssetId) {
           text-anchor="middle">!</text>
       ` : ''}
       <text class="node-id" x="${labelX}" y="${labelY}" text-anchor="middle"
-        fill="${categoryStyle.color}">${escapeXml(node.id)}</text>
+        fill="${categoryStyle.color}">${escapeXml(displayName)}</text>
       <text class="${node.ip ? 'node-ip' : 'node-name'}" x="${labelX}" y="${labelY + 12}"
         text-anchor="middle">${escapeXml(detailLabel)}</text>
       ${node.ip ? `
@@ -144,6 +152,24 @@ function renderNode(node, selectedAssetId) {
       ` : ''}
     </g>
   `
+}
+
+function renderCategorySections(sections) {
+  return sections.map((section) => {
+    const style = CATEGORY_STYLES[section.category] || CATEGORY_STYLES.infrastructure
+    return `
+      <g class="diagram-category-section" data-category="${escapeAttribute(section.category)}">
+        <rect class="category-section" x="${section.x}" y="${section.y}"
+          width="${section.width}" height="${section.height}" rx="18"
+          fill="${style.color}" fill-opacity=".055" stroke="${style.color}" stroke-opacity=".4"/>
+        <circle cx="${section.x + 22}" cy="${section.y + 25}" r="6" fill="${style.color}"/>
+        <text class="category-section-title" x="${section.x + 36}" y="${section.y + 30}"
+          fill="${style.color}">${escapeXml(style.label)}</text>
+        <text class="category-section-count" x="${section.x + section.width - 20}"
+          y="${section.y + 29}" text-anchor="end">${section.nodeCount} aset</text>
+      </g>
+    `
+  }).join('')
 }
 
 function renderLegend(categories, networks, diagramBottom) {
@@ -211,6 +237,16 @@ function modeLabel(mode) {
 
 function shortenLegend(value = '') {
   return value.length > 16 ? `${value.slice(0, 14)}…` : value
+}
+
+function shortenNodeLabel(value = '') {
+  return value.length > 20 ? `${value.slice(0, 18)}â€¦` : value
+}
+
+function shortAssetId(value = '') {
+  const parts = value.split(':').filter(Boolean)
+  const candidate = parts.at(-1) || value
+  return candidate.length > 22 ? `${candidate.slice(0, 20)}â€¦` : candidate
 }
 
 function roundedPath(points) {

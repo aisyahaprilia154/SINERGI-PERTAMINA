@@ -107,7 +107,7 @@ test('parallel network relations receive separate visual lanes', () => {
   assert.notDeepEqual(layout.edges[0].routePoints, layout.edges[1].routePoints)
 })
 
-test('map-relative layout preserves source orientation and a shared map frame', () => {
+test('full-map layout creates readable category sections', () => {
   const mapGraph = {
     status: 'ready',
     mode: 'full-map',
@@ -119,21 +119,14 @@ test('map-relative layout preserves source orientation and a shared map frame', 
     edges: [{ id: 'map-edge', sourceId: 'north-west', targetId: 'south-east' }],
   }
   const fullLayout = calculateSchematicLayout(mapGraph, { preserveMapOrientation: true })
-  const traceLayout = calculateSchematicLayout({
-    ...mapGraph,
-    mode: 'trace',
-    nodes: [mapGraph.nodes[1]],
-    edges: [],
-  }, { preserveMapOrientation: true })
-
   const northWest = fullLayout.nodes.find((node) => node.id === 'north-west')
   const southEast = fullLayout.nodes.find((node) => node.id === 'south-east')
 
-  assert.equal(fullLayout.strategy, 'map-relative')
+  assert.equal(fullLayout.strategy, 'category-sections')
+  assert.equal(fullLayout.sections.length, 1)
+  assert.equal(fullLayout.sections[0].nodeCount, 2)
   assert.ok(northWest.diagram.nodeX < southEast.diagram.nodeX)
-  assert.ok(northWest.diagram.nodeY < southEast.diagram.nodeY)
-  assert.equal(traceLayout.nodes[0].diagram.nodeX, southEast.diagram.nodeX)
-  assert.equal(traceLayout.nodes[0].diagram.nodeY, southEast.diagram.nodeY)
+  assert.equal(rectanglesOverlap(northWest.diagram, southEast.diagram), false)
 })
 
 function rectanglesOverlap(left, right) {

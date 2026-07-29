@@ -1,4 +1,7 @@
-export function renderNetworkSidebar(activeContext, selectedCount, counts = {}) {
+export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, {
+  locationGroups = [],
+  selectedArea = null,
+} = {}) {
   const countSummary = formatDatasetCounts(counts)
   return `
     <aside class="network-sidebar" id="network-sidebar"
@@ -30,12 +33,34 @@ export function renderNetworkSidebar(activeContext, selectedCount, counts = {}) 
           <span class="status-dot" title="Dataset aktif"></span>
         </section>
 
+        <label class="area-selector">
+          <span>Area fasilitas</span>
+          <select aria-label="Area fasilitas">
+            ${locationGroups.map((group) => `
+              <option value="${escapeAttribute(group.key)}"
+                ${group.key === selectedArea?.key ? 'selected' : ''}>
+                ${escapeHtml(group.name)}
+              </option>
+            `).join('')}
+          </select>
+        </label>
+
         <label class="search-control">
           <span class="material-symbols-outlined" aria-hidden="true">search</span>
           <input type="search" placeholder="Cari Asset ID, nama aset, atau lokasi"
             aria-label="Cari Asset ID, nama aset, atau lokasi" />
           <kbd>⌘ K</kbd>
         </label>
+
+        <div class="map-category-presets" aria-label="Preset kategori peta">
+          <button type="button" data-category-preset="all" class="active"
+            aria-pressed="true">Semua</button>
+          <button type="button" data-category-preset="cctv" aria-pressed="false">CCTV</button>
+          <button type="button" data-category-preset="fiber" aria-pressed="false">Fiber Optic</button>
+          <button type="button" data-category-preset="lan" aria-pressed="false">LAN</button>
+          <button type="button" data-category-preset="infrastructure"
+            aria-pressed="false">Infrastruktur</button>
+        </div>
 
         <div class="sidebar-list-header">
           <div class="selection-summary" aria-live="polite">

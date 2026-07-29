@@ -1,9 +1,12 @@
 import path from 'node:path'
-import { adaptKmlImportResult } from '../../../frontend/src/adapters/kml-import-adapter.js'
+import { buildCanonicalParserResult } from '../domain/parser-contract.js'
 import { AppError, asAppError } from '../errors.js'
+import { generateRelationArtifacts } from '../topology/semantic-relation-engine.js'
+import { applyArtifacts } from '../topology/topology-service.js'
 import { DatasetVersionValidationService } from './dataset-validation-service.js'
 import { extractKmzArchive, orderKmlCandidates } from './kmz-extractor.js'
 import { parseKmlFile } from './kml-parser.js'
+import { projectCanonicalImport } from './legacy-import-projection.js'
 
 export class ImportPipeline {
   constructor({
@@ -41,6 +44,7 @@ export class ImportPipeline {
     let workspace = null
     let resources = []
     let selectedKmlPath = null
+    let packageInfo = null
 
     await this.auditLog.record('dataset_import.processing_started', {
       actorId,
@@ -57,6 +61,16 @@ export class ImportPipeline {
         await this.#progress(datasetVersionId, 30, 'extracting_kmz')
         const extracted = await extractKmzArchive(sourcePath, workspace, this.limits)
         resources = extracted.resources
+        packageInfo = {
+          packageType: 'kmz',
+          kmlEntries: extracted.kmlFiles.map(({ relativePath, size }) => ({
+            relativePath,
+            size,
+          })),
+          ignoredEntries: extracted.ignoredEntries,
+          entryCount: extracted.entryCount,
+          totalUncompressedSize: extracted.totalExtractedSize,
+        }
         const selection = await selectKmlCandidate(extracted.kmlFiles, {
           ...this.limits,
           folderMappings: this.folderMappings,
@@ -64,6 +78,7 @@ export class ImportPipeline {
         selectedKmlPath = selection.selected.relativePath
         parserOutput = selection.parserOutput
         parserOutput.issues = [
+          ...parserOutput.issues,
           ...selection.issues,
           ...extracted.ignoredEntries.map((entry) => ({
             severity: 'warning',
@@ -74,6 +89,12 @@ export class ImportPipeline {
         ]
       } else {
         selectedKmlPath = path.basename(sourcePath)
+        packageInfo = {
+          packageType: 'kml',
+          kmlEntries: [{ relativePath: selectedKmlPath }],
+          ignoredEntries: [],
+          entryCount: 1,
+        }
         await this.#progress(datasetVersionId, 50, 'parsing_kml')
         parserOutput = await parseKmlFile(sourcePath, {
           ...this.limits,
@@ -83,22 +104,43 @@ export class ImportPipeline {
 
       await this.#progress(datasetVersionId, 70, 'validating_import')
       const current = await this.repository.get(datasetVersionId)
-      const adaptedResult = adaptKmlImportResult({
-        parserOutput,
-        datasetVersion: current.datasetVersion,
-        mapping: {
-          metadataAliases: this.metadataAliases,
-          sourceIdentityFallback: this.sourceIdentityFallback,
-          relationMappings: this.relationMappings,
-          topology: this.topology,
-        },
-      })
       const sourceSelection = {
         selectedKmlPath,
         resources,
+        ...packageInfo,
       }
+      const canonicalParser = buildCanonicalParserResult({
+        parserOutput,
+        datasetVersion: current.datasetVersion,
+        sourceSelection,
+        metadataAliases: this.metadataAliases,
+        resources,
+      })
+      const adaptedResult = projectCanonicalImport({
+        parserOutput,
+        canonicalParser,
+        datasetVersion: current.datasetVersion,
+        sourceIdentityFallback: this.sourceIdentityFallback,
+      })
+      const topologyArtifacts = generateRelationArtifacts(
+        canonicalParser.topologyInputBundle,
+        {
+          config: this.topology,
+          generatedAt: this.clock().toISOString(),
+        },
+      )
+      const projectedResult = applyArtifacts(adaptedResult, topologyArtifacts, {
+        topologyRun: {
+          runId: `initial:${datasetVersionId}`,
+          actorId,
+          generatedAt: topologyArtifacts.generatedAt,
+          reason: 'initial_import',
+          topologyRuleSetVersion: topologyArtifacts.topologyRuleSetVersion,
+          summary: topologyArtifacts.summary,
+        },
+      })
       const result = this.validationService.validate({
-        result: adaptedResult,
+        result: projectedResult,
         parserOutput,
         sourceSelection,
         expectedBranchId: current.datasetVersion.branchId,
@@ -109,6 +151,25 @@ export class ImportPipeline {
       const record = {
         ...result,
         sourceSelection,
+        canonicalParser,
+        sourceFeatures: canonicalParser.sourceFeatures,
+        sourceGeometries: canonicalParser.sourceGeometries,
+        sourceMetadataEntries: canonicalParser.sourceMetadataEntries,
+        sourceOverlays: canonicalParser.sourceOverlays,
+        sourceResources: canonicalParser.sourceResources,
+        classifiedObjects: canonicalParser.classifiedObjects,
+        topologyInputBundle: canonicalParser.topologyInputBundle,
+        parserCoverage: canonicalParser.coverage,
+        readiness: canonicalParser.readiness,
+        parserVersions: {
+          sourceChecksum: canonicalParser.sourceChecksum,
+          parserVersion: canonicalParser.parserVersion,
+          normalizerVersion: canonicalParser.normalizerVersion,
+          classificationRuleSetVersion: canonicalParser.classificationRuleSetVersion,
+          metadataAliasVersion: canonicalParser.metadataAliasVersion,
+          folderMappingVersion: canonicalParser.folderMappingVersion,
+          styleMappingVersion: canonicalParser.styleMappingVersion,
+        },
         processing: {
           progress: 100,
           stage: result.datasetVersion.status,

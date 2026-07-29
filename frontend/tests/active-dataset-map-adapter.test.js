@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   adaptActiveAssetDetail,
   adaptActiveDatasetForMap,
+  locationGroupFor,
 } from '../src/adapters/active-dataset-map-adapter.js'
 
 test('active dataset adapter preserves source coordinates and uses explicit relations only', () => {
@@ -214,12 +215,22 @@ test('active adapter exposes confirmed endpoint topology for map and diagram con
         coordinates: [[110, -7], [110.001, -7]],
       },
     ],
+    relations: [{
+      id: 'confirmed-sw-ap',
+      sourceAssetId: 'SW-A',
+      targetAssetId: 'AP-B',
+      relationType: 'connected-via-path',
+      pathAssetId: 'LAN-01',
+      verificationStatus: 'confirmed',
+      relationStatus: 'confirmed',
+      relationSource: 'spatial_inference',
+    }],
   })
 
   const result = adaptActiveDatasetForMap(payload)
 
   assert.equal(result.topologyGraph.edges.length, 1)
-  assert.equal(result.topologyGraph.edges[0].relationSource, 'inferred_endpoint')
+  assert.equal(result.topologyGraph.edges[0].relationSource, 'spatial_inference')
   assert.deepEqual(result.networks[0].edges, [['SW-A', 'AP-B']])
   assert.equal(result.assets.find(({ id }) => id === 'SW-A').relationCount, 1)
 })
@@ -420,6 +431,61 @@ test('asset detail adapter adds metadata only after the detail request', () => {
   assert.equal(result.ip, '10.20.1.2')
   assert.equal(result.owner, 'IT')
   assert.equal(Object.hasOwn(mapAsset, 'properties'), false)
+})
+
+test('location group is derived from the first KML folder after RJBT', () => {
+  assert.deepEqual(locationGroupFor('/RJBT/FT REWULU/CCTV/Camera'), {
+    locationGroupKey: 'ft-rewulu',
+    locationGroupName: 'FT REWULU',
+  })
+  assert.deepEqual(locationGroupFor('/Folder tanpa scope/CCTV'), {
+    locationGroupKey: 'lainnya',
+    locationGroupName: 'Lainnya',
+  })
+})
+
+test('Point and LineString in one facility share a location group without coordinate changes', () => {
+  const pointCoordinates = [110.4167, -6.9667]
+  const lineCoordinates = [[110.4167, -6.9667], [110.4171, -6.9663]]
+  const payload = activePayload({
+    layers: [{
+      ...layer('layer-pengapon', 'Camera', 'CCTV'),
+      sourceFolderPath: '/RJBT/FT PENGAPON - SEMARANG/CCTV/Camera',
+    }],
+    assets: [{
+      ...asset('node-camera', 'CAM-01', 'CCTV'),
+      layerId: 'layer-pengapon',
+    }, {
+      ...asset('node-cable', 'CABLE-01', 'CCTV cable'),
+      layerId: 'layer-pengapon',
+    }],
+    geometries: [
+      point('point-camera', 'node-camera', ...pointCoordinates),
+      {
+        id: 'line-cable',
+        assetNodeId: 'node-cable',
+        geometryType: 'line_string',
+        coordinates: lineCoordinates,
+      },
+    ],
+  })
+
+  const result = adaptActiveDatasetForMap(payload)
+
+  assert.equal(result.assets[0].locationGroupKey, 'ft-pengapon-semarang')
+  assert.ok(result.geometries.every(
+    ({ locationGroupKey }) => locationGroupKey === 'ft-pengapon-semarang',
+  ))
+  assert.deepEqual(result.assets[0].coordinate, pointCoordinates)
+  assert.deepEqual(result.geometries.find(({ id }) => id === 'line-cable').coordinates, lineCoordinates)
+  assert.deepEqual(result.locationGroups, [{
+    key: 'ft-pengapon-semarang',
+    name: 'FT PENGAPON - SEMARANG',
+    assetIds: ['CAM-01'],
+    geometryIds: ['point-camera', 'line-cable'],
+    bounds: [110.4167, -6.9667, 110.4171, -6.9663],
+  }])
+  assert.deepEqual(result.networks[0].locationGroupKeys, ['ft-pengapon-semarang'])
 })
 
 function asset(id, assetId, category) {

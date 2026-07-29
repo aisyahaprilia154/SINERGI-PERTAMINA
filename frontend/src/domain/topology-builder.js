@@ -22,25 +22,20 @@ export function buildTopologyGraph({
   config = {},
 } = {}) {
   const settings = normalizeConfig(config)
-  const layerById = new Map(layers.map((layer) => [layer.id, layer]))
   const ownerByNodeId = new Map(assets.map((asset) => [asset.id, asset]))
-  const visibleOwners = new Map(assets
-    .filter((asset) => isVisibleAsset(asset, layerById))
-    .map((asset) => [asset.id, asset]))
   const parts = geometries
     .flatMap(splitGeometry)
     .map((geometry) => ({
       ...geometry,
       owner: ownerByNodeId.get(geometry.assetNodeId),
     }))
-    .filter(({ owner }) => owner && visibleOwners.has(owner.id))
+    .filter(({ owner }) => Boolean(owner))
 
   const nodes = createAssetNodes(parts)
   const nodeById = new Map(nodes.map((node) => [node.id, node]))
   const lines = createTopologyLines(parts)
   const unresolvedEndpoints = []
   const ambiguousConnections = []
-  const virtualJunctions = []
   const anchorsByLineId = new Map(lines.map((line) => [line.id, []]))
 
   if (settings.inferLineEndpoints) {
@@ -64,25 +59,15 @@ export function buildTopologyGraph({
     })
   }
 
-  if (settings.inferLineIntersections) {
-    resolveLineIntersections({
-      lines,
-      nodes,
-      settings,
-      anchorsByLineId,
-      virtualJunctions,
-    })
-  }
-
   const internalEdges = createInternalEdges(lines, anchorsByLineId)
-  const inferredEdges = collapseVirtualJunctions({
-    internalEdges,
-    inventoryNodeIds: new Set(nodes.map(({ id }) => id)),
-    virtualNodeIds: new Set(virtualJunctions.map(({ id }) => id)),
-  })
+  const spatialCandidates = internalEdges.map((edge) => ({
+    ...edge,
+    relationStatus: 'candidate',
+    candidateStatus: 'candidate',
+  }))
   const edges = mergeConfirmedEdges({
-    explicitRelations: relations,
-    inferredEdges,
+    explicitRelations: relations.filter(isTrustedConfirmedRelation),
+    inferredEdges: [],
     nodeById,
   })
   const connectedComponents = findConnectedComponents(nodes, edges)
@@ -100,10 +85,24 @@ export function buildTopologyGraph({
     ambiguousConnections,
     isolatedNodes,
     connectedComponents,
-    virtualJunctions,
-    internalEdges,
+    virtualJunctions: [],
+    internalEdges: [],
+    spatialCandidates,
     settings,
   }
+}
+
+function isTrustedConfirmedRelation(relation) {
+  if (relation.verificationStatus !== undefined) {
+    return relation.verificationStatus === 'confirmed'
+  }
+  if (relation.candidateStatus !== undefined) {
+    return relation.candidateStatus === 'confirmed'
+  }
+  if (relation.relationStatus !== undefined) {
+    return relation.relationStatus === 'confirmed'
+  }
+  return relation.relationSource === undefined || relation.relationSource === 'explicit'
 }
 
 function createAssetNodes(parts) {

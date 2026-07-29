@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { DEFAULT_TOPOLOGY_CONFIG } from '../../frontend/src/domain/topology-builder.js'
+import { DEFAULT_RELATION_ENGINE_CONFIG } from './topology/semantic-relation-engine.js'
 
 const MEBIBYTE = 1024 * 1024
 
@@ -147,7 +147,7 @@ export function createConfig(env = process.env, overrides = {}) {
     ?? parseJsonObject(env.SINERGI_AUTH_TOKENS, {})
 
   return {
-    port: numberFrom(env.SINERGI_PORT, overrides.port ?? 3000),
+    port: numberFrom(env.SINERGI_PORT, overrides.port ?? 5000),
     host: overrides.host ?? env.SINERGI_HOST ?? '127.0.0.1',
     dataRoot,
     allowedBranchIds,
@@ -175,32 +175,52 @@ export function createConfig(env = process.env, overrides = {}) {
     relationMappings: overrides.relationMappings
       ?? parseJsonArray(env.SINERGI_RELATION_MAPPINGS, DEFAULT_RELATION_MAPPINGS),
     topology: {
-      endpointToleranceMeters: overrides.topology?.endpointToleranceMeters
+      searchRadiusMeters: overrides.topology?.searchRadiusMeters
+        ?? overrides.topology?.endpointToleranceMeters
         ?? numberFrom(
           env.SINERGI_TOPOLOGY_ENDPOINT_TOLERANCE_METERS,
-          DEFAULT_TOPOLOGY_CONFIG.endpointToleranceMeters,
+          DEFAULT_RELATION_ENGINE_CONFIG.searchRadiusMeters,
         ),
-      pointOnLineToleranceMeters: overrides.topology?.pointOnLineToleranceMeters
+      inlineSearchRadiusMeters: overrides.topology?.inlineSearchRadiusMeters
+        ?? overrides.topology?.pointOnLineToleranceMeters
         ?? numberFrom(
           env.SINERGI_TOPOLOGY_POINT_LINE_TOLERANCE_METERS,
-          DEFAULT_TOPOLOGY_CONFIG.pointOnLineToleranceMeters,
+          DEFAULT_RELATION_ENGINE_CONFIG.inlineSearchRadiusMeters,
         ),
       intersectionToleranceMeters: overrides.topology?.intersectionToleranceMeters
         ?? numberFrom(
           env.SINERGI_TOPOLOGY_INTERSECTION_TOLERANCE_METERS,
-          DEFAULT_TOPOLOGY_CONFIG.intersectionToleranceMeters,
+          DEFAULT_RELATION_ENGINE_CONFIG.intersectionToleranceMeters,
         ),
-      ambiguityDeltaMeters: overrides.topology?.ambiguityDeltaMeters
+      minimumInlineEndpointDistanceMeters:
+        overrides.topology?.minimumInlineEndpointDistanceMeters
         ?? numberFrom(
-          env.SINERGI_TOPOLOGY_AMBIGUITY_DELTA_METERS,
-          DEFAULT_TOPOLOGY_CONFIG.ambiguityDeltaMeters,
+          env.SINERGI_TOPOLOGY_MIN_INLINE_ENDPOINT_METERS,
+          DEFAULT_RELATION_ENGINE_CONFIG.minimumInlineEndpointDistanceMeters,
         ),
-      inferLineEndpoints: overrides.topology?.inferLineEndpoints
-        ?? booleanFrom(env.SINERGI_TOPOLOGY_INFER_ENDPOINTS, true),
-      inferLineIntersections: overrides.topology?.inferLineIntersections
-        ?? booleanFrom(env.SINERGI_TOPOLOGY_INFER_INTERSECTIONS, true),
-      inferPointsOnLines: overrides.topology?.inferPointsOnLines
-        ?? booleanFrom(env.SINERGI_TOPOLOGY_INFER_POINTS_ON_LINES, true),
+      distanceSigmaMeters: overrides.topology?.distanceSigmaMeters
+        ?? numberFrom(
+          env.SINERGI_TOPOLOGY_DISTANCE_SIGMA_METERS,
+          DEFAULT_RELATION_ENGINE_CONFIG.distanceSigmaMeters,
+        ),
+      acceptanceThreshold: overrides.topology?.acceptanceThreshold
+        ?? unitNumberFrom(
+          env.SINERGI_TOPOLOGY_ACCEPTANCE_THRESHOLD,
+          DEFAULT_RELATION_ENGINE_CONFIG.acceptanceThreshold,
+        ),
+      ambiguityScoreMargin: overrides.topology?.ambiguityScoreMargin
+        ?? unitNumberFrom(
+          env.SINERGI_TOPOLOGY_AMBIGUITY_SCORE_MARGIN,
+          DEFAULT_RELATION_ENGINE_CONFIG.ambiguityScoreMargin,
+        ),
+      autoConfirmSpatialInference: overrides.topology?.autoConfirmSpatialInference
+        ?? booleanFrom(env.SINERGI_TOPOLOGY_AUTO_CONFIRM_SPATIAL, false),
+      autoConfirmExplicitMetadata: overrides.topology?.autoConfirmExplicitMetadata
+        ?? booleanFrom(env.SINERGI_TOPOLOGY_AUTO_CONFIRM_EXPLICIT, true),
+      heldOutPrecision: overrides.topology?.heldOutPrecision
+        ?? optionalUnitNumberFrom(env.SINERGI_TOPOLOGY_HELD_OUT_PRECISION),
+      pathAccuracy: overrides.topology?.pathAccuracy
+        ?? optionalUnitNumberFrom(env.SINERGI_TOPOLOGY_PATH_ACCURACY),
     },
     validation: {
       requireAssetName: overrides.validation?.requireAssetName
@@ -227,6 +247,17 @@ function splitList(value) {
 function numberFrom(value, fallback) {
   const parsed = Number(value)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function unitNumberFrom(value, fallback) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : fallback
+}
+
+function optionalUnitNumberFrom(value) {
+  if (value === undefined || value === null || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : null
 }
 
 function parseJsonObject(value, fallback) {

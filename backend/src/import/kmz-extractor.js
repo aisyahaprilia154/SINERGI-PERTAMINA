@@ -1,4 +1,5 @@
-import { createWriteStream } from 'node:fs'
+import { createReadStream, createWriteStream } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
@@ -99,6 +100,7 @@ export async function extractKmzArchive(archivePath, workspace, limits) {
               relativePath: safeRelativePath,
               size: entry.uncompressedSize,
               extension,
+              checksum: await checksumFile(target),
             })
           }
           archive.readEntry()
@@ -128,6 +130,107 @@ export async function extractKmzArchive(archivePath, workspace, limits) {
     entryCount,
     totalExtractedSize,
   }
+}
+
+export async function readKmzResourceBuffer(archiveBuffer, candidatePaths, limits) {
+  const safePaths = new Set(candidatePaths.map(validateArchiveEntryPath))
+  if (!safePaths.size) {
+    throw new AppError('Resource overlay tidak memiliki archive path.', {
+      code: 'overlay_resource_path_missing',
+      statusCode: 404,
+    })
+  }
+  const archive = await openArchiveBuffer(archiveBuffer)
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const fail = (error) => {
+      if (settled) return
+      settled = true
+      archive.close()
+      reject(error instanceof AppError ? error : archiveError(error))
+    }
+    archive.on('error', fail)
+    archive.on('end', () => {
+      if (settled) return
+      settled = true
+      reject(new AppError('Resource overlay tidak ditemukan dalam KMZ.', {
+        code: 'overlay_resource_not_found',
+        statusCode: 404,
+      }))
+    })
+    archive.on('entry', async (entry) => {
+      try {
+        const safePath = validateArchiveEntryPath(entry.fileName)
+        if (!safePaths.has(safePath)) {
+          archive.readEntry()
+          return
+        }
+        const extension = path.extname(safePath).toLowerCase()
+        if (!ALLOWED_RESOURCE_EXTENSIONS.has(extension)) {
+          throw new AppError('Tipe resource overlay tidak diizinkan.', {
+            code: 'overlay_resource_type_not_allowed',
+            statusCode: 415,
+          })
+        }
+        if ((entry.generalPurposeBitFlag & 0x1) !== 0) {
+          throw new AppError('Resource overlay terenkripsi tidak dapat dibaca.', {
+            code: 'encrypted_kmz',
+            statusCode: 422,
+          })
+        }
+        if (entry.uncompressedSize > limits.maxExtractedSize) {
+          throw new AppError('Resource overlay melebihi batas ukuran.', {
+            code: 'overlay_resource_size_exceeded',
+            statusCode: 422,
+          })
+        }
+        const ratio = entry.compressedSize === 0
+          ? (entry.uncompressedSize > 0 ? Number.POSITIVE_INFINITY : 1)
+          : entry.uncompressedSize / entry.compressedSize
+        if (ratio > limits.maxCompressionRatio) {
+          throw new AppError('Resource overlay memiliki rasio kompresi tidak aman.', {
+            code: 'kmz_compression_ratio_exceeded',
+            statusCode: 422,
+          })
+        }
+        const stream = await openEntryStream(archive, entry)
+        const chunks = []
+        let size = 0
+        stream.on('data', (chunk) => {
+          size += chunk.length
+          if (size > limits.maxExtractedSize) {
+            stream.destroy(new AppError('Resource overlay melebihi batas ukuran.', {
+              code: 'overlay_resource_size_exceeded',
+              statusCode: 422,
+            }))
+            return
+          }
+          chunks.push(chunk)
+        })
+        stream.on('error', fail)
+        stream.on('end', () => {
+          if (settled) return
+          settled = true
+          archive.close()
+          resolve({
+            bytes: Buffer.concat(chunks),
+            size,
+            extension,
+            relativePath: safePath,
+          })
+        })
+      } catch (error) {
+        fail(error)
+      }
+    })
+    archive.readEntry()
+  })
+}
+
+async function checksumFile(filePath) {
+  const hash = createHash('sha256')
+  for await (const chunk of createReadStream(filePath)) hash.update(chunk)
+  return `sha256:${hash.digest('hex')}`
 }
 
 export function validateArchiveEntryPath(entryName) {
@@ -200,6 +303,19 @@ function openArchive(archivePath) {
       decodeStrings: true,
       validateEntrySizes: true,
       strictFileNames: true,
+    }, (error, archive) => {
+      if (error) reject(archiveError(error))
+      else resolve(archive)
+    })
+  })
+}
+
+function openArchiveBuffer(buffer) {
+  return new Promise((resolve, reject) => {
+    yauzl.fromBuffer(buffer, {
+      lazyEntries: true,
+      decodeStrings: true,
+      validateEntrySizes: true,
     }, (error, archive) => {
       if (error) reject(archiveError(error))
       else resolve(archive)

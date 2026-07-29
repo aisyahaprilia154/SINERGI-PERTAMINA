@@ -26,6 +26,7 @@ export function buildExplicitRelationGraph({ networks, assetIds, topologyGraph =
         relationType: 'explicit-network-edge',
       }))
     for (const relation of relationRecords) {
+      if (!isConfirmedRelation(relation)) continue
       const { sourceAssetId, targetAssetId } = relation
       if (!validAssetIds.has(sourceAssetId) || !validAssetIds.has(targetAssetId)) continue
       if (sourceAssetId === targetAssetId) continue
@@ -61,6 +62,20 @@ export function buildExplicitRelationGraph({ networks, assetIds, topologyGraph =
   }
 
   return graph
+}
+
+function isConfirmedRelation(relation) {
+  if (relation.verificationStatus !== undefined) {
+    return relation.verificationStatus === 'confirmed'
+  }
+  if (relation.candidateStatus !== undefined) {
+    return relation.candidateStatus === 'confirmed'
+  }
+  if (relation.relationStatus !== undefined) {
+    return relation.relationStatus === 'confirmed'
+  }
+  return relation.relationSource === undefined
+    || ['explicit', 'explicit_kml_metadata', 'manual_review'].includes(relation.relationSource)
 }
 
 export function getConnectedAssets(graph, assetId) {
