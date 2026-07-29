@@ -18,6 +18,9 @@ export function calculateSchematicLayout(graph, options = {}) {
   }
 
   const settings = { ...DEFAULT_OPTIONS, ...options }
+  if (graph.mode === 'full-map') {
+    return calculateCategorySectionLayout(graph, settings)
+  }
   if (options.preserveMapOrientation && canUseSourcePositions(graph)) {
     return calculateMapRelativeLayout(graph, settings)
   }
@@ -121,6 +124,101 @@ function calculateMapRelativeLayout(graph, settings) {
     nodes: graph.nodes.map((node) => nodeById.get(node.id)),
     edges: layoutEdges(graph.edges, nodeById),
   }
+}
+
+function calculateCategorySectionLayout(graph, settings) {
+  const categoryOrder = ['cctv', 'fiber-optic', 'lan', 'infrastructure', 'peripheral']
+  const groups = new Map()
+  graph.nodes.forEach((node) => {
+    const category = node.category || 'infrastructure'
+    if (!groups.has(category)) groups.set(category, [])
+    groups.get(category).push(node)
+  })
+  const orderedGroups = [...groups.entries()].sort(([left], [right]) => {
+    const leftOrder = categoryOrder.indexOf(left)
+    const rightOrder = categoryOrder.indexOf(right)
+    return (leftOrder < 0 ? categoryOrder.length : leftOrder)
+      - (rightOrder < 0 ? categoryOrder.length : rightOrder)
+      || left.localeCompare(right)
+  })
+  const largestGroupSize = Math.max(...orderedGroups.map(([, nodes]) => nodes.length), 1)
+  const aspectRatio = 16 / 9
+  const columnCount = Math.max(1, Math.ceil(Math.sqrt(largestGroupSize * aspectRatio)))
+  const horizontalGap = Math.max(settings.columnGap / 2, 28)
+  const verticalGap = Math.max(settings.rowGap / 2, 18)
+  const cellWidth = settings.nodeWidth + horizontalGap
+  const cellHeight = settings.nodeHeight + verticalGap
+  const sectionHeaderHeight = 54
+  const sectionPadding = 24
+  const sectionGap = 28
+  const width = Math.max(
+    settings.minWidth,
+    settings.marginX * 2 + columnCount * cellWidth,
+  )
+  const nodeById = new Map()
+  const sections = []
+  let sectionY = settings.headerHeight
+
+  orderedGroups.forEach(([category, nodes]) => {
+    const sortedNodes = [...nodes].sort((left, right) => (
+      compareSourcePosition(left, right)
+      || String(left.name || '').localeCompare(String(right.name || ''), 'id')
+      || left.id.localeCompare(right.id)
+    ))
+    const rowCount = Math.ceil(sortedNodes.length / columnCount)
+    const sectionHeight = sectionHeaderHeight + rowCount * cellHeight + sectionPadding
+    sections.push({
+      category,
+      nodeCount: sortedNodes.length,
+      x: 32,
+      y: sectionY,
+      width: width - 64,
+      height: sectionHeight,
+    })
+    sortedNodes.forEach((node, index) => {
+      const column = index % columnCount
+      const row = Math.floor(index / columnCount)
+      const x = settings.marginX + column * cellWidth
+      const y = sectionY + sectionHeaderHeight + row * cellHeight
+      nodeById.set(node.id, {
+        ...node,
+        depth: null,
+        parentId: null,
+        diagram: {
+          x,
+          y,
+          width: settings.nodeWidth,
+          height: settings.nodeHeight,
+          nodeX: x + settings.nodeWidth / 2,
+          nodeY: y + 14,
+          labelX: x + settings.nodeWidth / 2,
+          labelY: y + 35,
+        },
+      })
+    })
+    sectionY += sectionHeight + sectionGap
+  })
+
+  const height = sectionY - sectionGap + settings.footerHeight
+  return {
+    status: 'ready',
+    strategy: 'category-sections',
+    width,
+    height,
+    options: settings,
+    sections,
+    nodes: graph.nodes.map((node) => nodeById.get(node.id)),
+    edges: layoutEdges(graph.edges, nodeById),
+  }
+}
+
+function compareSourcePosition(left, right) {
+  const leftPosition = left.sourcePosition
+  const rightPosition = right.sourcePosition
+  if (!leftPosition && !rightPosition) return 0
+  if (!leftPosition) return 1
+  if (!rightPosition) return -1
+  return leftPosition.y - rightPosition.y || leftPosition.x - rightPosition.x
 }
 
 function canUseSourcePositions(graph) {

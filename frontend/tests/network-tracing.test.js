@@ -77,6 +77,39 @@ test('tracing consumes confirmed edges from the shared topology graph', () => {
   )
 })
 
+test('candidate, ambiguous, rejected, and revoked relations never enter tracing', () => {
+  const topologyGraph = {
+    edges: [
+      {
+        id: 'candidate-edge',
+        sourceAssetId: 'A',
+        targetAssetId: 'B',
+        candidateStatus: 'candidate',
+      },
+      {
+        id: 'revoked-edge',
+        sourceAssetId: 'B',
+        targetAssetId: 'C',
+        verificationStatus: 'revoked',
+      },
+      {
+        id: 'confirmed-edge',
+        sourceAssetId: 'A',
+        targetAssetId: 'C',
+        verificationStatus: 'confirmed',
+      },
+    ],
+  }
+  const graph = buildExplicitRelationGraph({
+    networks: [],
+    assetIds: ['A', 'B', 'C'],
+    topologyGraph,
+  })
+
+  assert.deepEqual(getConnectedAssets(graph, 'A').map(({ targetAssetId }) => targetAssetId), ['C'])
+  assert.deepEqual(getConnectedAssets(graph, 'B'), [])
+})
+
 test('cycle-safe traversal finds a path without revisiting nodes forever', () => {
   const result = findTracePath(graph, 'a', 'd')
 

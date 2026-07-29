@@ -1,14 +1,28 @@
 export function renderNetworkMapCanvas(activeContext, {
   empty = false,
   assetsWithoutGeometry = 0,
+  selectedArea = null,
+  counts = {},
+  confirmedConnectionCount = 0,
 } = {}) {
   return `
-    <section class="map-stage" aria-label="Peta topologi jaringan">
-      <canvas id="network-map" tabindex="0" aria-label="Visualisasi peta jaringan aset"
-        aria-describedby="map-keyboard-help"></canvas>
+    <section class="map-stage" aria-label="Peta geografis aset">
+      <div id="network-map" tabindex="0" aria-label="Peta geografis jaringan aset"
+        aria-describedby="map-keyboard-help"></div>
       <p class="map-sr-only" id="map-keyboard-help">
-        Gunakan tombol panah untuk berpindah antar aset, Enter untuk memilih, dan Escape untuk menutup informasi.
+        Gunakan kontrol zoom dan pan pada peta. Daftar aset alternatif tersedia setelah peta.
       </p>
+      <div class="map-accessible-assets map-sr-only" aria-label="Daftar aset pada peta"></div>
+      <div class="basemap-status" role="status">
+        <span class="material-symbols-outlined" aria-hidden="true">satellite_alt</span>
+        <strong>Peta geografis &middot; Dataset aktif</strong>
+        <span>Basemap: <b class="basemap-availability">memuat</b></span>
+        <span>Area: ${escapeHtml(selectedArea?.name ?? 'Lainnya')}</span>
+        <span>Aset: ${Number(counts.assetNodeCount) || 0}</span>
+        <span>Jalur kabel: ${Number(counts.lineCount) || 0}</span>
+        <span>Confirmed connection: ${Number(confirmedConnectionCount) || 0}</span>
+        <span>Tata aset: <b class="declutter-summary">adaptif</b></span>
+      </div>
       <div class="map-asset-tooltip" id="map-asset-tooltip" role="tooltip" aria-live="polite" hidden></div>
       ${empty ? `
         <section class="map-empty-layer" aria-live="polite">
@@ -35,9 +49,10 @@ export function renderNetworkMapCanvas(activeContext, {
 
       <div class="legend-popover" id="map-legend" hidden>
         <strong>Legenda peta</strong>
-        <span><i class="legend-node"></i> Asset node</span>
-        <span><i class="legend-junction"></i> Junction</span>
-        <span><i class="legend-line"></i> Jalur aktif</span>
+        <span><i class="legend-node"></i> Koordinat aktual dari KML</span>
+        <span><i class="legend-leader"></i> Label disebar dari titik asli</span>
+        <span><i class="legend-cluster">12</i> Kelompok aset; klik untuk buka</span>
+        <span><i class="legend-line"></i> Jalur fisik dari KML</span>
       </div>
 
       <div class="map-attribution">SINERGI Topology · Dataset ${escapeHtml(activeContext.version)}</div>
@@ -91,6 +106,11 @@ export function renderMapFloatingControls() {
         <button class="tool-button diagram-toggle" type="button">
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
           <span>Diagram 2D</span>
+        </button>
+        <button class="tool-button declutter-toggle" type="button" aria-pressed="true"
+          title="Sebarkan marker yang berdekatan tanpa mengubah koordinat KML">
+          <span class="material-symbols-outlined" aria-hidden="true">scatter_plot</span>
+          <span>Tata aset adaptif</span>
         </button>
         <button class="tool-button dim-toggle" type="button" aria-pressed="true">
           <span class="material-symbols-outlined" aria-hidden="true">contrast</span>

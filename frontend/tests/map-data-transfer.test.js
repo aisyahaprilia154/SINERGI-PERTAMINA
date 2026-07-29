@@ -106,4 +106,6 @@ test('map context and toolbar present a compact branch name and admin data actio
   assert.doesNotMatch(context, />Kantor Cabang Semarang</)
   assert.match(controls, /Import \/ Export/)
   assert.match(controls, /data-transfer-toggle/)
+  assert.match(controls, /Tata aset adaptif/)
+  assert.match(controls, /declutter-toggle/)
 })

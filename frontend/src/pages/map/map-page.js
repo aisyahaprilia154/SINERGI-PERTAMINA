@@ -1,13 +1,15 @@
 import {
   adaptActiveAssetDetail,
   adaptActiveDatasetForMap,
+  locationGroupFor,
 } from '../../adapters/active-dataset-map-adapter.js'
 import {
   loadActiveAssetDetail,
   loadActiveDataset,
+  loadDatasetProjection,
 } from '../../services/active-dataset-service.js'
 import { renderAssetDetailDrawer } from './asset-detail-drawer.js'
-import { createMapCanvas } from './map-canvas.js'
+import { createMapLibreSurface } from './maplibre-map.js'
 import { renderNetworkMapCanvas } from './map-surface.js'
 import { renderNetworkList as renderNetworkSidebarList, renderNetworkSidebar } from './network-sidebar.js'
 import {
@@ -70,18 +72,53 @@ export async function renderMapPage(container) {
     return
   }
 
+  const overlayResult = await Promise.allSettled([
+    loadDatasetProjection({
+      datasetVersionId: mapData.activeContext.datasetVersionId,
+      projection: 'overlays',
+    }),
+  ])
+
   const {
     activeContext,
-    assetById,
+    assets: allAssets,
+    diagramAssets: allDiagramAssets,
+    geometries: allGeometries,
+    exportAssets: allExportAssets,
+    networks: allNetworks,
+    topologyGraph: fullTopologyGraph,
+    locationGroups,
+    renderingSummary,
+  } = mapData
+  const selectedArea = selectLocationGroup(window.location.search, locationGroups)
+  const {
     assets,
+    assetById,
+    diagramAssets,
     geometries,
     exportAssets,
     networks,
     topologyGraph,
-    hasRenderableData,
-    renderingSummary,
     counts,
-  } = mapData
+  } = scopeMapData({
+    selectedArea,
+    assets: allAssets,
+    diagramAssets: allDiagramAssets,
+    geometries: allGeometries,
+    exportAssets: allExportAssets,
+    networks: allNetworks,
+    topologyGraph: fullTopologyGraph,
+  })
+  const hasRenderableData = geometries.length > 0
+  const resolvedOverlays = (overlayResult[0].status === 'fulfilled'
+    ? overlayResult[0].value.items ?? []
+    : [])
+    .filter((overlay) => (
+      overlay.valid
+      && overlay.resourceResolutionStatus === 'resolved'
+      && overlay.resourceUrl
+      && overlayMatchesArea(overlay, selectedArea)
+    ))
   const defaultNetworkIds = networks
     .filter((network) => network.isDefaultVisible)
     .map((network) => network.id)
@@ -119,6 +156,7 @@ export async function renderMapPage(container) {
     assetDetailError: null,
     showAdditionalMetadata: false,
     dimOthers: true,
+    declutterEnabled: true,
     search: '',
     expandedNetworkIds: new Set(),
     dataStatus: 'loading',
@@ -129,10 +167,16 @@ export async function renderMapPage(container) {
     <div class="map-app">
       ${renderTopNavigation()}
       <main class="map-workspace">
-        ${renderNetworkSidebar(activeContext, selection.selectedNetworkIds.size, counts)}
+        ${renderNetworkSidebar(activeContext, selection.selectedNetworkIds.size, counts, {
+          locationGroups,
+          selectedArea,
+        })}
         ${renderNetworkMapCanvas(activeContext, {
           empty: !hasRenderableData,
           assetsWithoutGeometry: renderingSummary.assetsWithoutGeometry,
+          selectedArea,
+          counts,
+          confirmedConnectionCount: topologyGraph.edges.length,
         })}
       </main>
     </div>
@@ -146,23 +190,74 @@ export async function renderMapPage(container) {
   const mobileSidebarToggle = container.querySelector('.open-sidebar')
   const legendToggle = container.querySelector('.legend-toggle')
   const legend = container.querySelector('.legend-popover')
-  const canvasApi = createMapCanvas(container.querySelector('#network-map'), {
+  const canvasApi = createMapLibreSurface(container.querySelector('#network-map'), {
     assets,
     networks,
     geometries,
+    topologyGraph,
+    overlays: resolvedOverlays,
+    candidates: [],
     onSelectAsset: handleAssetSelect,
     onSelectNetwork: handleNetworkSelect,
+    onBasemapStatus: updateBasemapStatus,
+    onLayoutStatus: updateLayoutStatus,
   })
 
+  function updateBasemapStatus(status, details = {}) {
+    const element = container.querySelector('.basemap-availability')
+    if (!element) return
+    const statusElement = element.closest('.basemap-status')
+    element.textContent = {
+      available: 'tersedia',
+      loading: details.retrying ? 'mencoba ulang' : 'memuat',
+      unavailable: 'tidak tersedia · data lokal tetap aktif',
+    }[status] ?? 'tidak diketahui'
+    statusElement?.classList.toggle('loading', status === 'loading')
+    statusElement?.classList.toggle('warning', status === 'unavailable')
+    statusElement?.setAttribute('data-basemap-status', status)
+    if (details.message) statusElement?.setAttribute('title', details.message)
+    else statusElement?.removeAttribute('title')
+  }
+
+  function updateLayoutStatus(status) {
+    const element = container.querySelector('.declutter-summary')
+    if (!element) return
+    if (!status.enabled) {
+      element.textContent = 'koordinat asli'
+      return
+    }
+    if (status.clusterCount) {
+      element.textContent = `${status.clusterCount} kelompok · klik untuk buka`
+      return
+    }
+    if (status.displacedAssetCount) {
+      element.textContent = `${status.displacedAssetCount} disebar · koordinat tetap`
+      return
+    }
+    element.textContent = 'adaptif · tidak bertumpuk'
+  }
+
   function updateUrl(mode = 'push') {
-    const query = serializeMapUrlState(window.location.search, {
+    const query = new URLSearchParams(serializeMapUrlState(window.location.search, {
       selectedNetworkIds: selection.selectedNetworkIds,
       selectedAssetId: selection.selectedAssetId,
       traceFrom: state.traceFromId,
       traceTo: state.traceToId,
-    })
+    }))
+    if (selectedArea?.key) query.set('area', selectedArea.key)
     const nextUrl = `${window.location.pathname}?${query}${window.location.hash}`
     window.history[`${mode}State`](null, '', nextUrl)
+    const topologyLink = container.querySelector('a[href="/topology"], a[href^="/topology?"]')
+    if (topologyLink) {
+      const topologyQuery = new URLSearchParams({
+        datasetId: activeContext.datasetId,
+        branchId: activeContext.branchId,
+      })
+      if (selection.selectedAssetId) topologyQuery.set('selectedAssetId', selection.selectedAssetId)
+      if (state.traceFromId) topologyQuery.set('traceFrom', state.traceFromId)
+      if (state.traceToId) topologyQuery.set('traceTo', state.traceToId)
+      topologyLink.href = `/topology?${topologyQuery}`
+    }
   }
 
   function invalidateMapAfterPanelChange(panel) {
@@ -511,13 +606,13 @@ export async function renderMapPage(container) {
 
   function openSchematic() {
     const fullMapGraph = buildSchematicGraph({
-      assets,
+      assets: diagramAssets,
       networks,
       topologyGraph,
       scope: 'full-map',
     })
     const traceGraph = buildSchematicGraph({
-      assets,
+      assets: diagramAssets,
       networks,
       topologyGraph,
       scope: 'trace',
@@ -596,6 +691,16 @@ export async function renderMapPage(container) {
     state.dimOthers = !state.dimOthers
     syncInactiveModeControls()
     syncMap()
+  }
+
+  function toggleDeclutter() {
+    state.declutterEnabled = !state.declutterEnabled
+    const button = container.querySelector('.declutter-toggle')
+    button.setAttribute('aria-pressed', String(state.declutterEnabled))
+    button.title = state.declutterEnabled
+      ? 'Sebarkan marker yang berdekatan tanpa mengubah koordinat KML'
+      : 'Tampilkan tata letak adaptif'
+    canvasApi.setDeclutterEnabled(state.declutterEnabled)
   }
 
   function restoreStateFromUrl() {
@@ -681,6 +786,40 @@ export async function renderMapPage(container) {
     state.search = event.target.value
     renderNetworkList()
   })
+  container.querySelector('.area-selector select')?.addEventListener('change', (event) => {
+    const nextArea = event.target.value
+    if (!locationGroups.some(({ key }) => key === nextArea) || nextArea === selectedArea?.key) {
+      return
+    }
+    const params = new URLSearchParams(window.location.search)
+    params.set('area', nextArea)
+    params.delete('selectedAssetId')
+    params.delete('traceFrom')
+    params.delete('traceTo')
+    canvasApi.destroy()
+    window.location.assign(`${window.location.pathname}?${params}${window.location.hash}`)
+  })
+  container.querySelector('.map-category-presets').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-category-preset]')
+    if (!button) return
+    const preset = button.dataset.categoryPreset
+    const selectedNetworkIds = preset === 'all'
+      ? networks.map(({ id }) => id)
+      : networks.filter((network) => networkMatchesPreset(network, preset))
+        .map(({ id }) => id)
+    selection.replace({
+      selectedNetworkIds,
+      selectedAssetId: selection.selectedAssetId,
+    })
+    container.querySelectorAll('[data-category-preset]').forEach((item) => {
+      const active = item === button
+      item.classList.toggle('active', active)
+      item.setAttribute('aria-pressed', String(active))
+    })
+    updateUrl()
+    renderNetworkList()
+    syncMap()
+  })
   container.querySelector('.show-all-networks').addEventListener('click', () => {
     selection.showAllNetworks()
     updateUrl()
@@ -699,6 +838,7 @@ export async function renderMapPage(container) {
   })
   container.querySelector('.trace-toggle').addEventListener('click', () => beginTracing(selection.selectedAssetId))
   container.querySelector('.diagram-toggle').addEventListener('click', openSchematic)
+  container.querySelector('.declutter-toggle').addEventListener('click', toggleDeclutter)
   container.querySelector('.cancel-trace').addEventListener('click', stopTracing)
   container.querySelector('.dim-toggle').addEventListener('click', toggleInactiveMode)
   container.querySelector('.zoom-in').addEventListener('click', canvasApi.zoomIn)
@@ -795,7 +935,121 @@ function formatContextName(value) {
     .replace(/\b\w/g, (character) => character.toUpperCase())
 }
 
-function renderTopNavigation() {
+export function selectLocationGroup(search, locationGroups = []) {
+  const requested = new URLSearchParams(search).get('area')
+  return locationGroups.find(({ key }) => key === requested) ?? locationGroups[0] ?? null
+}
+
+export function scopeMapData({
+  selectedArea,
+  assets,
+  diagramAssets,
+  geometries,
+  exportAssets,
+  networks,
+  topologyGraph,
+}) {
+  const areaKey = selectedArea?.key
+  const scopedAssets = areaKey
+    ? assets.filter(({ locationGroupKey }) => locationGroupKey === areaKey)
+    : [...assets]
+  const scopedGeometries = areaKey
+    ? geometries.filter(({ locationGroupKey }) => locationGroupKey === areaKey)
+    : [...geometries]
+  const scopedAssetIds = new Set(scopedAssets.map(({ id }) => id))
+  const scopedGeometryIds = new Set(scopedGeometries.map(({ id }) => id))
+  const scopedNetworks = networks.map((network) => {
+    const nodeIds = network.nodeIds.filter((id) => scopedAssetIds.has(id))
+    const geometryIds = network.geometryIds.filter((id) => scopedGeometryIds.has(id))
+    const relations = (network.relations ?? []).filter((relation) => (
+      scopedAssetIds.has(relation.sourceAssetId)
+      && scopedAssetIds.has(relation.targetAssetId)
+    ))
+    const geometryAssetIds = scopedGeometries
+      .filter(({ id }) => geometryIds.includes(id))
+      .map(({ assetId }) => assetId)
+      .filter(Boolean)
+    const assetIds = [...new Set([...nodeIds, ...geometryAssetIds])]
+    const networkGeometries = scopedGeometries.filter(({ id }) => geometryIds.includes(id))
+    return {
+      ...network,
+      nodeIds,
+      geometryIds,
+      geometryAssetIds,
+      assetIds,
+      relations,
+      relationIds: relations.map(({ id }) => id),
+      edges: relations.map(({ sourceAssetId, targetAssetId }) => [sourceAssetId, targetAssetId]),
+      assetCount: assetIds.length,
+      nodeCount: nodeIds.length,
+      lineCount: networkGeometries.filter(
+        ({ geometryType }) => geometryType === 'line_string',
+      ).length,
+      polygonCount: networkGeometries.filter(
+        ({ geometryType }) => geometryType === 'polygon',
+      ).length,
+      ...(selectedArea?.bounds ? { bounds: selectedArea.bounds } : {}),
+    }
+  }).filter((network) => network.nodeIds.length || network.geometryIds.length)
+  const edges = (topologyGraph.edges ?? []).filter((edge) => {
+    const sourceId = edge.sourceAssetId ?? edge.sourceNodeId
+    const targetId = edge.targetAssetId ?? edge.targetNodeId
+    return scopedAssetIds.has(sourceId) && scopedAssetIds.has(targetId)
+  })
+  const nodes = (topologyGraph.nodes ?? []).filter((node) => (
+    scopedAssetIds.has(node.id) || scopedAssetIds.has(node.assetId)
+  ))
+  const scopedExportAssetIds = new Set([
+    ...scopedAssetIds,
+    ...scopedGeometries.map(({ assetId }) => assetId).filter(Boolean),
+  ])
+  return {
+    assets: scopedAssets,
+    assetById: Object.fromEntries(scopedAssets.map((asset) => [asset.id, asset])),
+    diagramAssets: diagramAssets.filter((asset) => (
+      asset.locationGroupKey === areaKey || !areaKey
+    )),
+    geometries: scopedGeometries,
+    exportAssets: exportAssets.filter(({ id }) => scopedExportAssetIds.has(id)),
+    networks: scopedNetworks,
+    topologyGraph: { ...topologyGraph, nodes, edges },
+    counts: {
+      networkCount: scopedNetworks.length,
+      layerCount: new Set([
+        ...scopedAssets.map(({ layerId }) => layerId),
+        ...scopedGeometries.map(({ layerId }) => layerId),
+      ].filter(Boolean)).size,
+      assetCount: scopedExportAssetIds.size,
+      assetNodeCount: scopedAssets.length,
+      pointCount: scopedGeometries.filter(({ geometryType }) => geometryType === 'point').length,
+      lineCount: scopedGeometries.filter(
+        ({ geometryType }) => geometryType === 'line_string',
+      ).length,
+      polygonCount: scopedGeometries.filter(
+        ({ geometryType }) => geometryType === 'polygon',
+      ).length,
+      geometryCount: scopedGeometries.length,
+    },
+  }
+}
+
+function overlayMatchesArea(overlay, selectedArea) {
+  if (!selectedArea) return true
+  return locationGroupFor(overlay.sourceFolderPath).locationGroupKey === selectedArea.key
+}
+
+function networkMatchesPreset(network, preset) {
+  const source = `${network.category ?? ''} ${network.type ?? ''} ${network.name ?? ''}`.toLowerCase()
+  if (preset === 'cctv') return /cctv|camera|kamera|nvr|junction/.test(source)
+  if (preset === 'fiber') return /fiber|fibre|\bfo\b|otb/.test(source)
+  if (preset === 'lan') return /\blan\b|utp/.test(source)
+  if (preset === 'infrastructure') {
+    return /infrastructure|switch|server|router|rack|peripheral|printer|access point/.test(source)
+  }
+  return true
+}
+
+export function renderTopNavigation(activeView = 'map') {
   return `
     <header class="top-navigation">
       <a class="brand-lockup nav-brand" href="/" aria-label="SINERGI">
@@ -804,7 +1058,12 @@ function renderTopNavigation() {
       </a>
       <nav aria-label="Navigasi utama">
         <a href="#ringkasan"><span class="material-symbols-outlined" aria-hidden="true">space_dashboard</span>Ringkasan</a>
-        <a href="/map" class="active"><span class="material-symbols-outlined" aria-hidden="true">map</span>Peta jaringan</a>
+        <a href="/map" class="${activeView === 'map' ? 'active' : ''}">
+          <span class="material-symbols-outlined" aria-hidden="true">map</span>Peta Aset
+        </a>
+        <a href="/topology" class="${activeView === 'topology' ? 'active' : ''}">
+          <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>Topologi Cabang
+        </a>
         <a href="#inventaris"><span class="material-symbols-outlined" aria-hidden="true">inventory_2</span>Inventaris aset</a>
       </nav>
       <div class="nav-actions">

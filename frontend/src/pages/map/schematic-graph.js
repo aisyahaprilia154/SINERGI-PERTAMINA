@@ -1,5 +1,3 @@
-const DEFAULT_MAX_NODES = 30
-
 export function buildSchematicGraph({
   assets,
   networks,
@@ -9,7 +7,6 @@ export function buildSchematicGraph({
   tracePath = [],
   traceRelations = [],
   scope = 'auto',
-  maxNodes = DEFAULT_MAX_NODES,
 }) {
   const assetById = new Map(assets.map((asset) => [asset.id, asset]))
   const networkById = new Map(networks.map((network) => [network.id, network]))
@@ -49,10 +46,7 @@ export function buildSchematicGraph({
     sourceEdges = buildTraceEdges(tracePath, traceRelations, networks)
   } else if (scope === 'full-map') {
     mode = 'full-map'
-    nodeIds = uniqueIds(hasTopology
-      ? topologyGraph.nodes.map(({ id }) => id)
-      : networks.flatMap((network) => network.nodeIds || []))
-      .filter((assetId) => assetById.has(assetId))
+    nodeIds = uniqueIds(assets.map(({ id }) => id))
     sourceEdges = hasTopology
       ? topologyEdges
       : networks.flatMap((network) =>
@@ -117,18 +111,6 @@ export function buildSchematicGraph({
       status: 'empty',
       message: 'Tidak ada aset yang dapat digunakan untuk membuat diagram.',
       mode,
-      nodes: [],
-      edges: [],
-    }
-  }
-
-  if (nodeIds.length > maxNodes) {
-    return {
-      status: 'too-dense',
-      message: 'Cakupan terlalu luas untuk menghasilkan diagram yang terbaca. Persempit jaringan atau hasil tracing.',
-      mode,
-      nodeCount: nodeIds.length,
-      maxNodes,
       nodes: [],
       edges: [],
     }

@@ -3,7 +3,11 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { extractKmzArchive, orderKmlCandidates } from '../src/import/kmz-extractor.js'
+import {
+  extractKmzArchive,
+  orderKmlCandidates,
+  readKmzResourceBuffer,
+} from '../src/import/kmz-extractor.js'
 import { createStoredZip } from './helpers/zip-fixture.js'
 
 const LIMITS = {
@@ -31,6 +35,23 @@ test('extracts KML and safe image resources while ignoring executable content', 
       await readFile(path.join(workspace, 'doc.kml'), 'utf8'),
       '<kml><Document><name>Main</name></Document></kml>',
     )
+  })
+})
+
+test('reads one allowlisted overlay resource directly from the verified KMZ bytes', async () => {
+  const imageBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x01])
+  await withArchive([
+    { name: 'doc.kml', content: '<kml />' },
+    { name: 'images/site.png', content: imageBytes },
+    { name: 'scripts/ignored.exe', content: 'nope' },
+  ], async ({ archivePath }) => {
+    const resource = await readKmzResourceBuffer(
+      await readFile(archivePath),
+      ['images/site.png'],
+      LIMITS,
+    )
+    assert.equal(resource.extension, '.png')
+    assert.deepEqual(resource.bytes, imageBytes)
   })
 })
 

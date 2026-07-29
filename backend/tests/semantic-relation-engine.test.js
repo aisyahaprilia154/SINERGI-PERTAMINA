@@ -1,0 +1,307 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import {
+  generateRelationArtifacts,
+  TOPOLOGY_RULE_SET_VERSION,
+} from '../src/topology/semantic-relation-engine.js'
+
+test('spatial endpoint inference remains a candidate and never leaks into confirmed graph', () => {
+  const bundle = topologyBundle({
+    nodes: [node('CAM-01', 'cctv', 'CCTV Camera', [110, -7])],
+    paths: [pathObject('CBL-01', 'cctv', 'CCTV Cable', [
+      [110, -7],
+      [110.001, -7],
+    ])],
+  })
+  const sourceBefore = structuredClone(bundle.geometries)
+  const result = generateRelationArtifacts(bundle, {
+    generatedAt: '2026-07-29T00:00:00.000Z',
+  })
+
+  assert.ok(result.candidates.some(({ candidateType }) => candidateType === 'endpoint_device'))
+  assert.ok(result.candidates.every(({ candidateStatus }) => (
+    ['candidate', 'ambiguous'].includes(candidateStatus)
+  )))
+  assert.equal(result.confirmedRelations.length, 0)
+  assert.equal(result.graph.edges.length, 0)
+  assert.deepEqual(bundle.geometries, sourceBefore)
+  assert.equal(result.readiness.topologyReadiness, 'not_ready')
+  assert.ok(result.readiness.blockingReasons.includes('held_out_accuracy_not_proven'))
+  assert.deepEqual(result.summary, {
+    candidateCount: 1,
+    confirmedEdgeCount: 0,
+    ambiguousCount: 0,
+    rejectedCount: 0,
+    revokedCount: 0,
+    unresolvedCount: 1,
+    componentCount: 1,
+    isolatedNodeCount: 1,
+    falseComponentMergeCount: 0,
+  })
+})
+
+test('spatial auto-confirm requires both explicit policy approval and accuracy gates', () => {
+  const bundle = topologyBundle({
+    nodes: [node('CAM-01', 'cctv', 'CCTV Camera', [110, -7])],
+    paths: [pathObject('CBL-01', 'cctv', 'CCTV Cable', [
+      [110, -7],
+      [110.001, -7],
+    ])],
+  })
+  const missingAccuracy = generateRelationArtifacts(bundle, {
+    config: {
+      autoConfirmSpatialInference: true,
+    },
+  })
+  assert.equal(missingAccuracy.confirmedRelations.length, 0)
+
+  const approved = generateRelationArtifacts(bundle, {
+    config: {
+      autoConfirmSpatialInference: true,
+      heldOutPrecision: 0.99,
+      pathAccuracy: 0.95,
+    },
+  })
+  assert.equal(approved.confirmedRelations.length, 1)
+  assert.equal(approved.confirmedRelations[0].verificationStatus, 'confirmed')
+  assert.equal(approved.readiness.topologyReadiness, 'ready')
+})
+
+test('crossing lines do not connect without classified junction evidence', () => {
+  const result = generateRelationArtifacts(topologyBundle({
+    paths: [
+      pathObject('CBL-A', 'fiber_optic', 'Fiber Optic', [
+        [110, -7.001],
+        [110, -6.999],
+      ]),
+      pathObject('CBL-B', 'fiber_optic', 'Fiber Optic', [
+        [109.999, -7],
+        [110.001, -7],
+      ]),
+    ],
+  }))
+
+  assert.equal(
+    result.candidates.some(({ candidateType }) => candidateType === 'intersection_with_junction'),
+    false,
+  )
+  assert.equal(result.graph.edges.length, 0)
+})
+
+test('classified junction enables a reviewable intersection candidate', () => {
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [node('OTB-01', 'infrastructure', 'OTB Junction', [110, -7])],
+    paths: [
+      pathObject('FO-A', 'fiber_optic', 'Fiber Optic', [
+        [110, -7.001],
+        [110, -6.999],
+      ]),
+      pathObject('FO-B', 'fiber_optic', 'Fiber Optic', [
+        [109.999, -7],
+        [110.001, -7],
+      ]),
+    ],
+  }))
+
+  const intersection = result.candidates.find(({ candidateType }) => (
+    candidateType === 'intersection_with_junction'
+  ))
+  assert.ok(intersection)
+  assert.equal(intersection.targetAssetId, 'OTB-01')
+  assert.equal(intersection.candidateStatus, 'candidate')
+  assert.deepEqual(intersection.sourceGeometryIds.sort(), ['geometry:FO-A', 'geometry:FO-B'])
+})
+
+test('nearly equal endpoint-device scores become ambiguous', () => {
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [
+      node('CAM-A', 'cctv', 'CCTV Camera', [110.00001, -7]),
+      node('CAM-B', 'cctv', 'CCTV Camera', [109.99999, -7]),
+    ],
+    paths: [pathObject('CBL-01', 'cctv', 'CCTV Cable', [
+      [110, -7],
+      [110.001, -7],
+    ])],
+  }))
+  const startCandidates = result.candidates.filter(({ sourceEndpointId }) => (
+    sourceEndpointId === 'endpoint:geometry:CBL-01:start'
+  ))
+
+  assert.equal(startCandidates.length, 2)
+  assert.ok(startCandidates.every(({ candidateStatus }) => candidateStatus === 'ambiguous'))
+  assert.ok(startCandidates.every(({ proposalStatus }) => proposalStatus === 'ambiguous'))
+})
+
+test('endpoint gap candidate requires same family, continuation angle, and no nearby device', () => {
+  const result = generateRelationArtifacts(topologyBundle({
+    paths: [
+      pathObject('FO-A', 'fiber_optic', 'Fiber Optic', [
+        [110, -7],
+        [110.001, -7],
+      ]),
+      pathObject('FO-B', 'fiber_optic', 'Fiber Optic', [
+        [110.00102, -7],
+        [110.002, -7],
+      ]),
+    ],
+  }))
+
+  assert.ok(result.candidates.some(({ candidateType, distanceMeters }) => (
+    candidateType === 'endpoint_endpoint' && distanceMeters < 3
+  )))
+})
+
+test('valid explicit metadata is confirmed but dangling metadata blocks readiness', () => {
+  const validBundle = topologyBundle({
+    nodes: [
+      node('SW-A', 'infrastructure', 'Switch', [110, -7]),
+      node('SW-B', 'infrastructure', 'Switch', [110.001, -7]),
+    ],
+    explicitRelations: [{
+      explicitRelationEvidenceId: 'explicit-1',
+      datasetVersionId: 'dv-topology',
+      sourceFeatureId: 'feature:SW-A',
+      targetReference: 'SW-B',
+      relationType: 'uplink-to',
+      direction: 'source_to_target',
+    }],
+  })
+  const valid = generateRelationArtifacts(validBundle)
+  assert.equal(valid.confirmedRelations.length, 1)
+  assert.equal(valid.confirmedRelations[0].provenance, 'explicit_kml_metadata')
+  assert.equal(valid.confirmedRelations[0].verificationStatus, 'confirmed')
+  assert.equal(valid.graph.edges.length, 1)
+
+  const danglingBundle = structuredClone(validBundle)
+  danglingBundle.explicitRelations[0].targetReference = 'MISSING'
+  const dangling = generateRelationArtifacts(danglingBundle)
+  assert.ok(dangling.eligibilityIssues.some(({ issueCode }) => (
+    issueCode === 'explicit_relation_dangling'
+  )))
+  assert.equal(dangling.confirmedRelations.length, 0)
+})
+
+test('mixed dataset versions and invalid geometry references reject the whole bundle', () => {
+  const bundle = topologyBundle({
+    nodes: [node('SW-A', 'infrastructure', 'Switch', [110, -7])],
+  })
+  bundle.geometries[0].datasetVersionId = 'other-version'
+  assert.throws(
+    () => generateRelationArtifacts(bundle),
+    (error) => error.code === 'invalid_topology_input_bundle',
+  )
+
+  const missing = topologyBundle({
+    nodes: [node('SW-A', 'infrastructure', 'Switch', [110, -7])],
+  })
+  missing.classifiedNodes[0].geometryIds = ['not-found']
+  assert.throws(
+    () => generateRelationArtifacts(missing),
+    (error) => error.code === 'invalid_topology_input_bundle',
+  )
+})
+
+test('duplicate and zero-length linework are diagnosed without modifying source', () => {
+  const first = pathObject('FO-A', 'fiber_optic', 'Fiber Optic', [
+    [110, -7],
+    [110.001, -7],
+  ])
+  const duplicate = pathObject('FO-B', 'fiber_optic', 'Fiber Optic', [
+    [110.001, -7],
+    [110, -7],
+  ])
+  const bundle = topologyBundle({ paths: [first, duplicate] })
+  const result = generateRelationArtifacts(bundle)
+  assert.ok(result.lineworkIssues.some(({ issueCode }) => issueCode === 'duplicate_linework'))
+  assert.equal(result.graph.edges.length, 0)
+})
+
+function topologyBundle({
+  nodes = [],
+  paths = [],
+  explicitRelations = [],
+} = {}) {
+  const classifiedNodes = nodes.map(({ object }) => object)
+  const classifiedPaths = paths.map(({ object }) => object)
+  const geometries = [...nodes, ...paths].map(({ geometry }) => geometry)
+  return {
+    datasetVersion: {
+      id: 'dv-topology',
+      sourceChecksum: `sha256:${'a'.repeat(64)}`,
+    },
+    site: 'site-1',
+    classifiedNodes,
+    classifiedPaths,
+    geometries,
+    explicitRelations,
+    semanticRuleSetVersion: 'semantic-classifier/1.0.0',
+    topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+  }
+}
+
+function node(assetId, networkFamily, assetType, coordinates) {
+  const sourceFeatureId = `feature:${assetId}`
+  const geometryId = `geometry:${assetId}`
+  return {
+    object: {
+      assetId,
+      sourceFeatureId,
+      siteId: 'site-1',
+      objectRole: 'device_node',
+      networkFamily,
+      assetType,
+      category: assetType,
+      classificationStatus: 'classified',
+      classificationEvidence: evidence(assetType),
+      geometryIds: [geometryId],
+    },
+    geometry: {
+      geometryId,
+      datasetVersionId: 'dv-topology',
+      sourceFeatureId,
+      geometryType: 'Point',
+      coordinates,
+      valid: true,
+      geometryFingerprint: `fingerprint:${assetId}`,
+    },
+  }
+}
+
+function pathObject(assetId, networkFamily, assetType, coordinates) {
+  const sourceFeatureId = `feature:${assetId}`
+  const geometryId = `geometry:${assetId}`
+  return {
+    object: {
+      assetId,
+      sourceFeatureId,
+      siteId: 'site-1',
+      objectRole: 'cable_path',
+      networkFamily,
+      assetType,
+      category: assetType,
+      classificationStatus: 'classified',
+      classificationEvidence: evidence(assetType),
+      geometryIds: [geometryId],
+    },
+    geometry: {
+      geometryId,
+      datasetVersionId: 'dv-topology',
+      sourceFeatureId,
+      geometryType: 'LineString',
+      coordinates,
+      valid: true,
+      geometryFingerprint: `fingerprint:${assetId}`,
+    },
+  }
+}
+
+function evidence(value) {
+  return [{
+    source: 'folder',
+    observedValue: `/Network/${value}`,
+    normalizedValue: value,
+    ruleId: 'fixture',
+    weight: 0.8,
+    explanation: 'Fixture evidence.',
+  }]
+}

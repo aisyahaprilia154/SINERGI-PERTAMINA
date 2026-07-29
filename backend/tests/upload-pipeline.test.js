@@ -13,6 +13,7 @@ import { TokenAuthenticator } from '../src/security/authorization.js'
 import { JsonLinesAuditLog } from '../src/storage/audit-log.js'
 import { JsonDatasetVersionRepository } from '../src/storage/dataset-version-repository.js'
 import { ImportFileStore } from '../src/storage/file-store.js'
+import { TopologyService } from '../src/topology/topology-service.js'
 import { createStoredZip } from './helpers/zip-fixture.js'
 
 const VALID_KML = `<?xml version="1.0" encoding="UTF-8"?>
@@ -120,6 +121,30 @@ test('Administrator upload is queued, persisted as a non-active version, and exp
     assert.equal(status.validation.canActivate, true)
     assert.equal(status.validation.integrity.activeVersionUnchanged, true)
     assert.equal(status.validation.integrity.userVisible, false)
+    assert.equal(status.readiness.parseReadiness, 'ready')
+    assert.equal(status.readiness.topologyReadiness, 'not_applicable')
+    assert.equal(status.parserCoverage.placemarkCount, 1)
+    assert.match(status.parserVersions.parserVersion, /^evidence-parser\//)
+    const readinessResponse = await fetch(
+      `${fixture.origin}/api/dataset-versions/${status.datasetVersion.id}/readiness`,
+      { headers: { authorization: 'Bearer admin-token' } },
+    )
+    const readinessProjection = await readinessResponse.json()
+    assert.equal(readinessResponse.status, 200)
+    assert.equal(readinessProjection.readiness.parseReadiness, 'ready')
+    assert.equal(readinessProjection.coverage.placemarkCount, 1)
+    const topologySummaryResponse = await fetch(
+      `${fixture.origin}/api/dataset-versions/${status.datasetVersion.id}/topology/summary`,
+      { headers: { authorization: 'Bearer admin-token' } },
+    )
+    const topologySummary = await topologySummaryResponse.json()
+    assert.equal(topologySummaryResponse.status, 200)
+    assert.equal(topologySummary.summary.confirmedEdgeCount, 0)
+    assert.equal(topologySummary.readiness.topologyReadiness, 'not_ready')
+    assert.match(
+      topologySummary.topologyRuleSetVersion,
+      /^semantic-relation-engine\//,
+    )
 
     const persisted = await fixture.repository.get(status.datasetVersion.id)
     assert.equal(persisted.assets[0].assetId, 'CCTV-01')
@@ -128,6 +153,10 @@ test('Administrator upload is queued, persisted as a non-active version, and exp
     assert.equal(persisted.datasetVersion.versionNote, 'Fixture halaman admin dataset.')
     assert.equal(persisted.datasetVersion.officialSourceConfirmed, true)
     assert.match(persisted.datasetVersion.sourceStorageKey, /^source-files\/dv-/)
+    assert.equal(persisted.sourceFeatures.length, 1)
+    assert.equal(persisted.sourceGeometries.length, 1)
+    assert.equal(persisted.classifiedObjects[0].objectRole, 'device_node')
+    assert.equal(persisted.topologyInputBundle.topologyReady, false)
 
     const previewResponse = await fetch(
       `${fixture.origin}/api/admin/imports/${status.datasetVersion.id}/preview`,
@@ -381,10 +410,20 @@ test('structured Google Earth KML can use recorded folder and Placemark identity
 test('KMZ import prioritizes doc.kml, records safe resources, and cleans its workspace', async () => {
   const fixture = await createFixture()
   try {
+    const overlayImage = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+    const kmlWithOverlay = VALID_KML.replace('</Document>', `
+      <GroundOverlay id="site-plan">
+        <name>Site plan</name>
+        <Icon><href>icons/camera.png</href></Icon>
+        <LatLonBox>
+          <north>-6.8</north><south>-7</south><east>110.5</east><west>110.3</west>
+        </LatLonBox>
+      </GroundOverlay>
+    </Document>`)
     const archive = createStoredZip([
       { name: 'z-other.kml', content: INVALID_KML },
-      { name: 'doc.kml', content: VALID_KML },
-      { name: 'icons/camera.png', content: Buffer.from([0x89, 0x50, 0x4e, 0x47]) },
+      { name: 'doc.kml', content: kmlWithOverlay },
+      { name: 'icons/camera.png', content: overlayImage },
       { name: 'payload.exe', content: 'ignored' },
     ])
     const accepted = await uploadFile(
@@ -427,6 +466,31 @@ test('KMZ import prioritizes doc.kml, records safe resources, and cleans its wor
       /attachment; filename="network\.kmz"/,
     )
     assert.deepEqual(Buffer.from(await sourceDownload.arrayBuffer()), archive)
+    const overlayProjectionResponse = await fetch(
+      `${fixture.origin}/api/dataset-versions/${status.datasetVersion.id}/overlays`,
+      { headers: { authorization: 'Bearer viewer-token' } },
+    )
+    assert.equal(overlayProjectionResponse.status, 200)
+    const overlayProjection = await overlayProjectionResponse.json()
+    assert.equal(overlayProjection.items.length, 1)
+    assert.match(overlayProjection.items[0].resourceUrl, /overlay-resources/)
+    const overlayResponse = await fetch(
+      `${fixture.origin}${overlayProjection.items[0].resourceUrl}`,
+      { headers: { authorization: 'Bearer viewer-token' } },
+    )
+    assert.equal(overlayResponse.status, 200)
+    assert.equal(overlayResponse.headers.get('content-type'), 'image/png')
+    assert.deepEqual(Buffer.from(await overlayResponse.arrayBuffer()), overlayImage)
+    const viewerGraph = await fetch(
+      `${fixture.origin}/api/dataset-versions/${status.datasetVersion.id}/topology/graph`,
+      { headers: { authorization: 'Bearer viewer-token' } },
+    )
+    assert.equal(viewerGraph.status, 200)
+    const restrictedCandidates = await fetch(
+      `${fixture.origin}/api/dataset-versions/${status.datasetVersion.id}/topology/candidates`,
+      { headers: { authorization: 'Bearer viewer-token' } },
+    )
+    assert.equal(restrictedCandidates.status, 403)
     assert.deepEqual(await readdir(path.join(fixture.dataRoot, 'workspaces')), [])
   } finally {
     await fixture.close()
@@ -482,6 +546,11 @@ async function createFixture() {
     repository,
     auditLog,
   })
+  const topologyService = new TopologyService({
+    repository,
+    auditLog,
+    config: config.topology,
+  })
   const app = createApp({
     config,
     authenticator: new TokenAuthenticator(config.authTokens),
@@ -491,6 +560,7 @@ async function createFixture() {
     jobQueue,
     importPipeline,
     lifecycleService,
+    topologyService,
   })
   await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve))
   const address = app.address()

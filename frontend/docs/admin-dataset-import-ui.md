@@ -18,7 +18,7 @@ UI memakai endpoint relative berikut:
 - `GET /api/admin/imports/:datasetVersionId`.
 
 Vite meneruskan `/api` ke `SINERGI_API_TARGET`, dengan default
-`http://127.0.0.1:3000`. Pada production, frontend dan API diharapkan tersedia
+`http://127.0.0.1:5000`. Pada production, frontend dan API diharapkan tersedia
 pada origin yang sama atau diatur oleh reverse proxy.
 
 Token Administrator dibaca dari `sessionStorage` atau `localStorage` key

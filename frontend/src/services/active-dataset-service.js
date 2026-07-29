@@ -67,3 +67,98 @@ export async function loadActiveAssetDetail({
   }
   return body
 }
+
+export async function loadTopologyProjection({
+  datasetVersionId,
+  projection,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('datasetVersionId wajib tersedia.')
+  if (!['summary', 'graph', 'candidates'].includes(projection)) {
+    throw new TypeError('Projection topology tidak valid.')
+  }
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + `/topology/${projection}`,
+    { token, signal },
+  )
+}
+
+export async function loadDatasetProjection({
+  datasetVersionId,
+  projection,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('datasetVersionId wajib tersedia.')
+  if (!['readiness', 'source-features', 'geometries', 'overlays', 'classification-issues']
+    .includes(projection)) {
+    throw new TypeError('Projection dataset tidak valid.')
+  }
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}/${projection}`,
+    { token, signal },
+  )
+}
+
+export async function reviewTopologyCandidate({
+  candidateId,
+  action,
+  body = {},
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!candidateId) throw new TypeError('candidateId wajib tersedia.')
+  if (!['confirm', 'reject', 'skip', 'select-target'].includes(action)) {
+    throw new TypeError('Action candidate tidak valid.')
+  }
+  return topologyRequest(
+    `${apiBase}/api/topology/candidates/${encodeURIComponent(candidateId)}/${action}`,
+    { token, signal, method: 'POST', body },
+  )
+}
+
+export async function revokeTopologyRelation({
+  relationId,
+  reason,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!relationId) throw new TypeError('relationId wajib tersedia.')
+  return topologyRequest(
+    `${apiBase}/api/topology/relations/${encodeURIComponent(relationId)}/revoke`,
+    { token, signal, method: 'POST', body: { reason } },
+  )
+}
+
+async function topologyRequest(url, {
+  token,
+  signal,
+  method = 'GET',
+  body,
+}) {
+  const response = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+    signal,
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const error = new Error(
+      payload?.error?.message || `Layanan topology gagal (${response.status}).`,
+    )
+    error.code = payload?.error?.code
+    error.status = response.status
+    throw error
+  }
+  return payload
+}

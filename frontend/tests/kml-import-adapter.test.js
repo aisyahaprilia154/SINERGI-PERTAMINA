@@ -472,7 +472,7 @@ test('creates relations from ExtendedData only when an explicit mapping rule is 
   assert.equal(withMapping.relations[0].sourceMetadataKey, 'connectedTo')
 })
 
-test('persists confirmed endpoint topology without changing source LineString', () => {
+test('keeps endpoint topology reviewable without changing source LineString', () => {
   const parserOutput = {
     folders: [{
       name: 'LAN',
@@ -506,11 +506,14 @@ test('persists confirmed endpoint topology without changing source LineString', 
   })
 
   assert.deepEqual(parserOutput, snapshot)
-  assert.equal(result.relations.length, 1)
-  assert.equal(result.relations[0].relationSource, 'inferred_endpoint')
-  assert.equal(result.relations[0].relationStatus, 'confirmed')
-  assert.equal(result.relations[0].sourceGeometryId, result.geometries[2].id)
-  assert.equal(result.topologyGraph.edges.length, 1)
+  assert.equal(result.relations.length, 0)
+  assert.equal(result.topologyGraph.edges.length, 0)
+  assert.equal(result.topologyGraph.spatialCandidates.length, 1)
+  assert.equal(result.topologyGraph.spatialCandidates[0].candidateStatus, 'candidate')
+  assert.equal(
+    result.topologyGraph.spatialCandidates[0].sourceGeometryId,
+    result.geometries[2].id,
+  )
 })
 
 test('ambiguous topology candidates become ImportIssue diagnostics, not confirmed edges', () => {

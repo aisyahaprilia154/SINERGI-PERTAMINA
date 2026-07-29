@@ -29,7 +29,7 @@ test('explicit relation has priority and is confirmed', () => {
   assert.equal(graph.edges[0].relationStatus, 'confirmed')
 })
 
-test('line endpoints snap with geographic tolerance and create one edge', () => {
+test('line endpoints within tolerance remain reviewable candidates', () => {
   const graph = buildTopologyGraph(topologyInput({
     assets: [
       asset('node-a', 'A', 'LAN', 'Switch'),
@@ -43,11 +43,12 @@ test('line endpoints snap with geographic tolerance and create one edge', () => 
     ],
   }))
 
-  assert.equal(graph.edges.length, 1)
-  assert.deepEqual(edgePair(graph.edges[0]), ['A', 'B'])
-  assert.equal(graph.edges[0].relationSource, 'inferred_endpoint')
-  assert.equal(graph.edges[0].sourceGeometryId, 'line-1')
-  assert.ok(graph.edges[0].distanceMeters < 5)
+  assert.equal(graph.edges.length, 0)
+  assert.equal(graph.spatialCandidates.length, 1)
+  assert.deepEqual(edgePair(graph.spatialCandidates[0]), ['A', 'B'])
+  assert.equal(graph.spatialCandidates[0].candidateStatus, 'candidate')
+  assert.equal(graph.spatialCandidates[0].sourceGeometryId, 'line-1')
+  assert.ok(graph.spatialCandidates[0].distanceMeters < 5)
 })
 
 test('line endpoints outside tolerance remain unresolved', () => {
@@ -94,7 +95,7 @@ test('nearly equal endpoint candidates are ambiguous and never confirmed', () =>
   assert.equal(graph.edges.length, 0)
 })
 
-test('point on line splits the topology path without changing source geometry', () => {
+test('point on line produces candidates without changing source geometry', () => {
   const input = topologyInput({
     assets: [
       asset('node-a', 'A', 'LAN', 'Switch'),
@@ -114,16 +115,19 @@ test('point on line splits the topology path without changing source geometry', 
   const graph = buildTopologyGraph(input)
 
   assert.deepEqual(input, snapshot)
-  assert.deepEqual(graph.edges.map(edgePair).sort(), [
+  assert.equal(graph.edges.length, 0)
+  assert.deepEqual(graph.spatialCandidates.map(edgePair).sort(), [
     ['A', 'MID'],
     ['B', 'MID'],
   ])
-  assert.ok(graph.edges.every(
-    ({ relationSource }) => relationSource === 'inferred_point_on_line',
+  assert.ok(graph.spatialCandidates.every(
+    ({ relationSource, candidateStatus }) => (
+      relationSource === 'inferred_point_on_line' && candidateStatus === 'candidate'
+    ),
   ))
 })
 
-test('intersecting compatible lines create internal virtual junction connectivity', () => {
+test('intersecting lines never create virtual junction connectivity', () => {
   const graph = buildTopologyGraph(topologyInput({
     assets: [
       asset('node-a', 'A', 'LAN', 'Switch'),
@@ -143,15 +147,15 @@ test('intersecting compatible lines create internal virtual junction connectivit
     ],
   }))
 
-  assert.equal(graph.virtualJunctions.length, 1)
-  assert.equal(graph.connectedComponents.length, 1)
-  assert.equal(graph.connectedComponents[0].nodeIds.length, 4)
-  assert.ok(graph.edges.some(
-    ({ relationSource }) => relationSource === 'inferred_line_intersection',
-  ))
-  assert.ok(graph.virtualJunctions.every(
-    ({ id }) => !graph.nodes.some((node) => node.id === id),
-  ))
+  assert.equal(graph.virtualJunctions.length, 0)
+  assert.equal(graph.edges.length, 0)
+  assert.equal(graph.connectedComponents.length, 4)
+  assert.equal(
+    graph.spatialCandidates.some(
+      ({ relationSource }) => relationSource === 'inferred_line_intersection',
+    ),
+    false,
+  )
 })
 
 test('explicit and inferred copies of the same edge are deduplicated', () => {
