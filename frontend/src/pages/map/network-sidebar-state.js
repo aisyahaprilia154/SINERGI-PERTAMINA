@@ -1,5 +1,8 @@
+import { resolveSiteScope } from '../../domain/site-scope.js'
+
 export function parseMapUrlState(search, { networkIds, assetIds, defaultNetworkIds = [] }) {
   const params = new URLSearchParams(search)
+  const siteScope = resolveSiteScope(params.get('siteScopeId'))
   const validNetworkIds = new Set(networkIds)
   const validAssetIds = new Set(assetIds)
   const selectedNetworkIds = params.has('selectedNetworkIds')
@@ -10,6 +13,7 @@ export function parseMapUrlState(search, { networkIds, assetIds, defaultNetworkI
   const requestedTraceTo = params.get('traceTo')
 
   return {
+    siteScopeId: siteScope.id,
     selectedNetworkIds,
     selectedAssetId: validAssetIds.has(requestedAssetId) ? requestedAssetId : null,
     traceFrom: validAssetIds.has(requestedTraceFrom) ? requestedTraceFrom : null,
@@ -19,9 +23,16 @@ export function parseMapUrlState(search, { networkIds, assetIds, defaultNetworkI
 
 export function serializeMapUrlState(
   search,
-  { selectedNetworkIds, selectedAssetId, traceFrom = null, traceTo = null },
+  {
+    selectedNetworkIds,
+    selectedAssetId,
+    traceFrom = null,
+    traceTo = null,
+    siteScopeId = null,
+  },
 ) {
   const params = new URLSearchParams(search)
+  if (siteScopeId) params.set('siteScopeId', resolveSiteScope(siteScopeId).id)
   params.set('selectedNetworkIds', [...selectedNetworkIds].join(','))
 
   if (selectedAssetId) params.set('selectedAssetId', selectedAssetId)

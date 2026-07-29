@@ -1,3 +1,5 @@
+import { getAssetRenderLabels } from '../../domain/asset-display-name.js'
+
 export function renderAssetDetailDrawer({
   status = 'ready',
   errorMessage = null,
@@ -14,16 +16,22 @@ export function renderAssetDetailDrawer({
 
   const category = getAssetCategory(asset, assetNetworks)
   const hasIpAddress = asset.ip && !['—', 'â€”', '-'].includes(asset.ip)
+  const labels = getAssetRenderLabels(asset, {
+    shortMax: 18,
+    displayMax: 30,
+  })
 
   return `
-    <header class="drawer-header">
+    <header class="drawer-header" data-asset-stable-id="${escapeAttribute(
+      asset.stableId || asset.id,
+    )}">
       <div class="drawer-heading">
         <span class="asset-type-icon">
           <span class="material-symbols-outlined" aria-hidden="true">${assetIcon(asset.type)}</span>
         </span>
         <span>
           <small>Detail aset</small>
-          <strong>${escapeHtml(asset.id)}</strong>
+          <strong title="${escapeAttribute(labels.fullShortLabel)}">${escapeHtml(labels.shortLabel)}</strong>
         </span>
       </div>
       <button class="icon-button close-drawer" type="button" aria-label="Tutup detail aset">
@@ -42,7 +50,7 @@ export function renderAssetDetailDrawer({
             ${escapeHtml(asset.status)}
           </span>
         </div>
-        <h2>${escapeHtml(asset.name)}</h2>
+        <h2 title="${escapeAttribute(labels.fullDisplayName)}">${escapeHtml(labels.fullDisplayName)}</h2>
         <p>${escapeHtml(asset.type)}</p>
       </section>
 
@@ -51,8 +59,9 @@ export function renderAssetDetailDrawer({
       <section class="drawer-section" aria-labelledby="asset-information-title">
         <h3 id="asset-information-title">Informasi aset</h3>
         <dl class="asset-properties">
-          <div><dt>Asset ID</dt><dd>${escapeHtml(asset.id)}</dd></div>
-          <div><dt>Nama aset</dt><dd>${escapeHtml(asset.name)}</dd></div>
+          <div><dt>Asset ID</dt><dd>${escapeHtml(asset.assetId || 'Tidak tersedia')}</dd></div>
+          <div><dt>Nama aset</dt><dd>${escapeHtml(labels.fullDisplayName)}</dd></div>
+          <div><dt>Nama sumber</dt><dd>${escapeHtml(asset.sourceName || 'Tidak tersedia')}</dd></div>
           <div><dt>Kategori</dt><dd>${escapeHtml(category.label)}</dd></div>
           <div><dt>Jenis aset</dt><dd>${escapeHtml(asset.type)}</dd></div>
           <div><dt>Lokasi</dt><dd>${escapeHtml(asset.location || 'Lokasi belum tersedia')}</dd></div>
@@ -95,8 +104,12 @@ export function renderAssetDetailDrawer({
                     ${assetIcon(connectedAsset.type)}
                   </span>
                   <span>
-                    <strong>${escapeHtml(connectedAsset.name)}</strong>
-                    <small>${escapeHtml(connectedAsset.id)} · ${escapeHtml(network?.shortName || network?.name || 'Topologi terkonfirmasi')}</small>
+                    <strong>${escapeHtml(
+                      getAssetRenderLabels(connectedAsset).fullDisplayName,
+                    )}</strong>
+                    <small>${escapeHtml(
+                      getAssetRenderLabels(connectedAsset).fullShortLabel,
+                    )} · ${escapeHtml(network?.shortName || network?.name || 'Topologi terkonfirmasi')}</small>
                   </span>
                   <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
                 </button>
@@ -118,6 +131,8 @@ export function renderAssetDetailDrawer({
             <div><dt>Kantor cabang</dt><dd>${escapeHtml(activeContext.branchName)}</dd></div>
             <div><dt>Versi dataset</dt><dd>${escapeHtml(activeContext.version)}</dd></div>
             <div><dt>Dipublikasikan</dt><dd>${escapeHtml(activeContext.publishedAt || 'Belum tersedia')}</dd></div>
+            <div><dt>Folder sumber</dt><dd>${escapeHtml(asset.sourceFolderPath || 'Tidak tersedia')}</dd></div>
+            <div><dt>Stable ID</dt><dd>${escapeHtml(asset.stableId || asset.id)}</dd></div>
           </dl>
         ` : `
           <p class="section-summary">Informasi operasional tambahan tersedia tanpa membuka mode edit.</p>
@@ -159,6 +174,7 @@ export function renderAssetDetailDrawer({
 
 function renderTraceSection(trace) {
   if (!trace.status || trace.status === 'idle') return ''
+  if (['selecting_start', 'selecting_end', 'calculating'].includes(trace.status)) return ''
 
   if (trace.status === 'loading') {
     return `
@@ -186,8 +202,8 @@ function renderTraceSection(trace) {
           ${(trace.candidates || []).map(({ asset, distance }) => `
             <button type="button" data-trace-target="${escapeAttribute(asset.id)}">
               <span>
-                <strong>${escapeHtml(asset.name)}</strong>
-                <small>${escapeHtml(asset.id)} · ${distance} hubungan</small>
+                <strong>${escapeHtml(getAssetRenderLabels(asset).fullDisplayName)}</strong>
+                <small>${escapeHtml(getAssetRenderLabels(asset).fullShortLabel)} · ${distance} hubungan</small>
               </span>
               <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
             </button>
@@ -197,13 +213,14 @@ function renderTraceSection(trace) {
     `
   }
 
-  if (trace.status === 'error') {
+  if (trace.status === 'error' || trace.status === 'no_path') {
+    const noPath = trace.status === 'no_path'
     return `
       <section class="drawer-section trace-panel trace-error" role="alert">
         <div class="trace-panel-heading">
-          <span class="material-symbols-outlined" aria-hidden="true">error</span>
+          <span class="material-symbols-outlined" aria-hidden="true">${noPath ? 'route' : 'error'}</span>
           <div>
-            <h3>Tracing tidak dapat diselesaikan</h3>
+            <h3>${noPath ? 'Jalur tidak ditemukan' : 'Tracing tidak dapat diselesaikan'}</h3>
             <p>${escapeHtml(trace.error || 'Relasi atau tujuan tidak tersedia pada dataset aktif.')}</p>
           </div>
         </div>
@@ -211,7 +228,7 @@ function renderTraceSection(trace) {
     `
   }
 
-  if (trace.status === 'active') {
+  if (trace.status === 'result' || trace.status === 'active') {
     return `
       <section class="drawer-section trace-panel" aria-labelledby="trace-path-title">
         <div class="trace-panel-heading success">
@@ -228,8 +245,8 @@ function renderTraceSection(trace) {
               <li>
                 <span class="trace-order">${index + 1}</span>
                 <span>
-                  <strong>${escapeHtml(pathAsset.name)}</strong>
-                  <small>${escapeHtml(pathAsset.id)}</small>
+                  <strong>${escapeHtml(getAssetRenderLabels(pathAsset).fullDisplayName)}</strong>
+                  <small>${escapeHtml(getAssetRenderLabels(pathAsset).fullShortLabel)}</small>
                   ${relation?.networkName ? `<em>${escapeHtml(relation.networkName)}</em>` : ''}
                 </span>
               </li>

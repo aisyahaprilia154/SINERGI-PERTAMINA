@@ -695,6 +695,7 @@ export function adaptKmlImportResult({
     relations,
     layers,
     config: isPlainRecord(mapping.topology) ? mapping.topology : {},
+    datasetVersionId: datasetVersion.id,
   })
   topologyGraph.edges
     .filter(({ relationSource }) => relationSource !== 'explicit')
@@ -710,9 +711,11 @@ export function adaptKmlImportResult({
         ...(edge.pathAssetId ? { pathAssetId: edge.pathAssetId } : {}),
         relationSource: edge.relationSource,
         relationStatus: edge.relationStatus,
+        category: edge.category,
         ...(edge.sourceGeometryId
           ? { sourceGeometryId: edge.sourceGeometryId }
           : {}),
+        sourceGeometryIds: cloneValue(edge.sourceGeometryIds ?? []),
         ...(Number.isFinite(edge.distanceMeters)
           ? { distanceMeters: edge.distanceMeters }
           : {}),
@@ -737,6 +740,20 @@ export function adaptKmlImportResult({
     })
   })
   topologyGraph.unresolvedEndpoints.forEach((diagnostic) => {
+    if (diagnostic.kind === 'explicit_relation') {
+      addIssue({
+        severity: 'warning',
+        issueCode: diagnostic.reason === 'cross_site_relation_rejected'
+          ? 'topology_cross_site_relation_rejected'
+          : 'topology_explicit_relation_unresolved',
+        message: diagnostic.reason === 'cross_site_relation_rejected'
+          ? `Relation eksplisit ${diagnostic.sourceAssetId} → ${diagnostic.targetAssetId} ditolak karena berada di luar scope yang sama.`
+          : `Relation eksplisit ${diagnostic.sourceAssetId || '-'} → ${diagnostic.targetAssetId || '-'} tidak dapat diselesaikan pada dataset version ini.`,
+        assetId: diagnostic.sourceAssetId,
+        canActivate: true,
+      })
+      return
+    }
     addIssue({
       severity: 'information',
       issueCode: 'topology_endpoint_unresolved',

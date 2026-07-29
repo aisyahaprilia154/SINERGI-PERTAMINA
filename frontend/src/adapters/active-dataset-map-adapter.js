@@ -1,4 +1,13 @@
 import { buildTopologyGraph } from '../domain/topology-builder.js'
+import {
+  DEFAULT_SITE_SCOPE_ID,
+  scopeActiveDatasetRecordsToSite,
+} from '../domain/site-scope.js'
+import {
+  deriveAssetDisplayName,
+  normalizeAssetDisplayFields,
+  resolveDuplicateShortLabels,
+} from '../domain/asset-display-name.js'
 
 const CATEGORY_STYLE = Object.freeze({
   cctv: { color: '#9698f4', softColor: '#f1f1fe', type: 'CCTV', order: 1 },
@@ -18,7 +27,41 @@ const CATEGORY_STYLE = Object.freeze({
  * counted as a selectable node. Source coordinates remain immutable; projected
  * display coordinates exist only on the returned view model.
  */
-export function adaptActiveDatasetForMap(payload) {
+export function adaptActiveDatasetForMap(payload, { siteScopeId = null } = {}) {
+  if (siteScopeId) return scopeDatasetToSite(payload, siteScopeId)
+  return adaptDatasetRecordsForMap(payload)
+}
+
+/**
+ * Creates the single scoped domain consumed by the map, sidebar, tracing,
+ * schematic diagram, viewport selection, and contextual export.
+ */
+export function scopeDatasetToSite(payload, siteScopeId = DEFAULT_SITE_SCOPE_ID) {
+  const scopedSource = scopeActiveDatasetRecordsToSite(payload, siteScopeId)
+  const mapData = adaptDatasetRecordsForMap(scopedSource)
+  const scopedBounds = geometryBounds(mapData.geometries)
+  const scopeSummary = {
+    ...scopedSource.scopeSummary,
+    visibleObjectCount: mapData.geometries.length,
+    visibleNodeCount: mapData.counts.assetNodeCount,
+    visibleLineCount: mapData.counts.lineCount,
+    visiblePolygonCount: mapData.counts.polygonCount,
+    networkCount: mapData.counts.networkCount,
+  }
+  return {
+    ...mapData,
+    scopedLayers: mapData.layers,
+    scopedAssets: mapData.assets,
+    scopedGeometries: mapData.geometries,
+    scopedRelations: mapData.topologyGraph.edges,
+    scopedNetworks: mapData.networks,
+    scopedTopologyGraph: mapData.topologyGraph,
+    scopedBounds,
+    scopeSummary,
+  }
+}
+
+function adaptDatasetRecordsForMap(payload) {
   if (!payload?.datasetVersion || !Array.isArray(payload.assets)) {
     throw new TypeError('Response dataset aktif tidak valid.')
   }
@@ -47,11 +90,11 @@ export function adaptActiveDatasetForMap(payload) {
   const geometries = allMapGeometries.filter(({ sourceStatus }) => sourceStatus === 'visible')
   const geometriesByOwner = groupBy(allMapGeometries, 'sourceNodeId')
 
-  const exportAssets = payload.assets.map((asset) => createOwnerFeature({
+  const exportAssets = resolveDuplicateShortLabels(payload.assets.map((asset) => createOwnerFeature({
     asset,
     layer: layerById.get(asset.layerId),
     geometries: geometriesByOwner.get(asset.id) ?? [],
-  }))
+  })))
   const featureByAssetId = new Map(exportAssets.map((asset) => [asset.id, asset]))
 
   const assets = exportAssets
@@ -60,13 +103,15 @@ export function adaptActiveDatasetForMap(payload) {
     .filter(Boolean)
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
   const validNodeIds = new Set(assets.map(({ id }) => id))
-  const topologyGraph = buildTopologyGraph({
+  const topologyGraph = annotateTopologyGraph(buildTopologyGraph({
     assets: payload.assets,
     geometries: payload.geometries ?? [],
     relations: payload.relations ?? [],
     layers,
     config: payload.topologyConfig ?? {},
-  })
+    siteScopeId: payload.siteScope?.id ?? null,
+    datasetVersionId: payload.datasetVersion.id,
+  }), payload.siteScope)
   const relations = topologyGraph.edges
     .filter((edge) => (
       validNodeIds.has(edge.sourceNodeId)
@@ -120,7 +165,8 @@ export function adaptActiveDatasetForMap(payload) {
   return {
     activeContext: {
       branchId: payload.datasetVersion.branchId,
-      branchName: formatName(payload.datasetVersion.branchId),
+      branchName: payload.siteScope?.displayName || formatName(payload.datasetVersion.branchId),
+      datasetBranchName: formatName(payload.datasetVersion.branchId),
       datasetId: payload.datasetVersion.datasetId,
       datasetVersionId: payload.datasetVersion.id,
       datasetName: payload.datasetVersion.versionName,
@@ -128,6 +174,10 @@ export function adaptActiveDatasetForMap(payload) {
       sourceFilename: payload.datasetVersion.sourceFilename,
       publishedAt: payload.datasetVersion.activatedAt || payload.activePointer?.activatedAt,
       activePointerRevision: payload.activePointer?.revision,
+      ...(payload.siteScope ? {
+        siteScopeId: payload.siteScope.id,
+        siteScopeName: payload.siteScope.displayName,
+      } : {}),
     },
     assets,
     assetById,
@@ -142,6 +192,10 @@ export function adaptActiveDatasetForMap(payload) {
       ...counts,
       assetsWithoutGeometry: exportAssets.filter(({ geometry }) => !geometry.length).length,
     },
+    ...(payload.siteScope ? {
+      siteScope: structuredClone(payload.siteScope),
+      scopeSummary: structuredClone(payload.scopeSummary),
+    } : {}),
     hasRenderableData: geometries.length > 0,
   }
 }
@@ -151,9 +205,17 @@ export function adaptActiveAssetDetail(payload, mapAsset) {
     throw new TypeError('Response detail aset aktif tidak valid.')
   }
   const asset = payload.asset
+  const properties = structuredClone(asset.properties ?? {})
+  const displayName = deriveAssetDisplayName({
+    ...mapAsset,
+    sourceName: asset.name || mapAsset.sourceName,
+    properties,
+  })
   return {
     ...mapAsset,
-    name: asset.name || mapAsset.name,
+    sourceName: asset.name || mapAsset.sourceName,
+    displayName,
+    name: displayName,
     category: asset.category || mapAsset.category,
     type: normalizeAssetType(asset.type, asset.category),
     assetType: normalizeAssetType(asset.type, asset.category),
@@ -164,7 +226,7 @@ export function adaptActiveAssetDetail(payload, mapAsset) {
     status: readProperty(asset, 'status') || mapAsset.status,
     ip: readProperty(asset, 'ipAddress') || readProperty(asset, 'ip_address') || '—',
     owner: readProperty(asset, 'owner') || 'Tidak tersedia',
-    properties: structuredClone(asset.properties ?? {}),
+    properties,
   }
 }
 
@@ -172,15 +234,33 @@ function createOwnerFeature({ asset, layer, geometries }) {
   const category = normalizeCategory(asset.category, asset.type, layer)
   const type = normalizeAssetType(asset.type, asset.category || category, layer)
   const explicitStatus = readProperty(asset, 'status')
+  const displayFields = normalizeAssetDisplayFields({
+    ...asset,
+    stableId: asset.assetId,
+    sourceName: asset.name,
+    assetType: type,
+    type,
+    category,
+  }, {
+    sourceFolderPath: layer?.sourceFolderPath
+      ?? asset.properties?.sourceIdentityMapping?.sourceFolderPath,
+  })
   return {
-    id: asset.assetId,
-    assetId: asset.assetId,
+    id: displayFields.stableId,
+    stableId: displayFields.stableId,
+    assetId: displayFields.assetId,
     sourceNodeId: asset.id,
-    name: asset.name || asset.assetId,
+    sourceName: displayFields.sourceName,
+    displayName: displayFields.displayName,
+    shortLabel: displayFields.shortLabel,
+    name: displayFields.displayName,
+    sourceFolderPath: displayFields.sourceFolderPath,
     type,
     assetType: type,
     category,
     status: explicitStatus || 'Status tidak tersedia',
+    issueCount: Number.isInteger(asset.issueCount) ? asset.issueCount : 0,
+    hasIssue: Number(asset.issueCount) > 0,
     sourceStatus: sourceStatusFor(asset, layer),
     location: asset.location
       || readProperty(asset, 'location')
@@ -189,6 +269,12 @@ function createOwnerFeature({ asset, layer, geometries }) {
     datasetVersionId: asset.datasetVersionId,
     layerId: asset.layerId,
     networkIds: [],
+    properties: structuredClone(asset.properties ?? {}),
+    sourcePlacemarkId: asset.sourcePlacemarkId ?? null,
+    ...(asset.siteScopeId ? {
+      siteScopeId: asset.siteScopeId,
+      siteScopeName: asset.siteScopeName,
+    } : {}),
     geometry: geometries.map((geometry) => structuredClone(geometry)),
   }
 }
@@ -236,7 +322,7 @@ function createSemanticNetworks({
     const key = categoryKey(node.category, node.type)
     const group = ensureGroup(key)
     group.nodeIds.add(node.id)
-    group.assetIds.add(node.assetId)
+    group.assetIds.add(node.id)
     if (node.layerId) group.layerIds.add(node.layerId)
   })
   geometries.forEach((geometry) => {
@@ -323,6 +409,13 @@ function createSemanticNetworks({
           layerById,
         ),
         isDefaultVisible: true,
+        ...(networkNodes[0]?.siteScopeId ? {
+          siteScopeId: networkNodes[0].siteScopeId,
+          siteScopeName: networkNodes[0].siteScopeName,
+        } : networkGeometries[0]?.siteScopeId ? {
+          siteScopeId: networkGeometries[0].siteScopeId,
+          siteScopeName: networkGeometries[0].siteScopeName,
+        } : {}),
         ...(bounds ? { bounds } : {}),
         ...(displayBounds ? { displayBounds } : {}),
       }
@@ -367,7 +460,10 @@ function toMapGeometry(geometry, bounds) {
     ...(Number.isInteger(geometry.geometryPartIndex)
       ? { geometryPartIndex: geometry.geometryPartIndex }
       : {}),
-    ...(owner?.assetId ? { assetId: owner.assetId } : {}),
+    ...(owner?.assetId ? {
+      assetId: owner.assetId,
+      stableId: owner.assetId,
+    } : {}),
     sourceNodeId: geometry.assetNodeId,
     geometryType: geometry.geometryType,
     coordinates: structuredClone(geometry.coordinates),
@@ -375,6 +471,10 @@ function toMapGeometry(geometry, bounds) {
     layerId: owner?.layerId ?? geometry.layer?.id ?? null,
     category,
     sourceStatus: geometry.sourceStatus,
+    ...(owner?.siteScopeId ? {
+      siteScopeId: owner.siteScopeId,
+      siteScopeName: owner.siteScopeName,
+    } : {}),
     ...(geometry.altitudeMode ? { altitudeMode: geometry.altitudeMode } : {}),
     sourceGeometry: structuredClone(geometry.sourceGeometry),
   }
@@ -391,6 +491,10 @@ function normalizeLayers(layers) {
       category: layer.category ?? 'unmapped',
       displayOrder: Number.isFinite(layer.displayOrder) ? layer.displayOrder : index,
       defaultVisible: layer.defaultVisible !== false,
+      ...(layer.siteScopeId ? {
+        siteScopeId: layer.siteScopeId,
+        siteScopeName: layer.siteScopeName,
+      } : {}),
     }))
     .sort((left, right) => left.displayOrder - right.displayOrder
       || left.name.localeCompare(right.name, 'id'))
@@ -399,6 +503,20 @@ function normalizeLayers(layers) {
     ...layer,
     defaultVisible: hasVisibleLayerAncestry(layer, layerById),
   }))
+}
+
+function annotateTopologyGraph(topologyGraph, siteScope) {
+  if (!siteScope) return topologyGraph
+  const scopeFields = {
+    siteScopeId: siteScope.id,
+    siteScopeName: siteScope.displayName,
+  }
+  return {
+    ...topologyGraph,
+    ...scopeFields,
+    nodes: topologyGraph.nodes.map((node) => ({ ...node, ...scopeFields })),
+    edges: topologyGraph.edges.map((edge) => ({ ...edge, ...scopeFields })),
+  }
 }
 
 function hasVisibleLayerAncestry(layer, layerById) {
