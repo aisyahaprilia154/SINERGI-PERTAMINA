@@ -3,6 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "npm run dev --prefix backend"
+    "dev": "node scripts/dev.mjs"
   }
 }
