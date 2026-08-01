@@ -27,6 +27,10 @@ import { openSchematicDialog } from './diagram-dialog.js'
 import { openMapDataTransferDialog } from './map-data-transfer-dialog.js'
 import { buildSchematicGraph } from './schematic-graph.js'
 import { calculateSchematicLayout } from './schematic-layout.js'
+import {
+  emptyOperationalTopologyGraph,
+  TOPOLOGY_NOT_READY_MESSAGE,
+} from '../../domain/topology-readiness.js'
 
 export async function renderMapPage(container) {
   document.title = 'Peta Jaringan — SINERGI'
@@ -90,6 +94,13 @@ export async function renderMapPage(container) {
     locationGroups,
     renderingSummary,
   } = mapData
+  const topologyReadiness = mapData.topologyReadiness ?? {
+    ready: false,
+    message: TOPOLOGY_NOT_READY_MESSAGE,
+  }
+  const operationalTopologyGraph = topologyReadiness.ready
+    ? fullTopologyGraph
+    : emptyOperationalTopologyGraph(activeContext.datasetVersionId)
   const selectedArea = selectLocationGroup(window.location.search, locationGroups)
   const {
     assets,
@@ -107,7 +118,7 @@ export async function renderMapPage(container) {
     geometries: allGeometries,
     exportAssets: allExportAssets,
     networks: allNetworks,
-    topologyGraph: fullTopologyGraph,
+    topologyGraph: operationalTopologyGraph,
   })
   const hasRenderableData = geometries.length > 0
   const resolvedOverlays = (overlayResult[0].status === 'fulfilled'
@@ -173,13 +184,15 @@ export async function renderMapPage(container) {
         ${renderNetworkSidebar(activeContext, selection.selectedNetworkIds.size, counts, {
           locationGroups,
           selectedArea,
+          topologyReadiness,
         })}
         ${renderNetworkMapCanvas(activeContext, {
           empty: !hasRenderableData,
           assetsWithoutGeometry: renderingSummary.assetsWithoutGeometry,
           selectedArea,
           counts,
-          confirmedConnectionCount: topologyGraph.edges.length,
+          confirmedConnectionCount: topologyReadiness.ready ? topologyGraph.edges.length : 0,
+          topologyReadiness,
         })}
       </main>
     </div>
@@ -396,6 +409,8 @@ export async function renderMapPage(container) {
       activeContext,
       showAdditionalMetadata: state.showAdditionalMetadata,
       trace: getDrawerTraceState(),
+      topologyReady: topologyReadiness.ready,
+      topologyMessage: topologyReadiness.message || TOPOLOGY_NOT_READY_MESSAGE,
     })
     drawer.classList.add('open')
     drawer.setAttribute('aria-hidden', 'false')
@@ -531,6 +546,15 @@ export async function renderMapPage(container) {
 
   function beginTracing(startId = null, { historyMode = 'push' } = {}) {
     resetTraceState()
+    if (!topologyReadiness.ready) {
+      state.traceStatus = 'error'
+      state.traceError = topologyReadiness.message || TOPOLOGY_NOT_READY_MESSAGE
+      updateUrl(historyMode)
+      updateTraceBanner()
+      renderDrawer()
+      syncMap()
+      return
+    }
     if (!startId) {
       state.traceStatus = 'selecting-start'
       updateUrl(historyMode)
@@ -569,6 +593,10 @@ export async function renderMapPage(container) {
   }
 
   function runTraceTo(targetId, { historyMode = 'push', defer = true } = {}) {
+    if (!topologyReadiness.ready) {
+      beginTracing(null, { historyMode })
+      return
+    }
     if (!state.traceFromId) {
       beginTracing(selection.selectedAssetId)
       return
@@ -617,11 +645,19 @@ export async function renderMapPage(container) {
   }
 
   function openSchematic() {
+    if (!topologyReadiness.ready) {
+      state.traceStatus = 'error'
+      state.traceError = topologyReadiness.message || TOPOLOGY_NOT_READY_MESSAGE
+      updateTraceBanner()
+      renderDrawer()
+      return
+    }
     const fullMapGraph = buildSchematicGraph({
       assets: diagramAssets,
       networks,
       topologyGraph,
       scope: 'full-map',
+      topologyReady: topologyReadiness.ready,
     })
     const traceGraph = buildSchematicGraph({
       assets: diagramAssets,
@@ -630,6 +666,7 @@ export async function renderMapPage(container) {
       scope: 'trace',
       tracePath: state.traceStatus === 'active' ? state.tracePath : [],
       traceRelations: state.traceStatus === 'active' ? state.traceRelations : [],
+      topologyReady: topologyReadiness.ready,
     })
     openSchematicDialog({
       diagrams: {
@@ -657,6 +694,8 @@ export async function renderMapPage(container) {
       initialMode,
       onActivated: () => window.location.reload(),
       onOpenDiagram: openSchematic,
+      topologyReady: topologyReadiness.ready,
+      topologyMessage: topologyReadiness.message || TOPOLOGY_NOT_READY_MESSAGE,
     })
   }
 
@@ -809,6 +848,14 @@ export async function renderMapPage(container) {
   function restoreTraceState(urlState) {
     resetTraceState()
     if (!urlState.traceFrom) {
+      updateTraceBanner()
+      return
+    }
+
+    if (!topologyReadiness.ready) {
+      state.traceFromId = urlState.traceFrom
+      state.traceStatus = 'error'
+      state.traceError = topologyReadiness.message || TOPOLOGY_NOT_READY_MESSAGE
       updateTraceBanner()
       return
     }

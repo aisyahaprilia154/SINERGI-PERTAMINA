@@ -302,6 +302,7 @@ async function initializeReview(container, mapData) {
     const confirmedCount = projections.graph.confirmedRelations.filter(
       ({ verificationStatus }) => verificationStatus === 'confirmed',
     ).length
+    const confirmedDeviceEdgeCount = projections.graph.graph?.edges?.length ?? 0
     const actions = container.querySelector('.review-bulk-actions')
     actions.innerHTML = `
       <details class="bulk-actions-menu">
@@ -320,7 +321,7 @@ async function initializeReview(container, mapData) {
             ${confirmedCount ? '' : 'disabled'}>
             <span class="material-symbols-outlined" aria-hidden="true">delete_sweep</span>
             <span><strong>Hapus semua konfirmasi</strong>
-              <small>${confirmedCount} koneksi di seluruh dataset</small></span>
+              <small>${confirmedDeviceEdgeCount} device edge &middot; ${confirmedCount} relation/attachment</small></span>
           </button>
         </div>
       </details>

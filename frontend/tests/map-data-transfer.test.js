@@ -114,3 +114,40 @@ test('map context and toolbar present a compact branch name and admin data actio
   assert.match(finder, /Cari nama, ID, atau lokasi aset/)
   assert.match(finder, /aria-controls="map-asset-results"/)
 })
+
+test('map hides unready topology actions and displays the exact readiness message', () => {
+  const topologyReadiness = {
+    ready: false,
+    message: 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.',
+  }
+  const context = renderMapContextPill(activeContext, topologyReadiness)
+  const controls = renderMapFloatingControls(activeContext, topologyReadiness)
+
+  assert.match(context, /Topology-ready: No/)
+  assert.match(controls, /class="tool-button trace-toggle"[^>]*disabled aria-disabled="true"/)
+  assert.match(controls, /class="tool-button diagram-toggle"[^>]*disabled aria-disabled="true"/)
+  assert.match(controls, /Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\./)
+})
+
+test('export dialog also disables the diagram entry point while topology is unready', () => {
+  const html = renderMapDataTransferDialog({
+    activeContext,
+    assets,
+    networks: [{ id: 'cctv', nodeIds: ['CCTV-01'] }],
+    selectedNetworkIds: new Set(['cctv']),
+    topologyReady: false,
+    topologyMessage: 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.',
+    state: {
+      mode: 'export',
+      configStatus: 'ready',
+      config: { limits: { maxFileSize: 50 * 1024 * 1024 } },
+      versionName: 'Export',
+      officialSourceConfirmed: false,
+      phase: 'idle',
+      error: null,
+    },
+  })
+
+  assert.match(html, /class="button secondary open-map-diagram"[^>]*disabled aria-disabled="true"/)
+  assert.match(html, /Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\./)
+})

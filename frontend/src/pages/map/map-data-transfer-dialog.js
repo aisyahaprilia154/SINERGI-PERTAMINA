@@ -23,6 +23,8 @@ export function openMapDataTransferDialog({
   initialMode = 'import',
   onActivated,
   onOpenDiagram,
+  topologyReady = true,
+  topologyMessage = 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.',
 }) {
   const dialog = document.createElement('dialog')
   dialog.className = 'map-transfer-dialog'
@@ -63,6 +65,8 @@ export function openMapDataTransferDialog({
       assets,
       networks,
       selectedNetworkIds,
+      topologyReady,
+      topologyMessage,
       state,
     })
     bindEvents()
@@ -311,6 +315,8 @@ export function renderMapDataTransferDialog({
   assets,
   networks,
   selectedNetworkIds,
+  topologyReady = true,
+  topologyMessage = 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.',
   state,
 }) {
   const importSelected = state.mode === 'import'
@@ -349,6 +355,8 @@ export function renderMapDataTransferDialog({
             assets,
             networks,
             selectedNetworkIds,
+            topologyReady,
+            topologyMessage,
             error: state.error,
           })}
       </div>
@@ -507,6 +515,8 @@ function renderExportPanel({
   assets,
   networks,
   selectedNetworkIds,
+  topologyReady,
+  topologyMessage,
   error,
 }) {
   const hasActiveDataset = Boolean(activeContext.datasetVersionId)
@@ -547,7 +557,8 @@ function renderExportPanel({
           description: 'Export peta penuh atau jalur tracing ke SVG/PNG',
           buttonClass: 'open-map-diagram',
           buttonLabel: 'Buka diagram',
-          disabled: !hasActiveDataset || !assets.length,
+          disabled: !hasActiveDataset || !assets.length || !topologyReady,
+          disabledReason: topologyReady ? null : topologyMessage,
         })}
       </div>
       ${error ? `<p class="map-transfer-error" role="alert">
@@ -565,7 +576,13 @@ function renderExportOption({
   buttonClass,
   buttonLabel,
   disabled,
+  disabledReason = null,
 }) {
+  const disabledAttribute = disabled
+    ? `disabled aria-disabled="true"${disabledReason
+      ? ` title="${escapeAttribute(disabledReason)}"`
+      : ''}`
+    : ''
   return `
     <article class="map-export-option">
       <span class="material-symbols-outlined" aria-hidden="true">${icon}</span>
@@ -574,7 +591,7 @@ function renderExportOption({
         <small>${escapeHtml(description)}</small>
       </span>
       <button class="button secondary ${buttonClass}" type="button"
-        ${disabled ? 'disabled' : ''}>${escapeHtml(buttonLabel)}</button>
+        ${disabledAttribute}>${escapeHtml(buttonLabel)}</button>
     </article>
   `
 }

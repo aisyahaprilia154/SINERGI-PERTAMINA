@@ -1,5 +1,8 @@
 import { AppError } from '../errors.js'
-import { generateRelationArtifacts } from './semantic-relation-engine.js'
+import {
+  generateRelationArtifacts,
+  normalizeTopologySummary,
+} from './semantic-relation-engine.js'
 
 export class TopologyService {
   constructor({
@@ -57,7 +60,11 @@ export class TopologyService {
     return {
       datasetVersionId,
       topologyRuleSetVersion: record.topologyRuleSetVersion ?? null,
-      summary: record.topologySummary ?? emptySummary(),
+      summary: normalizeTopologySummary(
+        record.topologySummary ?? emptySummary(),
+        record.topologyGraph,
+        record.confirmedRelations,
+      ),
       readiness: record.topologyReadiness ?? {
         topologyReadiness: 'not_ready',
         blockingReasons: ['topology_not_generated'],
@@ -530,6 +537,7 @@ export function applyArtifacts(record, artifacts, {
     pathAssetId: edge.pathAssetId,
     sourceGeometryIds: structuredClone(edge.sourceGeometryIds),
     relationSource: edge.relationSource,
+    relationKind: edge.relationKind ?? 'device_edge',
     relationStatus: 'confirmed',
     provenance: edge.provenance,
     verificationStatus: 'confirmed',
@@ -560,6 +568,10 @@ export function applyArtifacts(record, artifacts, {
         ...(record.readiness?.topologyEligibility ?? {}),
         candidateCount: artifacts.summary.candidateCount,
         confirmedEdgeCount: artifacts.summary.confirmedEdgeCount,
+        confirmedDeviceEdgeCount: artifacts.summary.confirmedDeviceEdgeCount,
+        confirmedRelationCount: artifacts.summary.confirmedRelationCount,
+        confirmedPathAttachmentCount: artifacts.summary.confirmedPathAttachmentCount,
+        confirmedPathContinuationCount: artifacts.summary.confirmedPathContinuationCount,
         ambiguousCount: artifacts.summary.ambiguousCount,
         unresolvedCount: artifacts.summary.unresolvedCount,
         decisionOwner: 'relation_engine',
@@ -626,6 +638,9 @@ function bulkReviewResponse(record, {
     readiness: structuredClone(record.topologyReadiness),
     confirmedRelationCount: (record.confirmedRelations ?? [])
       .filter(({ verificationStatus }) => verificationStatus === 'confirmed').length,
+    confirmedDeviceEdgeCount: record.topologyGraph?.edges?.length ?? 0,
+    confirmedPathAttachmentCount: record.topologySummary?.confirmedPathAttachmentCount ?? 0,
+    confirmedPathContinuationCount: record.topologySummary?.confirmedPathContinuationCount ?? 0,
   }
 }
 
@@ -736,6 +751,10 @@ function emptySummary() {
   return {
     candidateCount: 0,
     confirmedEdgeCount: 0,
+    confirmedDeviceEdgeCount: 0,
+    confirmedRelationCount: 0,
+    confirmedPathAttachmentCount: 0,
+    confirmedPathContinuationCount: 0,
     ambiguousCount: 0,
     rejectedCount: 0,
     revokedCount: 0,

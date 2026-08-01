@@ -129,6 +129,30 @@ export function generateRelationArtifacts(topologyInputBundle, {
   }
 }
 
+export function normalizeTopologySummary(
+  summary = {},
+  graph = {},
+  confirmedRelations = [],
+) {
+  const confirmed = asArray(confirmedRelations).filter(({ verificationStatus }) => (
+    verificationStatus === 'confirmed'
+  ))
+  const kindCounts = confirmed.reduce((counts, relation) => {
+    const kind = relation.relationKind ?? persistedRelationKind(relation)
+    counts[kind] = (counts[kind] ?? 0) + 1
+    return counts
+  }, {})
+  const deviceEdgeCount = asArray(graph.edges).length
+  return {
+    ...structuredClone(summary ?? {}),
+    confirmedEdgeCount: deviceEdgeCount,
+    confirmedDeviceEdgeCount: deviceEdgeCount,
+    confirmedRelationCount: confirmed.length,
+    confirmedPathAttachmentCount: kindCounts.path_attachment ?? 0,
+    confirmedPathContinuationCount: kindCounts.path_continuation ?? 0,
+  }
+}
+
 export function normalizeAndValidateBundle(input) {
   if (!input || typeof input !== 'object') {
     throw invalidBundle('TopologyInputBundle wajib berupa object.')
@@ -208,6 +232,11 @@ export function normalizeAndValidateBundle(input) {
     }
   })
 
+  validateIdentityAliases([
+    ...asArray(bundle.classifiedNodes),
+    ...asArray(bundle.classifiedPaths),
+  ])
+
   return {
     ...bundle,
     datasetVersion: {
@@ -222,6 +251,42 @@ export function normalizeAndValidateBundle(input) {
     geometries,
     explicitRelations: asArray(bundle.explicitRelations),
   }
+}
+
+function validateIdentityAliases(objects) {
+  const aliasOwner = new Map()
+  objects.forEach((object) => {
+    const canonicalAssetId = readString(
+      object.canonicalAssetId,
+      object.assetId,
+      object.onboardingIdentity,
+    )
+    if (!canonicalAssetId) {
+      throw invalidBundle('Topology object tidak memiliki canonical asset identity.', {
+        sourceFeatureId: object.sourceFeatureId,
+      })
+    }
+    const aliases = [
+      canonicalAssetId,
+      object.assetId,
+      object.stableAssetId,
+      object.legacyAssetId,
+      object.onboardingIdentity,
+      object.sourceFeatureId,
+      ...Object.values(object.identityAliases ?? {}).flat(),
+    ].filter(Boolean)
+    aliases.forEach((alias) => {
+      const previous = aliasOwner.get(alias)
+      if (previous && previous !== canonicalAssetId) {
+        throw invalidBundle('Topology bundle memiliki alias identity duplikat.', {
+          alias,
+          previousCanonicalAssetId: previous,
+          canonicalAssetId,
+        })
+      }
+      aliasOwner.set(alias, canonicalAssetId)
+    })
+  })
 }
 
 function prepareNodes(bundle, issues) {
@@ -249,8 +314,12 @@ function prepareNodes(bundle, issues) {
     }
     return [{
       id: identity,
-      assetId: object.assetId,
+      canonicalAssetId: identity,
+      assetId: object.stableAssetId ?? object.assetId ?? null,
+      legacyAssetId: object.legacyAssetId ?? null,
       onboardingIdentity: object.onboardingIdentity,
+      identityStatus: object.identityStatus ?? (object.assetId ? 'stable' : 'onboarding'),
+      identityAliases: structuredClone(object.identityAliases ?? {}),
       sourceFeatureId: object.sourceFeatureId,
       siteId: object.siteId,
       networkFamily: object.networkFamily,
@@ -310,8 +379,12 @@ function preparePaths(bundle, issues, lineworkIssues) {
       }
       return [{
         id: identity,
-        assetId: object.assetId,
+        canonicalAssetId: identity,
+        assetId: object.stableAssetId ?? object.assetId ?? null,
+        legacyAssetId: object.legacyAssetId ?? null,
         onboardingIdentity: object.onboardingIdentity,
+        identityStatus: object.identityStatus ?? (object.assetId ? 'stable' : 'onboarding'),
+        identityAliases: structuredClone(object.identityAliases ?? {}),
         sourceFeatureId: object.sourceFeatureId,
         siteId: object.siteId,
         networkFamily: object.networkFamily,
@@ -597,10 +670,21 @@ function generateExplicitCandidates(bundle, nodes, paths, issues) {
     ...nodes.map((node) => [node.sourceFeatureId, node]),
     ...paths.map((path) => [path.sourceFeatureId, path]),
   ])
-  const objectByIdentity = new Map([
-    ...nodes.map((node) => [node.id, node]),
-    ...paths.map((path) => [path.id, path]),
-  ])
+  const objectByIdentity = new Map()
+  ;[...nodes, ...paths].forEach((object) => {
+    const aliases = [
+      object.id,
+      object.canonicalAssetId,
+      object.assetId,
+      object.legacyAssetId,
+      object.onboardingIdentity,
+      object.sourceFeatureId,
+      ...Object.values(object.identityAliases ?? {}).flat(),
+    ].filter(Boolean)
+    aliases.forEach((alias) => {
+      if (!objectByIdentity.has(alias)) objectByIdentity.set(alias, object)
+    })
+  })
   return bundle.explicitRelations.flatMap((relation) => {
     const source = relation.sourceReference
       ? objectByIdentity.get(relation.sourceReference)
@@ -697,6 +781,8 @@ function baseCandidate({
     targetEndpointId,
     targetPathAssetId: targetPath?.id,
     targetFeatureId: targetNode?.sourceFeatureId ?? targetPath?.sourceFeatureId,
+    sourceObjectRole: sourcePath?.objectRole ?? null,
+    targetObjectRole: targetNode?.objectRole ?? targetPath?.objectRole ?? null,
     distanceMeters,
     sourceCoordinate: sourceCoordinate ? cloneCoordinate(sourceCoordinate) : null,
     targetCoordinate: targetCoordinate ? cloneCoordinate(targetCoordinate) : null,
@@ -755,6 +841,9 @@ function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, dataset
         targetMeasureMeters: candidate.targetMeasureMeters,
       }),
       candidateType: candidate.candidateType,
+      sourceObjectRole: candidate.sourceObjectRole,
+      targetObjectRole: candidate.targetObjectRole,
+      relationKind: relationKindForCandidate(candidate),
       score: round(score, 6),
       scoreMargin: null,
       evidence: [
@@ -933,6 +1022,7 @@ function buildConfirmedRelations({
         anchorMeasureMeters: candidate.measureMeters,
         targetAnchorMeasureMeters: candidate.targetMeasureMeters,
       }),
+      relationKind: candidate.relationKind ?? relationKindForCandidate(candidate),
       provenance,
       verificationStatus: 'confirmed',
       candidateId: candidate.candidateId,
@@ -977,7 +1067,13 @@ function buildConfirmedRelations({
 export function buildConfirmedGraph({ bundle, nodes, paths, confirmedRelations }) {
   const graphNodes = nodes.map((node) => ({
       id: node.id,
-      assetId: node.assetId,
+      canonicalAssetId: node.id,
+      assetId: node.id,
+      stableAssetId: node.assetId,
+      legacyAssetId: node.legacyAssetId,
+      onboardingIdentity: node.onboardingIdentity,
+      identityStatus: node.identityStatus,
+      identityAliases: structuredClone(node.identityAliases ?? {}),
       sourceFeatureId: node.sourceFeatureId,
       siteId: node.siteId,
       networkFamily: node.networkFamily,
@@ -1099,6 +1195,7 @@ function collapseConfirmedPath(bundle, sourceAssetId, targetAssetId, relations) 
     verificationStatus: 'confirmed',
     relationStatus: 'confirmed',
     relationSource: allExplicit ? 'explicit_kml_metadata' : 'spatial_inference',
+    relationKind: 'device_edge',
     candidateId: candidateIds.length === 1 ? candidateIds[0] : undefined,
     candidateIds,
     sourceRelationIds: relations.map(({ relationId }) => relationId),
@@ -1230,10 +1327,19 @@ function buildUnresolvedEndpoints(paths, candidates) {
 }
 
 function buildSummary({ candidates, confirmedRelations, graph, unresolved, validation }) {
+  const confirmed = confirmedRelations.filter(({ verificationStatus }) => (
+    verificationStatus === 'confirmed'
+  ))
   return {
     candidateCount: candidates.filter(({ candidateStatus }) => candidateStatus === 'candidate').length,
-    confirmedEdgeCount: confirmedRelations.filter(({ verificationStatus }) => (
-      verificationStatus === 'confirmed'
+    confirmedEdgeCount: graph.edges.length,
+    confirmedDeviceEdgeCount: graph.edges.length,
+    confirmedRelationCount: confirmed.length,
+    confirmedPathAttachmentCount: confirmed.filter(({ relationKind }) => (
+      relationKind === 'path_attachment'
+    )).length,
+    confirmedPathContinuationCount: confirmed.filter(({ relationKind }) => (
+      relationKind === 'path_continuation'
     )).length,
     ambiguousCount: candidates.filter(({ candidateStatus }) => candidateStatus === 'ambiguous').length,
     rejectedCount: candidates.filter(({ candidateStatus }) => candidateStatus === 'rejected').length,
@@ -1260,7 +1366,11 @@ function evaluateTopologyReadiness({
     ...bundle.classifiedPaths,
   ]
   const stableIdentityCoverage = identities.length
-    ? identities.filter(({ assetId }) => Boolean(assetId)).length / identities.length
+    ? identities.filter(({ stableAssetId, identityStatus, assetId }) => (
+      Boolean(stableAssetId)
+        || identityStatus === 'stable'
+        || (identityStatus === undefined && Boolean(assetId))
+    )).length / identities.length
     : 0
   const accuracyReady = Number.isFinite(settings.heldOutPrecision)
     && settings.heldOutPrecision >= settings.requiredHeldOutPrecision
@@ -1640,6 +1750,21 @@ function relationTypeForCandidate(type) {
   }[type] ?? 'connected-to'
 }
 
+function relationKindForCandidate(candidate) {
+  if (candidate.sourceObjectRole === 'device_node'
+    && candidate.targetObjectRole === 'device_node') {
+    return 'device_edge'
+  }
+  if (candidate.candidateType === 'endpoint_endpoint') return 'path_continuation'
+  return 'path_attachment'
+}
+
+function persistedRelationKind(relation) {
+  if (relation.relationType === 'path-continuation') return 'path_continuation'
+  if (String(relation.relationType ?? '').startsWith('path-')) return 'path_attachment'
+  return 'device_edge'
+}
+
 function normalizeDirection(value) {
   return ['undirected', 'source_to_target', 'target_to_source', 'bidirectional']
     .includes(value) ? value : 'undirected'
@@ -1834,7 +1959,7 @@ function localMeters(coordinate, origin, referenceLatitude) {
 }
 
 function objectIdentity(object) {
-  return readString(object.assetId, object.onboardingIdentity)
+  return readString(object.canonicalAssetId, object.assetId, object.onboardingIdentity)
 }
 
 function validCoordinate(coordinate) {

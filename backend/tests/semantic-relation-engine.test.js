@@ -30,6 +30,10 @@ test('spatial endpoint inference remains a candidate and never leaks into confir
   assert.deepEqual(result.summary, {
     candidateCount: 1,
     confirmedEdgeCount: 0,
+    confirmedDeviceEdgeCount: 0,
+    confirmedRelationCount: 0,
+    confirmedPathAttachmentCount: 0,
+    confirmedPathContinuationCount: 0,
     ambiguousCount: 0,
     rejectedCount: 0,
     revokedCount: 0,
@@ -170,6 +174,8 @@ test('valid explicit metadata is confirmed but dangling metadata blocks readines
   assert.equal(valid.confirmedRelations.length, 1)
   assert.equal(valid.confirmedRelations[0].provenance, 'explicit_kml_metadata')
   assert.equal(valid.confirmedRelations[0].verificationStatus, 'confirmed')
+  assert.equal(valid.confirmedRelations[0].relationKind, 'device_edge')
+  assert.equal(valid.summary.confirmedDeviceEdgeCount, 1)
   assert.equal(valid.graph.edges.length, 1)
 
   const danglingBundle = structuredClone(validBundle)
