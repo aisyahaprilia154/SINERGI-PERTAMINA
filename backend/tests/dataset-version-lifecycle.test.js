@@ -98,9 +98,14 @@ test('atomic activation archives the previous version and publishes one shared p
     assert.equal(mapView.mapView, true)
     assert.equal(mapView.activePointer.revision, result.activePointer.revision)
     assert.equal(mapView.assets[0].assetId, 'ASSET-version-new')
+    assert.equal(mapView.assets[0].sourceFeatureId, 'source-feature-version-new')
     assert.equal(Object.hasOwn(mapView.assets[0], 'properties'), false)
     assert.deepEqual(mapView.geometries[0].coordinates, [110, -7])
-    assert.deepEqual(assetDetail.asset.properties, {})
+    assert.equal(mapView.geometries[0].sourceGeometryId, 'source-geometry-version-new')
+    assert.equal(mapView.geometries[0].sourceFeatureId, 'source-feature-version-new')
+    assert.deepEqual(assetDetail.asset.properties, {
+      sourceFeatureId: 'source-feature-version-new',
+    })
     assert.deepEqual(
       records.filter(({ datasetVersion }) => datasetVersion.status === 'active')
         .map(({ datasetVersion }) => datasetVersion.id),
@@ -387,11 +392,13 @@ function versionRecord(id, status) {
       category: 'Infrastructure',
       type: 'Switch',
       branchId: 'semarang',
-      properties: {},
+      properties: { sourceFeatureId: `source-feature-${id}` },
     }],
     geometries: [{
       id: `geometry-${id}`,
       assetNodeId: `node-${id}`,
+      sourceGeometryId: `source-geometry-${id}`,
+      sourceFeatureId: `source-feature-${id}`,
       geometryType: 'point',
       coordinates: [110, -7],
     }],

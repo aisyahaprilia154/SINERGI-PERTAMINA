@@ -1,18 +1,31 @@
-import { adaptActiveDatasetForMap } from '../../adapters/active-dataset-map-adapter.js'
+import {
+  adaptActiveDatasetForMap,
+  locationGroupFor,
+} from '../../adapters/active-dataset-map-adapter.js'
+import {
+  attachCandidateMapGeometryIds,
+  countCandidatesForLocation,
+  createReviewLocationIndex,
+  filterCandidatesByLocation,
+  selectReviewLocationGroup,
+} from '../../domain/topology-review-location.js'
 import { prioritizeTopologyCandidates } from '../../domain/topology-view-model.js'
 import {
   loadActiveDataset,
+  loadDatasetProjection,
   loadTopologyProjection,
+  reviewTopologyBulk,
   reviewTopologyCandidate,
   revokeTopologyRelation,
 } from '../../services/active-dataset-service.js'
-import { renderTopNavigation } from '../map/map-page.js'
+import { renderTopNavigation, scopeMapData } from '../map/map-page.js'
+import { createMapLibreSurface } from '../map/maplibre-map.js'
 
 export async function renderTopologyReviewPage(container) {
-  document.title = 'Review Relasi Topology — SINERGI'
+  document.title = 'Konfirmasi Koneksi — SINERGI'
   document.body.className = 'map-body topology-review-body'
-  container.innerHTML = reviewState('progress_activity', 'Memuat candidate review',
-    'Queue dan evidence topology sedang disiapkan.', true)
+  container.innerHTML = reviewState('progress_activity', 'Memuat konfirmasi koneksi',
+    'Daftar koneksi sedang disiapkan.', true)
 
   const requested = readContext()
   try {
@@ -20,7 +33,7 @@ export async function renderTopologyReviewPage(container) {
     const mapData = adaptActiveDatasetForMap(activePayload)
     await initializeReview(container, mapData)
   } catch (error) {
-    container.innerHTML = reviewState('error', 'Candidate review tidak dapat dimuat', error.message)
+    container.innerHTML = reviewState('error', 'Konfirmasi koneksi tidak dapat dimuat', error.message)
     container.querySelector('.retry-review')?.addEventListener('click', () => {
       renderTopologyReviewPage(container)
     })
@@ -29,11 +42,13 @@ export async function renderTopologyReviewPage(container) {
 
 async function initializeReview(container, mapData) {
   const datasetVersionId = mapData.activeContext.datasetVersionId
-  let projections = await loadReviewProjections(datasetVersionId)
+  let projections = await loadReviewProjections(datasetVersionId, mapData.geometries)
   const params = new URLSearchParams(window.location.search)
+  const requestedStatus = params.get('status')
+  const locationIndex = createReviewLocationIndex(mapData)
   const state = {
     selectedCandidateId: params.get('reviewCandidateId'),
-    status: params.get('status') ?? 'open',
+    status: requestedStatus === 'open' ? 'needs-review' : requestedStatus ?? 'needs-review',
     family: params.get('family') ?? 'all',
     type: params.get('type') ?? 'all',
     minScore: Number(params.get('minScore') ?? 0),
@@ -41,82 +56,295 @@ async function initializeReview(container, mapData) {
     search: params.get('q') ?? '',
     actionStatus: 'idle',
     actionMessage: '',
+    bulkStatus: 'idle',
+    bulkMessage: '',
   }
-  if (!projections.candidates.items.some(({ candidateId }) => (
+  let decisionContext = null
+  const requestedCandidate = projections.candidates.items.find(({ candidateId }) => (
+    candidateId === state.selectedCandidateId
+  )) ?? null
+  const selectedArea = selectReviewLocationGroup({
+    requestedKey: params.get('area'),
+    locationGroups: mapData.locationGroups,
+    candidate: requestedCandidate,
+    candidates: projections.candidates.items,
+    locationIndex,
+    branchId: mapData.activeContext.branchId,
+  })
+  state.area = selectedArea?.key ?? null
+  const scopedMapData = scopeMapData({
+    selectedArea,
+    assets: mapData.assets,
+    diagramAssets: mapData.diagramAssets,
+    geometries: mapData.geometries,
+    exportAssets: mapData.exportAssets,
+    networks: mapData.networks,
+    topologyGraph: mapData.topologyGraph,
+  })
+  const initialLocationCandidates = candidatesForLocation()
+  if (!initialLocationCandidates.some(({ candidateId }) => (
     candidateId === state.selectedCandidateId
   ))) {
-    state.selectedCandidateId = filterCandidates(projections.candidates.items, state)[0]?.candidateId
+    state.selectedCandidateId = filterCandidates(initialLocationCandidates, state)[0]?.candidateId
       ?? null
   }
 
   container.innerHTML = `
     <div class="map-app review-app">
-      ${renderTopNavigation('review')}
+      ${renderTopNavigation('review', {
+        ...mapData.activeContext,
+        area: selectedArea?.key,
+      })}
       <header class="review-header">
-        <div>
-          <a href="/topology?datasetId=${encodeURIComponent(mapData.activeContext.datasetId)}"
-            class="back-link">
-            <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
-            Topologi Cabang
-          </a>
-          <h1>Review Relasi Topology</h1>
-          <p>${escapeHtml(mapData.activeContext.branchName)} · ${
+        <div class="review-title">
+          <h1>Konfirmasi koneksi</h1>
+          <p>${escapeHtml(formatLocationName(selectedArea?.name ?? 'Semua lokasi'))} · ${
             escapeHtml(mapData.activeContext.version)
           }</p>
         </div>
-        ${renderReadiness(projections.summary)}
+        <label class="site-picker">
+          <span>Site operasional</span>
+          <span class="site-picker-control">
+            <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
+            <select class="site-select" aria-label="Pilih site operasional">
+              ${mapData.locationGroups.map((location) => `
+                <option value="${escapeHtml(location.key)}"
+                  ${location.key === selectedArea?.key ? 'selected' : ''}>
+                  ${escapeHtml(formatLocationName(location.name))} · ${
+                    countCandidatesForLocation(
+                      projections.candidates.items,
+                      location.key,
+                      locationIndex,
+                    )
+                  } koneksi
+                </option>
+              `).join('')}
+            </select>
+            <span class="material-symbols-outlined" aria-hidden="true">expand_more</span>
+          </span>
+        </label>
+        <div class="review-header-actions">
+          <div class="review-readiness-slot">${renderReadiness(
+            projections.summary,
+            initialLocationCandidates,
+          )}</div>
+          <div class="review-bulk-actions"></div>
+        </div>
       </header>
       <main class="review-workspace">
         <aside class="candidate-queue" aria-label="Candidate queue">
           <div class="queue-summary"></div>
           <div class="queue-filters">
-            <label>
-              <span>Cari</span>
-              <input class="candidate-search" type="search" value="${escapeHtml(state.search)}"
-                placeholder="Asset, endpoint, geometry">
-            </label>
-            <div>
-              <label><span>Status</span><select class="candidate-status-filter"></select></label>
-              <label><span>Family</span><select class="candidate-family-filter"></select></label>
-            </div>
-            <div>
-              <label><span>Tipe candidate</span><select class="candidate-type-filter"></select></label>
-              <label><span>Jarak maks.</span>
-                <input class="candidate-distance-filter" type="number" min="0" step=".5"
-                  value="${state.maxDistance}">
+            <div class="primary-filters">
+              <label class="candidate-search-field">
+                <span>Cari koneksi</span>
+                <input class="candidate-search" type="search" value="${escapeHtml(state.search)}"
+                  placeholder="Nama aset atau kabel">
               </label>
+              <label><span>Status</span><select class="candidate-status-filter"></select></label>
             </div>
-            <label>
-              <span>Score minimum <output class="score-output">${state.minScore.toFixed(2)}</output></span>
-              <input class="candidate-score-filter" type="range" min="0" max="1" step=".05"
-                value="${state.minScore}">
-            </label>
+            <details class="advanced-filters">
+              <summary>
+                <span class="material-symbols-outlined" aria-hidden="true">tune</span>
+                Filter lanjutan
+              </summary>
+              <div>
+                <label><span>Jenis jaringan</span><select class="candidate-family-filter"></select></label>
+                <label><span>Tipe koneksi</span><select class="candidate-type-filter"></select></label>
+                <label><span>Jarak maks.</span>
+                  <input class="candidate-distance-filter" type="number" min="0" step=".5"
+                    value="${state.maxDistance}">
+                </label>
+                <label>
+                  <span>Keyakinan minimum
+                    <output class="score-output">${Math.round(state.minScore * 100)}%</output>
+                  </span>
+                  <input class="candidate-score-filter" type="range" min="0" max="1" step=".05"
+                    value="${state.minScore}">
+                </label>
+              </div>
+            </details>
           </div>
           <div class="candidate-list" role="listbox" aria-label="Kandidat relasi"></div>
         </aside>
+        <section class="review-map-panel" aria-label="Peta koneksi yang ditinjau">
+          <header>
+            <div>
+              <strong>Peta koneksi · ${escapeHtml(formatLocationName(
+                selectedArea?.name ?? 'Semua lokasi',
+              ))}</strong>
+              <small>Garis putus-putus menunjukkan koneksi yang sedang diperiksa</small>
+            </div>
+            <span class="review-map-status">
+              <i></i><span class="review-map-status-label">Memuat peta</span>
+            </span>
+          </header>
+          <div id="review-map" tabindex="0" aria-label="Peta aset dan jalur kabel"></div>
+          <div class="review-map-legend" aria-label="Legenda peta">
+            <span><i class="asset"></i>Aset</span>
+            <span><i class="cable"></i>Jalur kabel</span>
+            <span><i class="candidate"></i>Koneksi diperiksa</span>
+          </div>
+        </section>
         <section class="candidate-review-panel" aria-live="polite"></section>
       </main>
+      ${renderBulkDialog()}
+      ${renderDecisionDialog()}
     </div>
   `
 
+  const reviewMap = createMapLibreSurface(container.querySelector('#review-map'), {
+    assets: scopedMapData.assets,
+    networks: scopedMapData.networks,
+    geometries: scopedMapData.geometries,
+    topologyGraph: scopedMapData.topologyGraph,
+    candidates: initialLocationCandidates,
+    onSelectCandidate: (candidateId) => {
+      if (!candidatesForLocation().some((item) => item.candidateId === candidateId)) return
+      state.selectedCandidateId = candidateId
+      state.actionStatus = 'idle'
+      state.actionMessage = ''
+      renderAll()
+    },
+    onBasemapStatus: (status) => {
+      const label = container.querySelector('.review-map-status-label')
+      const indicator = container.querySelector('.review-map-status')
+      if (!label || !indicator) return
+      label.textContent = {
+        available: 'Peta tersedia',
+        loading: 'Memuat peta',
+        unavailable: 'Data aset tetap tersedia',
+      }[status] ?? 'Status peta'
+      indicator.dataset.status = status
+    },
+  })
+  reviewMap.setState({
+    selectedNetworkIds: scopedMapData.networks.map(({ id }) => id),
+    dimOthers: true,
+    isolateSelectedCandidate: true,
+  })
+
+  bindSitePicker()
   bindFilters()
+  bindBulkDialog()
+  bindDecisionDialog()
   renderAll()
 
+  function bindSitePicker() {
+    container.querySelector('.site-select')?.addEventListener('change', (event) => {
+      const nextArea = event.target.value
+      if (!mapData.locationGroups.some(({ key }) => key === nextArea)
+        || nextArea === selectedArea?.key) return
+      const query = new URLSearchParams(window.location.search)
+      query.set('datasetId', mapData.activeContext.datasetId)
+      query.set('branchId', mapData.activeContext.branchId)
+      query.set('area', nextArea)
+      query.delete('reviewCandidateId')
+      reviewMap.destroy()
+      window.location.assign(`${window.location.pathname}?${query}`)
+    })
+  }
+
   function renderAll() {
-    const items = filterCandidates(projections.candidates.items, state)
+    const items = filterCandidates(candidatesForLocation(), state)
     if (!items.some(({ candidateId }) => candidateId === state.selectedCandidateId)) {
       state.selectedCandidateId = items[0]?.candidateId ?? null
     }
+    renderHeaderActions()
     renderQueue(items)
     renderDetail()
+    focusCandidateOnMap()
     updateUrl()
   }
 
+  function candidatesForLocation() {
+    return filterCandidatesByLocation(
+      projections.candidates.items,
+      state.area,
+      locationIndex,
+    )
+  }
+
+  function focusCandidateOnMap() {
+    const candidate = projections.candidates.items.find(({ candidateId }) => (
+      candidateId === state.selectedCandidateId
+    ))
+    reviewMap.setCandidates(candidatesForLocation())
+    reviewMap.setState({
+      selectedCandidateId: candidate?.candidateId ?? null,
+      selectedAssetId: candidate?.targetAssetId ?? null,
+      connectedNodeIds: [
+        candidate?.sourcePathAssetId,
+        candidate?.targetAssetId ?? candidate?.targetPathAssetId,
+      ].filter(Boolean),
+    })
+    if (!candidate) return
+    const positions = [candidate.sourceCoordinate, candidate.targetCoordinate]
+      .filter(validCoordinate)
+    if (positions.length) {
+      reviewMap.focusCoordinates(positions)
+      return
+    }
+    reviewMap.focusAssetBounds([
+      candidate.sourcePathAssetId,
+      candidate.targetAssetId ?? candidate.targetPathAssetId,
+    ].filter(Boolean))
+  }
+
+  function renderHeaderActions() {
+    container.querySelector('.review-readiness-slot').innerHTML = renderReadiness(
+      projections.summary,
+      candidatesForLocation(),
+    )
+    const confirmableCount = projections.candidates.items.filter(
+      isBulkConfirmableCandidate,
+    ).length
+    const confirmedCount = projections.graph.confirmedRelations.filter(
+      ({ verificationStatus }) => verificationStatus === 'confirmed',
+    ).length
+    const actions = container.querySelector('.review-bulk-actions')
+    actions.innerHTML = `
+      <details class="bulk-actions-menu">
+        <summary class="button secondary">
+          <span class="material-symbols-outlined" aria-hidden="true">more_horiz</span>
+          Aksi massal
+        </summary>
+        <div>
+          <button class="confirm-all-candidates" type="button"
+            ${confirmableCount ? '' : 'disabled'}>
+            <span class="material-symbols-outlined" aria-hidden="true">done_all</span>
+            <span><strong>Konfirmasi rekomendasi</strong>
+              <small>${confirmableCount} koneksi di seluruh dataset</small></span>
+          </button>
+          <button class="revoke-all-relations destructive" type="button"
+            ${confirmedCount ? '' : 'disabled'}>
+            <span class="material-symbols-outlined" aria-hidden="true">delete_sweep</span>
+            <span><strong>Hapus semua konfirmasi</strong>
+              <small>${confirmedCount} koneksi di seluruh dataset</small></span>
+          </button>
+        </div>
+      </details>
+      ${state.bulkMessage ? `<p class="bulk-action-message ${state.bulkStatus}" role="status">${
+        escapeHtml(state.bulkMessage)
+      }</p>` : ''}
+    `
+    actions.querySelector('.confirm-all-candidates')?.addEventListener('click', () => {
+      openBulkDialog('confirm-all', confirmableCount)
+    })
+    actions.querySelector('.revoke-all-relations')?.addEventListener('click', () => {
+      openBulkDialog('revoke-all', confirmedCount)
+    })
+  }
+
   function renderQueue(items) {
+    const locationCandidates = candidatesForLocation()
     container.querySelector('.queue-summary').innerHTML = `
       <div><strong>${items.length}</strong><span>ditampilkan</span></div>
-      <div><strong>${projections.summary.summary?.candidateCount ?? 0}</strong><span>candidate</span></div>
-      <div><strong>${projections.summary.summary?.ambiguousCount ?? 0}</strong><span>ambiguous</span></div>
+      <div><strong>${locationCandidates.filter(isBulkConfirmableCandidate).length}</strong>
+        <span>rekomendasi</span></div>
+      <div><strong>${locationCandidates.filter(({ candidateStatus }) => (
+        candidateStatus === 'ambiguous'
+      )).length}</strong><span>belum pasti</span></div>
     `
     const list = container.querySelector('.candidate-list')
     if (!items.length) {
@@ -133,11 +361,11 @@ async function initializeReview(container, mapData) {
       }" aria-selected="${candidate.candidateId === state.selectedCandidateId}"
         data-candidate-id="${escapeHtml(candidate.candidateId)}">
         <span class="candidate-status ${escapeHtml(candidate.candidateStatus)}">
-          ${escapeHtml(candidate.candidateStatus)}
+          ${escapeHtml(statusLabel(candidate))}
         </span>
-        <strong>${escapeHtml(candidate.sourcePathAssetId)}</strong>
+        <strong>${escapeHtml(endpointName(candidate, 'source', projections.sourceFeatures))}</strong>
         <span class="candidate-arrow" aria-hidden="true">→</span>
-        <strong>${escapeHtml(candidate.targetAssetId ?? candidate.targetPathAssetId ?? 'Unresolved')}</strong>
+        <strong>${escapeHtml(endpointName(candidate, 'target', projections.sourceFeatures))}</strong>
         <small>${escapeHtml(labelCandidateType(candidate.candidateType))} · ${
           formatDistance(candidate.distanceMeters)
         }</small>
@@ -162,12 +390,12 @@ async function initializeReview(container, mapData) {
     if (!candidate) {
       panel.innerHTML = `<div class="review-empty">
         <span class="material-symbols-outlined">fact_check</span>
-        <h2>Pilih candidate untuk direview</h2>
-        <p>Evidence, alternatif target, dan dampak graph akan muncul di sini.</p>
+        <h2>Pilih koneksi untuk diperiksa</h2>
+        <p>Pasangan aset dan pilihan keputusan akan muncul di sini.</p>
       </div>`
       return
     }
-    const alternatives = projections.candidates.items.filter((item) => (
+    const alternatives = candidatesForLocation().filter((item) => (
       item.sourceEndpointId === candidate.sourceEndpointId
       && item.candidateId !== candidate.candidateId
       && ['candidate', 'ambiguous', 'revoked'].includes(item.candidateStatus)
@@ -175,106 +403,97 @@ async function initializeReview(container, mapData) {
     const relation = projections.graph.confirmedRelations.find(({ candidateId }) => (
       candidate.candidateId === candidateId
     ))
-    const impact = graphImpact(candidate, projections.graph.graph)
+    const sourceName = endpointName(candidate, 'source', projections.sourceFeatures)
+    const targetName = endpointName(candidate, 'target', projections.sourceFeatures)
     panel.innerHTML = `
       <header class="candidate-detail-header">
         <div>
           <span class="candidate-status ${escapeHtml(candidate.candidateStatus)}">
-            ${escapeHtml(candidate.candidateStatus)}
+            ${escapeHtml(statusLabel(candidate))}
           </span>
-          <h2>${escapeHtml(labelCandidateType(candidate.candidateType))}</h2>
-          <code>${escapeHtml(candidate.candidateId)}</code>
+          <h2>Periksa sambungan ini</h2>
+          <p>${escapeHtml(labelCandidateType(candidate.candidateType))}</p>
         </div>
-        <div class="score-gauge" aria-label="Score ${Math.round((candidate.score ?? 0) * 100)} persen">
-          <strong>${Math.round((candidate.score ?? 0) * 100)}%</strong><span>score</span>
+        <div class="confidence-pill"
+          aria-label="Keyakinan ${Math.round((candidate.score ?? 0) * 100)} persen">
+          <span>Keyakinan sistem</span>
+          <strong>${Math.round((candidate.score ?? 0) * 100)}%</strong>
         </div>
       </header>
-      <section class="candidate-route" aria-label="Usulan relasi">
-        ${routeEndpoint('Source cable', candidate.sourcePathAssetId, candidate.sourceEndpointId)}
+      <section class="candidate-route" aria-label="Usulan koneksi">
+        ${routeEndpoint('Dari', sourceName, shortReference(candidate.sourceEndpointId))}
         <div class="route-connector">
           <span>${formatDistance(candidate.distanceMeters)}</span>
           <i></i>
-          <small>margin ${formatNumber(candidate.scoreMargin)}</small>
+          <small>${escapeHtml(candidate.networkFamily ?? 'Jaringan tidak diketahui')}</small>
         </div>
-        ${routeEndpoint('Target asset', candidate.targetAssetId ?? candidate.targetPathAssetId,
-          candidate.targetEndpointId)}
+        ${routeEndpoint('Ke', targetName, shortReference(candidate.targetEndpointId))}
       </section>
-      <section class="impact-summary">
-        <h3>Dampak jika dikonfirmasi</h3>
-        <div>
-          <span><strong>${impact.sourceComponentSize}</strong> source component</span>
-          <span><strong>${impact.targetComponentSize}</strong> target component</span>
-          <span><strong>${impact.mergeDelta}</strong> estimasi node tergabung</span>
+      <details class="technical-details">
+        <summary>
+          <span class="material-symbols-outlined" aria-hidden="true">analytics</span>
+          Detail teknis dan evidence
+        </summary>
+        <div class="evidence-grid">
+          <section>
+            <h3>Dasar penilaian</h3>
+            <div class="score-components">
+              ${Object.entries(candidate.scoreComponents ?? {}).map(([key, value]) => `
+                <div><span>${escapeHtml(componentLabel(key))}</span>
+                  <meter min="0" max="1" value="${Number(value)}">${Number(value)}</meter>
+                  <strong>${Math.round(Number(value) * 100)}%</strong></div>
+              `).join('')}
+            </div>
+            <ul class="evidence-list">${(candidate.evidence ?? []).map((evidence) => `
+              <li>
+                <span class="material-symbols-outlined" aria-hidden="true">task_alt</span>
+                <div><strong>${escapeHtml(evidence.source ?? evidence.evidenceType ?? 'Rule evidence')}</strong>
+                <p>${escapeHtml(evidence.explanation ?? evidence.normalizedValue ?? '')}</p></div>
+              </li>
+            `).join('')}</ul>
+          </section>
+          <section>
+            <h3>Referensi sumber</h3>
+            <dl class="source-reference-list">
+              ${detailRow('Geometry', (candidate.sourceGeometryIds ?? []).join(', ') || '—')}
+              ${detailRow('Source feature', candidate.sourceFeatureId ?? '—')}
+              ${detailRow('Target feature', candidate.targetFeatureId ?? '—')}
+              ${detailRow('Endpoint', candidate.sourceEndpointId ?? '—')}
+              ${detailRow('Jenis jaringan', candidate.networkFamily ?? '—')}
+              ${detailRow('Rule set', candidate.topologyRuleSetVersion ?? '—')}
+            </dl>
+          </section>
         </div>
-        <p>Graph operasional baru berubah setelah aksi konfirmasi berhasil.</p>
-      </section>
-      <div class="evidence-grid">
-        <section>
-          <h3>Evidence dan scoring</h3>
-          <div class="score-components">
-            ${Object.entries(candidate.scoreComponents ?? {}).map(([key, value]) => `
-              <div><span>${escapeHtml(componentLabel(key))}</span>
-                <meter min="0" max="1" value="${Number(value)}">${Number(value)}</meter>
-                <strong>${Math.round(Number(value) * 100)}%</strong></div>
-            `).join('')}
-          </div>
-          <ul class="evidence-list">${(candidate.evidence ?? []).map((evidence) => `
-            <li>
-              <span class="material-symbols-outlined" aria-hidden="true">task_alt</span>
-              <div><strong>${escapeHtml(evidence.source ?? evidence.evidenceType ?? 'Rule evidence')}</strong>
-              <p>${escapeHtml(evidence.explanation ?? evidence.normalizedValue ?? '')}</p></div>
-            </li>
-          `).join('')}</ul>
+        <section class="review-history">
+          <h3>Riwayat keputusan</h3>
+          ${renderHistory(candidate, projections.candidates.history, projections.candidates.runs)}
         </section>
-        <section>
-          <h3>Source references</h3>
-          <dl class="source-reference-list">
-            ${detailRow('Geometry', (candidate.sourceGeometryIds ?? []).join(', ') || '—')}
-            ${detailRow('Source feature', candidate.sourceFeatureId ?? '—')}
-            ${detailRow('Target feature', candidate.targetFeatureId ?? '—')}
-            ${detailRow('Endpoint', candidate.sourceEndpointId ?? '—')}
-            ${detailRow('Network family', candidate.networkFamily ?? '—')}
-            ${detailRow('Rule set', candidate.topologyRuleSetVersion ?? '—')}
-          </dl>
-          <h3>Alternatif target</h3>
-          <select class="alternative-target"${alternatives.length ? '' : ' disabled'}>
-            <option value="">${alternatives.length ? 'Pilih alternatif…' : 'Tidak ada alternatif'}</option>
-            ${alternatives.map((item) => `
-              <option value="${escapeHtml(item.candidateId)}">${
-                escapeHtml(item.targetAssetId ?? item.targetPathAssetId)
-              } · ${Math.round((item.score ?? 0) * 100)}%</option>`).join('')}
-          </select>
-        </section>
-      </div>
-      <section class="review-history">
-        <h3>Riwayat keputusan</h3>
-        ${renderHistory(candidate, projections.candidates.history, projections.candidates.runs)}
-      </section>
+      </details>
       <footer class="review-actions">
-        <label>
-          <span>Catatan/alasan review</span>
-          <textarea class="review-reason" rows="2"
-            placeholder="Wajib untuk tolak, pilih aset lain, atau batalkan konfirmasi"></textarea>
-        </label>
         ${state.actionMessage ? `<p class="review-action-message ${state.actionStatus}" role="status">${
           escapeHtml(state.actionMessage)
         }</p>` : ''}
-        <div>
+        <div class="review-primary-actions">
           <button class="button primary confirm-candidate" type="button"${
             canConfirm(candidate) ? '' : ' disabled'
-          }>Konfirmasi</button>
+          }>Hubungkan</button>
           <button class="button secondary select-alternative" type="button"${
             alternatives.length ? '' : ' disabled'
-          }>Pilih aset lain</button>
-          <button class="button danger reject-candidate" type="button"${
-            canReject(candidate) ? '' : ' disabled'
-          }>Tolak</button>
-          <button class="button secondary skip-candidate" type="button"${
-            canSkip(candidate) ? '' : ' disabled'
-          }>Lewati</button>
-          <button class="button danger-outline revoke-relation" type="button"${
-            relation?.relationId ? '' : ' disabled'
-          }>Batalkan konfirmasi</button>
+          }>Pilih target lain</button>
+          <details class="decision-more">
+            <summary class="button secondary">Opsi lain</summary>
+            <div>
+              <button class="button reject-candidate" type="button"${
+                canReject(candidate) ? '' : ' disabled'
+              }>Tandai tidak terhubung</button>
+              <button class="button skip-candidate" type="button"${
+                canSkip(candidate) ? '' : ' disabled'
+              }>Simpan untuk nanti</button>
+              <button class="button revoke-relation destructive" type="button"${
+                relation?.relationId ? '' : ' disabled'
+              }>Batalkan koneksi</button>
+            </div>
+          </details>
         </div>
       </footer>
     `
@@ -286,38 +505,26 @@ async function initializeReview(container, mapData) {
     panel.querySelector('.confirm-candidate')?.addEventListener('click', () => (
       performCandidateAction(candidate, 'confirm')
     ))
-    panel.querySelector('.reject-candidate')?.addEventListener('click', () => (
-      performCandidateAction(candidate, 'reject')
-    ))
+    panel.querySelector('.reject-candidate')?.addEventListener('click', () => {
+      openDecisionDialog('reject', { candidate, relation })
+    })
     panel.querySelector('.skip-candidate')?.addEventListener('click', () => (
       performCandidateAction(candidate, 'skip')
     ))
     panel.querySelector('.select-alternative')?.addEventListener('click', () => {
-      const targetCandidateId = panel.querySelector('.alternative-target').value
-      if (!targetCandidateId) {
-        showActionError('Pilih alternatif target terlebih dahulu.')
-        return
-      }
-      performCandidateAction(candidate, 'select-target', { targetCandidateId })
+      const alternatives = candidatesForLocation().filter((item) => (
+        item.sourceEndpointId === candidate.sourceEndpointId
+        && item.candidateId !== candidate.candidateId
+        && ['candidate', 'ambiguous', 'revoked'].includes(item.candidateStatus)
+      ))
+      openDecisionDialog('select-target', { candidate, relation, alternatives })
     })
-    panel.querySelector('.revoke-relation')?.addEventListener('click', async () => {
-      const reason = panel.querySelector('.review-reason').value.trim()
-      if (reason.length < 3) {
-        showActionError('Alasan pembatalan minimal tiga karakter.')
-        return
-      }
-      await performMutation(async () => {
-        await revokeTopologyRelation({ relationId: relation.relationId, reason })
-      }, 'Relasi berhasil dibatalkan dan dikeluarkan dari graph operasional.')
+    panel.querySelector('.revoke-relation')?.addEventListener('click', () => {
+      openDecisionDialog('revoke', { candidate, relation })
     })
   }
 
-  async function performCandidateAction(candidate, action, extra = {}) {
-    const reason = container.querySelector('.review-reason')?.value.trim() ?? ''
-    if (['reject', 'select-target'].includes(action) && reason.length < 3) {
-      showActionError('Alasan review minimal tiga karakter.')
-      return
-    }
+  async function performCandidateAction(candidate, action, extra = {}, reason = '') {
     await performMutation(async () => {
       await reviewTopologyCandidate({
         candidateId: candidate.candidateId,
@@ -334,7 +541,7 @@ async function initializeReview(container, mapData) {
     renderDetail()
     try {
       await mutation()
-      projections = await loadReviewProjections(datasetVersionId)
+      projections = await loadReviewProjections(datasetVersionId, mapData.geometries)
       state.actionStatus = 'success'
       state.actionMessage = successMessage
     } catch (error) {
@@ -344,25 +551,177 @@ async function initializeReview(container, mapData) {
     renderAll()
   }
 
-  function showActionError(message) {
-    state.actionStatus = 'error'
-    state.actionMessage = message
-    renderDetail()
+  function bindDecisionDialog() {
+    const dialog = container.querySelector('.decision-dialog')
+    const form = dialog.querySelector('form')
+    dialog.querySelector('.close-decision-dialog').addEventListener('click', () => dialog.close())
+    dialog.querySelector('.cancel-decision').addEventListener('click', () => dialog.close())
+    dialog.addEventListener('close', () => {
+      decisionContext = null
+      form.reset()
+      dialog.querySelector('.decision-dialog-message').textContent = ''
+    })
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault()
+      if (!decisionContext) return
+      const context = decisionContext
+      const reasonChoice = dialog.querySelector('.decision-reason-select').value
+      const details = dialog.querySelector('.decision-details').value.trim()
+      if (reasonChoice === 'Lainnya' && details.length < 3) {
+        dialog.querySelector('.decision-dialog-message').textContent =
+          'Tambahkan penjelasan singkat untuk alasan lainnya.'
+        return
+      }
+      const reason = details ? `${reasonChoice}: ${details}` : reasonChoice
+      const targetCandidateId = dialog.querySelector('.decision-target').value
+      if (context.action === 'select-target' && !targetCandidateId) {
+        dialog.querySelector('.decision-dialog-message').textContent =
+          'Pilih target pengganti terlebih dahulu.'
+        return
+      }
+      const submit = dialog.querySelector('.submit-decision')
+      submit.disabled = true
+      dialog.querySelector('.decision-dialog-message').textContent = 'Menyimpan keputusan…'
+      try {
+        dialog.close()
+        if (context.action === 'revoke') {
+          await performMutation(async () => {
+            await revokeTopologyRelation({
+              relationId: context.relation.relationId,
+              reason,
+            })
+          }, 'Koneksi dibatalkan dan dikeluarkan dari graph operasional.')
+        } else {
+          await performCandidateAction(
+            context.candidate,
+            context.action,
+            context.action === 'select-target' ? { targetCandidateId } : {},
+            reason,
+          )
+        }
+      } finally {
+        submit.disabled = false
+      }
+    })
+  }
+
+  function openDecisionDialog(action, context) {
+    const dialog = container.querySelector('.decision-dialog')
+    decisionContext = { action, ...context }
+    const copy = decisionDialogCopy(action)
+    dialog.querySelector('.decision-dialog-icon').textContent = copy.icon
+    dialog.querySelector('.decision-dialog-title').textContent = copy.title
+    dialog.querySelector('.decision-dialog-description').textContent = copy.description
+    dialog.querySelector('.decision-reason-select').innerHTML = copy.reasons.map((reason) => (
+      `<option value="${escapeHtml(reason)}">${escapeHtml(reason)}</option>`
+    )).join('')
+    const targetField = dialog.querySelector('.decision-target-field')
+    targetField.hidden = action !== 'select-target'
+    const targetSelect = dialog.querySelector('.decision-target')
+    targetSelect.innerHTML = action === 'select-target'
+      ? context.alternatives.map((item) => `
+        <option value="${escapeHtml(item.candidateId)}">${
+          escapeHtml(endpointName(item, 'target', projections.sourceFeatures))
+        } · ${Math.round((item.score ?? 0) * 100)}%</option>
+      `).join('')
+      : ''
+    dialog.querySelector('.submit-decision').textContent = copy.submit
+    dialog.querySelector('.decision-dialog-message').textContent = ''
+    dialog.showModal()
+  }
+
+  function bindBulkDialog() {
+    const dialog = container.querySelector('.bulk-review-dialog')
+    const form = dialog.querySelector('form')
+    dialog.querySelector('.close-bulk-dialog').addEventListener('click', () => dialog.close())
+    dialog.querySelector('.cancel-bulk-action').addEventListener('click', () => dialog.close())
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault()
+      const action = dialog.dataset.action
+      const reason = dialog.querySelector('.bulk-review-reason').value.trim()
+      if (action === 'revoke-all' && reason.length < 3) {
+        dialog.querySelector('.bulk-dialog-message').textContent =
+          'Alasan penghapusan konfirmasi minimal tiga karakter.'
+        return
+      }
+      await performBulkAction(action, reason)
+    })
+    dialog.addEventListener('close', () => {
+      dialog.dataset.action = ''
+      dialog.querySelector('.bulk-review-reason').value = ''
+      dialog.querySelector('.bulk-dialog-message').textContent = ''
+    })
+  }
+
+  function openBulkDialog(action, count) {
+    const dialog = container.querySelector('.bulk-review-dialog')
+    const destructive = action === 'revoke-all'
+    dialog.dataset.action = action
+    dialog.querySelector('.bulk-dialog-icon').textContent = destructive
+      ? 'delete_sweep'
+      : 'done_all'
+    dialog.querySelector('.bulk-dialog-title').textContent = destructive
+      ? `Hapus ${count} konfirmasi?`
+      : `Konfirmasi ${count} koneksi yang direkomendasikan?`
+    dialog.querySelector('.bulk-dialog-description').textContent = destructive
+      ? 'Semua relasi confirmed akan dikeluarkan dari graph dan tidak lagi dapat dipakai tracing.'
+      : 'Hanya kandidat berstatus recommended yang dikonfirmasi. Ambiguous, unresolved, rejected, dan revoked tidak ikut.'
+    dialog.querySelector('.bulk-reason-label').textContent = destructive
+      ? 'Alasan penghapusan konfirmasi'
+      : 'Catatan konfirmasi (opsional)'
+    const submit = dialog.querySelector('.submit-bulk-action')
+    submit.textContent = destructive ? 'Hapus semua konfirmasi' : 'Konfirmasi semua'
+    submit.className = `button ${destructive ? 'danger' : 'primary'} submit-bulk-action`
+    dialog.querySelector('.bulk-dialog-message').textContent = ''
+    dialog.showModal()
+    dialog.querySelector('.bulk-review-reason').focus()
+  }
+
+  async function performBulkAction(action, reason) {
+    const dialog = container.querySelector('.bulk-review-dialog')
+    const submit = dialog.querySelector('.submit-bulk-action')
+    const cancel = dialog.querySelector('.cancel-bulk-action')
+    submit.disabled = true
+    cancel.disabled = true
+    dialog.querySelector('.bulk-dialog-message').textContent =
+      'Menyimpan keputusan dan membangun ulang graph…'
+    try {
+      const result = await reviewTopologyBulk({
+        datasetVersionId,
+        action,
+        reason,
+      })
+      projections = await loadReviewProjections(datasetVersionId, mapData.geometries)
+      state.bulkStatus = 'success'
+      state.bulkMessage = action === 'confirm-all'
+        ? `${result.affectedCount} kandidat dikonfirmasi. Graph dan tracing telah diperbarui.`
+        : `${result.affectedCount} konfirmasi dihapus dari graph operasional.`
+      dialog.close()
+      renderAll()
+    } catch (error) {
+      state.bulkStatus = 'error'
+      state.bulkMessage = ''
+      dialog.querySelector('.bulk-dialog-message').textContent = error.message
+    } finally {
+      submit.disabled = false
+      cancel.disabled = false
+    }
   }
 
   function bindFilters() {
     const statuses = [
-      ['open', 'Open (candidate + ambiguous)'],
+      ['needs-review', 'Perlu ditinjau'],
       ['all', 'Semua status'],
-      ['candidate', 'Candidate'],
-      ['ambiguous', 'Ambiguous'],
-      ['confirmed', 'Confirmed'],
-      ['rejected', 'Rejected'],
-      ['revoked', 'Revoked'],
-      ['unresolved', 'Unresolved'],
+      ['candidate', 'Rekomendasi sistem'],
+      ['ambiguous', 'Belum pasti'],
+      ['confirmed', 'Sudah dikonfirmasi'],
+      ['rejected', 'Tidak terhubung'],
+      ['revoked', 'Dibatalkan'],
+      ['unresolved', 'Belum ada pasangan'],
     ]
-    const families = unique(projections.candidates.items.map(({ networkFamily }) => networkFamily))
-    const types = unique(projections.candidates.items.map(({ candidateType }) => candidateType))
+    const locationCandidates = candidatesForLocation()
+    const families = unique(locationCandidates.map(({ networkFamily }) => networkFamily))
+    const types = unique(locationCandidates.map(({ candidateType }) => candidateType))
     setOptions('.candidate-status-filter', statuses, state.status)
     setOptions('.candidate-family-filter', [
       ['all', 'Semua family'],
@@ -394,7 +753,7 @@ async function initializeReview(container, mapData) {
     })
     container.querySelector('.candidate-score-filter').addEventListener('input', (event) => {
       state.minScore = Number(event.target.value)
-      container.querySelector('.score-output').textContent = state.minScore.toFixed(2)
+      container.querySelector('.score-output').textContent = `${Math.round(state.minScore * 100)}%`
       renderAll()
     })
   }
@@ -409,6 +768,9 @@ async function initializeReview(container, mapData) {
 
   function updateUrl() {
     const query = new URLSearchParams(window.location.search)
+    setOrDelete(query, 'datasetId', mapData.activeContext.datasetId)
+    setOrDelete(query, 'branchId', mapData.activeContext.branchId)
+    setOrDelete(query, 'area', state.area)
     setOrDelete(query, 'reviewCandidateId', state.selectedCandidateId)
     setOrDelete(query, 'status', state.status)
     setOrDelete(query, 'family', state.family)
@@ -420,11 +782,13 @@ async function initializeReview(container, mapData) {
   }
 }
 
-async function loadReviewProjections(datasetVersionId) {
-  const [candidates, graph, summary] = await Promise.all([
+async function loadReviewProjections(datasetVersionId, mapGeometries = []) {
+  const [candidates, graph, summary, sourceFeaturePayload] = await Promise.all([
     loadTopologyProjection({ datasetVersionId, projection: 'candidates' }),
     loadTopologyProjection({ datasetVersionId, projection: 'graph' }),
     loadTopologyProjection({ datasetVersionId, projection: 'summary' }),
+    loadDatasetProjection({ datasetVersionId, projection: 'source-features' })
+      .catch(() => ({ items: [] })),
   ])
   candidates.items = [
     ...(candidates.items ?? []),
@@ -448,15 +812,34 @@ async function loadReviewProjections(datasetVersionId) {
       }],
     })),
   ]
-  return { candidates, graph, summary }
+  const sourceFeatureById = new Map(
+    (sourceFeaturePayload.items ?? []).map((feature) => [feature.sourceFeatureId, feature]),
+  )
+  candidates.items = candidates.items.map((candidate) => {
+    const sourceFeature = sourceFeatureById.get(candidate.sourceFeatureId)
+    const targetFeature = sourceFeatureById.get(candidate.targetFeatureId)
+    return {
+      ...candidate,
+      sourceDisplayName: sourceFeature?.sourceName,
+      targetDisplayName: targetFeature?.sourceName,
+      sourceLocationKey: sourceFeature?.sourceFolderPath
+        ? locationGroupFor(sourceFeature.sourceFolderPath).locationGroupKey
+        : null,
+      targetLocationKey: targetFeature?.sourceFolderPath
+        ? locationGroupFor(targetFeature.sourceFolderPath).locationGroupKey
+        : null,
+    }
+  })
+  candidates.items = attachCandidateMapGeometryIds(candidates.items, mapGeometries)
+  return { candidates, graph, summary, sourceFeatures: sourceFeaturePayload.items ?? [] }
 }
 
 function filterCandidates(items, state) {
   const query = state.search.trim().toLowerCase()
   return prioritizeTopologyCandidates(items).filter((candidate) => {
     const statusMatch = state.status === 'all'
-      || (state.status === 'open'
-        ? ['candidate', 'ambiguous', 'unresolved'].includes(candidate.candidateStatus)
+      || (state.status === 'needs-review'
+        ? ['candidate', 'ambiguous'].includes(candidate.candidateStatus)
         : candidate.candidateStatus === state.status)
     const familyMatch = state.family === 'all' || candidate.networkFamily === state.family
     const typeMatch = state.type === 'all' || candidate.candidateType === state.type
@@ -467,27 +850,14 @@ function filterCandidates(items, state) {
       candidate.candidateId,
       candidate.sourceEndpointId,
       candidate.sourcePathAssetId,
+      candidate.sourceDisplayName,
       candidate.targetAssetId,
       candidate.targetPathAssetId,
+      candidate.targetDisplayName,
       ...(candidate.sourceGeometryIds ?? []),
     ].filter(Boolean).join(' ').toLowerCase().includes(query)
     return statusMatch && familyMatch && typeMatch && scoreMatch && distanceMatch && queryMatch
   })
-}
-
-function graphImpact(candidate, graph) {
-  const componentFor = (assetId) => (
-    (graph.components ?? []).find(({ nodeIds }) => nodeIds.includes(assetId))?.nodeIds.length ?? 0
-  )
-  const sourceComponentSize = componentFor(candidate.sourcePathAssetId)
-  const targetComponentSize = componentFor(candidate.targetAssetId)
-  return {
-    sourceComponentSize,
-    targetComponentSize,
-    mergeDelta: sourceComponentSize && targetComponentSize
-      ? sourceComponentSize + targetComponentSize
-      : Math.max(sourceComponentSize, targetComponentSize, 1),
-  }
 }
 
 function renderHistory(candidate, history = [], runs = []) {
@@ -520,18 +890,191 @@ function renderHistory(candidate, history = [], runs = []) {
 
 function routeEndpoint(label, assetId, reference) {
   return `<div class="route-endpoint">
-    <span>${escapeHtml(label)}</span><strong>${escapeHtml(assetId ?? '—')}</strong>
-    <small>${escapeHtml(reference ?? 'Tidak ada endpoint reference')}</small>
+    <span>${escapeHtml(label)}</span><strong>${escapeHtml(assetId ?? 'Belum ada pasangan')}</strong>
+    <small>${escapeHtml(reference ?? 'Referensi endpoint tidak tersedia')}</small>
   </div>`
 }
 
-function renderReadiness(summary) {
-  const readiness = summary.readiness?.topologyReadiness ?? 'not_ready'
+function endpointName(candidate, side, sourceFeatures = []) {
+  const isSource = side === 'source'
+  const displayName = isSource ? candidate.sourceDisplayName : candidate.targetDisplayName
+  if (displayName) return displayName
+  const featureId = isSource ? candidate.sourceFeatureId : candidate.targetFeatureId
+  const featureName = sourceFeatures.find((feature) => (
+    feature.sourceFeatureId === featureId
+  ))?.sourceName
+  if (featureName) return featureName
+  const assetId = isSource
+    ? candidate.sourcePathAssetId
+    : candidate.targetAssetId ?? candidate.targetPathAssetId
+  if (!assetId) return 'Belum ada pasangan'
+  return `Aset ${shortReference(assetId)}`
+}
+
+function shortReference(value) {
+  if (!value) return null
+  const text = String(value)
+  const meaningful = text.split(':').at(-1)
+  return meaningful.length > 12
+    ? `…${meaningful.slice(-10)}`
+    : meaningful
+}
+
+function validCoordinate(value) {
+  return Array.isArray(value)
+    && value.length >= 2
+    && Number.isFinite(Number(value[0]))
+    && Number.isFinite(Number(value[1]))
+}
+
+function statusLabel(candidate) {
+  if (isBulkConfirmableCandidate(candidate)) return 'Direkomendasikan'
+  return {
+    candidate: 'Perlu ditinjau',
+    ambiguous: 'Belum pasti',
+    confirmed: 'Terkonfirmasi',
+    rejected: 'Tidak terhubung',
+    revoked: 'Dibatalkan',
+    unresolved: 'Belum ada pasangan',
+  }[candidate.candidateStatus] ?? candidate.candidateStatus
+}
+
+function renderBulkDialog() {
+  return `
+    <dialog class="bulk-review-dialog" aria-labelledby="bulk-dialog-title">
+      <form>
+        <header>
+          <span class="material-symbols-outlined bulk-dialog-icon" aria-hidden="true">
+            done_all
+          </span>
+          <div>
+            <h2 class="bulk-dialog-title" id="bulk-dialog-title">Konfirmasi semua</h2>
+            <p class="bulk-dialog-description"></p>
+          </div>
+          <button class="icon-button close-bulk-dialog" type="button" aria-label="Tutup dialog">
+            <span class="material-symbols-outlined" aria-hidden="true">close</span>
+          </button>
+        </header>
+        <label>
+          <span class="bulk-reason-label">Catatan konfirmasi</span>
+          <textarea class="bulk-review-reason" rows="3"
+            placeholder="Tuliskan konteks atau alasan keputusan bulk"></textarea>
+        </label>
+        <p class="bulk-dialog-message" role="status"></p>
+        <footer>
+          <button class="button secondary cancel-bulk-action" type="button">Batal</button>
+          <button class="button primary submit-bulk-action" type="submit">Konfirmasi semua</button>
+        </footer>
+      </form>
+    </dialog>
+  `
+}
+
+function renderDecisionDialog() {
+  return `
+    <dialog class="decision-dialog" aria-labelledby="decision-dialog-title">
+      <form>
+        <header>
+          <span class="material-symbols-outlined decision-dialog-icon" aria-hidden="true">
+            rule
+          </span>
+          <div>
+            <h2 class="decision-dialog-title" id="decision-dialog-title">Simpan keputusan</h2>
+            <p class="decision-dialog-description"></p>
+          </div>
+          <button class="icon-button close-decision-dialog" type="button" aria-label="Tutup dialog">
+            <span class="material-symbols-outlined" aria-hidden="true">close</span>
+          </button>
+        </header>
+        <div class="decision-dialog-fields">
+          <label class="decision-target-field" hidden>
+            <span>Target pengganti</span>
+            <select class="decision-target"></select>
+          </label>
+          <label>
+            <span>Alasan</span>
+            <select class="decision-reason-select"></select>
+          </label>
+          <label>
+            <span>Detail tambahan <small>Opsional</small></span>
+            <textarea class="decision-details" rows="2"
+              placeholder="Tambahkan konteks jika diperlukan"></textarea>
+          </label>
+        </div>
+        <p class="decision-dialog-message" role="status"></p>
+        <footer>
+          <button class="button secondary cancel-decision" type="button">Batal</button>
+          <button class="button primary submit-decision" type="submit">Simpan keputusan</button>
+        </footer>
+      </form>
+    </dialog>
+  `
+}
+
+function decisionDialogCopy(action) {
+  return {
+    reject: {
+      icon: 'link_off',
+      title: 'Tandai tidak terhubung?',
+      description: 'Koneksi ini tidak akan dipakai oleh graph dan tracing.',
+      submit: 'Tandai tidak terhubung',
+      reasons: [
+        'Endpoint tidak tersambung',
+        'Aset berbeda jaringan',
+        'Posisi pada data sumber salah',
+        'Hasil verifikasi lapangan',
+        'Lainnya',
+      ],
+    },
+    'select-target': {
+      icon: 'swap_horiz',
+      title: 'Pilih target pengganti',
+      description: 'Target baru akan dikonfirmasi dan kandidat sebelumnya ditutup.',
+      submit: 'Gunakan target ini',
+      reasons: [
+        'Target sesuai kondisi lapangan',
+        'Target sesuai dokumentasi',
+        'Target sebelumnya salah',
+        'Lainnya',
+      ],
+    },
+    revoke: {
+      icon: 'undo',
+      title: 'Batalkan koneksi?',
+      description: 'Koneksi akan dikeluarkan dari graph dan tidak dipakai untuk tracing.',
+      submit: 'Batalkan koneksi',
+      reasons: [
+        'Konfirmasi sebelumnya salah',
+        'Data aset berubah',
+        'Hasil verifikasi lapangan',
+        'Lainnya',
+      ],
+    },
+  }[action]
+}
+
+function renderReadiness(summary, locationCandidates = null) {
+  const hasLocationScope = Array.isArray(locationCandidates)
+  const openCount = hasLocationScope
+    ? locationCandidates.filter(({ candidateStatus }) => (
+      ['candidate', 'ambiguous', 'unresolved'].includes(candidateStatus)
+    )).length
+    : summary.summary?.ambiguousCount ?? 0
+  const readiness = hasLocationScope
+    ? (openCount ? 'not_ready' : 'ready')
+    : summary.readiness?.topologyReadiness ?? 'not_ready'
   return `<div class="review-readiness ${readiness}">
-    <span class="material-symbols-outlined">${readiness === 'ready' ? 'verified' : 'warning'}</span>
-    <div><strong>${readiness === 'ready' ? 'Topology ready' : 'Topology belum ready'}</strong>
-    <small>${(summary.readiness?.blockingReasons ?? []).join(' · ') || 'Semua gate terpenuhi'}</small></div>
+    <span class="material-symbols-outlined">${readiness === 'ready' ? 'verified' : 'pending_actions'}</span>
+    <div><strong>${readiness === 'ready' ? 'Site ini selesai' : 'Perlu peninjauan'}</strong>
+    <small>${readiness === 'ready'
+      ? 'Tidak ada koneksi yang tertunda'
+      : `${openCount} koneksi di site ini`}</small></div>
   </div>`
+}
+
+function isBulkConfirmableCandidate(candidate) {
+  return candidate.candidateStatus === 'candidate'
+    && candidate.proposalStatus === 'recommended'
 }
 
 function reviewState(icon, title, message, loading = false) {
@@ -587,10 +1130,6 @@ function formatDistance(value) {
   return Number.isFinite(value) ? `${value.toFixed(2)} m` : 'Metadata eksplisit'
 }
 
-function formatNumber(value) {
-  return Number.isFinite(value) ? value.toFixed(3) : '—'
-}
-
 function formatTimestamp(value) {
   try {
     return new Intl.DateTimeFormat('id-ID', {
@@ -621,6 +1160,21 @@ function readContext() {
 function setOrDelete(params, key, value) {
   if (value !== null && value !== undefined && value !== '') params.set(key, value)
   else params.delete(key)
+}
+
+function formatLocationName(value) {
+  const source = String(value ?? '').trim()
+  if (!source || source !== source.toUpperCase()) return source.replaceAll(' - ', ' — ')
+  const acronyms = new Set(['DPPU', 'FT', 'ICT', 'ITC', 'LPG', 'SSC', 'YIA'])
+  return source
+    .split(/\s+/)
+    .map((word) => (
+      acronyms.has(word)
+        ? word
+        : `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`
+    ))
+    .join(' ')
+    .replaceAll(' - ', ' — ')
 }
 
 function escapeHtml(value) {

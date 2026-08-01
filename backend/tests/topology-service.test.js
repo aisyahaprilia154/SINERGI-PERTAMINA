@@ -83,6 +83,71 @@ test('candidate review is audited, materializes confirmed graph, and can be revo
   )
 })
 
+test('bulk review confirms recommended candidates and revokes every confirmed relation atomically', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const auditLog = new MemoryAuditLog()
+  const times = [
+    '2026-07-29T06:00:00.000Z',
+    '2026-07-29T07:00:00.000Z',
+  ]
+  const service = new TopologyService({
+    repository,
+    auditLog,
+    clock: () => new Date(times.shift()),
+  })
+
+  const confirmed = await service.confirmAllCandidates('dv-review', 'admin-1', {
+    reason: 'Kandidat recommended disetujui untuk dataset pilot.',
+  })
+  assert.equal(confirmed.action, 'confirm_all')
+  assert.equal(confirmed.affectedCount, 2)
+  assert.equal(confirmed.confirmedRelationCount, 2)
+  assert.equal(confirmed.graph.edges.length, 1)
+
+  await assert.rejects(
+    service.revokeAllRelations('dv-review', 'admin-2', { reason: '' }),
+    (error) => error.code === 'topology_review_reason_required',
+  )
+  const revoked = await service.revokeAllRelations('dv-review', 'admin-2', {
+    reason: 'Dataset perlu diverifikasi ulang secara menyeluruh.',
+  })
+  assert.equal(revoked.action, 'revoke_all')
+  assert.equal(revoked.affectedCount, 2)
+  assert.equal(revoked.confirmedRelationCount, 0)
+  assert.equal(revoked.graph.edges.length, 0)
+  const record = await repository.get('dv-review')
+  assert.equal(record.topologyRelationHistory.length, 2)
+  assert.ok(record.topologyCandidates.every(({ candidateStatus }) => (
+    candidateStatus === 'revoked'
+  )))
+  assert.deepEqual(
+    auditLog.entries.map(({ event }) => event),
+    ['topology.candidates_bulk_confirmed', 'topology.relations_bulk_revoked'],
+  )
+})
+
+test('bulk confirmation excludes ambiguous alternatives', async () => {
+  const bundle = reviewBundle({ secondNode: true })
+  const initial = generateRelationArtifacts(bundle)
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const service = new TopologyService({
+    repository,
+    auditLog: new MemoryAuditLog(),
+  })
+
+  const result = await service.confirmAllCandidates('dv-review', 'admin-1')
+  const record = await repository.get('dv-review')
+  assert.equal(result.affectedCount, 1)
+  assert.equal(
+    record.topologyCandidates.filter(({ candidateStatus }) => (
+      candidateStatus === 'ambiguous'
+    )).length,
+    2,
+  )
+})
+
 test('reject requires reason and rejected candidates never enter operational graph', async () => {
   const bundle = reviewBundle()
   const initial = generateRelationArtifacts(bundle)

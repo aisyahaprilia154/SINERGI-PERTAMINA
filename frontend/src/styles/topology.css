@@ -27,7 +27,7 @@
 .view-switcher .material-symbols-outlined { font-size: 18px; }
 
 .topology-workspace {
-  height: calc(100dvh - var(--map-navbar-height) - 48px);
+  height: calc(100dvh - var(--map-navbar-height));
   min-height: 0;
   display: grid;
   grid-template-columns: 304px minmax(0, 1fr);

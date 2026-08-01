@@ -105,15 +105,7 @@ function initializeTopologyWorkspace(container, initial) {
 
   container.innerHTML = `
     <div class="map-app topology-app">
-      ${renderTopNavigation('topology')}
-      <section class="view-switcher" aria-label="Projection data">
-        <a href="${mapHref(activeContext)}">
-          <span class="material-symbols-outlined" aria-hidden="true">map</span>Peta Aset
-        </a>
-        <a class="active" href="${topologyHref(activeContext)}" aria-current="page">
-          <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>Peta Topologi
-        </a>
-      </section>
+      ${renderTopNavigation('topology', activeContext)}
       <main class="topology-workspace">
         <aside class="topology-controls" aria-label="Kontrol peta topologi">
           <div class="topology-controls-scroll">

@@ -161,6 +161,7 @@ function confirmedTopologyProjection(payload) {
     id: asset.assetId,
     assetId: asset.assetId,
     sourceNodeId: asset.id,
+    sourceFeatureId: asset.sourceFeatureId,
   }))
   const validIds = new Set(nodes.map(({ id }) => id))
   const edges = (payload.relations ?? [])
@@ -407,7 +408,8 @@ function splitGeometryRecord(geometry) {
   if (geometry.geometryType !== 'multi_geometry') {
     return [{
       id: geometry.id,
-      sourceGeometryId: geometry.id,
+      sourceGeometryId: geometry.sourceGeometryId ?? geometry.id,
+      sourceFeatureId: geometry.sourceFeatureId,
       assetNodeId: geometry.assetNodeId,
       geometryType: geometry.geometryType,
       coordinates: structuredClone(geometry.coordinates),
@@ -420,7 +422,8 @@ function splitGeometryRecord(geometry) {
     if (!child || typeof child !== 'object' || child.geometryType === 'multi_geometry') return []
     return [{
       id: `${geometry.id}:part:${index + 1}`,
-      sourceGeometryId: geometry.id,
+      sourceGeometryId: geometry.sourceGeometryId ?? geometry.id,
+      sourceFeatureId: geometry.sourceFeatureId,
       geometryPartIndex: index,
       assetNodeId: geometry.assetNodeId,
       geometryType: child.geometryType,
@@ -438,6 +441,7 @@ function toMapGeometry(geometry, bounds) {
   return {
     id: geometry.id,
     sourceGeometryId: geometry.sourceGeometryId,
+    sourceFeatureId: geometry.sourceFeatureId,
     ...(Number.isInteger(geometry.geometryPartIndex)
       ? { geometryPartIndex: geometry.geometryPartIndex }
       : {}),

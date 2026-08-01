@@ -52,6 +52,43 @@ test('user map mounts MapLibre with area scope and never loads review candidates
   assert.doesNotMatch(source, /createFlatNetworkMap\(/)
 })
 
+test('connection review keeps the decision beside a candidate-focused asset map', async () => {
+  const reviewSource = await readFile(
+    new URL('../src/pages/admin/topology-review-page.js', import.meta.url),
+    'utf8',
+  )
+  const mapSource = await readFile(
+    new URL('../src/pages/map/maplibre-map.js', import.meta.url),
+    'utf8',
+  )
+
+  assert.match(reviewSource, /id="review-map"/)
+  assert.match(reviewSource, /createMapLibreSurface\(container\.querySelector\('#review-map'\)/)
+  assert.match(reviewSource, /candidates: initialLocationCandidates/)
+  assert.match(reviewSource, /reviewMap\.focusCoordinates\(positions\)/)
+  assert.match(reviewSource, /class="site-select"/)
+  assert.match(reviewSource, /mapData\.locationGroups\.map/)
+  assert.match(reviewSource, /scopeMapData\(\{/)
+  assert.match(reviewSource, /query\.set\('area', nextArea\)/)
+  assert.match(reviewSource, /attachCandidateMapGeometryIds/)
+  assert.match(reviewSource, /isolateSelectedCandidate: true/)
+  assert.doesNotMatch(reviewSource, /loadImportConfig/)
+  assert.match(reviewSource, /class="decision-reason-select"/)
+  assert.match(reviewSource, /Detail tambahan <small>Opsional/)
+  assert.match(reviewSource, /decisionDialogCopy/)
+  assert.doesNotMatch(reviewSource, /class="review-reason"/)
+  assert.match(mapSource, /selectedCandidateId/)
+  assert.match(mapSource, /selectedCandidateGeometryIds/)
+  assert.match(mapSource, /focusCoordinates\(positions\)/)
+  assert.match(mapSource, /map-selected-candidate-overlay/)
+  assert.match(mapSource, /Koneksi dipilih/)
+  assert.match(mapSource, /selected-map-endpoint source/)
+  assert.match(mapSource, /selected-map-endpoint target/)
+  assert.match(mapSource, /function geometryIdsForCandidate/)
+  assert.match(mapSource, /!isolateCandidate \|\| trace/)
+  assert.match(mapSource, /!isolateCandidate \|\| candidate\.candidateId === state\.selectedCandidateId/)
+})
+
 test('MapLibre basemap is environment-configured and operational data is fail-safe', async () => {
   const source = await readFile(
     new URL('../src/pages/map/maplibre-map.js', import.meta.url),
@@ -72,6 +109,14 @@ test('MapLibre basemap is environment-configured and operational data is fail-sa
   assert.match(source, /setDeclutterEnabled\(enabled\)/)
   assert.match(source, /drawKmlLineOverlay/)
   assert.match(source, /map-kml-line-overlay/)
+  assert.match(source, /cooperativeGestures: false/)
+  assert.match(source, /scrollZoom: true/)
+  assert.match(source, /touchZoomRotate: true/)
+  assert.match(source, /touchPitch: false/)
+  assert.match(source, /dragRotate: false/)
+  assert.match(source, /pitchWithRotate: true/)
+  assert.match(source, /map\.dragRotate\.enable\(\)/)
+  assert.match(source, /map\.dragRotate\.disable\(\)/)
   assert.doesNotMatch(source, /\bnew Marker\(/)
 })
 
@@ -86,13 +131,52 @@ test('fallback and vector basemap styles are valid and use a visible neutral can
     vectorTiles: 'https://tiles.openfreemap.org/planet',
     attribution: '',
   })
+  const fieldStyle = createBaseStyle({
+    imageryTiles: 'https://imagery.example.test/{z}/{x}/{y}.jpg',
+    vectorTiles: 'https://tiles.openfreemap.org/planet',
+    attribution: 'Imagery test',
+  })
 
   assert.deepEqual(validateStyleMin(fallbackStyle), [])
   assert.deepEqual(validateStyleMin(vectorStyle), [])
+  assert.deepEqual(validateStyleMin(fieldStyle), [])
+  assert.equal(
+    fieldStyle.layers.find(({ id }) => id === 'satellite-imagery')
+      ?.layout?.visibility,
+    'none',
+  )
+  assert.ok(fieldStyle.layers.some(({ id }) => id === 'basemap-poi-labels'))
+  assert.ok(fieldStyle.layers.some(({ id }) => id === 'basemap-house-numbers'))
+  assert.equal(
+    fieldStyle.layers.find(({ id }) => id === 'basemap-buildings')?.minzoom,
+    14,
+  )
+  assert.ok(fieldStyle.layers.some(({ id }) => id === 'basemap-building-shadows'))
+  assert.ok(fieldStyle.layers.some(({ id }) => id === 'basemap-building-labels'))
+  assert.notEqual(
+    fieldStyle.layers.find(({ id }) => id === 'basemap-buildings')
+      ?.layout?.visibility,
+    'none',
+  )
+  assert.equal(
+    fieldStyle.layers.find(({ id }) => id === 'basemap-house-numbers')
+      ?.layout?.visibility,
+    'none',
+  )
   assert.equal(
     fallbackStyle.layers.find(({ id }) => id === 'safe-background')
       ?.paint?.['background-color'],
-    '#edf2f6',
+    '#f7f6f1',
+  )
+  assert.equal(
+    fieldStyle.layers.find(({ id }) => id === 'basemap-water')
+      ?.paint?.['fill-color'],
+    '#a9dff0',
+  )
+  assert.equal(
+    fieldStyle.layers.find(({ id }) => id === 'basemap-roads')
+      ?.paint?.['line-color']?.[0],
+    'match',
   )
 })
 

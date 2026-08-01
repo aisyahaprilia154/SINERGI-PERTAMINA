@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   loadTopologyProjection,
+  reviewTopologyBulk,
   reviewTopologyCandidate,
 } from '../src/services/active-dataset-service.js'
 
@@ -48,6 +49,49 @@ test('candidate mutation sends only the selected review action and body', async 
     assert.equal(request.url, '/api/topology/candidates/candidate-1/confirm')
     assert.equal(request.options.method, 'POST')
     assert.deepEqual(JSON.parse(request.options.body), { reason: 'Evidence diverifikasi.' })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('bulk topology mutation uses the versioned admin endpoint', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options })
+    return new Response(JSON.stringify({ affectedCount: 2 }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    await reviewTopologyBulk({
+      datasetVersionId: 'dv-1',
+      action: 'confirm-all',
+      reason: 'Review bulk pilot.',
+      token: 'admin',
+    })
+    await reviewTopologyBulk({
+      datasetVersionId: 'dv-1',
+      action: 'revoke-all',
+      reason: 'Perlu verifikasi ulang.',
+      token: 'admin',
+    })
+    assert.deepEqual(
+      requests.map(({ url }) => url),
+      [
+        '/api/dataset-versions/dv-1/topology/confirm-all',
+        '/api/dataset-versions/dv-1/topology/revoke-all',
+      ],
+    )
+    assert.ok(requests.every(({ options }) => options.method === 'POST'))
+    assert.deepEqual(
+      requests.map(({ options }) => JSON.parse(options.body)),
+      [
+        { reason: 'Review bulk pilot.' },
+        { reason: 'Perlu verifikasi ulang.' },
+      ],
+    )
   } finally {
     globalThis.fetch = originalFetch
   }

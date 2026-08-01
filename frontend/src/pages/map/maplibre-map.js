@@ -44,6 +44,7 @@ export function createMapLibreSurface(element, {
   onBasemapStatus = () => {},
   onLayoutStatus = () => {},
 } = {}) {
+  let currentCandidates = candidates
   const assetById = new Map(assets.map((asset) => [asset.id, asset]))
   const geometryById = new Map(geometries.map((geometry) => [geometry.id, geometry]))
   const networkById = new Map(networks.map((network) => [network.id, network]))
@@ -64,7 +65,9 @@ export function createMapLibreSurface(element, {
     selectedAssetId: null,
     traceNodeIds: [],
     connectedNodeIds: [],
+    selectedCandidateId: null,
     dimOthers: true,
+    isolateSelectedCandidate: false,
     highlightedNetworkId: null,
   }
   let loaded = false
@@ -86,6 +89,8 @@ export function createMapLibreSurface(element, {
       ?? '/api/basemap/openfreemap/planet',
   ).trim()
   const basemapAttribution = String(import.meta.env.VITE_SINERGI_BASEMAP_ATTRIBUTION ?? '').trim()
+  let basemapMode = vectorTiles ? 'street' : 'satellite'
+  const loadedBasemapSourceIds = new Set()
   const map = new MapLibreMap({
     container: element,
     style: createBaseStyle({ imageryTiles, vectorTiles, attribution: basemapAttribution }),
@@ -96,7 +101,13 @@ export function createMapLibreSurface(element, {
     minZoom: 1,
     maxZoom: 22,
     attributionControl: false,
-    cooperativeGestures: true,
+    cooperativeGestures: false,
+    scrollZoom: true,
+    keyboard: true,
+    touchZoomRotate: true,
+    touchPitch: false,
+    dragRotate: false,
+    pitchWithRotate: true,
     transformRequest: (url) => (
       url.includes('/overlay-resources/')
         ? { url, headers: { Authorization: `Bearer ${getDefaultMapToken()}` } }
@@ -107,18 +118,37 @@ export function createMapLibreSurface(element, {
   markerOverlay.className = 'map-adaptive-marker-layer'
   markerOverlay.setAttribute('aria-label', 'Aset KML dengan tata letak adaptif')
   element.append(markerOverlay)
+  const selectedCandidateOverlay = document.createElement('div')
+  selectedCandidateOverlay.className = 'map-selected-candidate-overlay'
+  selectedCandidateOverlay.setAttribute('aria-live', 'polite')
+  element.append(selectedCandidateOverlay)
+
+  const enableCtrlPitch = (event) => {
+    if (event?.ctrlKey || event?.key === 'Control') map.dragRotate.enable()
+  }
+  const disableCtrlPitch = (event) => {
+    if (!event || event.key === 'Control' || !event.ctrlKey) map.dragRotate.disable()
+  }
+  const toggleCtrlPitchFromPointer = (event) => {
+    if (event.ctrlKey) map.dragRotate.enable()
+    else map.dragRotate.disable()
+  }
+  window.addEventListener('keydown', enableCtrlPitch)
+  window.addEventListener('keyup', disableCtrlPitch)
+  window.addEventListener('blur', disableCtrlPitch)
+  element.addEventListener('pointerdown', toggleCtrlPitchFromPointer)
 
   map.addControl(new NavigationControl({ showCompass: false }), 'bottom-right')
   map.addControl(new AttributionControl({
     compact: true,
-    customAttribution: imageryTiles
-      ? 'SINERGI · canonical longitude/latitude'
-      : 'SINERGI · OpenFreeMap © OpenMapTiles · Data © OpenStreetMap',
+    customAttribution: vectorTiles
+      ? 'SINERGI · OpenFreeMap © OpenMapTiles · Data © OpenStreetMap'
+      : 'SINERGI · canonical longitude/latitude',
   }))
 
-  const basemapSourceId = imageryTiles
-    ? 'satellite-imagery'
-    : vectorTiles ? 'openfreemap' : null
+  let basemapSourceId = vectorTiles
+    ? 'openfreemap'
+    : imageryTiles ? 'satellite-imagery' : null
   onBasemapStatus('loading', { retrying: false })
   armBasemapTimeout()
 
@@ -164,9 +194,9 @@ export function createMapLibreSurface(element, {
       const source = map.getSource(basemapSourceId)
       try {
         armBasemapTimeout()
-        if (imageryTiles && typeof source?.setTiles === 'function') {
+        if (basemapSourceId === 'satellite-imagery' && typeof source?.setTiles === 'function') {
           source.setTiles([imageryTiles])
-        } else if (vectorTiles && typeof source?.setUrl === 'function') {
+        } else if (basemapSourceId === 'openfreemap' && typeof source?.setUrl === 'function') {
           source.setUrl(vectorTiles)
         }
       } catch (error) {
@@ -182,8 +212,11 @@ export function createMapLibreSurface(element, {
     if (!basemapHasLoadedTile) scheduleBasemapRetry()
   })
   map.on('sourcedata', (event) => {
+    if (['openfreemap', 'satellite-imagery'].includes(event?.sourceId) && event?.tile) {
+      loadedBasemapSourceIds.add(event.sourceId)
+    }
     if (!isBasemapLoadedEvent(event, basemapSourceId)) return
-    basemapHasLoadedTile = Boolean(event.tile) || basemapHasLoadedTile
+    basemapHasLoadedTile = true
     basemapLastError = ''
     basemapRetryAttempt = 0
     clearBasemapRetry()
@@ -262,7 +295,7 @@ export function createMapLibreSurface(element, {
       assetById,
       assetNetworkIds,
       topologyGraph,
-      candidates,
+      candidates: currentCandidates,
       overlays,
       state,
     })
@@ -284,11 +317,22 @@ export function createMapLibreSurface(element, {
   function syncAdaptiveMarkers() {
     if (!loaded || destroyed) return
     const traceIds = new Set(state.traceNodeIds)
+    const selectedCandidate = currentCandidates.find(({ candidateId }) => (
+      candidateId === state.selectedCandidateId
+    ))
+    const isolateCandidate = Boolean(state.isolateSelectedCandidate && selectedCandidate)
+    const focusedAssetIds = new Set([
+      selectedCandidate?.sourcePathAssetId,
+      selectedCandidate?.targetAssetId,
+      selectedCandidate?.targetPathAssetId,
+    ].filter(Boolean))
     const items = assets
       .filter(({ coordinate }) => validPosition(coordinate))
       .map((asset) => {
-        const active = !asset.networkIds?.length
-          || asset.networkIds.some((networkId) => state.selectedNetworkIds.has(networkId))
+        const active = isolateCandidate
+          ? focusedAssetIds.has(asset.id)
+          : !asset.networkIds?.length
+            || asset.networkIds.some((networkId) => state.selectedNetworkIds.has(networkId))
         const projected = map.project(asset.coordinate.slice(0, 2))
         return {
           id: asset.id,
@@ -305,7 +349,7 @@ export function createMapLibreSurface(element, {
           isCoreNode: asset.isCoreNode,
         }
       })
-      .filter(({ active }) => active || state.dimOthers)
+      .filter(({ active }) => active || (!isolateCandidate && state.dimOthers))
 
     const layout = buildAdaptiveAssetLayout(items, {
       zoom: map.getZoom(),
@@ -326,6 +370,7 @@ export function createMapLibreSurface(element, {
       + `<div class="map-adaptive-leaders">${leaders}</div>`
       + `<div class="map-adaptive-markers">${markers}</div>`
     drawKmlLineOverlay(markerOverlay.querySelector('.map-kml-line-overlay'))
+    syncSelectedCandidateOverlay()
 
     const signature = JSON.stringify({
       enabled: declutterEnabled,
@@ -335,6 +380,93 @@ export function createMapLibreSurface(element, {
       layoutStatusSignature = signature
       onLayoutStatus({ enabled: declutterEnabled, ...layout.summary })
     }
+  }
+
+  function syncSelectedCandidateOverlay() {
+    const candidate = currentCandidates.find(({ candidateId }) => (
+      candidateId === state.selectedCandidateId
+    ))
+    if (!candidate
+      || !validPosition(candidate.sourceCoordinate)
+      || !validPosition(candidate.targetCoordinate)) {
+      selectedCandidateOverlay.replaceChildren()
+      selectedCandidateOverlay.hidden = true
+      return
+    }
+
+    selectedCandidateOverlay.hidden = false
+    const sourcePoint = map.project(candidate.sourceCoordinate.slice(0, 2))
+    const targetPoint = map.project(candidate.targetCoordinate.slice(0, 2))
+    const width = Math.max(element.clientWidth, 1)
+    const height = Math.max(element.clientHeight, 1)
+    const overlap = Math.hypot(
+      targetPoint.x - sourcePoint.x,
+      targetPoint.y - sourcePoint.y,
+    ) < 84
+    const midpoint = {
+      x: (sourcePoint.x + targetPoint.x) / 2,
+      y: (sourcePoint.y + targetPoint.y) / 2,
+    }
+    const sourceLabel = overlap
+      ? {
+        x: clampNumber(midpoint.x - 104, 86, width - 86),
+        y: clampNumber(midpoint.y - 70, 92, height - 48),
+      }
+      : {
+        x: clampNumber(sourcePoint.x, 86, width - 86),
+        y: clampNumber(sourcePoint.y - 58, 92, height - 48),
+      }
+    const targetLabel = overlap
+      ? {
+        x: clampNumber(midpoint.x + 104, 86, width - 86),
+        y: clampNumber(midpoint.y + 70, 92, height - 48),
+      }
+      : {
+        x: clampNumber(targetPoint.x, 86, width - 86),
+        y: clampNumber(targetPoint.y + 58, 92, height - 48),
+      }
+    const sourceName = candidate.sourceDisplayName
+      || candidate.sourcePathAssetId
+      || 'Aset sumber'
+    const targetName = candidate.targetDisplayName
+      || candidate.targetAssetId
+      || candidate.targetPathAssetId
+      || 'Aset target'
+    const distance = Number.isFinite(candidate.distanceMeters)
+      ? `${candidate.distanceMeters.toFixed(2)} m`
+      : 'Lokasi dari metadata'
+
+    selectedCandidateOverlay.innerHTML = `
+      <svg viewBox="0 0 ${styleNumber(width)} ${styleNumber(height)}"
+        preserveAspectRatio="none" aria-hidden="true">
+        <line class="selected-connection"
+          x1="${styleNumber(sourcePoint.x)}" y1="${styleNumber(sourcePoint.y)}"
+          x2="${styleNumber(targetPoint.x)}" y2="${styleNumber(targetPoint.y)}"></line>
+        <line class="selected-endpoint-leader source"
+          x1="${styleNumber(sourcePoint.x)}" y1="${styleNumber(sourcePoint.y)}"
+          x2="${styleNumber(sourceLabel.x)}" y2="${styleNumber(sourceLabel.y)}"></line>
+        <line class="selected-endpoint-leader target"
+          x1="${styleNumber(targetPoint.x)}" y1="${styleNumber(targetPoint.y)}"
+          x2="${styleNumber(targetLabel.x)}" y2="${styleNumber(targetLabel.y)}"></line>
+        <circle class="selected-anchor source" cx="${styleNumber(sourcePoint.x)}"
+          cy="${styleNumber(sourcePoint.y)}" r="${overlap ? 11 : 8}"></circle>
+        <circle class="selected-anchor target" cx="${styleNumber(targetPoint.x)}"
+          cy="${styleNumber(targetPoint.y)}" r="${overlap ? 5 : 8}"></circle>
+      </svg>
+      <div class="selected-candidate-map-summary">
+        <small>Koneksi dipilih</small>
+        <strong>${escapeHtml(sourceName)} <span>→</span> ${escapeHtml(targetName)}</strong>
+        <b>${escapeHtml(distance)}</b>
+      </div>
+      <div class="selected-map-endpoint source"
+        style="left:${styleNumber(sourceLabel.x)}px;top:${styleNumber(sourceLabel.y)}px">
+        <span>Dari</span><strong>${escapeHtml(sourceName)}</strong>
+      </div>
+      <div class="selected-map-endpoint target"
+        style="left:${styleNumber(targetLabel.x)}px;top:${styleNumber(targetLabel.y)}px">
+        <span>Ke</span><strong>${escapeHtml(targetName)}</strong>
+      </div>
+    `
   }
 
   function focusCluster(cluster) {
@@ -348,7 +480,7 @@ export function createMapLibreSurface(element, {
         center.longitude / cluster.coordinates.length,
         center.latitude / cluster.coordinates.length,
       ],
-      zoom: Math.min(19, Math.max(17.2, map.getZoom() + 2)),
+      zoom: Math.min(21, Math.max(17.2, map.getZoom() + 2)),
       duration: 420,
     })
   }
@@ -376,6 +508,17 @@ export function createMapLibreSurface(element, {
         ? edge.sourceGeometryIds ?? []
         : []
     }))
+    const selectedCandidate = currentCandidates.find(({ candidateId }) => (
+      candidateId === state.selectedCandidateId
+    ))
+    const selectedCandidateGeometryIds = new Set(
+      geometryIdsForCandidate(selectedCandidate),
+    )
+    const isolateCandidate = Boolean(
+      state.isolateSelectedCandidate
+      && selectedCandidate
+      && selectedCandidateGeometryIds.size,
+    )
     const linework = geometries
       .filter(({ geometryType, coordinates }) => (
         geometryType === 'line_string' && coordinates?.length > 1
@@ -389,11 +532,14 @@ export function createMapLibreSurface(element, {
           network,
           active,
           highlighted: network?.id === state.highlightedNetworkId,
-          trace: traceGeometryIds.has(geometry.id)
+          trace: selectedCandidateGeometryIds.has(geometry.id)
+            || selectedCandidateGeometryIds.has(geometry.sourceGeometryId)
+            || traceGeometryIds.has(geometry.id)
             || traceGeometryIds.has(geometry.sourceGeometryId),
         }
       })
       .filter(({ active }) => active || state.dimOthers)
+      .filter(({ trace }) => !isolateCandidate || trace)
       .sort((left, right) => Number(left.active) - Number(right.active)
         || Number(left.trace) - Number(right.trace))
 
@@ -446,6 +592,56 @@ export function createMapLibreSurface(element, {
     })
   }
 
+  function setBasemapMode(nextMode) {
+    const resolvedMode = nextMode === 'satellite' && imageryTiles ? 'satellite' : 'street'
+    if (resolvedMode === 'street' && !vectorTiles) return false
+
+    basemapMode = resolvedMode
+    const satelliteVisible = resolvedMode === 'satellite'
+    if (map.getLayer('satellite-imagery')) {
+      map.setLayoutProperty(
+        'satellite-imagery',
+        'visibility',
+        satelliteVisible ? 'visible' : 'none',
+      )
+    }
+
+    const vectorSurfaceLayers = new Set([
+      'basemap-landuse',
+      'basemap-landcover',
+      'basemap-water',
+      'basemap-building-shadows',
+      'basemap-buildings',
+    ])
+    const hiddenContextLayers = new Set([
+      'basemap-building-labels',
+      'basemap-poi-labels',
+      'basemap-house-numbers',
+    ])
+    map.getStyle().layers
+      .filter(({ id }) => id.startsWith('basemap-'))
+      .forEach(({ id }) => {
+        map.setLayoutProperty(
+          id,
+          'visibility',
+          hiddenContextLayers.has(id)
+            || (satelliteVisible && vectorSurfaceLayers.has(id)) ? 'none' : 'visible',
+        )
+      })
+
+    basemapSourceId = satelliteVisible ? 'satellite-imagery' : 'openfreemap'
+    basemapHasLoadedTile = loadedBasemapSourceIds.has(basemapSourceId)
+    basemapRetryAttempt = 0
+    basemapLastError = ''
+    clearBasemapRetry()
+    if (basemapHasLoadedTile) setBasemapStatus('available', { mode: basemapMode })
+    else {
+      setBasemapStatus('loading', { mode: basemapMode })
+      armBasemapTimeout()
+    }
+    return true
+  }
+
   return {
     invalidateSize() {
       map.resize()
@@ -467,6 +663,10 @@ export function createMapLibreSurface(element, {
         }
       }
     },
+    setCandidates(nextCandidates = []) {
+      currentCandidates = Array.isArray(nextCandidates) ? nextCandidates : []
+      syncSources()
+    },
     setHighlightedNetworkId(networkId) {
       state.highlightedNetworkId = networkById.has(networkId) ? networkId : null
       syncSources()
@@ -485,6 +685,25 @@ export function createMapLibreSurface(element, {
       const bounds = boundsForPositions(positions)
       if (bounds) fitBounds(bounds)
     },
+    focusCoordinates(positions) {
+      const valid = positions.filter(validPosition)
+      if (!valid.length) return
+      const [firstLongitude, firstLatitude] = valid[0]
+      const isSinglePoint = valid.every(([longitude, latitude]) => (
+        Math.abs(Number(longitude) - Number(firstLongitude)) < 1e-8
+        && Math.abs(Number(latitude) - Number(firstLatitude)) < 1e-8
+      ))
+      if (isSinglePoint) {
+        map.easeTo({
+          center: [Number(firstLongitude), Number(firstLatitude)],
+          zoom: Math.max(map.getZoom(), 18),
+          duration: 320,
+        })
+        return
+      }
+      const bounds = boundsForPositions(valid)
+      if (bounds) fitBounds(bounds)
+    },
     zoomIn() {
       map.zoomIn()
     },
@@ -494,6 +713,14 @@ export function createMapLibreSurface(element, {
     reset() {
       if (initialBounds) fitBounds(initialBounds)
     },
+    getBasemapCapabilities() {
+      return {
+        mode: basemapMode,
+        street: Boolean(vectorTiles),
+        satellite: Boolean(imageryTiles),
+      }
+    },
+    setBasemapMode,
     setDeclutterEnabled(enabled) {
       declutterEnabled = Boolean(enabled)
       syncAdaptiveMarkers()
@@ -503,7 +730,12 @@ export function createMapLibreSurface(element, {
       if (basemapTimer !== null) window.clearTimeout(basemapTimer)
       clearBasemapRetry()
       if (layoutFrame !== null) window.cancelAnimationFrame(layoutFrame)
+      window.removeEventListener('keydown', enableCtrlPitch)
+      window.removeEventListener('keyup', disableCtrlPitch)
+      window.removeEventListener('blur', disableCtrlPitch)
+      element.removeEventListener('pointerdown', toggleCtrlPitchFromPointer)
       markerOverlay.remove()
+      selectedCandidateOverlay.remove()
       map.remove()
     },
   }
@@ -546,9 +778,18 @@ function addOperationalLayers(map) {
     type: 'line',
     source: 'sinergi-lines',
     paint: {
-      'line-color': ['case', ['get', 'trace'], '#1367d1', ['get', 'color']],
+      'line-color': [
+        'case',
+        ['get', 'trace'], '#1367d1',
+        ['get', 'selectedCandidate'], '#1367d1',
+        ['get', 'color'],
+      ],
       'line-opacity': ['get', 'opacity'],
-      'line-width': ['interpolate', ['linear'], ['zoom'], 14, 2, 19, 7],
+      'line-width': [
+        'case',
+        ['get', 'selectedCandidate'], 6,
+        ['interpolate', ['linear'], ['zoom'], 14, 2, 19, 7],
+      ],
     },
   })
   map.addLayer({
@@ -594,8 +835,14 @@ function addOperationalLayers(map) {
     source: 'sinergi-candidates',
     minzoom: 15,
     paint: {
-      'line-color': ['case', ['==', ['get', 'status'], 'ambiguous'], '#dc6d21', '#d69a25'],
-      'line-width': 3,
+      'line-color': [
+        'case',
+        ['get', 'selected'], '#1367d1',
+        ['==', ['get', 'status'], 'ambiguous'], '#dc6d21',
+        '#d69a25',
+      ],
+      'line-opacity': ['case', ['get', 'dimmed'], .18, 1],
+      'line-width': ['case', ['get', 'selected'], 5, 3],
       'line-dasharray': [2, 2],
     },
   })
@@ -616,6 +863,13 @@ function addOperationalLayers(map) {
   // MapLibre rejects text-field layers when the style has no glyphs URL; that
   // synchronous error used to stop source synchronization and blank every
   // operational layer. Asset identity remains available via click/tooltip.
+}
+
+function geometryIdsForCandidate(candidate) {
+  if (!candidate) return []
+  return candidate.mapGeometryIds?.length
+    ? candidate.mapGeometryIds
+    : candidate.sourceGeometryIds ?? []
 }
 
 function drawProjectedLine(context, map, {
@@ -702,7 +956,6 @@ function renderClusterMarker(marker, key) {
       title="${escapeHtml(title)}"
       style="left:${styleNumber(marker.point.x)}px;top:${styleNumber(marker.point.y)}px">
       <strong>${marker.count}</strong>
-      <span>aset</span>
     </button>
   `
 }
@@ -731,6 +984,11 @@ function safeColor(value) {
 
 function styleNumber(value) {
   return Math.round(Number(value) * 100) / 100
+}
+
+function clampNumber(value, minimum, maximum) {
+  if (maximum < minimum) return (minimum + maximum) / 2
+  return Math.max(minimum, Math.min(maximum, Number(value)))
 }
 
 function addGroundOverlayImages(map, overlays) {
@@ -774,8 +1032,19 @@ function buildFeatureCollections({
     (edge) => edge.sourceGeometryIds ?? edge.sourceGeometryId ?? [],
   ))
   const candidateGeometryIds = new Set(candidates.flatMap(
-    (candidate) => candidate.sourceGeometryIds ?? [],
+    (candidate) => geometryIdsForCandidate(candidate),
   ))
+  const selectedCandidateItem = candidates.find(({ candidateId }) => (
+    candidateId === state.selectedCandidateId
+  ))
+  const selectedCandidateGeometryIds = new Set(
+    geometryIdsForCandidate(selectedCandidateItem),
+  )
+  const isolateCandidate = Boolean(
+    state.isolateSelectedCandidate
+    && selectedCandidateItem
+    && selectedCandidateGeometryIds.size,
+  )
   const traceGeometryIds = new Set((topologyGraph.edges ?? []).flatMap((edge) => {
     const sourceId = edge.sourceAssetId ?? edge.sourceNodeId
     const targetId = edge.targetAssetId ?? edge.targetNodeId
@@ -800,6 +1069,9 @@ function buildFeatureCollections({
     const active = !networkIds.length
       || networkIds.some((id) => state.selectedNetworkIds.has(id))
     const highlighted = network?.id === state.highlightedNetworkId
+    const selectedCandidateGeometry = selectedCandidateGeometryIds.has(geometry.id)
+      || selectedCandidateGeometryIds.has(geometry.sourceGeometryId)
+    if (isolateCandidate && !selectedCandidateGeometry) return
     const properties = {
       assetId: geometry.assetId ?? '',
       name: assetById.get(geometry.assetId)?.name ?? geometry.assetId ?? geometry.id,
@@ -808,7 +1080,7 @@ function buildFeatureCollections({
       color: geoType === 'LineString'
         ? operationalLineColor(network, geometry.category)
         : network?.color ?? CATEGORY_COLORS[geometry.category] ?? '#708196',
-      opacity: active ? 1 : state.dimOthers ? 0.16 : 0,
+      opacity: selectedCandidateGeometry ? 1 : active ? 1 : state.dimOthers ? 0.16 : 0,
       selected: geometry.assetId === state.selectedAssetId,
       trace: traceIds.has(geometry.assetId) || traceGeometryIds.has(geometry.id)
         || traceGeometryIds.has(geometry.sourceGeometryId),
@@ -820,6 +1092,7 @@ function buildFeatureCollections({
         || confirmedGeometryIds.has(geometry.sourceGeometryId),
       hasCandidate: candidateGeometryIds.has(geometry.id)
         || candidateGeometryIds.has(geometry.sourceGeometryId),
+      selectedCandidate: selectedCandidateGeometry,
     }
     if (properties.highlighted) properties.opacity = 1
     const feature = {
@@ -832,10 +1105,11 @@ function buildFeatureCollections({
     else if (geoType === 'LineString') collections.lines.push(feature)
     else collections.polygons.push(feature)
   })
-  candidates.filter(({ candidateStatus }) => (
-    ['candidate', 'ambiguous'].includes(candidateStatus)
+  candidates.filter((candidate) => (
+    ['candidate', 'ambiguous'].includes(candidate.candidateStatus)
     && validPosition(candidate.sourceCoordinate)
     && validPosition(candidate.targetCoordinate)
+    && (!isolateCandidate || candidate.candidateId === state.selectedCandidateId)
   )).forEach((candidate) => {
     collections.candidates.push({
       type: 'Feature',
@@ -845,6 +1119,10 @@ function buildFeatureCollections({
         status: candidate.candidateStatus,
         score: candidate.score,
         networkFamily: candidate.networkFamily,
+        selected: candidate.candidateId === state.selectedCandidateId,
+        dimmed: Boolean(
+          state.selectedCandidateId && candidate.candidateId !== state.selectedCandidateId,
+        ),
       },
       geometry: {
         type: 'LineString',

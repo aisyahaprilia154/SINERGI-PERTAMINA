@@ -83,6 +83,31 @@ test('selected asset expands its cluster and keeps its identity label visible', 
   assert.equal(layout.leaders.length, 3)
 })
 
+test('large dense groups stay compact and peel out only the selected asset', () => {
+  const manyAssets = Array.from({ length: 30 }, (_, index) => ({
+    ...denseAssets[index % denseAssets.length],
+    id: `ASSET-${index + 1}`,
+    label: `ASSET-${index + 1}`,
+    point: {
+      x: 200 + (index % 5),
+      y: 200 + (index % 4),
+    },
+    selected: index === 0,
+  }))
+  const layout = buildAdaptiveAssetLayout(manyAssets, {
+    zoom: 18,
+    viewport: { width: 800, height: 600 },
+  })
+  const assetMarkers = layout.markers.filter(({ kind }) => kind === 'asset')
+  const clusters = layout.markers.filter(({ kind }) => kind === 'cluster')
+
+  assert.equal(assetMarkers.length, 1)
+  assert.equal(assetMarkers[0].id, 'ASSET-1')
+  assert.equal(assetMarkers[0].showLabel, true)
+  assert.equal(clusters.length, 1)
+  assert.equal(clusters[0].count, 29)
+})
+
 test('turning adaptive layout off keeps every marker at its exact projected point', () => {
   const layout = buildAdaptiveAssetLayout(denseAssets, {
     zoom: 18,
