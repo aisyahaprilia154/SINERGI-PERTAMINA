@@ -165,7 +165,10 @@ export async function renderMapPage(container) {
 
   container.innerHTML = `
     <div class="map-app">
-      ${renderTopNavigation()}
+      ${renderTopNavigation('map', {
+        ...activeContext,
+        area: selectedArea?.key,
+      })}
       <main class="map-workspace">
         ${renderNetworkSidebar(activeContext, selection.selectedNetworkIds.size, counts, {
           locationGroups,
@@ -190,6 +193,11 @@ export async function renderMapPage(container) {
   const mobileSidebarToggle = container.querySelector('.open-sidebar')
   const legendToggle = container.querySelector('.legend-toggle')
   const legend = container.querySelector('.legend-popover')
+  const basemapToggle = container.querySelector('.basemap-toggle')
+  const basemapPicker = container.querySelector('.basemap-popover')
+  const assetFinder = container.querySelector('.map-asset-finder')
+  const assetSearch = assetFinder.querySelector('input')
+  const assetResults = assetFinder.querySelector('.map-asset-results')
   const canvasApi = createMapLibreSurface(container.querySelector('#network-map'), {
     assets,
     networks,
@@ -215,6 +223,7 @@ export async function renderMapPage(container) {
     statusElement?.classList.toggle('loading', status === 'loading')
     statusElement?.classList.toggle('warning', status === 'unavailable')
     statusElement?.setAttribute('data-basemap-status', status)
+    if (details.mode) updateBasemapModeLabel(details.mode)
     if (details.message) statusElement?.setAttribute('title', details.message)
     else statusElement?.removeAttribute('title')
   }
@@ -477,8 +486,11 @@ export async function renderMapPage(container) {
     const banner = container.querySelector('.trace-banner')
     if (state.traceStatus === 'idle') {
       banner.hidden = true
+      assetFinder.hidden = false
       return
     }
+    closeAssetResults()
+    assetFinder.hidden = true
     banner.hidden = false
     const step = banner.querySelector('.trace-step')
     const title = banner.querySelector('strong')
@@ -678,6 +690,88 @@ export async function renderMapPage(container) {
     legend.hidden = !isOpen
     legendToggle.setAttribute('aria-expanded', String(isOpen))
     legendToggle.setAttribute('aria-label', isOpen ? 'Sembunyikan legenda' : 'Tampilkan legenda')
+    if (isOpen) closeBasemapPicker()
+  }
+
+  function closeBasemapPicker() {
+    basemapPicker.hidden = true
+    basemapToggle.setAttribute('aria-expanded', 'false')
+  }
+
+  function toggleBasemapPicker() {
+    const isOpen = basemapPicker.hidden
+    basemapPicker.hidden = !isOpen
+    basemapToggle.setAttribute('aria-expanded', String(isOpen))
+    if (isOpen && !legend.hidden) toggleLegend()
+  }
+
+  function updateBasemapModeLabel(mode) {
+    const label = container.querySelector('.basemap-mode-label')
+    if (label) label.textContent = mode === 'satellite' ? 'Citra + label' : 'Jalan & bangunan'
+  }
+
+  function configureBasemapPicker() {
+    const capabilities = canvasApi.getBasemapCapabilities()
+    basemapPicker.querySelectorAll('[data-basemap-mode]').forEach((button) => {
+      const mode = button.dataset.basemapMode
+      const available = Boolean(capabilities[mode])
+      const active = mode === capabilities.mode
+      button.disabled = !available
+      button.classList.toggle('active', active)
+      button.setAttribute('aria-pressed', String(active))
+      button.querySelector('.basemap-option-check').textContent =
+        active ? 'check_circle' : 'radio_button_unchecked'
+    })
+    const satelliteCopy = basemapPicker.querySelector('.satellite-option-copy')
+    if (!capabilities.satellite) {
+      satelliteCopy.textContent = 'Belum dikonfigurasi pada lingkungan ini'
+    }
+    updateBasemapModeLabel(capabilities.mode)
+  }
+
+  function selectBasemapMode(mode) {
+    if (!canvasApi.setBasemapMode(mode)) return
+    configureBasemapPicker()
+    closeBasemapPicker()
+  }
+
+  function closeAssetResults() {
+    assetResults.hidden = true
+    assetSearch.setAttribute('aria-expanded', 'false')
+  }
+
+  function renderAssetResults(query) {
+    const matches = findAssetMatches(assets, query)
+    if (String(query).trim().length < 2) {
+      closeAssetResults()
+      return
+    }
+    assetResults.innerHTML = matches.length
+      ? matches.map((asset) => `
+          <button type="button" role="option" data-map-asset-id="${escapePageHtml(asset.id)}">
+            <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
+            <span>
+              <strong>${escapePageHtml(asset.name || asset.id)}</strong>
+              <small>${escapePageHtml(asset.id)} &middot; ${escapePageHtml(asset.location || asset.type || 'Lokasi pada peta')}</small>
+            </span>
+            <span class="material-symbols-outlined" aria-hidden="true">center_focus_strong</span>
+          </button>
+        `).join('')
+      : `
+          <p>
+            <span class="material-symbols-outlined" aria-hidden="true">location_off</span>
+            Aset tidak ditemukan pada area aktif.
+          </p>
+        `
+    assetResults.hidden = false
+    assetSearch.setAttribute('aria-expanded', 'true')
+  }
+
+  function selectAssetResult(assetId) {
+    if (!assetById[assetId]) return
+    assetSearch.value = assetById[assetId].name || assetId
+    closeAssetResults()
+    handleAssetSelect(assetId)
   }
 
   function syncInactiveModeControls() {
@@ -782,6 +876,40 @@ export async function renderMapPage(container) {
     if (!item || item.contains(event.relatedTarget)) return
     canvasApi.setHighlightedNetworkId(null)
   })
+  assetSearch.addEventListener('input', (event) => {
+    renderAssetResults(event.target.value)
+  })
+  assetSearch.addEventListener('focus', () => {
+    renderAssetResults(assetSearch.value)
+  })
+  assetSearch.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown' && !assetResults.hidden) {
+      event.preventDefault()
+      assetResults.querySelector('button')?.focus()
+    }
+    if (event.key === 'Escape') closeAssetResults()
+  })
+  assetResults.addEventListener('click', (event) => {
+    const result = event.target.closest('[data-map-asset-id]')
+    if (result) selectAssetResult(result.dataset.mapAssetId)
+  })
+  assetResults.addEventListener('keydown', (event) => {
+    const result = event.target.closest('[data-map-asset-id]')
+    if (!result) return
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      const buttons = [...assetResults.querySelectorAll('[data-map-asset-id]')]
+      const currentIndex = buttons.indexOf(result)
+      const nextIndex = event.key === 'ArrowDown'
+        ? Math.min(buttons.length - 1, currentIndex + 1)
+        : Math.max(0, currentIndex - 1)
+      buttons[nextIndex]?.focus()
+    }
+    if (event.key === 'Escape') {
+      closeAssetResults()
+      assetSearch.focus()
+    }
+  })
   container.querySelector('.search-control input').addEventListener('input', (event) => {
     state.search = event.target.value
     renderNetworkList()
@@ -844,6 +972,12 @@ export async function renderMapPage(container) {
   container.querySelector('.zoom-in').addEventListener('click', canvasApi.zoomIn)
   container.querySelector('.zoom-out').addEventListener('click', canvasApi.zoomOut)
   container.querySelector('.zoom-reset').addEventListener('click', canvasApi.reset)
+  basemapToggle.addEventListener('click', toggleBasemapPicker)
+  basemapPicker.querySelector('.close-basemap-picker').addEventListener('click', closeBasemapPicker)
+  basemapPicker.addEventListener('click', (event) => {
+    const option = event.target.closest('[data-basemap-mode]')
+    if (option && !option.disabled) selectBasemapMode(option.dataset.basemapMode)
+  })
   container.querySelector('.open-sidebar').addEventListener('click', openMobileSidebar)
   container.querySelector('.close-sidebar').addEventListener('click', closeMobileSidebar)
   container.querySelector('.sidebar-collapse').addEventListener('click', toggleDesktopSidebar)
@@ -856,15 +990,18 @@ export async function renderMapPage(container) {
   document.addEventListener('keydown', (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
       event.preventDefault()
-      container.querySelector('.search-control input').focus()
+      assetSearch.focus()
     }
     if (event.key !== 'Escape') return
-    if (state.traceStatus !== 'idle') stopTracing()
+    if (!assetResults.hidden) closeAssetResults()
+    else if (!basemapPicker.hidden) closeBasemapPicker()
+    else if (!legend.hidden) toggleLegend()
+    else if (state.traceStatus !== 'idle') stopTracing()
     else if (selection.selectedAssetId) closeAssetDrawer()
     else if (workspace.classList.contains('sidebar-open')) closeMobileSidebar()
-    else if (!legend.hidden) toggleLegend()
   })
 
+  configureBasemapPicker()
   restoreTraceState(initialUrlState)
   updateUrl('replace')
   syncInactiveModeControls()
@@ -918,6 +1055,42 @@ function renderDatasetState(container, {
       </main>
     </div>
   `
+}
+
+export function findAssetMatches(assets, query, limit = 8) {
+  const normalizedQuery = String(query ?? '').trim().toLocaleLowerCase('id')
+  if (normalizedQuery.length < 2) return []
+
+  return assets
+    .map((asset, index) => {
+      const fields = [
+        asset.id,
+        asset.name,
+        asset.location,
+        asset.type,
+        asset.category,
+      ].map((value) => String(value ?? '').toLocaleLowerCase('id'))
+      const exact = fields.some((value) => value === normalizedQuery)
+      const startsWith = fields.some((value) => value.startsWith(normalizedQuery))
+      const includes = fields.some((value) => value.includes(normalizedQuery))
+      if (!includes) return null
+      return {
+        asset,
+        index,
+        score: exact ? 0 : startsWith ? 1 : 2,
+      }
+    })
+    .filter(Boolean)
+    .sort((left, right) => (
+      left.score - right.score
+      || String(left.asset.name || left.asset.id).localeCompare(
+        String(right.asset.name || right.asset.id),
+        'id',
+      )
+      || left.index - right.index
+    ))
+    .slice(0, limit)
+    .map(({ asset }) => asset)
 }
 
 function escapePageHtml(value) {
@@ -1049,7 +1222,15 @@ function networkMatchesPreset(network, preset) {
   return true
 }
 
-export function renderTopNavigation(activeView = 'map') {
+export function renderTopNavigation(activeView = 'map', context = null) {
+  const contextParams = context?.datasetId
+    ? new URLSearchParams({
+      datasetId: context.datasetId,
+      branchId: context.branchId,
+    })
+    : null
+  if (contextParams && context.area) contextParams.set('area', context.area)
+  const contextQuery = contextParams ? `?${contextParams}` : ''
   return `
     <header class="top-navigation">
       <a class="brand-lockup nav-brand" href="/" aria-label="SINERGI">
@@ -1057,14 +1238,17 @@ export function renderTopNavigation(activeView = 'map') {
         <span><strong>SINERGI</strong><small>Asset Network</small></span>
       </a>
       <nav aria-label="Navigasi utama">
-        <a href="#ringkasan"><span class="material-symbols-outlined" aria-hidden="true">space_dashboard</span>Ringkasan</a>
-        <a href="/map" class="${activeView === 'map' ? 'active' : ''}">
+        <a href="/map${contextQuery}" class="${activeView === 'map' ? 'active' : ''}">
           <span class="material-symbols-outlined" aria-hidden="true">map</span>Peta Aset
         </a>
-        <a href="/topology" class="${activeView === 'topology' ? 'active' : ''}">
+        <a href="/topology${contextQuery}" class="${activeView === 'topology' ? 'active' : ''}">
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>Topologi Cabang
         </a>
-        <a href="#inventaris"><span class="material-symbols-outlined" aria-hidden="true">inventory_2</span>Inventaris aset</a>
+        <a href="/admin/topology-review${contextQuery}"
+          class="${activeView === 'review' ? 'active' : ''}">
+          <span class="material-symbols-outlined" aria-hidden="true">fact_check</span>
+          Konfirmasi Koneksi
+        </a>
       </nav>
       <div class="nav-actions">
         <button class="icon-button" type="button" aria-label="Bantuan">

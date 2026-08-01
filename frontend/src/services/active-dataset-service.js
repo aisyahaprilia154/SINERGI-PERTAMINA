@@ -122,6 +122,30 @@ export async function reviewTopologyCandidate({
   )
 }
 
+export async function reviewTopologyBulk({
+  datasetVersionId,
+  action,
+  reason,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
+  if (!['confirm-all', 'revoke-all'].includes(action)) {
+    throw new TypeError('Action bulk topology tidak valid.')
+  }
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + `/topology/${action}`,
+    {
+      token,
+      signal,
+      method: 'POST',
+      body: { reason: String(reason ?? '').trim() || undefined },
+    },
+  )
+}
+
 export async function revokeTopologyRelation({
   relationId,
   reason,

@@ -313,6 +313,7 @@ function toActiveMapDataset(resolved) {
       datasetVersionId: asset.datasetVersionId,
       layerId: asset.layerId,
       assetId: asset.assetId,
+      sourceFeatureId: asset.properties?.sourceFeatureId,
       name: asset.name,
       category: asset.category,
       type: asset.type,
@@ -325,6 +326,8 @@ function toActiveMapDataset(resolved) {
     geometries: renderableGeometries.map((geometry) => ({
       id: geometry.id,
       assetNodeId: geometry.assetNodeId,
+      sourceGeometryId: geometry.sourceGeometryId,
+      sourceFeatureId: geometry.sourceFeatureId,
       geometryType: geometry.geometryType,
       coordinates: structuredClone(geometry.coordinates),
       altitudeMode: geometry.altitudeMode,

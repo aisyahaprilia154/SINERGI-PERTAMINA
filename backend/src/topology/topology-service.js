@@ -105,6 +105,65 @@ export class TopologyService {
     })
   }
 
+  async confirmAllCandidates(datasetVersionId, actorId, { reason } = {}) {
+    const current = await this.repository.get(datasetVersionId)
+    assertTopologyBundle(current)
+    const candidates = current.topologyCandidates ?? []
+    const confirmable = candidates.filter(isBulkConfirmableCandidate)
+    const normalizedReason = normalizeReason(reason, false)
+    if (!confirmable.length) {
+      return bulkReviewResponse(current, {
+        action: 'confirm_all',
+        affectedCount: 0,
+      })
+    }
+
+    const reviewedAt = this.clock().toISOString()
+    const candidateIds = confirmable.map(({ candidateId }) => candidateId)
+    const candidateIdSet = new Set(candidateIds)
+    const event = await this.auditLog.record('topology.candidates_bulk_confirmed', {
+      actorId,
+      datasetVersionId,
+      branchId: current.datasetVersion.branchId,
+      outcome: 'confirmed',
+      details: {
+        candidateCount: candidateIds.length,
+        candidateIds,
+        reason: normalizedReason,
+        topologyRuleSetVersion: current.topologyRuleSetVersion ?? null,
+      },
+    })
+    const updated = await this.repository.update(datasetVersionId, (record) => {
+      const nextCandidates = structuredClone(record.topologyCandidates ?? [])
+      nextCandidates.forEach((candidate) => {
+        if (!candidateIdSet.has(candidate.candidateId)) return
+        if (!isBulkConfirmableCandidate(candidate)) {
+          throw new AppError('Daftar kandidat berubah sejak aksi bulk dimulai.', {
+            code: 'stale_topology_bulk_review',
+            statusCode: 409,
+          })
+        }
+        candidate.candidateStatus = 'confirmed'
+        candidate.proposalStatus = 'confirmed_by_admin_bulk'
+        candidate.review = reviewRecord({
+          actorId,
+          reviewedAt,
+          reason: normalizedReason,
+          action: 'confirm_all',
+          auditEventId: event.id,
+          before: 'candidate',
+          after: 'confirmed',
+        })
+      })
+      return rebuildFromReviewedCandidates(record, nextCandidates, this.config, reviewedAt)
+    })
+    return bulkReviewResponse(updated, {
+      action: 'confirm_all',
+      affectedCount: candidateIds.length,
+      auditEventId: event.id,
+    })
+  }
+
   async rejectCandidate(candidateId, actorId, { reason } = {}) {
     return this.#reviewCandidate(candidateId, actorId, {
       action: 'reject',
@@ -272,6 +331,90 @@ export class TopologyService {
       graph: updated.topologyGraph,
       readiness: updated.topologyReadiness,
     }
+  }
+
+  async revokeAllRelations(datasetVersionId, actorId, { reason } = {}) {
+    const current = await this.repository.get(datasetVersionId)
+    assertTopologyBundle(current)
+    const relations = (current.confirmedRelations ?? [])
+      .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+    const normalizedReason = normalizeReason(reason, true)
+    if (!relations.length) {
+      return bulkReviewResponse(current, {
+        action: 'revoke_all',
+        affectedCount: 0,
+      })
+    }
+
+    const revokedAt = this.clock().toISOString()
+    const relationIds = relations.map(({ relationId }) => relationId)
+    const candidateIds = new Set(relations.map(({ candidateId }) => candidateId).filter(Boolean))
+    const event = await this.auditLog.record('topology.relations_bulk_revoked', {
+      actorId,
+      datasetVersionId,
+      branchId: current.datasetVersion.branchId,
+      outcome: 'revoked',
+      details: {
+        relationCount: relationIds.length,
+        relationIds,
+        candidateCount: candidateIds.size,
+        candidateIds: [...candidateIds],
+        reason: normalizedReason,
+        topologyRuleSetVersion: current.topologyRuleSetVersion ?? null,
+      },
+    })
+    const updated = await this.repository.update(datasetVersionId, (record) => {
+      const currentRelations = (record.confirmedRelations ?? [])
+        .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+      const currentRelationIds = new Set(currentRelations.map(({ relationId }) => relationId))
+      if (relationIds.some((relationId) => !currentRelationIds.has(relationId))) {
+        throw new AppError('Daftar relasi berubah sejak aksi bulk dimulai.', {
+          code: 'stale_topology_bulk_review',
+          statusCode: 409,
+        })
+      }
+
+      const nextCandidates = structuredClone(record.topologyCandidates ?? [])
+      nextCandidates.forEach((candidate) => {
+        if (!candidateIds.has(candidate.candidateId)) return
+        candidate.candidateStatus = 'revoked'
+        candidate.proposalStatus = 'revoked'
+        candidate.review = reviewRecord({
+          actorId,
+          reviewedAt: revokedAt,
+          reason: normalizedReason,
+          action: 'revoke_all',
+          auditEventId: event.id,
+          before: 'confirmed',
+          after: 'revoked',
+        })
+      })
+      const revokedRelations = currentRelations.map((relation) => ({
+        ...structuredClone(relation),
+        verificationStatus: 'revoked',
+        revokedBy: actorId,
+        revokedAt,
+        revokeReason: normalizedReason,
+        auditEventId: event.id,
+      }))
+      const rebuilt = rebuildFromReviewedCandidates(
+        record,
+        nextCandidates,
+        this.config,
+        revokedAt,
+      )
+      rebuilt.topologyRelationHistory = [
+        ...(record.topologyRelationHistory ?? []),
+        ...revokedRelations,
+      ]
+      return rebuilt
+    })
+    return bulkReviewResponse(updated, {
+      action: 'revoke_all',
+      affectedCount: relationIds.length,
+      affectedCandidateCount: candidateIds.size,
+      auditEventId: event.id,
+    })
   }
 
   async #reviewCandidate(candidateId, actorId, { action, reason }) {
@@ -464,6 +607,31 @@ function candidateReviewResponse(record, candidateId) {
     graph: structuredClone(record.topologyGraph),
     readiness: structuredClone(record.topologyReadiness),
   }
+}
+
+function bulkReviewResponse(record, {
+  action,
+  affectedCount,
+  affectedCandidateCount = affectedCount,
+  auditEventId = null,
+}) {
+  return {
+    datasetVersionId: record.datasetVersion.id,
+    action,
+    affectedCount,
+    affectedCandidateCount,
+    auditEventId,
+    summary: structuredClone(record.topologySummary ?? emptySummary()),
+    graph: structuredClone(record.topologyGraph),
+    readiness: structuredClone(record.topologyReadiness),
+    confirmedRelationCount: (record.confirmedRelations ?? [])
+      .filter(({ verificationStatus }) => verificationStatus === 'confirmed').length,
+  }
+}
+
+function isBulkConfirmableCandidate(candidate) {
+  return candidate.candidateStatus === 'candidate'
+    && candidate.proposalStatus === 'recommended'
 }
 
 function candidateAuditSnapshot(candidate, status = candidate.candidateStatus) {

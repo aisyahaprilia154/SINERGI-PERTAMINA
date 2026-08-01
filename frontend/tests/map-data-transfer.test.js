@@ -6,6 +6,7 @@ import {
 } from '../src/pages/map/active-dataset-kml-export.js'
 import { renderMapDataTransferDialog } from '../src/pages/map/map-data-transfer-dialog.js'
 import {
+  renderMapAssetFinder,
   renderMapContextPill,
   renderMapFloatingControls,
 } from '../src/pages/map/map-surface.js'
@@ -101,6 +102,7 @@ test('map data transfer dialog exposes direct import and complete export choices
 test('map context and toolbar present a compact branch name and admin data action', () => {
   const context = renderMapContextPill(activeContext)
   const controls = renderMapFloatingControls()
+  const finder = renderMapAssetFinder()
 
   assert.match(context, />Semarang</)
   assert.doesNotMatch(context, />Kantor Cabang Semarang</)
@@ -108,4 +110,7 @@ test('map context and toolbar present a compact branch name and admin data actio
   assert.match(controls, /data-transfer-toggle/)
   assert.match(controls, /Tata aset adaptif/)
   assert.match(controls, /declutter-toggle/)
+  assert.match(controls, /basemap-toggle/)
+  assert.match(finder, /Cari nama, ID, atau lokasi aset/)
+  assert.match(finder, /aria-controls="map-asset-results"/)
 })

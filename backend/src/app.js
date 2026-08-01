@@ -201,6 +201,24 @@ export function createApp({
           topologyRuleSetVersion: record.topologyRuleSetVersion,
         })
       }
+      const bulkTopologyActionMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/(confirm-all|revoke-all)$/,
+        )
+        : null
+      if (bulkTopologyActionMatch) {
+        const user = requireAdministrator(request, authenticator)
+        assertTopologyService(topologyService)
+        const body = await readJsonBody(request)
+        const method = bulkTopologyActionMatch[2] === 'confirm-all'
+          ? 'confirmAllCandidates'
+          : 'revokeAllRelations'
+        return sendJson(
+          response,
+          200,
+          await topologyService[method](bulkTopologyActionMatch[1], user.id, body),
+        )
+      }
       const candidateActionMatch = request.method === 'POST'
         ? url.pathname.match(
           /^\/api\/topology\/candidates\/([^/]+)\/(confirm|reject|skip|select-target)$/,

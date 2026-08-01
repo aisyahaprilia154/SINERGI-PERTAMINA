@@ -19,19 +19,54 @@ export function buildAdaptiveAssetLayout(items = [], {
 
   groups.forEach((group) => {
     const ranked = [...group].sort(compareItems)
+    const focused = ranked.filter(({ selected, trace }) => selected || trace).slice(0, 4)
+    if (enabled && ranked.length > 8) {
+      const focusedIds = new Set(focused.map(({ id }) => id))
+      const clustered = ranked.filter(({ id }) => !focusedIds.has(id))
+      const center = centroid(ranked.map(({ point }) => point))
+
+      if (focused.length) {
+        const displayPoints = focused.length === 1
+          ? [center]
+          : spreadPoints(center, focused.length)
+        focused.forEach((item, index) => {
+          const point = displayPoints[index]
+          const displaced = distance(item.point, point) > 7
+          markers.push({
+            ...item,
+            key: `asset:${item.id}`,
+            kind: 'asset',
+            point,
+            anchorPoint: item.point,
+            displaced,
+            showLabel: true,
+          })
+          if (displaced) {
+            leaders.push({
+              key: `leader:${item.id}`,
+              assetId: item.id,
+              from: item.point,
+              to: point,
+              color: item.color,
+            })
+          }
+        })
+      }
+
+      if (clustered.length) {
+        markers.push(createClusterMarker(
+          clustered,
+          focused.length === 1 ? { x: center.x + 38, y: center.y } : center,
+        ))
+      }
+      return
+    }
+
     const mustExpand = zoom >= 17
       || ranked.some(({ selected, trace }) => selected || trace)
 
     if (enabled && ranked.length > 1 && !mustExpand) {
-      markers.push({
-        key: `cluster:${ranked.map(({ id }) => id).sort().join('|')}`,
-        kind: 'cluster',
-        point: centroid(ranked.map(({ point }) => point)),
-        count: ranked.length,
-        memberIds: ranked.map(({ id }) => id),
-        coordinates: ranked.map(({ coordinate }) => coordinate).filter(validCoordinate),
-        label: clusterLabel(ranked),
-      })
+      markers.push(createClusterMarker(ranked))
       return
     }
 
@@ -81,6 +116,18 @@ export function buildAdaptiveAssetLayout(items = [], {
         .filter(({ kind, showLabel }) => kind === 'asset' && !showLabel)
         .length,
     },
+  }
+}
+
+function createClusterMarker(items, point = centroid(items.map((item) => item.point))) {
+  return {
+    key: `cluster:${items.map(({ id }) => id).sort().join('|')}`,
+    kind: 'cluster',
+    point,
+    count: items.length,
+    memberIds: items.map(({ id }) => id),
+    coordinates: items.map(({ coordinate }) => coordinate).filter(validCoordinate),
+    label: clusterLabel(items),
   }
 }
 
@@ -191,9 +238,9 @@ function clusterLabel(items) {
 }
 
 function separationForZoom(zoom) {
-  if (zoom < 15) return 72
-  if (zoom < 17) return 52
-  if (zoom < 19) return 30
+  if (zoom < 15) return 96
+  if (zoom < 17) return 68
+  if (zoom < 19) return 38
   return 22
 }
 

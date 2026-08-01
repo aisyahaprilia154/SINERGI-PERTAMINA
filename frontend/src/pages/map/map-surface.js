@@ -10,18 +10,25 @@ export function renderNetworkMapCanvas(activeContext, {
       <div id="network-map" tabindex="0" aria-label="Peta geografis jaringan aset"
         aria-describedby="map-keyboard-help"></div>
       <p class="map-sr-only" id="map-keyboard-help">
-        Gunakan kontrol zoom dan pan pada peta. Daftar aset alternatif tersedia setelah peta.
+        Geser peta dengan drag. Zoom langsung dengan scroll atau touchpad tanpa tombol Control,
+        cubit layar sentuh, atau gunakan tombol tambah dan kurang. Untuk memiringkan peta,
+        tahan tombol Control sambil drag pada peta.
       </p>
       <div class="map-accessible-assets map-sr-only" aria-label="Daftar aset pada peta"></div>
-      <div class="basemap-status" role="status">
-        <span class="material-symbols-outlined" aria-hidden="true">satellite_alt</span>
-        <strong>Peta geografis &middot; Dataset aktif</strong>
-        <span>Basemap: <b class="basemap-availability">memuat</b></span>
-        <span>Area: ${escapeHtml(selectedArea?.name ?? 'Lainnya')}</span>
-        <span>Aset: ${Number(counts.assetNodeCount) || 0}</span>
-        <span>Jalur kabel: ${Number(counts.lineCount) || 0}</span>
-        <span>Confirmed connection: ${Number(confirmedConnectionCount) || 0}</span>
-        <span>Tata aset: <b class="declutter-summary">adaptif</b></span>
+      <div class="basemap-status loading" role="status">
+        <span class="basemap-status-overview">
+          <span class="material-symbols-outlined" aria-hidden="true">map</span>
+          <span>
+            <small>Peta kerja &middot; ${escapeHtml(selectedArea?.name ?? 'Area aktif')}</small>
+            <strong><b class="basemap-availability">memuat</b> &middot; <b class="basemap-mode-label">Jalan &amp; bangunan</b></strong>
+          </span>
+        </span>
+        <span class="basemap-status-metrics">
+          <span><b>${Number(counts.assetNodeCount) || 0}</b> aset</span>
+          <span><b>${Number(counts.lineCount) || 0}</b> jalur</span>
+          <span><b>${Number(confirmedConnectionCount) || 0}</b> koneksi</span>
+          <span class="declutter-summary">adaptif</span>
+        </span>
       </div>
       <div class="map-asset-tooltip" id="map-asset-tooltip" role="tooltip" aria-live="polite" hidden></div>
       ${empty ? `
@@ -34,6 +41,7 @@ export function renderNetworkMapCanvas(activeContext, {
         </section>
       ` : ''}
       ${renderMapContextPill(activeContext)}
+      ${renderMapAssetFinder()}
       ${renderMapFloatingControls(activeContext)}
 
       <div class="trace-banner" hidden>
@@ -53,6 +61,28 @@ export function renderNetworkMapCanvas(activeContext, {
         <span><i class="legend-leader"></i> Label disebar dari titik asli</span>
         <span><i class="legend-cluster">12</i> Kelompok aset; klik untuk buka</span>
         <span><i class="legend-line"></i> Jalur fisik dari KML</span>
+      </div>
+
+      <div class="basemap-popover" id="basemap-picker" hidden>
+        <div class="basemap-popover-heading">
+          <span>
+            <strong>Tampilan peta dasar</strong>
+            <small>Pilih konteks yang paling membantu di lapangan.</small>
+          </span>
+          <button class="icon-button close-basemap-picker" type="button" aria-label="Tutup pilihan peta dasar">
+            <span class="material-symbols-outlined" aria-hidden="true">close</span>
+          </button>
+        </div>
+        <button class="basemap-option active" type="button" data-basemap-mode="street" aria-pressed="true">
+          <span class="basemap-preview street" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span><strong>Peta kerja</strong><small>Jalan, bangunan, nomor, dan nama tempat</small></span>
+          <span class="material-symbols-outlined basemap-option-check" aria-hidden="true">check_circle</span>
+        </button>
+        <button class="basemap-option" type="button" data-basemap-mode="satellite" aria-pressed="false">
+          <span class="basemap-preview satellite" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span><strong>Citra satelit</strong><small class="satellite-option-copy">Kondisi fisik area dengan label jalan</small></span>
+          <span class="material-symbols-outlined basemap-option-check" aria-hidden="true">radio_button_unchecked</span>
+        </button>
       </div>
 
       <div class="map-attribution">SINERGI Topology · Dataset ${escapeHtml(activeContext.version)}</div>
@@ -82,6 +112,22 @@ export function renderMapContextPill(activeContext) {
         <span class="material-symbols-outlined" aria-hidden="true">lock</span>
         Read-only
       </span>
+    </section>
+  `
+}
+
+export function renderMapAssetFinder() {
+  return `
+    <section class="map-asset-finder" aria-label="Cari lokasi aset">
+      <div class="map-asset-search">
+        <span class="material-symbols-outlined" aria-hidden="true">search</span>
+        <input type="search" autocomplete="off" spellcheck="false"
+          placeholder="Cari nama, ID, atau lokasi aset"
+          aria-label="Cari nama, ID, atau lokasi aset"
+          aria-controls="map-asset-results" aria-expanded="false">
+        <kbd>Ctrl K</kbd>
+      </div>
+      <div class="map-asset-results" id="map-asset-results" role="listbox" hidden></div>
     </section>
   `
 }
@@ -120,19 +166,24 @@ export function renderMapFloatingControls() {
     </div>
 
     <div class="map-floating-bottom">
+      <button class="icon-button basemap-toggle" type="button" aria-label="Pilih tampilan peta dasar"
+        aria-controls="basemap-picker" aria-expanded="false">
+        <span class="material-symbols-outlined" aria-hidden="true">layers</span>
+      </button>
       <button class="icon-button legend-toggle" type="button" aria-label="Tampilkan legenda"
         aria-controls="map-legend" aria-expanded="false">
         <span class="material-symbols-outlined" aria-hidden="true">info</span>
       </button>
 
       <div class="zoom-controls" aria-label="Kontrol zoom peta">
-        <button type="button" aria-label="Perbesar peta" class="zoom-in">
+        <button type="button" aria-label="Perbesar peta" title="Perbesar peta" class="zoom-in">
           <span class="material-symbols-outlined" aria-hidden="true">add</span>
         </button>
-        <button type="button" aria-label="Perkecil peta" class="zoom-out">
+        <button type="button" aria-label="Perkecil peta" title="Perkecil peta" class="zoom-out">
           <span class="material-symbols-outlined" aria-hidden="true">remove</span>
         </button>
-        <button type="button" aria-label="Atur ulang tampilan" class="zoom-reset">
+        <button type="button" aria-label="Kembali ke seluruh area cabang"
+          title="Kembali ke seluruh area cabang" class="zoom-reset">
           <span class="material-symbols-outlined" aria-hidden="true">my_location</span>
         </button>
       </div>
