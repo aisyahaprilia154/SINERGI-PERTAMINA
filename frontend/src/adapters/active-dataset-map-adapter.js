@@ -1,3 +1,5 @@
+import { resolveTopologyReadiness } from '../domain/topology-readiness.js'
+
 const CATEGORY_STYLE = Object.freeze({
   cctv: { color: '#9698f4', softColor: '#f1f1fe', type: 'CCTV', order: 1 },
   'cctv-cable': { color: '#9698f4', softColor: '#f1f1fe', type: 'CCTV cable', order: 2 },
@@ -63,6 +65,12 @@ export function adaptActiveDatasetForMap(payload) {
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
   const validNodeIds = new Set(assets.map(({ id }) => id))
   const topologyGraph = confirmedTopologyProjection(payload)
+  const topologyReadiness = resolveTopologyReadiness({
+    topologyReadiness: payload.topologyReadiness,
+    readiness: payload.readiness,
+    readinessContract: payload.readinessContract,
+    topologyGraph,
+  })
   const relations = topologyGraph.edges
     .filter((edge) => (
       validNodeIds.has(edge.sourceNodeId)
@@ -129,6 +137,9 @@ export function adaptActiveDatasetForMap(payload) {
       sourceFilename: payload.datasetVersion.sourceFilename,
       publishedAt: payload.datasetVersion.activatedAt || payload.activePointer?.activatedAt,
       activePointerRevision: payload.activePointer?.revision,
+      topologyReady: topologyReadiness.ready,
+      topologyReadiness,
+      readinessContract: structuredClone(payload.readinessContract ?? null),
     },
     assets,
     diagramAssets,
@@ -138,6 +149,10 @@ export function adaptActiveDatasetForMap(payload) {
     networks,
     locationGroups,
     topologyGraph,
+    topologyReadiness,
+    readiness: structuredClone(payload.readiness ?? null),
+    readinessContract: structuredClone(payload.readinessContract ?? null),
+    assetIdentityMap: structuredClone(payload.assetIdentityMap ?? null),
     layers,
     counts,
     renderingSummary: {
@@ -151,15 +166,69 @@ export function adaptActiveDatasetForMap(payload) {
 
 function confirmedTopologyProjection(payload) {
   const source = payload.topologyGraph
+  const resolver = createFrontendIdentityResolver(payload)
   if (source && Array.isArray(source.nodes) && Array.isArray(source.edges)) {
+    const unresolvedNodes = []
+    const nodes = source.nodes.flatMap((node) => {
+      const originalId = node.canonicalAssetId ?? node.assetId ?? node.id
+      const canonicalAssetId = resolver.resolve(originalId)
+      if (!canonicalAssetId) {
+        unresolvedNodes.push(originalId)
+        return []
+      }
+      return [{
+        ...structuredClone(node),
+        id: canonicalAssetId,
+        assetId: canonicalAssetId,
+        canonicalAssetId,
+        sourceNodeId: originalId,
+      }]
+    })
+    const nodeIds = new Set(nodes.map(({ id }) => id))
+    const unresolvedEdges = []
+    const edges = source.edges.flatMap((edge) => {
+      if (!isConfirmedRelation(edge)) return []
+      const originalSource = edge.sourceAssetId ?? edge.sourceNodeId
+      const originalTarget = edge.targetAssetId ?? edge.targetNodeId
+      const sourceAssetId = resolver.resolve(originalSource)
+      const targetAssetId = resolver.resolve(originalTarget)
+      if (!sourceAssetId || !targetAssetId
+        || !nodeIds.has(sourceAssetId)
+        || !nodeIds.has(targetAssetId)
+        || sourceAssetId === targetAssetId) {
+        unresolvedEdges.push({
+          id: edge.id ?? null,
+          sourceAssetId: originalSource,
+          targetAssetId: originalTarget,
+        })
+        return []
+      }
+      return [{
+        ...structuredClone(edge),
+        sourceAssetId,
+        targetAssetId,
+        sourceNodeId: sourceAssetId,
+        targetNodeId: targetAssetId,
+        canonicalSourceAssetId: sourceAssetId,
+        canonicalTargetAssetId: targetAssetId,
+      }]
+    })
     return {
       ...structuredClone(source),
-      edges: source.edges.filter(isConfirmedRelation),
+      nodes,
+      edges,
+      identityResolution: {
+        unresolvedNodeCount: unresolvedNodes.length,
+        unresolvedEdgeCount: unresolvedEdges.length,
+        unresolvedNodes: unresolvedNodes.slice(0, 25),
+        unresolvedEdges: unresolvedEdges.slice(0, 25),
+      },
     }
   }
   const nodes = payload.assets.map((asset) => ({
-    id: asset.assetId,
-    assetId: asset.assetId,
+    id: canonicalAssetIdFor(asset),
+    assetId: canonicalAssetIdFor(asset),
+    canonicalAssetId: canonicalAssetIdFor(asset),
     sourceNodeId: asset.id,
     sourceFeatureId: asset.sourceFeatureId,
   }))
@@ -167,15 +236,19 @@ function confirmedTopologyProjection(payload) {
   const edges = (payload.relations ?? [])
     .filter((relation) => (
       isConfirmedRelation(relation)
-      && validIds.has(relation.sourceAssetId)
-      && validIds.has(relation.targetAssetId)
-      && relation.sourceAssetId !== relation.targetAssetId
+      && resolver.resolve(relation.sourceAssetId)
+      && resolver.resolve(relation.targetAssetId)
+      && validIds.has(resolver.resolve(relation.sourceAssetId))
+      && validIds.has(resolver.resolve(relation.targetAssetId))
+      && resolver.resolve(relation.sourceAssetId) !== resolver.resolve(relation.targetAssetId)
     ))
     .map((relation) => ({
       ...structuredClone(relation),
       id: relation.id,
-      sourceNodeId: relation.sourceAssetId,
-      targetNodeId: relation.targetAssetId,
+      sourceAssetId: resolver.resolve(relation.sourceAssetId),
+      targetAssetId: resolver.resolve(relation.targetAssetId),
+      sourceNodeId: resolver.resolve(relation.sourceAssetId),
+      targetNodeId: resolver.resolve(relation.targetAssetId),
       verificationStatus: 'confirmed',
       relationStatus: 'confirmed',
     }))
@@ -189,6 +262,43 @@ function confirmedTopologyProjection(payload) {
   }
 }
 
+function createFrontendIdentityResolver(payload) {
+  const aliases = new Map()
+  const register = (alias, canonicalAssetId) => {
+    if (!alias || !canonicalAssetId) return
+    if (!aliases.has(alias)) aliases.set(alias, canonicalAssetId)
+    else if (aliases.get(alias) !== canonicalAssetId) aliases.set(alias, null)
+  }
+  Object.entries(payload.assetIdentityMap?.aliasToCanonicalAssetId ?? {})
+    .forEach(([alias, canonicalAssetId]) => register(alias, canonicalAssetId))
+  ;(payload.assetIdentityMap?.items ?? []).forEach((item) => {
+    const canonicalAssetId = item.canonicalAssetId
+    ;(item.aliasValues ?? Object.values(item.aliases ?? {}).flat())
+      .forEach((alias) => register(alias, canonicalAssetId))
+  })
+  ;(payload.assets ?? []).forEach((asset) => {
+    const canonicalAssetId = canonicalAssetIdFor(asset)
+    ;[
+      canonicalAssetId,
+      asset.assetId,
+      asset.id,
+      asset.sourceFeatureId,
+      asset.onboardingIdentity,
+      asset.legacyAssetId,
+      ...Object.values(asset.identityAliases ?? {}).flat(),
+    ].forEach((alias) => register(alias, canonicalAssetId))
+  })
+  return {
+    resolve(value) {
+      return aliases.get(value) ?? null
+    },
+  }
+}
+
+function canonicalAssetIdFor(asset) {
+  return asset?.canonicalAssetId ?? asset?.assetId ?? asset?.id ?? null
+}
+
 function isConfirmedRelation(relation) {
   if (relation.verificationStatus !== undefined) {
     return relation.verificationStatus === 'confirmed'
@@ -197,7 +307,15 @@ function isConfirmedRelation(relation) {
 }
 
 export function adaptActiveAssetDetail(payload, mapAsset) {
-  if (!payload?.asset || payload.asset.assetId !== mapAsset?.id) {
+  const expectedId = mapAsset?.canonicalAssetId ?? mapAsset?.id
+  const detailIds = [
+    payload?.asset?.canonicalAssetId,
+    payload?.asset?.assetId,
+    payload?.asset?.id,
+    payload?.identity?.canonicalAssetId,
+    ...(payload?.identity?.aliasValues ?? []),
+  ].filter(Boolean)
+  if (!payload?.asset || !expectedId || !detailIds.includes(expectedId)) {
     throw new TypeError('Response detail aset aktif tidak valid.')
   }
   const asset = payload.asset
@@ -223,10 +341,18 @@ function createOwnerFeature({ asset, layer, geometries }) {
   const type = normalizeAssetType(asset.type, asset.category || category, layer)
   const explicitStatus = readProperty(asset, 'status')
   const locationGroup = locationGroupFor(layer?.sourceFolderPath)
+  const canonicalAssetId = canonicalAssetIdFor(asset)
   return {
-    id: asset.assetId,
-    assetId: asset.assetId,
+    id: canonicalAssetId,
+    assetId: canonicalAssetId,
+    canonicalAssetId,
+    stableAssetId: asset.stableAssetId ?? null,
+    onboardingIdentity: asset.onboardingIdentity ?? null,
+    legacyAssetId: asset.legacyAssetId ?? asset.assetId ?? null,
+    identityStatus: asset.identityStatus ?? 'legacy',
+    identityAliases: structuredClone(asset.identityAliases ?? {}),
     sourceNodeId: asset.id,
+    sourceFeatureId: asset.sourceFeatureId ?? readProperty(asset, 'sourceFeatureId'),
     name: asset.name || asset.assetId,
     type,
     assetType: type,
@@ -438,6 +564,7 @@ function toMapGeometry(geometry, bounds) {
   const owner = geometry.owner
   const category = normalizeCategory(owner?.category, owner?.type, geometry.layer)
   const locationGroup = locationGroupFor(geometry.layer?.sourceFolderPath)
+  const canonicalAssetId = canonicalAssetIdFor(owner)
   return {
     id: geometry.id,
     sourceGeometryId: geometry.sourceGeometryId,
@@ -445,7 +572,12 @@ function toMapGeometry(geometry, bounds) {
     ...(Number.isInteger(geometry.geometryPartIndex)
       ? { geometryPartIndex: geometry.geometryPartIndex }
       : {}),
-    ...(owner?.assetId ? { assetId: owner.assetId } : {}),
+    ...(canonicalAssetId ? {
+      assetId: canonicalAssetId,
+      canonicalAssetId,
+      stableAssetId: owner?.stableAssetId ?? null,
+      legacyAssetId: owner?.legacyAssetId ?? owner?.assetId ?? null,
+    } : {}),
     sourceNodeId: geometry.assetNodeId,
     geometryType: geometry.geometryType,
     coordinates: structuredClone(geometry.coordinates),

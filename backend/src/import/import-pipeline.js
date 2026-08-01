@@ -158,6 +158,7 @@ export class ImportPipeline {
         sourceOverlays: canonicalParser.sourceOverlays,
         sourceResources: canonicalParser.sourceResources,
         classifiedObjects: canonicalParser.classifiedObjects,
+        assetIdentityMap: canonicalParser.assetIdentityMap,
         topologyInputBundle: canonicalParser.topologyInputBundle,
         parserCoverage: canonicalParser.coverage,
         readiness: canonicalParser.readiness,

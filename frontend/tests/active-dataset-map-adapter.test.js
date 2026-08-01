@@ -433,6 +433,80 @@ test('asset detail adapter adds metadata only after the detail request', () => {
   assert.equal(Object.hasOwn(mapAsset, 'properties'), false)
 })
 
+test('active adapter resolves topology nodes and edges through canonical identity aliases', () => {
+  const payload = activePayload({
+    layers: [layer('layer-lan', 'LAN', 'LAN')],
+    assets: [{
+      ...asset('node-a', 'SW-A', 'LAN'),
+      canonicalAssetId: 'canonical-sw-a',
+      stableAssetId: 'SW-A',
+      onboardingIdentity: 'onboarding-identity:sw-a',
+      legacyAssetId: 'src:pengapon:sw-a',
+      identityStatus: 'stable',
+      identityAliases: {
+        canonicalAssetId: ['canonical-sw-a'],
+        stableAssetId: ['SW-A'],
+        onboardingId: ['onboarding-identity:sw-a'],
+        legacyId: ['src:pengapon:sw-a'],
+        sourceFeatureId: ['feature-sw-a'],
+      },
+    }, {
+      ...asset('node-b', 'AP-B', 'LAN'),
+      canonicalAssetId: 'canonical-ap-b',
+      stableAssetId: 'AP-B',
+      onboardingIdentity: 'onboarding-identity:ap-b',
+      identityAliases: {
+        canonicalAssetId: ['canonical-ap-b'],
+        stableAssetId: ['AP-B'],
+        onboardingId: ['onboarding-identity:ap-b'],
+        sourceFeatureId: ['feature-ap-b'],
+      },
+    }],
+    geometries: [
+      point('point-a', 'node-a', 110, -7),
+      point('point-b', 'node-b', 110.001, -7),
+    ],
+  })
+  payload.assetIdentityMap = {
+    version: 'canonical-asset-identity/1.0.0',
+    items: [{
+      canonicalAssetId: 'canonical-sw-a',
+      aliasValues: ['canonical-sw-a', 'SW-A', 'onboarding-identity:sw-a', 'feature-sw-a'],
+    }, {
+      canonicalAssetId: 'canonical-ap-b',
+      aliasValues: ['canonical-ap-b', 'AP-B', 'onboarding-identity:ap-b', 'feature-ap-b'],
+    }],
+    aliasToCanonicalAssetId: {
+      'canonical-sw-a': 'canonical-sw-a',
+      'onboarding-identity:sw-a': 'canonical-sw-a',
+      'canonical-ap-b': 'canonical-ap-b',
+      'onboarding-identity:ap-b': 'canonical-ap-b',
+    },
+  }
+  payload.topologyGraph = {
+    nodes: [
+      { id: 'onboarding-identity:sw-a', sourceFeatureId: 'feature-sw-a' },
+      { id: 'onboarding-identity:ap-b', sourceFeatureId: 'feature-ap-b' },
+    ],
+    edges: [{
+      id: 'edge-sw-ap',
+      sourceNodeId: 'onboarding-identity:sw-a',
+      targetNodeId: 'onboarding-identity:ap-b',
+      relationSource: 'explicit',
+    }],
+  }
+
+  const result = adaptActiveDatasetForMap(payload)
+
+  assert.deepEqual(result.assets.map(({ id }) => id), ['canonical-sw-a', 'canonical-ap-b'])
+  assert.deepEqual(result.topologyGraph.edges.map(({ sourceNodeId, targetNodeId }) => [
+    sourceNodeId,
+    targetNodeId,
+  ]), [['canonical-sw-a', 'canonical-ap-b']])
+  assert.deepEqual(result.networks[0].edges, [['canonical-sw-a', 'canonical-ap-b']])
+  assert.equal(result.geometries[0].assetId, 'canonical-sw-a')
+})
+
 test('location group is derived from the first KML folder after RJBT', () => {
   assert.deepEqual(locationGroupFor('/RJBT/FT REWULU/CCTV/Camera'), {
     locationGroupKey: 'ft-rewulu',

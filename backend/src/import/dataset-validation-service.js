@@ -566,7 +566,14 @@ function validateRelations({
   relations,
   issues,
 }) {
-  const assetIds = new Set(assets.map((asset) => asset.assetId))
+  const assetIds = new Set(assets.flatMap((asset) => [
+    asset.assetId,
+    asset.canonicalAssetId,
+    asset.id,
+    ...(asset.identityAliases
+      ? Object.values(asset.identityAliases).flat()
+      : []),
+  ].filter(Boolean)))
   const semanticRelations = new Set()
 
   relations.forEach((relation) => {

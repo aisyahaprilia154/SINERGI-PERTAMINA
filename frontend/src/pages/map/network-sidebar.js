@@ -1,8 +1,12 @@
 export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, {
   locationGroups = [],
   selectedArea = null,
+  topologyReadiness = null,
 } = {}) {
   const countSummary = formatDatasetCounts(counts)
+  const topologyReady = topologyReadiness?.ready ?? activeContext?.topologyReady ?? true
+  const topologyMessage = topologyReadiness?.message
+    || 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.'
   return `
     <aside class="network-sidebar" id="network-sidebar"
       aria-label="Pemilih jaringan. ${escapeAttribute(countSummary)}">
@@ -31,6 +35,14 @@ export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, 
             <span>${escapeHtml(activeContext.version)} · ${escapeHtml(activeContext.publishedAt)}</span>
           </div>
           <span class="status-dot" title="Dataset aktif"></span>
+        </section>
+
+        <section class="sidebar-topology-readiness ${topologyReady ? 'ready' : 'not-ready'}"
+          role="status" aria-label="Status kesiapan topologi">
+          <strong>Topology-ready: ${topologyReady ? 'Yes' : 'No'}</strong>
+          <span>${escapeHtml(topologyReady
+            ? 'Tracing dan diagram dapat menggunakan graph terkonfirmasi.'
+            : topologyMessage)}</span>
         </section>
 
         <label class="area-selector">

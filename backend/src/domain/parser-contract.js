@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import path from 'node:path'
+import { buildCanonicalAssetIdentityMap } from './canonical-asset-identity.js'
 
 export const PARSER_VERSION = 'evidence-parser/1.0.0'
 export const NORMALIZER_VERSION = 'canonical-normalizer/1.0.0'
@@ -376,9 +377,32 @@ export function buildCanonicalParserResult({
   ;(parserOutput.folders ?? []).forEach(visitFolder)
 
   const styles = canonicalizeStyles(parserOutput, datasetVersionId)
+  const assetIdentityMap = buildCanonicalAssetIdentityMap({
+    datasetVersion,
+    sourceFeatures,
+    classifiedObjects,
+  })
+  const identityByFeature = new Map(assetIdentityMap.items.map((item) => [
+    item.sourceFeatureId,
+    item,
+  ]))
+  const identityClassifiedObjects = classifiedObjects.map((object) => {
+    const identity = identityByFeature.get(object.sourceFeatureId)
+    if (!identity) return object
+    return {
+      ...object,
+      canonicalAssetId: identity.canonicalAssetId,
+      stableAssetId: identity.stableAssetId,
+      onboardingIdentity: identity.onboardingId,
+      legacyAssetId: identity.legacyId,
+      identityStatus: identity.identityStatus,
+      identityAliases: structuredClone(identity.aliases),
+    }
+  })
+  identityIssues(assetIdentityMap).forEach(addIssue)
   const topologyInputBundle = buildTopologyInputBundle({
     datasetVersion,
-    classifiedObjects,
+    classifiedObjects: identityClassifiedObjects,
     sourceGeometries,
     explicitRelationEvidence,
   })
@@ -388,14 +412,14 @@ export function buildCanonicalParserResult({
     sourceGeometries,
     sourceOverlays,
     resources: resourceResult.resources,
-    classifiedObjects,
+    classifiedObjects: identityClassifiedObjects,
     topologyInputBundle,
   })
   const readiness = evaluateReadiness({
     issues,
     sourceGeometries,
     sourceOverlays,
-    classifiedObjects,
+    classifiedObjects: identityClassifiedObjects,
     coverage,
   })
 
@@ -422,7 +446,8 @@ export function buildCanonicalParserResult({
     sourceStyles: styles,
     sourceOverlays,
     sourceResources: resourceResult.resources,
-    classifiedObjects,
+    classifiedObjects: identityClassifiedObjects,
+    assetIdentityMap,
     explicitRelationEvidence,
     topologyInputBundle,
     coverage,
@@ -729,10 +754,14 @@ function buildTopologyInputBundle({
     ))
   ))
   const mapObject = (object) => ({
-    assetId: object.assetId,
-    onboardingIdentity: object.assetId
-      ? undefined
-      : deterministicId('onboarding-identity', datasetVersion.id, object.sourceFeatureId),
+    assetId: object.canonicalAssetId ?? object.assetId,
+    canonicalAssetId: object.canonicalAssetId ?? object.assetId,
+    stableAssetId: object.stableAssetId ?? object.assetId ?? null,
+    onboardingIdentity: object.onboardingIdentity
+      ?? deterministicId('onboarding-identity', datasetVersion.id, object.sourceFeatureId),
+    legacyAssetId: object.legacyAssetId ?? null,
+    identityStatus: object.identityStatus ?? (object.assetId ? 'stable' : 'onboarding'),
+    identityAliases: structuredClone(object.identityAliases ?? {}),
     sourceFeatureId: object.sourceFeatureId,
     siteId: object.siteId,
     objectRole: object.objectRole,
@@ -773,6 +802,46 @@ function geometryMatchesRole(geometry, objectRole) {
   if (objectRole === 'device_node') return geometry.geometryType === 'Point'
   if (objectRole === 'cable_path') return geometry.geometryType === 'LineString'
   return false
+}
+
+function identityIssues(identityMap) {
+  const issues = []
+  identityMap.validation.duplicateAliases.forEach((duplicate) => {
+    issues.push({
+      severity: 'error',
+      issueCode: 'duplicate_asset_identity_alias',
+      scope: 'identity',
+      message: `Alias asset ${duplicate.alias} merujuk lebih dari satu canonicalAssetId.`,
+      readinessDimension: 'inventory',
+      canPublish: false,
+      sourceFeatureId: duplicate.sourceFeatureId,
+      focusReference: duplicate.alias,
+    })
+  })
+  identityMap.validation.duplicateCanonicalIds.forEach((duplicate) => {
+    issues.push({
+      severity: 'error',
+      issueCode: 'duplicate_canonical_asset_id',
+      scope: 'identity',
+      message: `canonicalAssetId ${duplicate.canonicalAssetId} digunakan ${duplicate.count} kali.`,
+      readinessDimension: 'inventory',
+      canPublish: false,
+      focusReference: duplicate.canonicalAssetId,
+    })
+  })
+  identityMap.validation.missingSourceFeatureReferences.forEach((sourceFeatureId) => {
+    issues.push({
+      severity: 'error',
+      issueCode: 'canonical_identity_source_feature_missing',
+      scope: 'identity',
+      message: `Identity asset merujuk source feature ${sourceFeatureId} yang tidak ditemukan.`,
+      readinessDimension: 'inventory',
+      canPublish: false,
+      sourceFeatureId,
+      focusReference: sourceFeatureId,
+    })
+  })
+  return issues
 }
 
 function buildCoverage({
@@ -833,9 +902,12 @@ function evaluateReadiness({
     ['device_node', 'cable_path'].includes(objectRole)
   ))
   const duplicateIds = duplicateValues(assets.map(({ assetId }) => assetId).filter(Boolean))
+  const identityBlocking = issues.filter((issue) => (
+    issue.readinessDimension === 'inventory' && issue.canPublish === false
+  )).length
   const inventoryBlocking = assets.filter(({ assetId, assetType, category }) => (
     !assetId || assetType === 'unknown' || category === 'unknown'
-  )).length + duplicateIds.length
+  )).length + duplicateIds.length + identityBlocking
 
   return {
     parseReadiness: readinessValue(

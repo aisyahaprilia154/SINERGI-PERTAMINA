@@ -17,6 +17,12 @@ export function projectCanonicalImport({
   const classificationByFeature = new Map(
     canonicalParser.classifiedObjects.map((object) => [object.sourceFeatureId, object]),
   )
+  const identityByFeature = new Map(
+    (canonicalParser.assetIdentityMap?.items ?? []).map((identity) => [
+      identity.sourceFeatureId,
+      identity,
+    ]),
+  )
   const geometriesByFeature = groupBy(canonicalParser.sourceGeometries, 'sourceFeatureId')
   const layerByPath = new Map()
   const placemarkRecords = []
@@ -92,6 +98,7 @@ export function projectCanonicalImport({
   const fallbackCounts = countValues(fallbackBases.filter(Boolean))
   const fallbackOccurrences = new Map()
   const usedAssetIds = new Set()
+  const usedCanonicalAssetIds = new Set()
 
   placemarkRecords.forEach(({ placemark, layer: inputLayer, index }) => {
     const feature = shiftFeature(featureQueues, placemark)
@@ -107,24 +114,29 @@ export function projectCanonicalImport({
       return
     }
     const classification = classificationByFeature.get(feature.sourceFeatureId)
+    const identity = identityByFeature.get(feature.sourceFeatureId)
     const metadata = semanticMetadataForFeature(canonicalParser, feature.sourceFeatureId)
     const layer = inputLayer
       ?? layerByPath.get(feature.sourceFolderPath)
       ?? getFallbackLayer()
-    let assetId = classification?.assetId
+    let assetId = classification?.stableAssetId ?? classification?.assetId
     let sourceIdentity = null
     if (!assetId && sourceIdentityFallback === 'folder-path-name') {
       const base = sourceIdentityBase(feature.sourceFolderPath, feature.sourceName)
       if (base) {
         const occurrence = (fallbackOccurrences.get(base) ?? 0) + 1
         fallbackOccurrences.set(base, occurrence)
-        assetId = (fallbackCounts.get(base) ?? 1) > 1 ? `${base}:${occurrence}` : base
+        assetId = identity?.legacyId
+          ?? ((fallbackCounts.get(base) ?? 1) > 1 ? `${base}:${occurrence}` : base)
         sourceIdentity = {
           strategy: 'folder-path-name',
           sourceFolderPath: feature.sourceFolderPath,
           sourcePlacemarkName: feature.sourceName,
           occurrence,
           totalOccurrences: fallbackCounts.get(base) ?? 1,
+          canonicalAssetId: identity?.canonicalAssetId ?? null,
+          onboardingId: identity?.onboardingId ?? null,
+          legacyId: identity?.legacyId ?? assetId,
         }
       }
     }
@@ -152,6 +164,20 @@ export function projectCanonicalImport({
       return
     }
     usedAssetIds.add(assetId)
+    const canonicalAssetId = identity?.canonicalAssetId ?? assetId
+    if (usedCanonicalAssetIds.has(canonicalAssetId)) {
+      addIssue({
+        severity: 'error',
+        issueCode: 'duplicate_canonical_asset_id',
+        message: `canonicalAssetId ${canonicalAssetId} digunakan lebih dari sekali.`,
+        sourceFolderPath: feature.sourceFolderPath,
+        sourcePlacemarkName: feature.sourceName,
+        assetId,
+        canActivate: false,
+      })
+      return
+    }
+    usedCanonicalAssetIds.add(canonicalAssetId)
     const nodeId = `asset-node:${datasetVersion.id}:${slugify(assetId)}`
     const sourceProperties = structuredClone(feature.rawProperties ?? {})
     const asset = {
@@ -159,6 +185,13 @@ export function projectCanonicalImport({
       datasetVersionId: datasetVersion.id,
       layerId: layer.id,
       assetId,
+      canonicalAssetId,
+      stableAssetId: identity?.stableAssetId ?? classification?.stableAssetId ?? null,
+      onboardingIdentity: identity?.onboardingId ?? classification?.onboardingIdentity ?? null,
+      legacyAssetId: identity?.legacyId ?? assetId,
+      identityStatus: identity?.identityStatus ?? (assetId ? 'stable' : 'unresolved'),
+      identityAliases: structuredClone(identity?.aliases ?? {}),
+      sourceFeatureId: feature.sourceFeatureId,
       name: metadata.assetName ?? feature.sourceName ?? `Placemark ${index + 1}`,
       category: metadata.category ?? layer.category ?? classification?.category ?? 'uncategorized',
       type: metadata.assetType
@@ -173,9 +206,21 @@ export function projectCanonicalImport({
         semanticMetadata: {
           ...metadata.camel,
           ...(sourceIdentity ? { assetId } : {}),
+          canonicalAssetId,
         },
         metadataMapping: structuredClone(metadata.mappings),
-        ...compact({ sourceIdentityMapping: sourceIdentity }),
+        ...compact({
+          sourceIdentityMapping: sourceIdentity
+            ? sourceIdentity
+            : identity
+              ? {
+                strategy: identity.identityStatus,
+                canonicalAssetId,
+                onboardingId: identity.onboardingId,
+                legacyId: identity.legacyId,
+              }
+              : null,
+        }),
         sourceFeatureId: feature.sourceFeatureId,
         classification: classification ? structuredClone(classification) : null,
       },
@@ -272,6 +317,7 @@ export function projectCanonicalImport({
     geometries,
     relations: [],
     issues,
+    assetIdentityMap: structuredClone(canonicalParser.assetIdentityMap ?? null),
     sourceStyles: {
       styles: structuredClone(parserOutput.styles ?? []),
       styleMaps: structuredClone(parserOutput.styleMaps ?? []),

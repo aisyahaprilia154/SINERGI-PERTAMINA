@@ -127,6 +127,74 @@ test('atomic activation archives the previous version and publishes one shared p
   }
 })
 
+test('active map migrates legacy asset and topology IDs into one canonical identity', async () => {
+  const fixture = await createLifecycleFixture()
+  try {
+    const record = versionRecord('version-identity', 'active')
+    record.assets[0] = {
+      ...record.assets[0],
+      assetId: 'src:pengapon:cam-01',
+      properties: {
+        sourceFeatureId: 'source-feature-identity',
+        sourceIdentityMapping: {
+          strategy: 'folder-path-name',
+          legacyId: 'src:pengapon:cam-01',
+        },
+      },
+    }
+    record.geometries[0].sourceFeatureId = 'source-feature-identity'
+    record.topologyInputBundle = {
+      classifiedNodes: [{
+        sourceFeatureId: 'source-feature-identity',
+        assetId: 'onboarding-identity:cam-01',
+      }],
+      classifiedPaths: [],
+    }
+    record.topologyGraph = {
+      nodes: [{
+        id: 'onboarding-identity:cam-01',
+        sourceFeatureId: 'source-feature-identity',
+      }],
+      edges: [],
+    }
+    record.confirmedRelations = [{
+      relationId: 'relation-path-continuation',
+      relationType: 'path-continuation',
+      verificationStatus: 'confirmed',
+      sourceAssetId: 'onboarding-identity:cam-01',
+      targetAssetId: 'onboarding-identity:cam-02',
+    }]
+    record.topologySummary = {
+      candidateCount: 0,
+      confirmedEdgeCount: 1,
+    }
+    record.readiness = {
+      mapReadiness: 'ready',
+      inventoryReadiness: 'not_ready',
+      topologyReadiness: 'not_ready',
+    }
+    record.topologyReadiness = { topologyReadiness: 'not_ready' }
+    await fixture.repository.create(record)
+
+    const mapView = await fixture.service.getActiveMapDataset({
+      datasetId: 'dataset-semarang',
+      branchId: 'semarang',
+    })
+
+    assert.equal(mapView.assets[0].assetId, 'src:pengapon:cam-01')
+    assert.equal(mapView.assets[0].canonicalAssetId, 'onboarding-identity:cam-01')
+    assert.equal(mapView.assets[0].legacyAssetId, 'src:pengapon:cam-01')
+    assert.equal(mapView.topologyGraph.nodes[0].id, 'onboarding-identity:cam-01')
+    assert.equal(mapView.topologyIdentity.unresolvedNodeCount, 0)
+    assert.equal(mapView.topologySummary.confirmedEdgeCount, 0)
+    assert.equal(mapView.topologySummary.confirmedRelationCount, 1)
+    assert.equal(mapView.topologySummary.confirmedPathContinuationCount, 1)
+    assert.equal(mapView.readinessContract.topologyReady, 'not_ready')
+  } finally {
+    await fixture.close()
+  }
+})
+
 test('concurrent activation is locked and cannot publish two active versions', async () => {
   let enterCommit
   let releaseCommit

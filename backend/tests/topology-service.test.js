@@ -37,12 +37,19 @@ test('candidate review is audited, materializes confirmed graph, and can be revo
   assert.equal(firstConfirmation.candidate.candidateStatus, 'confirmed')
   assert.equal(firstConfirmation.confirmedRelations.length, 1)
   assert.equal(firstConfirmation.graph.edges.length, 0)
+  assert.equal(firstConfirmation.confirmedRelations[0].relationKind, 'path_attachment')
   const confirmed = await service.confirmCandidate(endCandidate.candidateId, 'admin-1', {
     reason: 'Endpoint kedua telah diverifikasi pada peta sumber.',
   })
   assert.equal(confirmed.candidate.candidateStatus, 'confirmed')
   assert.equal(confirmed.confirmedRelations.length, 2)
   assert.equal(confirmed.graph.edges.length, 1)
+  assert.equal(confirmed.confirmedRelations.every(({ relationKind }) => (
+    relationKind === 'path_attachment'
+  )), true)
+  const confirmedRecord = await repository.get('dv-review')
+  assert.equal(confirmedRecord.topologySummary.confirmedPathAttachmentCount, 2)
+  assert.equal(confirmedRecord.topologySummary.confirmedDeviceEdgeCount, 1)
   assert.equal(confirmed.confirmedRelations[0].verificationStatus, 'confirmed')
   assert.equal(confirmed.confirmedRelations[0].verifiedBy, 'admin-1')
   assert.ok(confirmed.confirmedRelations[0].auditEventId)

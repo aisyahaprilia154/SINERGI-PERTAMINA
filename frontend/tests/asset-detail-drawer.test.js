@@ -82,3 +82,20 @@ test('drawer supports loading and error states', () => {
   assert.match(error, /Dataset tidak tersedia/)
   assert.match(error, /Coba lagi/)
 })
+
+test('drawer disables topology actions while the site is not topology-ready', () => {
+  const html = renderAssetDetailDrawer({
+    asset,
+    assetNetworks: [network],
+    connectedAssets: [],
+    activeContext,
+    topologyReady: false,
+    topologyMessage: 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.',
+    trace: { status: 'idle' },
+  })
+
+  assert.match(html, /Topology-ready: No/)
+  assert.match(html, /class="button primary trace-from"[^>]*disabled aria-disabled="true"/)
+  assert.match(html, /class="button secondary open-schematic"[^>]*disabled aria-disabled="true"/)
+  assert.match(html, /Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\./)
+})

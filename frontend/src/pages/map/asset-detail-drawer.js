@@ -7,6 +7,8 @@ export function renderAssetDetailDrawer({
   activeContext,
   trace = {},
   showAdditionalMetadata = false,
+  topologyReady = true,
+  topologyMessage = 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.',
 }) {
   if (status === 'loading') return renderLoadingState()
   if (status === 'error') return renderErrorState(errorMessage)
@@ -47,6 +49,13 @@ export function renderAssetDetailDrawer({
       </section>
 
       ${renderTraceSection(trace)}
+
+      ${!topologyReady ? `
+        <section class="drawer-topology-readiness" role="status">
+          <strong>Topology-ready: No</strong>
+          <span>${escapeHtml(topologyMessage)}</span>
+        </section>
+      ` : ''}
 
       <section class="drawer-section" aria-labelledby="asset-information-title">
         <h3 id="asset-information-title">Informasi aset</h3>
@@ -137,7 +146,8 @@ export function renderAssetDetailDrawer({
           Hentikan tracing
         </button>
       ` : `
-        <button class="button primary trace-from" type="button">
+        <button class="button primary trace-from" type="button"
+          ${topologyReady ? '' : `disabled aria-disabled="true" title="${escapeAttribute(topologyMessage)}"`}>
           <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>
           Telusuri jaringan
         </button>
@@ -148,7 +158,8 @@ export function renderAssetDetailDrawer({
           <span class="material-symbols-outlined" aria-hidden="true">info</span>
           Buka detail aset
         </button>
-        <button class="button secondary open-schematic" type="button">
+        <button class="button secondary open-schematic" type="button"
+          ${topologyReady ? '' : `disabled aria-disabled="true" title="${escapeAttribute(topologyMessage)}"`}>
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
           Buat diagram 2D
         </button>

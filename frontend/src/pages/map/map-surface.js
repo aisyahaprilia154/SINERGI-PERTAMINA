@@ -4,7 +4,14 @@ export function renderNetworkMapCanvas(activeContext, {
   selectedArea = null,
   counts = {},
   confirmedConnectionCount = 0,
+  topologyReadiness = null,
 } = {}) {
+  const topologyReady = topologyReadiness?.ready ?? activeContext?.topologyReady ?? true
+  const topologyMessage = topologyReadiness?.message
+    || 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.'
+  const displayedConfirmedConnectionCount = topologyReady
+    ? Number(confirmedConnectionCount) || 0
+    : 0
   return `
     <section class="map-stage" aria-label="Peta geografis aset">
       <div id="network-map" tabindex="0" aria-label="Peta geografis jaringan aset"
@@ -26,10 +33,16 @@ export function renderNetworkMapCanvas(activeContext, {
         <span class="basemap-status-metrics">
           <span><b>${Number(counts.assetNodeCount) || 0}</b> aset</span>
           <span><b>${Number(counts.lineCount) || 0}</b> jalur</span>
-          <span><b>${Number(confirmedConnectionCount) || 0}</b> koneksi</span>
+          <span><b>${displayedConfirmedConnectionCount}</b> koneksi</span>
           <span class="declutter-summary">adaptif</span>
         </span>
       </div>
+      ${!topologyReady ? `
+        <div class="map-topology-readiness" id="topology-not-ready-message" role="status">
+          <strong>Topology-ready: No</strong>
+          <span>${escapeHtml(topologyMessage)}</span>
+        </div>
+      ` : ''}
       <div class="map-asset-tooltip" id="map-asset-tooltip" role="tooltip" aria-live="polite" hidden></div>
       ${empty ? `
         <section class="map-empty-layer" aria-live="polite">
@@ -40,9 +53,9 @@ export function renderNetworkMapCanvas(activeContext, {
             : 'Pilih atau aktifkan dataset yang memiliki Point, LineString, atau Polygon valid.'}</p>
         </section>
       ` : ''}
-      ${renderMapContextPill(activeContext)}
+      ${renderMapContextPill(activeContext, topologyReadiness)}
       ${renderMapAssetFinder()}
-      ${renderMapFloatingControls(activeContext)}
+      ${renderMapFloatingControls(activeContext, topologyReadiness)}
 
       <div class="trace-banner" hidden>
         <span class="trace-step">1</span>
@@ -92,8 +105,9 @@ export function renderNetworkMapCanvas(activeContext, {
   `
 }
 
-export function renderMapContextPill(activeContext) {
+export function renderMapContextPill(activeContext, topologyReadiness = null) {
   const branchName = formatBranchName(activeContext.branchName)
+  const topologyReady = topologyReadiness?.ready ?? activeContext?.topologyReady ?? true
   return `
     <section class="map-context-pill" aria-label="Konteks peta aktif">
       <span class="context-branch">
@@ -111,6 +125,10 @@ export function renderMapContextPill(activeContext) {
       <span class="context-readonly">
         <span class="material-symbols-outlined" aria-hidden="true">lock</span>
         Read-only
+      </span>
+      <span class="context-topology ${topologyReady ? 'ready' : 'not-ready'}"
+        title="${topologyReady ? 'Topologi siap untuk tracing.' : 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.'}">
+        Topology-ready: ${topologyReady ? 'Yes' : 'No'}
       </span>
     </section>
   `
@@ -132,7 +150,13 @@ export function renderMapAssetFinder() {
   `
 }
 
-export function renderMapFloatingControls() {
+export function renderMapFloatingControls(activeContext = null, topologyReadiness = null) {
+  const topologyReady = topologyReadiness?.ready ?? activeContext?.topologyReady ?? true
+  const topologyMessage = topologyReadiness?.message
+    || 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.'
+  const topologyActionAttributes = topologyReady
+    ? ''
+    : `disabled aria-disabled="true" title="${escapeHtml(topologyMessage)}"`
   return `
     <div class="map-floating-top">
       <button class="icon-button open-sidebar mobile-only" type="button"
@@ -145,11 +169,11 @@ export function renderMapFloatingControls() {
           <span class="material-symbols-outlined" aria-hidden="true">swap_vert</span>
           <span>Import / Export</span>
         </button>
-        <button class="tool-button trace-toggle" type="button">
+        <button class="tool-button trace-toggle" type="button" ${topologyActionAttributes}>
           <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>
           <span>Tracing</span>
         </button>
-        <button class="tool-button diagram-toggle" type="button">
+        <button class="tool-button diagram-toggle" type="button" ${topologyActionAttributes}>
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
           <span>Diagram 2D</span>
         </button>
