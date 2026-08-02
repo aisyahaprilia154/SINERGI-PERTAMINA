@@ -32,14 +32,15 @@ export function openMapDataTransferDialog({
   visibleAssetIds = [],
   visibleGeometryIds = [],
   initialMode = 'import',
+  allowImport = true,
   onActivated,
   onOpenDiagram,
 }) {
   const dialog = document.createElement('dialog')
   dialog.className = 'map-transfer-dialog'
   const state = {
-    mode: initialMode,
-    configStatus: 'loading',
+    mode: allowImport ? initialMode : 'export',
+    configStatus: allowImport ? 'loading' : 'disabled',
     config: null,
     file: null,
     fileValidation: null,
@@ -57,7 +58,7 @@ export function openMapDataTransferDialog({
   document.body.append(dialog)
   dialog.showModal()
   render()
-  loadConfig()
+  if (allowImport) loadConfig()
 
   async function loadConfig() {
     try {
@@ -82,6 +83,7 @@ export function openMapDataTransferDialog({
       tracePath,
       visibleAssetIds,
       visibleGeometryIds,
+      allowImport,
       state,
     })
     bindEvents()
@@ -408,23 +410,25 @@ export function renderMapDataTransferDialog({
   tracePath = [],
   visibleAssetIds = [],
   visibleGeometryIds = [],
+  allowImport = true,
   state,
 }) {
-  const importSelected = state.mode === 'import'
+  const importSelected = allowImport && state.mode === 'import'
   return `
     <div class="map-transfer-shell">
       <header class="map-transfer-header">
         <div>
           <span class="eyebrow">ADMINISTRASI DATASET</span>
-          <h2>Import &amp; export peta</h2>
+          <h2>${allowImport ? 'Import &amp; export peta' : 'Export peta'}</h2>
           <p>${escapeHtml(activeContext.branchName || activeContext.branchId)}</p>
         </div>
         <button class="icon-button close-map-transfer" type="button"
-          aria-label="Tutup import dan export">
+          aria-label="${allowImport ? 'Tutup import dan export' : 'Tutup export'}">
           <span class="material-symbols-outlined" aria-hidden="true">close</span>
         </button>
       </header>
 
+      ${allowImport ? `
       <div class="map-transfer-tabs" role="tablist" aria-label="Import dan export dataset">
         <button type="button" role="tab" data-transfer-mode="import"
           aria-selected="${importSelected}" class="${importSelected ? 'active' : ''}">
@@ -437,6 +441,7 @@ export function renderMapDataTransferDialog({
           Export
         </button>
       </div>
+      ` : ''}
 
       <div class="map-transfer-content">
         ${importSelected

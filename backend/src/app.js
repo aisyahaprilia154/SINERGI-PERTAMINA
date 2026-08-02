@@ -140,6 +140,44 @@ export function createApp({
           await lifecycleService.reject(rejectionMatch[1], user.id),
         )
       }
+      const relationReviewMatch = request.method === 'GET'
+        ? url.pathname.match(
+          /^\/api\/admin\/dataset-versions\/([a-zA-Z0-9_-]+)\/relation-review$/,
+        )
+        : null
+      if (relationReviewMatch) {
+        requireAdministrator(request, authenticator)
+        return sendJson(
+          response,
+          200,
+          await lifecycleService.getRelationReview(relationReviewMatch[1], {
+            siteScopeId: normalizeSiteScopeId(url.searchParams.get('siteScopeId')),
+          }),
+        )
+      }
+      const relationDecisionMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/admin\/dataset-versions\/([a-zA-Z0-9_-]+)\/relations\/([^/]+)\/review$/,
+        )
+        : null
+      if (relationDecisionMatch) {
+        const user = requireAdministrator(request, authenticator)
+        const body = await readJsonBody(request)
+        return sendJson(
+          response,
+          200,
+          await lifecycleService.reviewRelation(
+            relationDecisionMatch[1],
+            normalizeRelationId(decodePathSegment(relationDecisionMatch[2])),
+            {
+              decision: body.decision,
+              siteScopeId: normalizeSiteScopeId(body.siteScopeId),
+              note: normalizeOptionalReviewNote(body.note),
+            },
+            user.id,
+          ),
+        )
+      }
       const statusMatch = request.method === 'GET'
         ? url.pathname.match(/^\/api\/admin\/imports\/([a-zA-Z0-9_-]+)$/)
         : null
@@ -208,6 +246,31 @@ function normalizeAssetId(value) {
     })
   }
   return value
+}
+
+function normalizeRelationId(value) {
+  if (!value || value.length > 512 || /[\u0000-\u001f\u007f/\\]/.test(value)) {
+    throw new AppError('Relation ID tidak valid.', {
+      code: 'invalid_relation_id',
+      statusCode: 400,
+    })
+  }
+  return value
+}
+
+function normalizeSiteScopeId(value) {
+  const normalized = String(value ?? 'pengapon').trim().toLowerCase()
+  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(normalized)) {
+    throw new AppError('Site scope ID tidak valid.', {
+      code: 'invalid_site_scope_id',
+      statusCode: 400,
+    })
+  }
+  return normalized
+}
+
+function normalizeOptionalReviewNote(value) {
+  return normalizeOptionalText(value, 500, 'Catatan review')
 }
 
 function decodePathSegment(value) {

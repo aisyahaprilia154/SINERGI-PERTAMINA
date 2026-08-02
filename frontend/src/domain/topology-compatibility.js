@@ -2,6 +2,7 @@ const LINE_ROLES = Object.freeze([
   ['cctv-cable', /\bcctv\b.*\b(cable|kabel|backbone)\b|\b(cable|kabel|backbone)\b.*\bcctv\b/i],
   ['fiber-optic', /\b(fiber|fibre)\b|\bf[.\s_-]*o\b/i],
   ['lan-line', /\b(lan|utp)\b.*\b(cable|kabel|line|jalur)\b|\b(cable|kabel|line|jalur)\b.*\b(lan|utp)\b/i],
+  ['power-cable', /\b(power|pln|listrik)\b/i],
 ])
 
 const NODE_ROLES = Object.freeze([
@@ -11,6 +12,7 @@ const NODE_ROLES = Object.freeze([
   ['server', /\bserver\b/i],
   ['nvr', /\bnvr\b/i],
   ['otb', /\botb\b/i],
+  ['pole', /\b(tiang|pole)\b/i],
   ['cctv', /\b(cctv|camera|kamera|ip\s*camera)\b/i],
 ])
 
@@ -29,15 +31,24 @@ export const TOPOLOGY_COMPATIBILITY_CONFIG = Object.freeze({
       'switch',
     ]),
     'lan-line': Object.freeze([
+      // UTP routes in the Pengapon source are also used as physical CCTV
+      // access cabling. The line remains owned by the LAN/UTP network; these
+      // endpoint roles only allow evidence-backed attachment to that route.
+      'cctv',
+      'junction-box',
       'switch',
       'access-point',
       'server',
+    ]),
+    'power-cable': Object.freeze([
+      'pole',
     ]),
   }),
   lineIntersections: Object.freeze([
     Object.freeze(['cctv-cable', 'cctv-cable']),
     Object.freeze(['fiber-optic', 'fiber-optic']),
     Object.freeze(['lan-line', 'lan-line']),
+    Object.freeze(['power-cable', 'power-cable']),
   ]),
   explicitMetadataAliases: Object.freeze({
     connectedTo: Object.freeze(['connected_to', 'connectedTo']),

@@ -8,6 +8,8 @@ export function renderAssetDetailDrawer({
   connectedAssets = [],
   activeContext,
   trace = {},
+  relationReadiness = null,
+  isAdministrator = false,
   showAdditionalMetadata = false,
 }) {
   if (status === 'loading') return renderLoadingState()
@@ -20,6 +22,10 @@ export function renderAssetDetailDrawer({
     shortMax: 18,
     displayMax: 30,
   })
+  const canOpenDiagram = relationReadiness?.canCreateDiagram
+    || (isAdministrator && Number(relationReadiness?.pendingEdgeCount) > 0)
+  const diagramIsPreview = !relationReadiness?.canCreateDiagram
+    && canOpenDiagram
 
   return `
     <header class="drawer-header" data-asset-stable-id="${escapeAttribute(
@@ -92,12 +98,12 @@ export function renderAssetDetailDrawer({
 
       <section class="drawer-section connected-assets" aria-labelledby="connected-assets-title">
         <div class="drawer-section-heading">
-          <h3 id="connected-assets-title">Aset terhubung</h3>
+          <h3 id="connected-assets-title">Relasi langsung</h3>
           <span class="count-badge">${connectedAssets.length}</span>
         </div>
         ${connectedAssets.length ? `
           <ul class="relation-list">
-            ${connectedAssets.map(({ asset: connectedAsset, network }) => `
+            ${connectedAssets.map(({ asset: connectedAsset, relation }) => `
               <li>
                 <button type="button" data-connected-asset="${escapeAttribute(connectedAsset.id)}">
                   <span class="relation-icon material-symbols-outlined" aria-hidden="true">
@@ -109,14 +115,27 @@ export function renderAssetDetailDrawer({
                     )}</strong>
                     <small>${escapeHtml(
                       getAssetRenderLabels(connectedAsset).fullShortLabel,
-                    )} · ${escapeHtml(network?.shortName || network?.name || 'Topologi terkonfirmasi')}</small>
+                    )} · ${escapeHtml(relation?.relationType || 'connected-to')}</small>
+                    <small>${escapeHtml(simplifiedRelationStatus(relation))}${
+                      relationPathLabel(relation)
+                        ? ` · ${escapeHtml(relationPathLabel(relation))}`
+                        : ''
+                    }</small>
                   </span>
                   <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
                 </button>
               </li>
             `).join('')}
           </ul>
-        ` : renderInlineEmpty('Tidak ada relasi topologi terkonfirmasi untuk aset ini. Aset tetap ditampilkan di peta.')}
+        ` : renderInlineEmpty(
+          'Relasi aset belum tersedia. Lokasi dan metadata aset tetap dapat dilihat.',
+        )}
+        ${isAdministrator ? `
+          <button class="button secondary review-relations" type="button">
+            <span class="material-symbols-outlined" aria-hidden="true">fact_check</span>
+            Periksa kandidat relasi
+          </button>
+        ` : ''}
       </section>
 
       <section class="drawer-section additional-metadata ${showAdditionalMetadata ? 'expanded' : ''}"
@@ -152,9 +171,10 @@ export function renderAssetDetailDrawer({
           Hentikan tracing
         </button>
       ` : `
-        <button class="button primary trace-from" type="button">
+        <button class="button primary trace-from" type="button"
+          ${relationReadiness?.canTrace ? '' : 'disabled title="Relasi aset belum tersedia."'}>
           <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>
-          Telusuri jaringan
+          Telusuri koneksi
         </button>
       `}
       <div class="drawer-secondary-actions">
@@ -163,9 +183,12 @@ export function renderAssetDetailDrawer({
           <span class="material-symbols-outlined" aria-hidden="true">info</span>
           Buka detail aset
         </button>
-        <button class="button secondary open-schematic" type="button">
+        <button class="button secondary open-schematic" type="button"
+          ${canOpenDiagram
+            ? ''
+            : 'disabled title="Diagram memerlukan relasi terkonfirmasi."'}>
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
-          Buat diagram 2D
+          ${diagramIsPreview ? 'Preview diagram 2D' : 'Buat diagram 2D'}
         </button>
       </div>
     </footer>
@@ -213,14 +236,19 @@ function renderTraceSection(trace) {
     `
   }
 
-  if (trace.status === 'error' || trace.status === 'no_path') {
+  if (['error', 'no_path', 'unavailable'].includes(trace.status)) {
     const noPath = trace.status === 'no_path'
+    const unavailable = trace.status === 'unavailable'
     return `
       <section class="drawer-section trace-panel trace-error" role="alert">
         <div class="trace-panel-heading">
-          <span class="material-symbols-outlined" aria-hidden="true">${noPath ? 'route' : 'error'}</span>
+          <span class="material-symbols-outlined" aria-hidden="true">${
+            unavailable ? 'link_off' : noPath ? 'route' : 'error'
+          }</span>
           <div>
-            <h3>${noPath ? 'Jalur tidak ditemukan' : 'Tracing tidak dapat diselesaikan'}</h3>
+            <h3>${unavailable
+              ? 'Tracing belum tersedia'
+              : noPath ? 'Jalur tidak ditemukan' : 'Tracing tidak dapat diselesaikan'}</h3>
             <p>${escapeHtml(trace.error || 'Relasi atau tujuan tidak tersedia pada dataset aktif.')}</p>
           </div>
         </div>
@@ -345,6 +373,18 @@ function assetIcon(type = '') {
   if (normalizedType === 'access point') return 'wifi'
   if (normalizedType === 'printer') return 'print'
   return 'device_hub'
+}
+
+function simplifiedRelationStatus(relation) {
+  if (relation?.relationStatus === 'admin_confirmed') {
+    return 'Dikonfirmasi Administrator'
+  }
+  return 'Relasi terkonfirmasi'
+}
+
+function relationPathLabel(relation) {
+  const geometryId = relation?.pathGeometryId || relation?.sourceGeometryId
+  return geometryId ? `melalui ${geometryId}` : ''
 }
 
 function escapeHtml(value) {

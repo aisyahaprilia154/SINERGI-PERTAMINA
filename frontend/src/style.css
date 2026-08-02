@@ -1,8 +1,9 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:FILL@0..1&display=swap');
+@import 'leaflet/dist/leaflet.css';
 @import './styles/base.css';
 @import './styles/login.css';
 @import './styles/map-tokens.css';
 @import './styles/map.css';
-@import './styles/map-canvas.css';
+@import './styles/leaflet-overrides.css';
 @import './styles/admin-import.css';
 @import './styles/admin-preview.css';

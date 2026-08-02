@@ -32,9 +32,17 @@ test('drawer exposes read-only asset, network, relation, and action details', ()
     connectedAssets: [{
       asset: { ...asset, id: 'jb-01', name: 'JB-CCTV-01', type: 'Junction box' },
       network,
+      relation: {
+        relationType: 'connected-to',
+        relationStatus: 'explicit_confirmed',
+      },
     }],
     activeContext,
     trace: { status: 'idle' },
+    relationReadiness: {
+      canTrace: true,
+      canCreateDiagram: true,
+    },
   })
 
   assert.match(html, /cam-01/)
@@ -42,10 +50,50 @@ test('drawer exposes read-only asset, network, relation, and action details', ()
   assert.match(html, /10\.42\.3\.31/)
   assert.match(html, /SMG Network Master/)
   assert.match(html, /JB-CCTV-01/)
-  assert.match(html, /Telusuri jaringan/)
+  assert.match(html, /Telusuri koneksi/)
   assert.match(html, /Buka detail aset/)
   assert.match(html, /Buat diagram 2D/)
   assert.doesNotMatch(html, /tombol edit|tombol hapus|ubah relasi/i)
+})
+
+test('isolated asset explains relation unavailability and exposes Admin review', () => {
+  const html = renderAssetDetailDrawer({
+    asset,
+    assetNetworks: [network],
+    connectedAssets: [],
+    activeContext,
+    trace: { status: 'idle' },
+    relationReadiness: {
+      canTrace: false,
+      canCreateDiagram: false,
+    },
+    isAdministrator: true,
+  })
+
+  assert.match(
+    html,
+    /Relasi aset belum tersedia\. Lokasi dan metadata aset tetap dapat dilihat\./,
+  )
+  assert.match(html, /Periksa kandidat relasi/)
+  assert.match(html, /class="button primary trace-from"[\s\S]*disabled/)
+})
+
+test('Admin can open a pending relation preview from the asset drawer', () => {
+  const html = renderAssetDetailDrawer({
+    asset,
+    assetNetworks: [network],
+    connectedAssets: [],
+    activeContext,
+    relationReadiness: {
+      canTrace: false,
+      canCreateDiagram: false,
+      pendingEdgeCount: 2,
+    },
+    isAdministrator: true,
+  })
+
+  assert.match(html, /Preview diagram 2D/)
+  assert.doesNotMatch(html, /open-schematic"[^>]*disabled/)
 })
 
 test('drawer renders an explainable ordered trace', () => {

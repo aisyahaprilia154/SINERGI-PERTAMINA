@@ -19,6 +19,10 @@ export function openSchematicDialog({
   activeContext,
   selectedAssetId = null,
   onSelectAsset,
+  onViewAssets,
+  onChooseAsset,
+  onReviewRelations,
+  isAdministrator = false,
 }) {
   const dialog = document.createElement('dialog')
   dialog.className = 'schematic-dialog'
@@ -38,9 +42,9 @@ export function openSchematicDialog({
       <div class="schematic-mode-bar">
         <div class="schematic-mode-switch" role="tablist" aria-label="Cakupan diagram utama">
           <button class="schematic-mode-option active" type="button" role="tab"
-            data-schematic-mode="overview-pengapon" aria-selected="true">
+            data-schematic-mode="primary" aria-selected="true">
             <span class="material-symbols-outlined" aria-hidden="true">hub</span>
-            <span><strong>Peta penuh</strong><small>Overview atau scope dataset aktif</small></span>
+            <span><strong>Koneksi terpilih</strong><small class="schematic-primary-description">Scope dengan relasi terkonfirmasi</small></span>
           </button>
           <button class="schematic-mode-option" type="button" role="tab"
             data-schematic-mode="active-trace" aria-selected="false">
@@ -128,6 +132,10 @@ export function openSchematicDialog({
     activeContext,
     selectedAssetId,
     onSelectAsset,
+    onViewAssets,
+    onChooseAsset,
+    onReviewRelations,
+    isAdministrator,
   })
 }
 
@@ -140,6 +148,10 @@ function bindDialogEvents({
   activeContext,
   selectedAssetId,
   onSelectAsset,
+  onViewAssets,
+  onChooseAsset,
+  onReviewRelations,
+  isAdministrator,
 }) {
   const board = dialog.querySelector('.schematic-board')
   const scopeSelector = dialog.querySelector('.schematic-scope-selector select')
@@ -176,7 +188,11 @@ function bindDialogEvents({
   const getCurrentSvg = () => board.querySelector('.schematic-svg')
   const isCurrentReady = () => {
     const current = getCurrentDiagram()
-    return current?.graph.status === 'ready' && current?.layout.status === 'ready'
+    return isDiagramExportEnabled(current?.graph, current?.layout)
+  }
+  const isCurrentRenderable = () => {
+    const current = getCurrentDiagram()
+    return isDiagramRenderable(current?.graph, current?.layout)
   }
 
   const applyZoom = ({
@@ -260,7 +276,8 @@ function bindDialogEvents({
   const renderCurrentDiagram = () => {
     const collection = getCollection()
     const current = getCurrentDiagram()
-    const ready = isCurrentReady()
+    const renderable = isCurrentRenderable()
+    const exportable = isCurrentReady()
     const graph = current?.graph || {
       status: collection?.status || 'empty',
       mode: selectedDiagramScope,
@@ -269,17 +286,29 @@ function bindDialogEvents({
     const pageCount = collection?.pages?.length || 0
 
     dialog.querySelector('.schematic-current-title').textContent =
-      ready ? graph.title : graph.status === 'scope-required'
+      renderable ? graph.title : graph.status === 'scope-required'
         ? 'Pilih cakupan diagram'
-        : 'Diagram belum dapat dibuat'
-    dialog.querySelector('.schematic-current-meta').textContent = ready
-      ? `${graph.nodes.length} node · ${describeMode(graph.mode)} · dataset ${activeContext.version}`
+        : graph.status === 'relation-unavailable'
+          ? 'Diagram koneksi belum tersedia'
+          : 'Diagram belum dapat dibuat'
+    dialog.querySelector('.schematic-current-meta').textContent = renderable
+      ? `${describeDiagramNodeCount(graph)} · ${describeMode(graph.mode)} · dataset ${activeContext.version}`
       : graph.status === 'scope-required'
         ? `${graph.nodeCount} aset tersedia pada scope ini`
         : 'Periksa cakupan data diagram.'
 
-    board.innerHTML = ready
-      ? `<div class="schematic-viewport">
+    board.innerHTML = renderable
+      ? `${graph.isDiagnosticPreview ? `
+          <div class="schematic-preview-notice" role="status">
+            <span class="material-symbols-outlined" aria-hidden="true">fact_check</span>
+            <span><strong>${graph.isInventoryPreview
+              ? 'Aset tanpa relasi'
+              : 'Preview kandidat relasi'}</strong>
+            ${diagnosticPreviewDescription(graph)}</span>
+            <button type="button" class="button secondary"
+              data-diagram-action="review-relations">Periksa relasi</button>
+          </div>
+        ` : ''}<div class="schematic-viewport">
           ${renderSchematicSvg({
             graph,
             layout: current.layout,
@@ -287,13 +316,13 @@ function bindDialogEvents({
             selectedAssetId: currentSelectedAssetId,
           })}
         </div>`
-      : renderDiagramState(graph, scopeOptions)
+      : renderDiagramState(graph, scopeOptions, { isAdministrator })
 
     dialog.querySelectorAll('[data-schematic-mode]').forEach((button) => {
       const selected = button.dataset.schematicMode === (
         selectedDiagramScope === 'active-trace'
           ? 'active-trace'
-          : 'overview-pengapon'
+          : 'primary'
       )
       button.classList.toggle('active', selected)
       button.setAttribute('aria-selected', String(selected))
@@ -309,11 +338,21 @@ function bindDialogEvents({
       nextPageButton.disabled = currentPageIndex >= pageCount - 1
     }
     viewControlButtons.forEach((button) => {
-      button.disabled = !ready
+      button.disabled = !renderable
     })
-    exportSvgButton.disabled = !ready
-    exportPngButton.disabled = !ready
-    exportStatus.textContent = ''
+    exportSvgButton.disabled = !exportable
+    exportPngButton.disabled = !exportable
+    exportStatus.textContent = graph.isDiagnosticPreview
+      ? graph.isInventoryPreview
+        ? 'Export diagram koneksi tidak tersedia karena network belum mempunyai relasi.'
+        : 'Konfirmasi kandidat relasi sebelum export.'
+      : ''
+    dialog.querySelector('.schematic-primary-description').textContent =
+      graph.isInventoryPreview
+        ? 'Inventaris KMZ tanpa relasi'
+        : graph.isDiagnosticPreview
+        ? 'Preview kandidat koneksi dari KMZ'
+        : 'Scope dengan relasi terkonfirmasi'
     zoom = 1
     requestAnimationFrame(() => fitDiagram({ rememberInitial: true }))
   }
@@ -321,7 +360,14 @@ function bindDialogEvents({
   dialog.querySelectorAll('.close-schematic')
     .forEach((button) => button.addEventListener('click', () => dialog.close()))
   dialog.querySelectorAll('[data-schematic-mode]').forEach((button) => {
-    button.addEventListener('click', () => setDiagramScope(button.dataset.schematicMode))
+    button.addEventListener('click', () => {
+      if (button.dataset.schematicMode === 'primary') {
+        const primaryScope = scopeOptions.find(({ key }) => key !== 'active-trace')
+        if (primaryScope) setDiagramScope(primaryScope.key)
+        return
+      }
+      setDiagramScope(button.dataset.schematicMode)
+    })
   })
   scopeSelector.addEventListener('change', () => setDiagramScope(scopeSelector.value))
   dialog.querySelector('.diagram-zoom-in').addEventListener('click', () => {
@@ -367,7 +413,7 @@ function bindDialogEvents({
   })
 
   board.addEventListener('wheel', (event) => {
-    if (!event.ctrlKey || !isCurrentReady()) return
+    if (!event.ctrlKey || !isCurrentRenderable()) return
     event.preventDefault()
     const step = event.deltaY < 0 ? .12 : -.12
     zoom = Math.min(
@@ -408,7 +454,16 @@ function bindDialogEvents({
     const action = event.target.closest('[data-diagram-action]')
     if (action) {
       const actionName = action.dataset.diagramAction
-      if (actionName === 'select-network') {
+      if (actionName === 'view-map') {
+        dialog.close()
+        onViewAssets?.()
+      } else if (actionName === 'choose-asset') {
+        dialog.close()
+        onChooseAsset?.()
+      } else if (actionName === 'review-relations') {
+        dialog.close()
+        onReviewRelations?.()
+      } else if (actionName === 'select-network') {
         const firstNetwork = scopeOptions.find(({ group }) => group === 'Jaringan')
         if (firstNetwork) setDiagramScope(firstNetwork.key)
         else scopeSelector.focus()
@@ -552,8 +607,11 @@ function renderOverviewSvg(diagramFactory, context) {
   })
 }
 
-function renderDiagramState(graph, scopeOptions) {
+function renderDiagramState(graph, scopeOptions, {
+  isAdministrator = false,
+} = {}) {
   const needsScope = graph.status === 'scope-required'
+  const relationUnavailable = graph.status === 'relation-unavailable'
   const hasNetwork = scopeOptions.some(({ group }) => group === 'Jaringan')
   return `
     <div class="schematic-state ${needsScope ? 'warning' : ''}" role="alert">
@@ -562,18 +620,29 @@ function renderDiagramState(graph, scopeOptions) {
       </span>
       <strong>${needsScope
         ? `${graph.nodeCount} aset ditemukan. Pilih cara penyederhanaan diagram.`
-        : 'Data diagram belum tersedia'}</strong>
+        : relationUnavailable
+          ? 'Diagram koneksi belum tersedia'
+          : 'Data diagram belum tersedia'}</strong>
       <p>${escapeHtml(needsScope
         ? 'Diagram detail satu halaman dibatasi agar koneksi dan label tetap terbaca.'
         : graph.message || 'Pilih aset atau jalankan tracing terlebih dahulu.')}</p>
+      ${relationUnavailable ? `
+        <div class="schematic-state-actions">
+          <button class="button secondary" type="button" data-diagram-action="view-map">
+            Lihat aset di peta
+          </button>
+          <button class="button secondary" type="button" data-diagram-action="choose-asset">
+            Pilih aset lain
+          </button>
+          ${isAdministrator ? `
+            <button class="button primary" type="button" data-diagram-action="review-relations">
+              Periksa relasi
+            </button>
+          ` : ''}
+        </div>
+      ` : ''}
       ${needsScope ? `
         <div class="schematic-state-actions">
-          <button class="button secondary" type="button" data-diagram-action="overview-pengapon">
-            Buat overview Pengapon
-          </button>
-          <button class="button secondary" type="button" data-diagram-action="current-viewport">
-            Gunakan area peta saat ini
-          </button>
           <button class="button secondary" type="button" data-diagram-action="select-network"
             ${hasNetwork ? '' : 'disabled'}>
             Pilih satu jaringan
@@ -581,23 +650,18 @@ function renderDiagramState(graph, scopeOptions) {
           <button class="button secondary" type="button" data-diagram-action="active-trace">
             Gunakan jalur tracing
           </button>
-          <button class="button primary" type="button" data-diagram-action="multi-page">
-            Export beberapa halaman
+          <button class="button primary" type="button" data-diagram-action="choose-asset">
+            Pilih aset fokus
           </button>
         </div>
-        <small>Detail optimal 5–30 node · compact layout 31–100 node</small>
+        <small>Gunakan jalur atau komponen terkonfirmasi yang lebih kecil.</small>
       ` : ''}
     </div>
   `
 }
 
 function renderScopeOptions(options) {
-  const builtIn = [
-    { key: 'overview-pengapon', label: 'Peta penuh · Overview Pengapon' },
-    { key: 'current-viewport', label: 'Area peta saat ini' },
-    ...options,
-  ]
-  const unique = [...new Map(builtIn.map((option) => [option.key, option])).values()]
+  const unique = [...new Map(options.map((option) => [option.key, option])).values()]
   const ungrouped = unique.filter(({ group }) => !group)
   const grouped = new Map()
   unique.filter(({ group }) => group).forEach((option) => {
@@ -616,7 +680,6 @@ function renderScopeOptions(options) {
         )).join('')}
       </optgroup>
     `),
-    '<option value="active-trace">Jalur tracing aktif</option>',
   ].join('')
 }
 
@@ -629,6 +692,29 @@ function describeMode(mode) {
   if (mode === 'overview') return 'overview jaringan'
   if (mode === 'multi-page') return 'export beberapa halaman'
   return 'jaringan terpilih'
+}
+
+function describeDiagramNodeCount(graph) {
+  if (graph.mode === 'overview') {
+    return `${graph.nodes.length} kelompok · ${graph.representedAssetCount || 0} aset`
+  }
+  const assetCount = graph.nodes.filter((node) => (
+    !node.isVirtual && !node.isGroup && !node.isIsolatedAggregate
+  )).length
+  const virtualJunctionCount = graph.nodes.filter(({ isVirtual }) => isVirtual).length
+  return `${assetCount} aset${
+    virtualJunctionCount ? ` + ${virtualJunctionCount} junction internal` : ''
+  }`
+}
+
+function diagnosticPreviewDescription(graph) {
+  if (graph.isInventoryPreview) {
+    return `${graph.nodeCount} aset ditemukan pada KMZ, tetapi network ini belum mempunyai relasi topologi.`
+  }
+  if (graph.mode === 'overview') {
+    return `${graph.pendingEdgeCount} kandidat relasi diringkas sebagai koneksi antar-jaringan dan belum dikonfirmasi Administrator.`
+  }
+  return `${graph.pendingEdgeCount} segmen koneksi berasal dari pencocokan KMZ dan belum dikonfirmasi Administrator.`
 }
 
 function createFilename(graph, context) {
@@ -665,8 +751,25 @@ export function reduceDiagramViewState(state, action) {
   return { ...state }
 }
 
+export function isDiagramExportEnabled(graph, layout) {
+  return isDiagramRenderable(graph, layout)
+    && graph?.isDiagnosticPreview !== true
+    && graph?.isInventoryPreview !== true
+    && Number(graph?.pendingEdgeCount) === 0
+}
+
+export function isDiagramRenderable(graph, layout) {
+  return graph?.status === 'ready'
+    && (graph?.edges?.length > 0 || (
+      graph?.isInventoryPreview === true && graph?.nodes?.length > 0
+    ))
+    && layout?.status === 'ready'
+}
+
 export const diagramDialogInternals = {
   renderDiagramState,
   renderScopeOptions,
   reduceDiagramViewState,
+  isDiagramExportEnabled,
+  isDiagramRenderable,
 }

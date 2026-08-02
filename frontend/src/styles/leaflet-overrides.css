@@ -1,0 +1,382 @@
+/*
+ * Leaflet hanya mengisi geographic map surface. Shell, toolbar, sidebar,
+ * context pill, drawer, dan modal tetap dimiliki map.css.
+ */
+.map-body .network-map-host,
+.map-body .leaflet-map-root {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.map-body .network-map-host {
+  position: relative;
+  z-index: 0;
+  overflow: hidden;
+  background: var(--color-map-background);
+}
+
+.map-body .leaflet-map-root {
+  position: relative;
+  z-index: 0;
+  background: var(--color-map-background);
+  color: var(--color-text-primary);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.map-body .leaflet-container {
+  cursor: grab;
+  outline: 0;
+}
+
+.map-body .leaflet-container:active {
+  cursor: grabbing;
+}
+
+.map-body .leaflet-container:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -3px;
+}
+
+.map-body .leaflet-tile-pane {
+  opacity: .84;
+  filter: grayscale(.12) saturate(.62) contrast(.94) brightness(1.03);
+}
+
+.map-body .leaflet-control-container {
+  position: relative;
+  z-index: 1;
+}
+
+.map-body .leaflet-control-attribution {
+  max-width: min(460px, calc(100vw - 120px));
+  margin: 0 var(--space-2) var(--space-1) 0;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-body .leaflet-control-attribution a {
+  color: var(--color-text-secondary);
+}
+
+.map-body .renderer-leaflet > .map-attribution {
+  right: auto;
+  left: var(--space-3);
+  z-index: 2;
+  padding: 2px 6px;
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+  border-radius: var(--radius-sm);
+}
+
+.map-body .leaflet-basemap-status {
+  max-width: min(330px, calc(100% - var(--space-8)));
+  min-height: 32px;
+  padding: 7px var(--space-3);
+  position: absolute;
+  bottom: max(var(--space-8), var(--map-safe-bottom));
+  left: var(--map-safe-left);
+  z-index: 7;
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-floating);
+  font-size: var(--font-size-caption);
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.map-body .leaflet-basemap-status[data-status="error"] {
+  color: var(--color-danger);
+  border-color: color-mix(in srgb, var(--color-danger) 38%, var(--color-border));
+}
+
+.map-body .leaflet-basemap-status[hidden] {
+  display: none;
+}
+
+.map-body .sinergi-leaflet-div-icon {
+  background: transparent;
+  border: 0;
+}
+
+.map-body .sinergi-leaflet-marker {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: grid;
+  place-items: center;
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1;
+  transform: translate3d(
+    var(--marker-offset-x, 0),
+    var(--marker-offset-y, 0),
+    0
+  );
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.map-body .asset-marker-leader {
+  width: var(--leader-length, 0);
+  height: 1px;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: -1;
+  background: var(--color-border-strong);
+  transform: rotate(var(--leader-angle, 0));
+  transform-origin: 0 50%;
+  pointer-events: none;
+}
+
+.map-body .asset-marker-symbol {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  background: var(--color-surface);
+  border: 2px solid var(--asset-color, var(--color-border-strong));
+  border-radius: var(--radius-pill);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-surface) 88%, transparent);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.map-body .sinergi-leaflet-marker.asset-type-junction-box,
+.map-body .sinergi-leaflet-marker.asset-type-otb {
+  border-radius: 0;
+}
+
+.map-body .sinergi-leaflet-marker.asset-type-junction-box .asset-marker-symbol,
+.map-body .sinergi-leaflet-marker.asset-type-otb .asset-marker-symbol {
+  border-radius: 7px;
+  transform: rotate(45deg);
+}
+
+.map-body .sinergi-leaflet-marker.asset-type-junction-box .asset-marker-glyph,
+.map-body .sinergi-leaflet-marker.asset-type-otb .asset-marker-glyph {
+  transform: rotate(-45deg);
+}
+
+.map-body .sinergi-leaflet-marker.asset-type-core-switch .asset-marker-symbol,
+.map-body .sinergi-leaflet-marker.asset-type-distribution-switch .asset-marker-symbol,
+.map-body .sinergi-leaflet-marker.asset-type-access-switch .asset-marker-symbol,
+.map-body .sinergi-leaflet-marker.asset-type-server .asset-marker-symbol,
+.map-body .sinergi-leaflet-marker.asset-type-nvr .asset-marker-symbol {
+  border-radius: 8px;
+}
+
+.map-body .sinergi-leaflet-marker.is-selected .asset-marker-symbol {
+  color: var(--color-text-inverse);
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  box-shadow:
+    0 0 0 3px var(--color-surface),
+    0 0 0 5px var(--color-primary);
+}
+
+.map-body .sinergi-leaflet-marker.is-connected:not(.is-selected) .asset-marker-symbol {
+  box-shadow:
+    0 0 0 3px var(--color-surface),
+    0 0 0 4px var(--asset-color, var(--color-border-strong));
+}
+
+.map-body .sinergi-leaflet-marker.is-isolated:not(.is-selected) .asset-marker-symbol {
+  border-style: dashed;
+  opacity: .82;
+}
+
+.map-body .sinergi-leaflet-marker.is-trace-endpoint .asset-marker-symbol {
+  border-width: 3px;
+}
+
+.map-body .sinergi-leaflet-marker.is-trace-start .asset-marker-symbol {
+  box-shadow:
+    0 0 0 3px var(--color-surface),
+    0 0 0 5px var(--color-success);
+}
+
+.map-body .sinergi-leaflet-marker.is-trace-end .asset-marker-symbol {
+  box-shadow:
+    0 0 0 3px var(--color-surface),
+    0 0 0 5px var(--color-primary);
+}
+
+.map-body .asset-marker-trace-role {
+  width: 16px;
+  height: 16px;
+  position: absolute;
+  right: -8px;
+  bottom: -7px;
+  display: grid;
+  place-items: center;
+  color: var(--color-text-inverse);
+  background: var(--color-primary);
+  border: 2px solid var(--color-surface);
+  border-radius: var(--radius-pill);
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.map-body .sinergi-leaflet-marker.is-trace-start .asset-marker-trace-role {
+  background: var(--color-success);
+}
+
+.map-body .sinergi-leaflet-marker.is-muted {
+  opacity: .3;
+}
+
+.map-body .sinergi-leaflet-marker.is-disabled {
+  cursor: not-allowed;
+  filter: grayscale(.75);
+}
+
+.map-body .asset-marker-issue {
+  width: 13px;
+  height: 13px;
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  color: var(--color-text-inverse);
+  background: var(--color-warning);
+  border: 2px solid var(--color-surface);
+  border-radius: var(--radius-pill);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.map-body .asset-marker-label {
+  max-width: 160px;
+  padding: 4px 7px;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  overflow: hidden;
+  transform: translateX(-50%);
+  color: var(--color-text-primary);
+  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
+  border: 1px solid var(--color-divider);
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, .08);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.map-body .sinergi-leaflet-tooltip {
+  width: 220px;
+  padding: 10px var(--space-3);
+  display: flex;
+  flex-direction: column;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover);
+  font-family: inherit;
+}
+
+.map-body .sinergi-leaflet-tooltip::before {
+  display: none;
+}
+
+.map-body .sinergi-leaflet-tooltip strong {
+  font-size: var(--font-size-caption);
+  line-height: 1.35;
+}
+
+.map-body .sinergi-leaflet-tooltip span {
+  margin-top: 2px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.map-body .sinergi-leaflet-tooltip small {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  overflow: hidden;
+  color: var(--color-text-muted);
+  border-top: 1px solid var(--color-divider);
+  font-size: var(--font-size-micro);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-body .sinergi-leaflet-path-tooltip {
+  width: auto;
+  min-width: 180px;
+  max-width: 260px;
+}
+
+.map-body .leaflet-basemap-switch {
+  padding: 3px;
+  display: flex;
+  gap: 2px;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-map-control);
+}
+
+.map-body .leaflet-basemap-switch button {
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  font: inherit;
+  font-size: var(--font-size-caption);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.map-body .leaflet-basemap-switch button:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-hover);
+}
+
+.map-body .leaflet-basemap-switch button[aria-pressed="true"] {
+  color: var(--color-text-inverse);
+  background: var(--color-primary);
+}
+
+.map-body .leaflet-basemap-switch button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (max-width: 620px) {
+  .map-body .leaflet-control-attribution {
+    max-width: calc(100vw - 96px);
+  }
+
+  .map-body .leaflet-basemap-status {
+    right: var(--space-3);
+    bottom: var(--space-6);
+    left: var(--space-3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-body .sinergi-leaflet-marker {
+    transition: none;
+  }
+}

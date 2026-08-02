@@ -5,6 +5,7 @@ export const TRACE_STATES = Object.freeze([
   'calculating',
   'result',
   'no_path',
+  'unavailable',
   'error',
 ])
 
@@ -39,6 +40,12 @@ const TRACE_INSTRUCTIONS = Object.freeze({
     title: 'Jalur tidak ditemukan',
     description: 'Kedua aset belum memiliki relasi yang tersambung.',
   },
+  unavailable: {
+    step: null,
+    icon: 'link_off',
+    title: 'Tracing belum tersedia',
+    description: 'Relasi aset belum tersedia.',
+  },
   error: {
     step: null,
     icon: 'priority_high',
@@ -70,13 +77,13 @@ export function reduceTracingState(state, action) {
       return createTracingState({ status: 'selecting_start' })
     case 'start-selected':
       return createTracingState({
-        status: action.candidates?.length ? 'selecting_end' : 'no_path',
+        status: action.candidates?.length ? 'selecting_end' : 'unavailable',
         fromId: action.assetId,
         path: [action.assetId],
         candidates: action.candidates || [],
         error: action.candidates?.length
           ? null
-          : 'Tidak ada tujuan yang tersambung dari aset awal.',
+          : 'Relasi aset belum tersedia.',
       })
     case 'calculate':
       return {
@@ -103,6 +110,15 @@ export function reduceTracingState(state, action) {
         explanation: null,
         error: action.message || TRACE_INSTRUCTIONS.no_path.description,
       }
+    case 'unavailable':
+      return {
+        ...current,
+        status: 'unavailable',
+        path: action.assetId ? [action.assetId] : current.path,
+        relations: [],
+        explanation: null,
+        error: action.message || TRACE_INSTRUCTIONS.unavailable.description,
+      }
     case 'error':
       return {
         ...current,
@@ -123,7 +139,7 @@ export function getTraceInstruction(state) {
       description: `${state.path.length} aset berada pada jalur topologi terkonfirmasi.`,
     }
   }
-  if (state.status === 'error' && state.error) {
+  if (['error', 'unavailable'].includes(state.status) && state.error) {
     return { ...instruction, description: state.error }
   }
   return instruction

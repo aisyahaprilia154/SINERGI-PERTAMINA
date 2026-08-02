@@ -3,6 +3,7 @@ import {
   deriveAssetShortLabel,
   truncateAssetLabel,
 } from '../../domain/asset-display-name.js'
+import { isUserConfirmedRelation } from '../../domain/relation-readiness.js'
 
 const DEFAULT_DETAIL_MAX_NODES = 30
 const DEFAULT_COMPACT_MAX_NODES = 100
@@ -22,6 +23,8 @@ export function buildSchematicGraph({
   scope = 'auto',
   maxNodes = DEFAULT_DETAIL_MAX_NODES,
   compactMaxNodes = DEFAULT_COMPACT_MAX_NODES,
+  includePendingRelations = false,
+  includeIsolatedNodes = false,
 }) {
   const diagramScope = normalizeDiagramScope(scope)
   const assetById = new Map(assets.map((asset) => [asset.id, asset]))
@@ -29,16 +32,24 @@ export function buildSchematicGraph({
     .map((junction) => [junction.id, junction]))
   const networkById = new Map(networks.map((network) => [network.id, network]))
   const selectedIds = new Set(selectedNetworkIds)
-  const topologyEdges = collectTopologyEdges(topologyGraph, networks)
+  const topologyEdges = collectTopologyEdges(topologyGraph, networks, {
+    includePendingRelations,
+  })
   const hasTopology = Array.isArray(topologyGraph?.edges)
 
   if (diagramScope === 'overview') {
+    if (!topologyEdges.length) {
+      const overviewNodeCount = new Set(networks.flatMap(
+        (network) => network.nodeIds ?? [],
+      )).size
+      return relationUnavailableGraph('overview', overviewNodeCount)
+    }
     return buildOverviewGraph({
       assets,
       networks,
       geometries,
       topologyEdges,
-      topologyGraph,
+      includeUnconnectedNetworks: includePendingRelations,
     })
   }
 
@@ -66,6 +77,17 @@ export function buildSchematicGraph({
       : networks.flatMap((network) => network.nodeIds || []))
       .filter((assetId) => assetById.has(assetId))
     sourceEdges = topologyEdges
+  } else if (diagramScope === 'component'
+    && focusedAssetId && assetById.has(focusedAssetId)) {
+    mode = 'component'
+    anchorAssetId = focusedAssetId
+    const componentResult = collectFocusScope(
+      focusedAssetId,
+      topologyEdges,
+      Number.POSITIVE_INFINITY,
+    )
+    nodeIds = componentResult.nodeIds.filter((assetId) => assetById.has(assetId))
+    sourceEdges = componentResult.edges
   } else if ((diagramScope === 'auto' || diagramScope === 'focus')
     && focusedAssetId && assetById.has(focusedAssetId)) {
     mode = 'focus'
@@ -115,6 +137,10 @@ export function buildSchematicGraph({
   sourceEdges = expandedVirtualGraph.edges
   const includedIds = new Set(nodeIds)
   const scopedEdges = deduplicateEdges(sourceEdges)
+    .filter((edge) => (
+      isUserConfirmedRelation(edge)
+      || (includePendingRelations && edge.relationStatus === 'inferred_pending')
+    ))
     .filter((edge) => includedIds.has(edge.sourceId) && includedIds.has(edge.targetId))
   const representedGeometryIds = collectScopeGeometryIds({
     mode,
@@ -125,19 +151,42 @@ export function buildSchematicGraph({
     viewportBounds,
     scopedEdges,
   })
-  if (!nodeIds.length) {
-    if (representedGeometryIds.length && ['network', 'layer', 'viewport'].includes(mode)) {
-      return buildGeometryAggregateGraph({
-        mode,
+  if (nodeIds.length && !scopedEdges.length && includeIsolatedNodes) {
+    const inventoryNodes = nodeIds
+      .filter((nodeId) => assetById.has(nodeId))
+      .map((assetId) => mapAssetNode(assetById.get(assetId), {
+        anchorAssetId: null,
         networks,
-        geometries,
-        representedGeometryIds,
-        selectedNetworkIds,
-        selectedLayerIds,
-      })
+        order: null,
+      }))
+    return {
+      status: 'ready',
+      mode,
+      anchorAssetId: null,
+      nodes: inventoryNodes,
+      edges: [],
+      isDiagnosticPreview: true,
+      isInventoryPreview: true,
+      pendingEdgeCount: 0,
+      nodeCount: inventoryNodes.length,
+      representedNodeIds: inventoryNodes.map(({ id }) => id),
+      representedGeometryIds,
+      pathGeometryIds: [],
+      layoutDensity: inventoryNodes.length > maxNodes ? 'compact' : 'detail',
+      sourceBounds: getSourceDisplayBounds(inventoryNodes),
+      title: getDiagramTitle(mode, inventoryNodes, networkById, selectedIds, focusDepth),
     }
-    return emptyGraph(mode, emptyMessageFor(mode))
   }
+  if (!nodeIds.length || !scopedEdges.length) {
+    return relationUnavailableGraph(mode, nodeIds.length)
+  }
+  const connectedNodeIds = new Set(scopedEdges.flatMap(({ sourceId, targetId }) => (
+    [sourceId, targetId]
+  )))
+  nodeIds = nodeIds.filter((nodeId) => (
+    connectedNodeIds.has(nodeId)
+    || (includeIsolatedNodes && assetById.has(nodeId))
+  ))
   anchorAssetId ||= chooseCoreAnchor(nodeIds, scopedEdges, assetById)
 
   if (mode !== 'trace' && nodeIds.length > compactMaxNodes) {
@@ -163,6 +212,9 @@ export function buildSchematicGraph({
   }
 
   const edges = mapSchematicEdges(scopedEdges, networkById)
+  const pendingEdgeCount = scopedEdges.filter(({ relationStatus }) => (
+    relationStatus === 'inferred_pending'
+  )).length
   const nodes = nodeIds.map((assetId, index) => (
     virtualNodeById.has(assetId)
       ? mapVirtualJunction(virtualNodeById.get(assetId), scopedEdges)
@@ -179,6 +231,8 @@ export function buildSchematicGraph({
     anchorAssetId,
     nodes,
     edges,
+    isDiagnosticPreview: pendingEdgeCount > 0,
+    pendingEdgeCount,
     nodeCount: nodes.length,
     representedNodeIds: [...nodeIds],
     representedGeometryIds,
@@ -246,9 +300,15 @@ export function segmentSchematicGraph(graph, {
   }
 }
 
-function collectTopologyEdges(topologyGraph, networks) {
+function collectTopologyEdges(topologyGraph, networks, {
+  includePendingRelations = false,
+} = {}) {
   if (Array.isArray(topologyGraph?.edges)) {
-    return topologyGraph.edges.map((edge, index) => ({
+    const sourceEdges = [
+      ...topologyGraph.edges.filter(isUserConfirmedRelation),
+      ...(includePendingRelations ? topologyGraph.candidateEdges ?? [] : []),
+    ]
+    return sourceEdges.map((edge, index) => ({
       sourceId: edge.sourceNodeId,
       targetId: edge.targetNodeId,
       networkId: edge.networkId || null,
@@ -258,6 +318,11 @@ function collectTopologyEdges(topologyGraph, networks) {
       pathGeometryId: edge.pathGeometryId,
       sourceGeometryId: edge.sourceGeometryId,
       sourceGeometryIds: edge.sourceGeometryIds || [],
+      distanceMeters: edge.distanceMeters,
+      chainage: edge.chainage ? structuredClone(edge.chainage) : undefined,
+      topologyEvidence: edge.topologyEvidence
+        ? structuredClone(edge.topologyEvidence)
+        : undefined,
       order: index,
     }))
   }
@@ -265,14 +330,20 @@ function collectTopologyEdges(topologyGraph, networks) {
 }
 
 function networkFallbackEdges(network) {
-  return (network.edges || []).map(([sourceId, targetId], index) => ({
-    sourceId,
-    targetId,
-    networkId: network.id,
-    relationType: 'explicit-network-edge',
-    relationSource: 'explicit',
-    order: index,
-  }))
+  return (network.relations || [])
+    .filter(isUserConfirmedRelation)
+    .map((relation, index) => ({
+      sourceId: relation.sourceAssetId || relation.sourceNodeId,
+      targetId: relation.targetAssetId || relation.targetNodeId,
+      networkId: network.id,
+      relationType: relation.relationType || 'connected-to',
+      relationSource: relation.relationSource || 'explicit',
+      relationStatus: relation.relationStatus,
+      pathGeometryId: relation.pathGeometryId,
+      sourceGeometryId: relation.sourceGeometryId,
+      sourceGeometryIds: relation.sourceGeometryIds || [],
+      order: index,
+    }))
 }
 
 function collectFocusScope(focusedAssetId, edges, depthLimit) {
@@ -308,13 +379,20 @@ function buildOverviewGraph({
   networks,
   geometries,
   topologyEdges,
-  topologyGraph,
+  includeUnconnectedNetworks = false,
 }) {
   const assetById = new Map(assets.map((asset) => [asset.id, asset]))
   const geometryById = new Map(geometries.map((geometry) => [geometry.id, geometry]))
   const availableNetworks = networks.filter((network) => (
-    (network.nodeIds || []).some((nodeId) => assetById.has(nodeId))
-    || (network.geometryIds || []).some((geometryId) => geometryById.has(geometryId))
+    includeUnconnectedNetworks
+      ? (network.nodeIds?.length || network.geometryIds?.length || network.lineCount)
+      : topologyEdges.some((edge) => (
+        edge.networkId === network.id
+        || (
+          (network.nodeIds || []).includes(edge.sourceId)
+          && (network.nodeIds || []).includes(edge.targetId)
+        )
+      ))
   ))
   if (!availableNetworks.length) {
     return emptyGraph('overview', 'Tidak ada jaringan aktif untuk dibuat menjadi overview.')
@@ -349,14 +427,16 @@ function buildOverviewGraph({
     const representedMembers = representedNodeIds
       .map((assetId) => assetById.get(assetId))
       .filter(Boolean)
-    const isolatedNodeCount = representedNodeIds.filter((nodeId) => (
-      topologyGraph?.isolatedNodes?.includes(nodeId)
-    )).length
-    const connectedComponentCount = (topologyGraph?.connectedComponents || [])
-      .filter((component) => (
-        component.nodeIds.some((nodeId) => representedNodeIds.includes(nodeId))
-      ))
-      .length
+    const connectedNodeIds = new Set(networkEdges.flatMap(({ sourceId, targetId }) => (
+      [sourceId, targetId]
+    )))
+    const isolatedNodeCount = representedNodeIds.filter(
+      (nodeId) => !connectedNodeIds.has(nodeId),
+    ).length
+    const connectedComponentCount = countGraphComponents(
+      representedNodeIds,
+      networkEdges,
+    )
     const sourcePosition = averageSourcePosition(representedMembers)
       || centerOfDisplayBounds(network.displayBounds)
     return {
@@ -386,7 +466,11 @@ function buildOverviewGraph({
       bounds: network.bounds || null,
       representedNodeIds,
       representedGeometryIds,
-      detailScopeKey: `network:${network.id}`,
+      detailScopeKey: includeUnconnectedNetworks
+        ? networkEdges.length
+          ? `preview-network:${network.id}`
+          : `preview-inventory-network:${network.id}`
+        : `network:${network.id}`,
       order: null,
     }
   }).filter(({ nodeCount, lineCount, representedGeometryIds }) => (
@@ -432,6 +516,9 @@ function buildOverviewGraph({
   const anchor = [...nodes].sort((left, right) => (
     right.memberCount - left.memberCount || left.id.localeCompare(right.id)
   ))[0]
+  const pendingEdgeCount = topologyEdges.filter(({ relationStatus }) => (
+    relationStatus === 'inferred_pending'
+  )).length
   if (anchor) anchor.isAnchor = true
   return {
     status: 'ready',
@@ -439,6 +526,8 @@ function buildOverviewGraph({
     anchorAssetId: anchor?.id || null,
     nodes,
     edges: [...aggregatedEdges.values()],
+    isDiagnosticPreview: pendingEdgeCount > 0,
+    pendingEdgeCount,
     nodeCount: nodes.length,
     representedAssetCount: uniqueIds(
       nodes.flatMap((node) => node.representedNodeIds),
@@ -451,6 +540,34 @@ function buildOverviewGraph({
     sourceBounds: getSourceDisplayBounds(nodes),
     title: 'Overview jaringan Pengapon',
   }
+}
+
+function countGraphComponents(nodeIds, edges) {
+  if (!nodeIds.length) return 0
+  const included = new Set(nodeIds)
+  const adjacency = new Map(nodeIds.map((nodeId) => [nodeId, []]))
+  edges.forEach(({ sourceId, targetId }) => {
+    if (!included.has(sourceId) || !included.has(targetId)) return
+    adjacency.get(sourceId).push(targetId)
+    adjacency.get(targetId).push(sourceId)
+  })
+  const visited = new Set()
+  let componentCount = 0
+  nodeIds.forEach((startNodeId) => {
+    if (visited.has(startNodeId)) return
+    componentCount += 1
+    const queue = [startNodeId]
+    visited.add(startNodeId)
+    while (queue.length) {
+      const currentNodeId = queue.shift()
+      adjacency.get(currentNodeId).forEach((nextNodeId) => {
+        if (visited.has(nextNodeId)) return
+        visited.add(nextNodeId)
+        queue.push(nextNodeId)
+      })
+    }
+  })
+  return componentCount
 }
 
 function mapSchematicEdges(edges, networkById) {
@@ -470,6 +587,11 @@ function mapSchematicEdges(edges, networkById) {
       pathGeometryId: edge.pathGeometryId,
       sourceGeometryId: edge.sourceGeometryId,
       sourceGeometryIds: edge.sourceGeometryIds || [],
+      distanceMeters: edge.distanceMeters,
+      chainage: edge.chainage ? structuredClone(edge.chainage) : undefined,
+      topologyEvidence: edge.topologyEvidence
+        ? structuredClone(edge.topologyEvidence)
+        : undefined,
       order: edge.order ?? index,
     }
   })
@@ -555,16 +677,19 @@ function expandVirtualJunctionPaths({
   ))
   if (!expandableEdges.length) return { nodeIds, edges }
 
-  const geometryNetwork = new Map()
+  const geometryRelation = new Map()
   expandableEdges.forEach((edge) => {
     edgeGeometryIds(edge).forEach((geometryId) => {
-      if (!geometryNetwork.has(geometryId)) {
-        geometryNetwork.set(geometryId, edge.networkId || null)
+      if (!geometryRelation.has(geometryId)) {
+        geometryRelation.set(geometryId, {
+          networkId: edge.networkId || null,
+          relationStatus: edge.relationStatus,
+        })
       }
     })
   })
   const candidates = topologyGraph.internalEdges
-    .filter((edge) => geometryNetwork.has(edge.sourceGeometryId))
+    .filter((edge) => geometryRelation.has(edge.sourceGeometryId))
     .filter((edge) => (
       (inventoryIds.has(edge.sourceNodeId) || virtualNodeById.has(edge.sourceNodeId))
       && (inventoryIds.has(edge.targetNodeId) || virtualNodeById.has(edge.targetNodeId))
@@ -572,10 +697,10 @@ function expandVirtualJunctionPaths({
     .map((edge, index) => ({
       sourceId: edge.sourceNodeId,
       targetId: edge.targetNodeId,
-      networkId: geometryNetwork.get(edge.sourceGeometryId),
+      networkId: geometryRelation.get(edge.sourceGeometryId).networkId,
       relationType: 'line-intersection',
       relationSource: edge.relationSource || 'inferred_intersection',
-      relationStatus: edge.relationStatus || 'confirmed_inferred',
+      relationStatus: geometryRelation.get(edge.sourceGeometryId).relationStatus,
       sourceGeometryId: edge.sourceGeometryId,
       sourceGeometryIds: [edge.sourceGeometryId].filter(Boolean),
       order: index,
@@ -1002,6 +1127,7 @@ function normalizeDiagramScope(scope) {
   if (scope === 'overview-pengapon') return 'overview'
   if (scope === 'current-viewport') return 'viewport'
   if (scope === 'focused-asset-depth-1' || scope === 'focused-asset-depth-2') return 'focus'
+  if (scope === 'connected-component') return 'component'
   if (scope === 'active-trace') return 'trace'
   if (scope === 'selected-network') return 'network'
   if (scope === 'selected-layer') return 'layer'
@@ -1047,6 +1173,7 @@ function getDiagramTitle(mode, nodes, networkById, selectedIds, focusDepth) {
   if (mode === 'focus') {
     return `Relasi depth ${focusDepth} ${nodes.find((node) => node.isAnchor)?.name || 'aset fokus'}`
   }
+  if (mode === 'component') return 'Connected component aset fokus'
   const selectedNames = [...selectedIds]
     .map((networkId) => networkById.get(networkId)?.shortName)
     .filter(Boolean)
@@ -1055,6 +1182,20 @@ function getDiagramTitle(mode, nodes, networkById, selectedIds, focusDepth) {
 
 function emptyGraph(mode, message) {
   return { status: 'empty', message, mode, nodes: [], edges: [] }
+}
+
+function relationUnavailableGraph(mode, nodeCount) {
+  return {
+    status: 'relation-unavailable',
+    mode,
+    nodeCount,
+    edgeCount: 0,
+    message: `${nodeCount} aset ditemukan, tetapi belum ada relasi yang telah dikonfirmasi.`,
+    nodes: [],
+    edges: [],
+    representedNodeIds: [],
+    representedGeometryIds: [],
+  }
 }
 
 function emptyMessageFor(mode) {

@@ -1,4 +1,15 @@
 import { AppError } from '../errors.js'
+import { buildTopologyGraph } from '../../../frontend/src/domain/topology-builder.js'
+import {
+  RELATION_STATUSES,
+  evaluateRelationReadiness,
+  isUserConfirmedRelation,
+  normalizeRelationStatus,
+} from '../../../frontend/src/domain/relation-readiness.js'
+import {
+  DEFAULT_SITE_SCOPE_ID,
+  scopeActiveDatasetRecordsToSite,
+} from '../../../frontend/src/domain/site-scope.js'
 
 export class DatasetVersionLifecycleService {
   constructor({
@@ -91,6 +102,97 @@ export class DatasetVersionLifecycleService {
         .map((geometry) => structuredClone(geometry)),
       relations: relations.map((relation) => structuredClone(relation)),
     }
+  }
+
+  async getRelationReview(datasetVersionId, {
+    siteScopeId = DEFAULT_SITE_SCOPE_ID,
+  } = {}) {
+    const record = await this.repository.get(datasetVersionId)
+    return createRelationReviewModel(record, siteScopeId)
+  }
+
+  async reviewRelation(datasetVersionId, relationId, {
+    decision,
+    siteScopeId = DEFAULT_SITE_SCOPE_ID,
+    note = null,
+  } = {}, actorId) {
+    const status = {
+      confirm: RELATION_STATUSES.ADMIN_CONFIRMED,
+      reject: RELATION_STATUSES.REJECTED,
+      undetermined: RELATION_STATUSES.UNRESOLVED,
+    }[decision]
+    if (!status) {
+      throw new AppError('Keputusan review relasi tidak valid.', {
+        code: 'invalid_relation_review_decision',
+        statusCode: 400,
+      })
+    }
+    const current = await this.repository.get(datasetVersionId)
+    if (current.datasetVersion.status === 'archived') {
+      throw new AppError('Relasi pada dataset version terarsip tidak dapat diubah.', {
+        code: 'archived_relation_review_forbidden',
+        statusCode: 409,
+      })
+    }
+    const review = createRelationReviewModel(current, siteScopeId)
+    const candidate = review.candidates.find(({ id }) => id === relationId)
+    if (!candidate) {
+      throw new AppError('Kandidat relasi tidak ditemukan pada site dan version ini.', {
+        code: 'relation_candidate_not_found',
+        statusCode: 404,
+      })
+    }
+    const reviewedAt = this.clock().toISOString()
+    const updated = await this.repository.update(datasetVersionId, (record) => {
+      const relations = [...(record.relations ?? [])]
+      const existingIndex = relations.findIndex(({ id }) => id === relationId)
+      const existing = existingIndex >= 0 ? relations[existingIndex] : null
+      const next = {
+        ...(existing ?? candidate.relation),
+        id: candidate.id,
+        datasetVersionId: record.datasetVersion.id,
+        sourceAssetId: candidate.sourceAssetId,
+        targetAssetId: candidate.targetAssetId,
+        relationType: candidate.relationType,
+        relationSource: candidate.relationSource,
+        relationStatus: status,
+        networkId: candidate.networkId,
+        inferenceMethod: candidate.inferenceMethod,
+        pathGeometryId: candidate.pathGeometryId,
+        sourceGeometryId: candidate.sourceGeometryId,
+        sourceGeometryIds: structuredClone(candidate.sourceGeometryIds ?? []),
+        distanceMeters: candidate.distanceMeters,
+        chainage: structuredClone(candidate.chainage ?? null),
+        topologyEvidence: structuredClone(candidate.topologyEvidence ?? null),
+        metadata: {
+          ...(existing?.metadata ?? candidate.relation.metadata ?? {}),
+          relationReview: {
+            decision,
+            status,
+            reviewedBy: actorId,
+            reviewedAt,
+            ...(note ? { note } : {}),
+          },
+        },
+      }
+      if (existingIndex >= 0) relations[existingIndex] = next
+      else relations.push(next)
+      return { ...record, relations }
+    })
+    await this.auditLog.record('dataset_relation.reviewed', {
+      actorId,
+      datasetVersionId,
+      branchId: updated.datasetVersion.branchId,
+      outcome: status,
+      details: {
+        relationId,
+        decision,
+        siteScopeId,
+        sourceAssetId: candidate.sourceAssetId,
+        targetAssetId: candidate.targetAssetId,
+      },
+    })
+    return createRelationReviewModel(updated, siteScopeId)
   }
 
   async #resolveActive(datasetId, branchId) {
@@ -278,6 +380,101 @@ export function compareDatasetVersions(candidate, active) {
   }
 }
 
+export function createRelationReviewModel(
+  record,
+  siteScopeId = DEFAULT_SITE_SCOPE_ID,
+) {
+  const scoped = scopeActiveDatasetRecordsToSite(record, siteScopeId)
+  const topologyGraph = buildTopologyGraph({
+    assets: scoped.assets,
+    geometries: scoped.geometries,
+    relations: scoped.relations,
+    layers: scoped.layers,
+    config: record.topologyGraph?.settings ?? {},
+    siteScopeId: scoped.siteScope.id,
+    datasetVersionId: record.datasetVersion.id,
+  })
+  const readiness = evaluateRelationReadiness({ topologyGraph })
+  const assetByAssetId = new Map(scoped.assets.map((asset) => [asset.assetId, asset]))
+  const layerById = new Map(scoped.layers.map((layer) => [layer.id, layer]))
+  const geometryById = new Map(scoped.geometries.flatMap((geometry) => (
+    [geometry.id, geometry.sourceGeometryId]
+      .filter(Boolean)
+      .map((id) => [id, geometry])
+  )))
+  const candidates = (topologyGraph.candidateEdges ?? []).map((relation) => {
+    const source = assetByAssetId.get(relation.sourceNodeId)
+    const target = assetByAssetId.get(relation.targetNodeId)
+    const geometry = geometryById.get(
+      relation.sourceGeometryId || relation.pathGeometryId,
+    )
+    return {
+      id: relation.id,
+      sourceAssetId: relation.sourceNodeId,
+      targetAssetId: relation.targetNodeId,
+      sourceName: source?.name || relation.sourceNodeId,
+      targetName: target?.name || relation.targetNodeId,
+      sourceType: source?.type || source?.category || 'Unknown',
+      targetType: target?.type || target?.category || 'Unknown',
+      relationType: relation.relationType,
+      relationSource: relation.relationSource,
+      relationStatus: RELATION_STATUSES.INFERRED_PENDING,
+      networkId: relation.networkId ?? null,
+      inferenceMethod: relation.inferenceMethod ?? relation.relationSource,
+      pathGeometryId: relation.pathGeometryId ?? relation.sourceGeometryId ?? null,
+      sourceGeometryId: relation.sourceGeometryId,
+      sourceGeometryIds: structuredClone(relation.sourceGeometryIds ?? []),
+      pathGeometry: geometry ? {
+        id: geometry.id,
+        geometryType: geometry.geometryType,
+      } : null,
+      distanceMeters: relation.distanceMeters ?? null,
+      chainage: structuredClone(relation.chainage ?? null),
+      topologyEvidence: structuredClone(relation.topologyEvidence ?? null),
+      sourceFolderPath: layerById.get(source?.layerId)?.sourceFolderPath ?? null,
+      targetFolderPath: layerById.get(target?.layerId)?.sourceFolderPath ?? null,
+      relation: structuredClone(relation),
+    }
+  })
+  const traceableAssetIds = new Set(topologyGraph.edges.flatMap((edge) => (
+    [edge.sourceNodeId, edge.targetNodeId]
+  )))
+  const diagramNetworkIds = new Set(topologyGraph.edges
+    .map(({ networkId }) => networkId)
+    .filter(Boolean))
+
+  return {
+    datasetVersion: withoutInternalStorage(record.datasetVersion),
+    siteScope: scoped.siteScope,
+    summary: {
+      confirmed: topologyGraph.edges.length,
+      explicitConfirmed: topologyGraph.edges.filter((edge) => (
+        edge.relationStatus === RELATION_STATUSES.EXPLICIT_CONFIRMED
+      )).length,
+      adminConfirmed: topologyGraph.edges.filter((edge) => (
+        edge.relationStatus === RELATION_STATUSES.ADMIN_CONFIRMED
+      )).length,
+      inferredPending: candidates.length,
+      attachedPoints: topologyGraph.attachedNodeIds?.length ?? 0,
+      geographicLines: topologyGraph.geographicLines?.length ?? 0,
+      ambiguous: topologyGraph.ambiguousConnections.length,
+      unresolved: topologyGraph.unresolvedEndpoints.length
+        + topologyGraph.unresolvedRelations.length,
+      isolatedAssets: topologyGraph.isolatedNodes.length,
+      traceableAssets: traceableAssetIds.size,
+      diagramNetworks: diagramNetworkIds.size,
+    },
+    readiness,
+    candidates,
+    ambiguous: structuredClone(topologyGraph.ambiguousConnections),
+    unresolved: [
+      ...structuredClone(topologyGraph.unresolvedEndpoints),
+      ...structuredClone(topologyGraph.unresolvedRelations),
+    ],
+    isolatedAssetIds: [...topologyGraph.isolatedNodes],
+  }
+}
+
 function toActiveMapDataset(resolved) {
   const record = resolved.record
   const renderableGeometries = (record.geometries ?? []).filter(isRenderableGeometry)
@@ -339,13 +536,20 @@ function toActiveMapDataset(resolved) {
       relationSource: relation.relationSource
         ?? relation.metadata?.topology?.relationSource
         ?? 'explicit',
-      relationStatus: relation.relationStatus ?? 'confirmed',
+      relationStatus: normalizeRelationStatus(relation),
+      networkId: relation.networkId,
+      inferenceMethod: relation.inferenceMethod,
+      pathGeometryId: relation.pathGeometryId,
       category: relation.category,
       sourceGeometryId: relation.sourceGeometryId,
       sourceGeometryIds: relation.sourceGeometryIds
         ? structuredClone(relation.sourceGeometryIds)
         : undefined,
       distanceMeters: relation.distanceMeters,
+      chainage: relation.chainage ? structuredClone(relation.chainage) : undefined,
+      topologyEvidence: relation.topologyEvidence
+        ? structuredClone(relation.topologyEvidence)
+        : undefined,
       metadata: relation.metadata ? structuredClone(relation.metadata) : undefined,
     })),
     renderingSummary: {
@@ -382,6 +586,7 @@ function filterResolvedRelations(record) {
   const assetIds = new Set((record.assets ?? []).map(({ assetId }) => assetId))
   return (record.relations ?? []).filter((relation) => (
     (!relation.datasetVersionId || relation.datasetVersionId === record.datasetVersion.id)
+    && isUserConfirmedRelation(relation)
     && assetIds.has(relation.sourceAssetId)
     && assetIds.has(relation.targetAssetId)
     && relation.sourceAssetId !== relation.targetAssetId

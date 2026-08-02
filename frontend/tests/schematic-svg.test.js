@@ -166,8 +166,30 @@ test('virtual junction uses a small non-inventory SVG symbol', () => {
 
   assert.match(svg, /data-virtual-junction-id="virtual-junction:fixture"/)
   assert.match(svg, /class="virtual-junction"/)
+  assert.match(svg, /2 aset \+ 1 junction internal/)
+  assert.match(svg, /2 aset dan 1 junction internal/)
   assert.doesNotMatch(svg, /data-asset-id="virtual-junction:fixture"/)
   assert.match(svg, /diagram-edge\s+inferred/)
+})
+
+test('pending KMZ topology is labelled as a candidate instead of a confirmed relation', () => {
+  const pendingGraph = {
+    ...graph,
+    mode: 'network',
+    edges: [{
+      ...graph.edges[0],
+      relationSource: 'inferred_point_on_line',
+      relationStatus: 'inferred_pending',
+    }],
+  }
+  const svg = renderSchematicSvg({
+    graph: pendingGraph,
+    layout: calculateSchematicLayout(pendingGraph),
+    context: { siteScopeName: 'Pengapon', version: 'doc' },
+  })
+
+  assert.match(svg, /Kandidat relasi dari geometri, menunggu konfirmasi Administrator/)
+  assert.doesNotMatch(svg, /Relasi terkonfirmasi dari geometri/)
 })
 
 test('multi-page SVG export is one ZIP containing overview, standalone pages, and indexes', async () => {

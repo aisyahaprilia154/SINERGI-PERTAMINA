@@ -142,6 +142,10 @@ test('active map layers preserve normalized line and polygon coordinates separat
     lineCount: 1,
     polygonCount: 1,
     geometryCount: 2,
+    confirmedRelationCount: 0,
+    inferredPendingCount: 0,
+    unresolvedRelationCount: 2,
+    isolatedAssetCount: 0,
     hiddenPlacemarkCount: 0,
   })
 })
@@ -188,7 +192,7 @@ test('LineString remains geometry and never becomes a map node', () => {
   assert.equal(result.counts.lineCount, 1)
 })
 
-test('active adapter exposes confirmed endpoint topology for map and diagram consumers', () => {
+test('active adapter exposes inferred endpoints as review candidates, not User edges', () => {
   const payload = activePayload({
     layers: [layer('layer-lan', 'LAN', 'LAN')],
     assets: [{
@@ -218,10 +222,54 @@ test('active adapter exposes confirmed endpoint topology for map and diagram con
 
   const result = adaptActiveDatasetForMap(payload)
 
-  assert.equal(result.topologyGraph.edges.length, 1)
-  assert.equal(result.topologyGraph.edges[0].relationSource, 'inferred_endpoint')
-  assert.deepEqual(result.networks[0].edges, [['SW-A', 'AP-B']])
-  assert.equal(result.assets.find(({ id }) => id === 'SW-A').relationCount, 1)
+  assert.equal(result.topologyGraph.edges.length, 0)
+  assert.equal(result.topologyGraph.candidateEdges.length, 1)
+  assert.equal(result.topologyGraph.candidateEdges[0].relationSource, 'inferred_endpoint')
+  assert.deepEqual(result.networks[0].edges, [])
+  assert.equal(result.assets.find(({ id }) => id === 'SW-A').relationCount, 0)
+  assert.equal(result.relationReadiness.scope.canCreateDiagram, false)
+})
+
+test('path network includes compatible endpoint nodes from another inventory category', () => {
+  const payload = activePayload({
+    layers: [
+      layer('layer-infra', 'Switch', 'Infrastructure'),
+      layer('layer-fo', 'Fiber Optic', 'Fiber Optic'),
+    ],
+    assets: [{
+      ...asset('node-a', 'SW-A', 'Infrastructure'),
+      layerId: 'layer-infra',
+      type: 'Switch',
+    }, {
+      ...asset('node-b', 'SW-B', 'Infrastructure'),
+      layerId: 'layer-infra',
+      type: 'Switch',
+    }, {
+      ...asset('node-line', 'FO-01', 'Fiber Optic'),
+      layerId: 'layer-fo',
+      type: 'Fiber Optic line',
+    }],
+    geometries: [
+      point('point-a', 'node-a', 110, -7),
+      point('point-b', 'node-b', 110.001, -7),
+      {
+        id: 'line-fo',
+        assetNodeId: 'node-line',
+        geometryType: 'line_string',
+        coordinates: [[110, -7], [110.001, -7]],
+      },
+    ],
+  })
+
+  const result = adaptActiveDatasetForMap(payload)
+  const fiberNetwork = result.networks.find(({ id }) => id === 'network:fiber-optic')
+
+  assert.deepEqual(fiberNetwork.nodeIds.sort(), ['SW-A', 'SW-B'])
+  assert.ok(result.assets.find(({ id }) => id === 'SW-A')
+    .networkIds.includes('network:fiber-optic'))
+  assert.equal(fiberNetwork.relations.length, 0)
+  assert.equal(fiberNetwork.relationReadiness.pendingEdgeCount, 1)
+  assert.equal(fiberNetwork.relationReadiness.geographicLineCount, 1)
 })
 
 test('Polygon remains geometry and never becomes a map node', () => {

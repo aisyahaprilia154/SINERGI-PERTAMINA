@@ -127,7 +127,7 @@ test('render labels enforce map and diagram limits while preserving full values'
 
 test('map and schematic SVG import the same centralized render-label utility', async () => {
   const [mapSource, schematicSource] = await Promise.all([
-    readFile(new URL('../src/pages/map/map-canvas.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/pages/map/leaflet-map-icons.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/pages/map/schematic-svg.js', import.meta.url), 'utf8'),
   ])
 

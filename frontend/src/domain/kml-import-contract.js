@@ -114,8 +114,8 @@ export const IMPORT_ISSUE_SEVERITIES = Object.freeze(['error', 'warning', 'infor
  * @property {string} relationType
  * @property {string=} pathAssetId
  * @property {string=} sourceMetadataKey
- * @property {'explicit'|'inferred_endpoint'|'inferred_line_intersection'|'inferred_point_on_line'=} relationSource
- * @property {'confirmed'|'confirmed_inferred'=} relationStatus
+ * @property {'explicit'|'inferred_endpoint'|'inferred_intersection'|'inferred_line_intersection'|'inferred_point_on_line'=} relationSource
+ * @property {'explicit_confirmed'|'admin_confirmed'|'inferred_pending'|'ambiguous'|'unresolved'|'rejected'=} relationStatus
  * @property {string=} sourceGeometryId
  * @property {string[]=} sourceGeometryIds
  * @property {number=} distanceMeters
@@ -298,6 +298,7 @@ export function isAssetRelation(value) {
     || [
       'explicit',
       'inferred_endpoint',
+      'inferred_intersection',
       'inferred_line_intersection',
       'inferred_point_on_line',
     ].includes(value.relationSource)
@@ -312,7 +313,17 @@ export function isAssetRelation(value) {
     && validRelationSource
     && (
       value.relationStatus === undefined
-      || ['confirmed', 'confirmed_inferred'].includes(value.relationStatus)
+      || [
+        'explicit_confirmed',
+        'admin_confirmed',
+        'inferred_pending',
+        'ambiguous',
+        'unresolved',
+        'rejected',
+        // Legacy values remain readable and are normalized at the graph boundary.
+        'confirmed',
+        'confirmed_inferred',
+      ].includes(value.relationStatus)
     )
     && isOptionalString(value.sourceGeometryId)
     && (
