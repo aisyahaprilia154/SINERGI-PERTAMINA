@@ -4,6 +4,7 @@ import {
   isPlainRecord,
   validateKmlImportResult,
 } from '../domain/kml-import-contract.js'
+import { RELATION_STATUSES } from '../domain/relation-readiness.js'
 import { buildTopologyGraph } from '../domain/topology-builder.js'
 
 const DEFAULT_METADATA_ALIASES = Object.freeze({
@@ -685,7 +686,7 @@ export function adaptKmlImportResult({
         ? { metadata: cloneValue(rawRelation.metadata) }
         : {}),
       relationSource: 'explicit',
-      relationStatus: 'confirmed',
+      relationStatus: RELATION_STATUSES.EXPLICIT_CONFIRMED,
     })
   })
 
@@ -697,8 +698,7 @@ export function adaptKmlImportResult({
     config: isPlainRecord(mapping.topology) ? mapping.topology : {},
     datasetVersionId: datasetVersion.id,
   })
-  topologyGraph.edges
-    .filter(({ relationSource }) => relationSource !== 'explicit')
+  topologyGraph.candidateEdges
     .forEach((edge) => {
       if (usedRelationIds.has(edge.id)) return
       usedRelationIds.add(edge.id)
@@ -710,12 +710,17 @@ export function adaptKmlImportResult({
         relationType: edge.relationType,
         ...(edge.pathAssetId ? { pathAssetId: edge.pathAssetId } : {}),
         relationSource: edge.relationSource,
-        relationStatus: edge.relationStatus,
+        relationStatus: RELATION_STATUSES.INFERRED_PENDING,
+        networkId: edge.networkId,
+        inferenceMethod: edge.inferenceMethod,
+        pathGeometryId: edge.pathGeometryId,
         category: edge.category,
         ...(edge.sourceGeometryId
           ? { sourceGeometryId: edge.sourceGeometryId }
           : {}),
         sourceGeometryIds: cloneValue(edge.sourceGeometryIds ?? []),
+        chainage: cloneValue(edge.chainage ?? null),
+        topologyEvidence: cloneValue(edge.topologyEvidence ?? null),
         ...(Number.isFinite(edge.distanceMeters)
           ? { distanceMeters: edge.distanceMeters }
           : {}),
@@ -723,6 +728,10 @@ export function adaptKmlImportResult({
           topology: {
             sourceGeometryIds: cloneValue(edge.sourceGeometryIds ?? []),
             pathLengthMeters: edge.pathLengthMeters,
+            networkId: edge.networkId,
+            inferenceMethod: edge.inferenceMethod,
+            chainage: cloneValue(edge.chainage ?? null),
+            topologyEvidence: cloneValue(edge.topologyEvidence ?? null),
           },
         },
       })

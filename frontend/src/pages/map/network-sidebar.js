@@ -46,10 +46,6 @@ export function renderNetworkSidebar(activeContext, selectedCount, counts = {}) 
             <span aria-hidden="true"></span>
             <button class="text-button hide-all-networks" type="button">Sembunyikan semua</button>
           </div>
-          <button class="inactive-mode-toggle" type="button" aria-pressed="false">
-            <span class="material-symbols-outlined" aria-hidden="true">contrast</span>
-            <span>Redupkan jaringan nonaktif</span>
-          </button>
         </div>
 
         <div class="network-list" aria-label="Daftar jaringan" aria-busy="true"></div>

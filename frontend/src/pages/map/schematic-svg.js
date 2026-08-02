@@ -21,6 +21,10 @@ export function renderSchematicSvg({
     0,
   )
   const siteName = context.siteScopeName || context.branchName || 'Pengapon'
+  const inventoryNodeCount = layout.nodes.filter((node) => (
+    !node.isVirtual && !node.isGroup && !node.isIsolatedAggregate
+  )).length
+  const virtualJunctionCount = layout.nodes.filter(({ isVirtual }) => isVirtual).length
 
   return `
     <svg class="schematic-svg topology-schematic" xmlns="http://www.w3.org/2000/svg"
@@ -30,7 +34,9 @@ export function renderSchematicSvg({
       role="img" aria-labelledby="schematic-svg-title schematic-svg-description">
       <title id="schematic-svg-title">${escapeXml(graph.title)}</title>
       <desc id="schematic-svg-description">
-        Diagram topologi skematik ${layout.nodes.length} node berdasarkan scoped TopologyGraph Pengapon.
+        Diagram topologi skematik ${inventoryNodeCount} aset${virtualJunctionCount
+          ? ` dan ${virtualJunctionCount} junction internal`
+          : ''} berdasarkan scoped TopologyGraph Pengapon.
       </desc>
       <defs>
         <pattern id="topology-grid" width="24" height="24" patternUnits="userSpaceOnUse">
@@ -324,8 +330,13 @@ function shortType(type = '') {
 }
 
 function relationLabel(edge) {
+  if (edge.relationStatus === 'inferred_pending') {
+    return 'Kandidat relasi dari geometri, menunggu konfirmasi Administrator'
+  }
   if (String(edge.relationSource || '').startsWith('inferred')) {
-    return 'Relasi terkonfirmasi dari geometri'
+    return edge.relationStatus === 'admin_confirmed'
+      ? 'Relasi dari geometri yang dikonfirmasi Administrator'
+      : 'Relasi hasil rekonstruksi topologi'
   }
   return 'Relasi eksplisit'
 }
@@ -351,7 +362,13 @@ function diagramCountLabel(graph, layout) {
   if (graph.mode === 'overview') {
     return `${layout.nodes.length} kelompok · ${graph.representedAssetCount} aset`
   }
-  return `${graph.nodeCount ?? graph.nodes.length} aset`
+  const inventoryNodeCount = layout.nodes.filter((node) => (
+    !node.isVirtual && !node.isGroup && !node.isIsolatedAggregate
+  )).length
+  const virtualJunctionCount = layout.nodes.filter(({ isVirtual }) => isVirtual).length
+  return `${inventoryNodeCount} aset${
+    virtualJunctionCount ? ` + ${virtualJunctionCount} junction internal` : ''
+  }`
 }
 
 function formatExportDate(value) {

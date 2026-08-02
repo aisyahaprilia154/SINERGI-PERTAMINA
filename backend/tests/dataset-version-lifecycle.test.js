@@ -326,6 +326,85 @@ test('stale activation request is rejected after active pointer changes', async 
   }
 })
 
+test('Administrator review promotes an inferred candidate into the confirmed User graph', async () => {
+  const fixture = await createLifecycleFixture()
+  try {
+    const record = relationReviewVersionRecord()
+    await fixture.repository.create(record)
+
+    const before = await fixture.service.getRelationReview(record.datasetVersion.id, {
+      siteScopeId: 'pengapon',
+    })
+    assert.equal(before.summary.confirmed, 0)
+    assert.equal(before.summary.inferredPending, 1)
+    assert.equal(before.summary.attachedPoints, 2)
+    assert.equal(before.summary.geographicLines, 1)
+    assert.equal(before.candidates[0].networkId, 'network:lan')
+    assert.equal(before.candidates[0].inferenceMethod, 'inferred_endpoint')
+    assert.equal(before.candidates[0].pathGeometryId, 'line-lan')
+    assert.ok(before.candidates[0].topologyEvidence.attachments.length >= 2)
+    assert.equal(before.readiness.canCreateDiagram, false)
+
+    const after = await fixture.service.reviewRelation(
+      record.datasetVersion.id,
+      before.candidates[0].id,
+      {
+        decision: 'confirm',
+        siteScopeId: 'pengapon',
+        note: 'Endpoint diverifikasi Administrator.',
+      },
+      'admin-ssc-ict',
+    )
+    const activeMap = await fixture.service.getActiveMapDataset({
+      datasetId: 'dataset-semarang',
+      branchId: 'semarang',
+    })
+
+    assert.equal(after.summary.adminConfirmed, 1)
+    assert.equal(after.summary.inferredPending, 0)
+    assert.equal(after.readiness.canCreateDiagram, true)
+    assert.equal(activeMap.relations.length, 1)
+    assert.equal(activeMap.relations[0].relationStatus, 'admin_confirmed')
+    assert.equal(activeMap.relations[0].networkId, 'network:lan')
+    assert.equal(activeMap.relations[0].pathGeometryId, 'line-lan')
+    assert.ok(activeMap.relations[0].topologyEvidence.attachments.length >= 2)
+    assert.ok(fixture.auditEntries.some((entry) => (
+      entry.event === 'dataset_relation.reviewed'
+      && entry.actorId === 'admin-ssc-ict'
+      && entry.outcome === 'admin_confirmed'
+    )))
+  } finally {
+    await fixture.close()
+  }
+})
+
+test('rejected inferred candidate stays outside the User graph and review queue', async () => {
+  const fixture = await createLifecycleFixture()
+  try {
+    const record = relationReviewVersionRecord()
+    await fixture.repository.create(record)
+    const before = await fixture.service.getRelationReview(record.datasetVersion.id)
+
+    const after = await fixture.service.reviewRelation(
+      record.datasetVersion.id,
+      before.candidates[0].id,
+      { decision: 'reject', siteScopeId: 'pengapon' },
+      'admin-ssc-ict',
+    )
+    const activeMap = await fixture.service.getActiveMapDataset({
+      datasetId: 'dataset-semarang',
+      branchId: 'semarang',
+    })
+
+    assert.equal(after.summary.confirmed, 0)
+    assert.equal(after.summary.inferredPending, 0)
+    assert.equal(after.candidates.length, 0)
+    assert.equal(activeMap.relations.length, 0)
+  } finally {
+    await fixture.close()
+  }
+})
+
 function asset(id, assetId, name) {
   return {
     id,
@@ -394,6 +473,68 @@ function versionRecord(id, status) {
       assetNodeId: `node-${id}`,
       geometryType: 'point',
       coordinates: [110, -7],
+    }],
+    relations: [],
+  }
+}
+
+function relationReviewVersionRecord() {
+  const id = 'version-review'
+  return {
+    ...versionRecord(id, 'active'),
+    layers: [{
+      id: 'layer-pengapon-lan',
+      datasetVersionId: id,
+      sourceFolderPath: '/RJBT/FT PENGAPON/LAN/',
+      name: 'LAN',
+      category: 'LAN',
+    }],
+    assets: [{
+      id: 'node-switch',
+      datasetVersionId: id,
+      layerId: 'layer-pengapon-lan',
+      assetId: 'SW-01',
+      name: 'Switch 01',
+      category: 'LAN',
+      type: 'Switch',
+      branchId: 'semarang',
+      properties: {},
+    }, {
+      id: 'node-access-point',
+      datasetVersionId: id,
+      layerId: 'layer-pengapon-lan',
+      assetId: 'AP-01',
+      name: 'Access Point 01',
+      category: 'Peripheral',
+      type: 'Access Point',
+      branchId: 'semarang',
+      properties: {},
+    }, {
+      id: 'node-lan-line',
+      datasetVersionId: id,
+      layerId: 'layer-pengapon-lan',
+      assetId: 'LAN-01',
+      name: 'LAN 01',
+      category: 'LAN',
+      type: 'LAN cable',
+      branchId: 'semarang',
+      properties: {},
+    }],
+    geometries: [{
+      id: 'point-switch',
+      assetNodeId: 'node-switch',
+      geometryType: 'point',
+      coordinates: [110, -7],
+    }, {
+      id: 'point-access-point',
+      assetNodeId: 'node-access-point',
+      geometryType: 'point',
+      coordinates: [110.001, -7],
+    }, {
+      id: 'line-lan',
+      assetNodeId: 'node-lan-line',
+      geometryType: 'line_string',
+      coordinates: [[110, -7], [110.001, -7]],
     }],
     relations: [],
   }

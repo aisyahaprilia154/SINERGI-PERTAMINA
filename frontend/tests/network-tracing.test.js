@@ -43,7 +43,7 @@ test('graph retains AssetRelation identity and type from the active dataset', ()
   assert.equal(relation.pathAssetId, 'cable-1')
 })
 
-test('tracing consumes confirmed edges from the shared topology graph', () => {
+test('tracing consumes Administrator-confirmed inferred edges from the shared topology graph', () => {
   const relationGraph = buildExplicitRelationGraph({
     assetIds: ['camera', 'junction', 'switch'],
     networks: [],
@@ -54,7 +54,7 @@ test('tracing consumes confirmed edges from the shared topology graph', () => {
         targetNodeId: 'junction',
         relationType: 'line-endpoint',
         relationSource: 'inferred_endpoint',
-        relationStatus: 'confirmed',
+        relationStatus: 'admin_confirmed',
         networkId: 'network:cctv',
       }, {
         id: 'topology-junction-switch',
@@ -62,7 +62,7 @@ test('tracing consumes confirmed edges from the shared topology graph', () => {
         targetNodeId: 'switch',
         relationType: 'point-on-line',
         relationSource: 'inferred_point_on_line',
-        relationStatus: 'confirmed',
+        relationStatus: 'admin_confirmed',
         networkId: 'network:cctv',
       }],
     },

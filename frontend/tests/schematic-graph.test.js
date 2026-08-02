@@ -20,6 +20,10 @@ const networks = [
     type: 'CCTV',
     nodeIds: ['core', 'jb', 'cam'],
     edges: [['core', 'jb'], ['jb', 'cam']],
+    relations: [
+      explicitRelation('core', 'jb'),
+      explicitRelation('jb', 'cam'),
+    ],
   },
   {
     id: 'peripheral',
@@ -28,6 +32,7 @@ const networks = [
     type: 'Peripheral',
     nodeIds: ['core', 'printer'],
     edges: [['core', 'printer']],
+    relations: [explicitRelation('core', 'printer')],
   },
 ]
 
@@ -92,6 +97,7 @@ test('diagram uses the same confirmed topology edges as tracing and map', () => 
         networkId: 'cctv',
         relationType: 'line-endpoint',
         relationSource: 'inferred_endpoint',
+        relationStatus: 'admin_confirmed',
       }],
     },
     focusedAssetId: 'core',
@@ -101,6 +107,87 @@ test('diagram uses the same confirmed topology edges as tracing and map', () => 
     ['core', 'cam'],
   ])
   assert.equal(graph.edges[0].relationSource, 'inferred_endpoint')
+})
+
+test('Admin preview renders pending KMZ topology without promoting it to confirmed', () => {
+  const topologyGraph = {
+    nodes: assets.map(({ id }) => ({ id })),
+    edges: [],
+    candidateEdges: [{
+      id: 'candidate-core-camera',
+      sourceNodeId: 'core',
+      targetNodeId: 'cam',
+      networkId: 'cctv',
+      relationType: 'point-on-line',
+      relationSource: 'inferred_point_on_line',
+      relationStatus: 'inferred_pending',
+      pathGeometryId: 'line-kmz-01',
+      distanceMeters: 1.2,
+      chainage: { sourceMeters: 12, targetMeters: 84 },
+      topologyEvidence: { inferenceMethod: 'inferred_point_on_line' },
+    }],
+  }
+  const sourceSnapshot = structuredClone(topologyGraph)
+  const userGraph = buildScopedGraph({
+    assets,
+    networks,
+    topologyGraph,
+    scope: 'selected-network',
+    selectedNetworkIds: ['cctv'],
+  })
+  const previewGraph = buildScopedGraph({
+    assets,
+    networks,
+    topologyGraph,
+    scope: 'selected-network',
+    selectedNetworkIds: ['cctv'],
+    includePendingRelations: true,
+  })
+
+  assert.equal(userGraph.status, 'relation-unavailable')
+  assert.equal(previewGraph.status, 'ready')
+  assert.equal(previewGraph.isDiagnosticPreview, true)
+  assert.equal(previewGraph.pendingEdgeCount, 1)
+  assert.equal(previewGraph.edges[0].relationStatus, 'inferred_pending')
+  assert.equal(previewGraph.edges[0].pathGeometryId, 'line-kmz-01')
+  assert.deepEqual(previewGraph.edges[0].chainage, {
+    sourceMeters: 12,
+    targetMeters: 84,
+  })
+  assert.deepEqual(topologyGraph, sourceSnapshot)
+})
+
+test('complete Admin preview keeps visible CCTV assets without inventing edges', () => {
+  const topologyGraph = {
+    nodes: assets.map(({ id }) => ({ id })),
+    edges: [],
+    candidateEdges: [{
+      id: 'candidate-core-jb',
+      sourceNodeId: 'core',
+      targetNodeId: 'jb',
+      networkId: 'cctv',
+      relationSource: 'inferred_endpoint',
+      relationStatus: 'inferred_pending',
+    }],
+  }
+  const graph = buildScopedGraph({
+    assets,
+    networks,
+    topologyGraph,
+    scope: 'full-map',
+    includePendingRelations: true,
+    includeIsolatedNodes: true,
+  })
+
+  assert.equal(graph.status, 'ready')
+  assert.deepEqual(
+    new Set(graph.nodes.map(({ id }) => id)),
+    new Set(['core', 'jb', 'cam', 'printer']),
+  )
+  assert.equal(graph.edges.length, 1)
+  assert.equal(graph.edges.some(({ sourceId, targetId }) => (
+    [sourceId, targetId].includes('cam')
+  )), false)
 })
 
 test('scoped graph expands a confirmed topology path through its virtual junction', () => {
@@ -113,7 +200,7 @@ test('scoped graph expands a confirmed topology path through its virtual junctio
       networkId: 'cctv',
       relationType: 'line-intersection',
       relationSource: 'inferred_intersection',
-      relationStatus: 'confirmed_inferred',
+      relationStatus: 'admin_confirmed',
       sourceGeometryIds: ['line-a', 'line-b'],
     }],
     virtualJunctions: [{
@@ -172,6 +259,15 @@ test('builder uses compact layout metadata for 31 to 100 nodes', () => {
       nodeIds: manyAssets.map((asset) => asset.id),
       edges: [],
     }],
+    topologyGraph: {
+      nodes: manyAssets.map(({ id }) => ({ id })),
+      edges: manyAssets.slice(1).map((asset, index) => (
+        {
+          ...topologyEdge(manyAssets[index].id, asset.id),
+          networkId: 'large',
+        }
+      )),
+    },
     selectedNetworkIds: ['large'],
   })
 
@@ -194,6 +290,12 @@ test('scope above 100 nodes returns actionable simplification choices', () => {
       nodeIds: manyAssets.map((asset) => asset.id),
       edges: [],
     }],
+    topologyGraph: {
+      nodes: manyAssets.map(({ id }) => ({ id })),
+      edges: manyAssets.slice(1).map((asset, index) => (
+        topologyEdge(manyAssets[index].id, asset.id)
+      )),
+    },
     scope: 'full-map',
   })
 
@@ -272,7 +374,7 @@ test('focus depth two follows the shared topology graph without including unrela
   assert.equal(graph.nodes.some(({ id }) => id === 'printer'), false)
 })
 
-test('viewport uses geographic Canvas bounds and layer scope selects its assets', () => {
+test('viewport uses geographic Leaflet bounds and layer scope selects its assets', () => {
   const scopedAssets = assets.map((asset, index) => ({
     ...asset,
     x: index / 10,
@@ -300,11 +402,11 @@ test('viewport uses geographic Canvas bounds and layer scope selects its assets'
 
   assert.deepEqual(viewportGraph.nodes.map(({ id }) => id), ['core', 'jb'])
   assert.ok(viewportGraph.representedGeometryIds.includes('viewport-crossing-line'))
-  assert.deepEqual(layerGraph.nodes.map(({ id }) => id), ['cam', 'printer'])
-  assert.deepEqual(layerGraph.representedGeometryIds, ['layer-b-line'])
+  assert.equal(layerGraph.status, 'relation-unavailable')
+  assert.equal(layerGraph.nodeCount, 2)
 })
 
-test('overview includes Fiber Optic and LAN networks that only contain LineString geometry', () => {
+test('line-only overview is unavailable without confirmed topology edges', () => {
   const lineOnlyNetworks = [
     ...networks,
     {
@@ -340,15 +442,9 @@ test('overview includes Fiber Optic and LAN networks that only contain LineStrin
     scope: 'overview-pengapon',
   })
 
-  const fiber = graph.nodes.find(({ groupId }) => groupId === 'fiber-optic')
-  const lan = graph.nodes.find(({ groupId }) => groupId === 'lan')
-  assert.equal(fiber.groupType, 'network-aggregate')
-  assert.equal(fiber.nodeCount, 0)
-  assert.equal(fiber.lineCount, 1)
-  assert.deepEqual(fiber.representedGeometryIds, ['fo-line'])
-  assert.equal(lan.groupType, 'network-aggregate')
-  assert.equal(lan.nodeCount, 0)
-  assert.equal(lan.lineCount, 1)
+  assert.equal(graph.status, 'ready')
+  assert.equal(graph.nodes.some(({ groupId }) => groupId === 'fiber-optic'), false)
+  assert.equal(graph.nodes.some(({ groupId }) => groupId === 'lan'), false)
 
   const selectedFiber = buildSchematicGraph({
     assets,
@@ -359,9 +455,8 @@ test('overview includes Fiber Optic and LAN networks that only contain LineStrin
     scope: 'selected-network',
     selectedNetworkIds: ['fiber-optic'],
   })
-  assert.equal(selectedFiber.status, 'ready')
-  assert.equal(selectedFiber.nodes[0].groupType, 'network-aggregate')
-  assert.deepEqual(selectedFiber.representedGeometryIds, ['fo-line'])
+  assert.equal(selectedFiber.status, 'relation-unavailable')
+  assert.equal(selectedFiber.nodeCount, 0)
 })
 
 test('focused depth traversal is cycle-safe and stops at the requested depth', () => {
@@ -414,6 +509,58 @@ test('overview represents networks as group nodes instead of every asset label',
   assert.equal(graph.edges.length, 1)
 })
 
+test('Admin Pengapon overview retains inventory-only and line-only networks', () => {
+  const overviewNetworks = [
+    ...networks,
+    {
+      id: 'lan',
+      name: 'Jaringan LAN',
+      shortName: 'LAN',
+      type: 'LAN',
+      nodeIds: ['cam', 'jb'],
+      geometryIds: ['utp-line'],
+      lineCount: 1,
+      edges: [],
+      relations: [],
+    },
+  ]
+  const topologyGraph = {
+    nodes: assets.map(({ id }) => ({ id })),
+    edges: [],
+    candidateEdges: [{
+      id: 'candidate-utp-camera-jb',
+      sourceNodeId: 'cam',
+      targetNodeId: 'jb',
+      networkId: 'lan',
+      relationSource: 'inferred_point_on_line',
+      relationStatus: 'inferred_pending',
+      pathGeometryId: 'utp-line',
+    }],
+  }
+  const graph = buildScopedGraph({
+    assets,
+    networks: overviewNetworks,
+    geometries: [geometry('utp-line', 'line_string', [[110, -7], [111, -7]])],
+    topologyGraph,
+    scope: 'overview-pengapon',
+    includePendingRelations: true,
+  })
+
+  assert.equal(graph.status, 'ready')
+  assert.equal(graph.isDiagnosticPreview, true)
+  assert.equal(graph.pendingEdgeCount, 1)
+  assert.deepEqual(
+    new Set(graph.nodes.map(({ groupId }) => groupId)),
+    new Set(['cctv', 'peripheral', 'lan']),
+  )
+  assert.equal(graph.nodes.find(({ groupId }) => groupId === 'lan').lineCount, 1)
+  assert.equal(
+    graph.nodes.find(({ groupId }) => groupId === 'peripheral').detailScopeKey,
+    'preview-inventory-network:peripheral',
+  )
+  assert.equal(graph.representedAssetCount, 4)
+})
+
 test('multi-page segmentation keeps every node within configurable page size', () => {
   const manyAssets = Array.from({ length: 65 }, (_, index) => ({
     id: `asset-${index}`,
@@ -428,6 +575,12 @@ test('multi-page segmentation keeps every node within configurable page size', (
       nodeIds: manyAssets.map(({ id }) => id),
       edges: [],
     }],
+    topologyGraph: {
+      nodes: manyAssets.map(({ id }) => ({ id })),
+      edges: manyAssets.slice(1).map((asset, index) => (
+        topologyEdge(manyAssets[index].id, asset.id)
+      )),
+    },
     scope: 'full-map',
     compactMaxNodes: Number.POSITIVE_INFINITY,
   })
@@ -454,7 +607,18 @@ function topologyEdge(sourceNodeId, targetNodeId) {
     targetNodeId,
     relationType: 'connected-to',
     relationSource: 'explicit',
-    relationStatus: 'confirmed',
+    relationStatus: 'explicit_confirmed',
+  }
+}
+
+function explicitRelation(sourceAssetId, targetAssetId) {
+  return {
+    id: `relation:${sourceAssetId}:${targetAssetId}`,
+    sourceAssetId,
+    targetAssetId,
+    relationType: 'connected-to',
+    relationSource: 'explicit',
+    relationStatus: 'explicit_confirmed',
   }
 }
 

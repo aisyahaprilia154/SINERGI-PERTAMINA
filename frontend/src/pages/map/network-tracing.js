@@ -1,3 +1,5 @@
+import { isUserConfirmedRelation } from '../../domain/relation-readiness.js'
+
 /**
  * Builds a read-only traversal graph from the shared confirmed topology.
  * Legacy network relations remain supported for datasets without topology output.
@@ -6,14 +8,15 @@ export function buildExplicitRelationGraph({ networks, assetIds, topologyGraph =
   const validAssetIds = new Set(assetIds)
   const graph = new Map([...validAssetIds].map((assetId) => [assetId, []]))
   const seenRelations = new Set()
-  const topologyRelations = Array.isArray(topologyGraph?.edges)
-    ? topologyGraph.edges.map((edge) => ({
+  const hasTopologyGraph = Array.isArray(topologyGraph?.edges)
+  const topologyRelations = hasTopologyGraph
+    ? topologyGraph.edges.filter(isUserConfirmedRelation).map((edge) => ({
       ...edge,
       sourceAssetId: edge.sourceAssetId || edge.sourceNodeId,
       targetAssetId: edge.targetAssetId || edge.targetNodeId,
     }))
     : []
-  const relationGroups = topologyRelations.length
+  const relationGroups = hasTopologyGraph
     ? [{ id: 'topology', relations: topologyRelations }]
     : networks
 
@@ -24,8 +27,15 @@ export function buildExplicitRelationGraph({ networks, assetIds, topologyGraph =
         sourceAssetId,
         targetAssetId,
         relationType: 'explicit-network-edge',
+        relationSource: 'explicit',
+        relationStatus: 'explicit_confirmed',
       }))
     for (const relation of relationRecords) {
+      const isLegacyExplicit = !relation.relationSource
+        && !relation.relationStatus
+        && Boolean(relation.sourceAssetId)
+        && Boolean(relation.targetAssetId)
+      if (!isUserConfirmedRelation(relation) && !isLegacyExplicit) continue
       const { sourceAssetId, targetAssetId } = relation
       if (!validAssetIds.has(sourceAssetId) || !validAssetIds.has(targetAssetId)) continue
       if (sourceAssetId === targetAssetId) continue
@@ -44,7 +54,7 @@ export function buildExplicitRelationGraph({ networks, assetIds, topologyGraph =
         pathAssetId: relation.pathAssetId,
         sourceGeometryId: relation.sourceGeometryId,
         relationSource: relation.relationSource || 'explicit',
-        relationStatus: relation.relationStatus || 'confirmed',
+        relationStatus: relation.relationStatus || 'explicit_confirmed',
       })
       graph.get(targetAssetId).push({
         id: relation.id,
@@ -55,7 +65,7 @@ export function buildExplicitRelationGraph({ networks, assetIds, topologyGraph =
         pathAssetId: relation.pathAssetId,
         sourceGeometryId: relation.sourceGeometryId,
         relationSource: relation.relationSource || 'explicit',
-        relationStatus: relation.relationStatus || 'confirmed',
+        relationStatus: relation.relationStatus || 'explicit_confirmed',
       })
     }
   }

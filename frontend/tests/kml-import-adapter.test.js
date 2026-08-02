@@ -472,7 +472,7 @@ test('creates relations from ExtendedData only when an explicit mapping rule is 
   assert.equal(withMapping.relations[0].sourceMetadataKey, 'connectedTo')
 })
 
-test('persists confirmed endpoint topology without changing source LineString', () => {
+test('persists endpoint inference as a pending candidate without changing source LineString', () => {
   const parserOutput = {
     folders: [{
       name: 'LAN',
@@ -508,9 +508,10 @@ test('persists confirmed endpoint topology without changing source LineString', 
   assert.deepEqual(parserOutput, snapshot)
   assert.equal(result.relations.length, 1)
   assert.equal(result.relations[0].relationSource, 'inferred_endpoint')
-  assert.equal(result.relations[0].relationStatus, 'confirmed_inferred')
+  assert.equal(result.relations[0].relationStatus, 'inferred_pending')
   assert.equal(result.relations[0].sourceGeometryId, result.geometries[2].id)
-  assert.equal(result.topologyGraph.edges.length, 1)
+  assert.equal(result.topologyGraph.edges.length, 0)
+  assert.equal(result.topologyGraph.candidateEdges.length, 1)
 })
 
 test('ambiguous topology candidates become ImportIssue diagnostics, not confirmed edges', () => {

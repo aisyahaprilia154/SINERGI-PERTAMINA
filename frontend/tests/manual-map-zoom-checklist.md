@@ -16,7 +16,7 @@ Gunakan dataset Pengapon dan ulangi pemeriksaan pada viewport 1366 × 768 serta
 1. Buka dan tutup sidebar desktop.
 2. Buka dan tutup sidebar mobile overlay.
 3. Pilih aset untuk membuka drawer, lalu tutup drawer.
-4. Setelah setiap transisi, Canvas harus mengisi area baru tanpa clipping,
+4. Setelah setiap transisi, Leaflet harus mengisi area baru tanpa clipping,
    geographic bounds harus berubah, dan marker tidak bergeser dari jalurnya.
 
 ## Level of detail

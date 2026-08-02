@@ -6,7 +6,7 @@ import {
   getTraceInstruction,
   reduceTracingState,
 } from '../src/pages/map/map-tools-state.js'
-import { renderNetworkMapCanvas } from '../src/pages/map/map-surface.js'
+import { renderNetworkMapSurface } from '../src/pages/map/map-surface.js'
 
 test('tracing state machine follows the approved states and instruction copy', () => {
   let state = reduceTracingState(createTracingState(), { type: 'select-start' })
@@ -40,14 +40,14 @@ test('tracing state machine follows the approved states and instruction copy', (
   assert.equal(reduceTracingState(state, { type: 'reset' }).status, 'idle')
 })
 
-test('empty destinations and unreachable targets use no_path instead of generic error', () => {
+test('asset without confirmed adjacency uses the unavailable tracing state', () => {
   const emptyStart = reduceTracingState(createTracingState(), {
     type: 'start-selected',
     assetId: 'ISOLATED-01',
     candidates: [],
   })
-  assert.equal(emptyStart.status, 'no_path')
-  assert.equal(getTraceInstruction(emptyStart).title, 'Jalur tidak ditemukan')
+  assert.equal(emptyStart.status, 'unavailable')
+  assert.equal(getTraceInstruction(emptyStart).title, 'Tracing belum tersedia')
 
   const unreachable = reduceTracingState(emptyStart, {
     type: 'no-path',
@@ -102,7 +102,7 @@ test('compact drawer contributes to bottom safe area and mobile sidebar to left 
 })
 
 test('map surface exposes a single accessible tracing instruction overlay', () => {
-  const html = renderNetworkMapCanvas({
+  const html = renderNetworkMapSurface({
     version: 'v12',
     branchName: 'Pengapon',
     siteScopeName: 'Pengapon',

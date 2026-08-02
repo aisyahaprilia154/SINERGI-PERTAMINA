@@ -6,6 +6,11 @@ import {
   isTopologyPointLineCompatible,
   normalizeTopologyMetadataKey,
 } from './topology-compatibility.js'
+import {
+  RELATION_STATUSES,
+  isUserConfirmedRelation,
+  normalizeRelationStatus,
+} from './relation-readiness.js'
 
 const EARTH_RADIUS_METERS = 6371008.8
 
@@ -51,9 +56,9 @@ export function buildTopologyGraph({
     }))
     .filter(({ owner }) => owner && visibleOwners.has(owner.id))
 
-  const nodes = createAssetNodes(parts, graphContext)
+  const nodes = createAssetNodes(parts, graphContext, layerById)
   const nodeById = new Map(nodes.map((node) => [node.id, node]))
-  const lines = createTopologyLines(parts, graphContext)
+  const lines = createTopologyLines(parts, graphContext, layerById)
   const unresolvedEndpoints = []
   const ambiguousConnections = []
   const virtualJunctions = []
@@ -76,7 +81,6 @@ export function buildTopologyGraph({
       nodes,
       settings,
       anchorsByLineId,
-      ambiguousConnections,
     })
   }
 
@@ -91,12 +95,36 @@ export function buildTopologyGraph({
     })
   }
 
+  const attachments = collectLineAttachments(lines, anchorsByLineId)
   const internalEdges = createInternalEdges(lines, anchorsByLineId)
   const inferredEdges = collapseVirtualJunctions({
     internalEdges,
     inventoryNodeIds: new Set(nodes.map(({ id }) => id)),
     virtualNodeIds: new Set(virtualJunctions.map(({ id }) => id)),
   })
+  const storedRelationById = new Map(relations
+    .filter(({ id }) => id)
+    .map((relation) => [relation.id, relation]))
+  const reviewedInferredEdges = inferredEdges.map((edge) => {
+    const stored = storedRelationById.get(edge.id)
+    return {
+      ...edge,
+      ...(stored?.metadata ? { metadata: structuredClone(stored.metadata) } : {}),
+      relationStatus: normalizeRelationStatus(stored ?? edge),
+    }
+  })
+  const candidateEdges = reviewedInferredEdges.filter((edge) => (
+    edge.relationStatus === RELATION_STATUSES.INFERRED_PENDING
+  ))
+  const adminConfirmedEdges = reviewedInferredEdges.filter((edge) => (
+    edge.relationStatus === RELATION_STATUSES.ADMIN_CONFIRMED
+  ))
+  const rejectedEdges = reviewedInferredEdges.filter((edge) => (
+    edge.relationStatus === RELATION_STATUSES.REJECTED
+  ))
+  const unresolvedRelations = reviewedInferredEdges.filter((edge) => (
+    edge.relationStatus === RELATION_STATUSES.UNRESOLVED
+  ))
   const explicitRelations = collectExplicitRelations({
     assets,
     relations,
@@ -106,8 +134,8 @@ export function buildTopologyGraph({
     unresolvedEndpoints,
   })
   const edges = mergeConfirmedEdges({
-    explicitRelations,
-    inferredEdges,
+    explicitRelations: [...explicitRelations, ...adminConfirmedEdges],
+    inferredEdges: [],
     nodeById,
     graphContext,
   })
@@ -123,6 +151,10 @@ export function buildTopologyGraph({
   return {
     nodes,
     edges,
+    candidateEdges,
+    inferredEdges: candidateEdges,
+    rejectedEdges,
+    unresolvedRelations,
     adjacency,
     unresolvedEndpoints,
     ambiguousCandidates: ambiguousConnections,
@@ -130,6 +162,20 @@ export function buildTopologyGraph({
     isolatedNodes,
     connectedComponents,
     virtualJunctions,
+    attachments,
+    attachedNodeIds: unique(attachments.map(({ nodeId }) => nodeId)),
+    geographicLines: lines.map((line) => ({
+      id: line.id,
+      sourceGeometryId: line.sourceGeometryId,
+      ownerAssetId: line.ownerAssetId,
+      layerId: line.layerId,
+      category: line.category,
+      assetType: line.assetType,
+      lineRole: line.lineRole,
+      networkId: line.networkId,
+      siteScopeId: line.siteScopeId,
+      datasetVersionId: line.datasetVersionId,
+    })),
     internalEdges,
     settings,
     siteScopeId: graphContext.siteScopeId,
@@ -137,13 +183,14 @@ export function buildTopologyGraph({
   }
 }
 
-function createAssetNodes(parts, graphContext) {
+function createAssetNodes(parts, graphContext, layerById) {
   const nodes = new Map()
   parts.forEach((geometry) => {
     if (geometry.geometryType !== 'point' || !validCoordinate(geometry.coordinates)) return
     const owner = geometry.owner
     if (nodes.has(owner.assetId)) return
-    nodes.set(owner.assetId, {
+    const layer = layerById.get(owner.layerId)
+    const node = {
       id: owner.assetId,
       assetId: owner.assetId,
       sourceNodeId: owner.id,
@@ -151,18 +198,20 @@ function createAssetNodes(parts, graphContext) {
       category: owner.category || 'unmapped',
       assetType: owner.type || owner.category || 'unknown',
       layerId: owner.layerId,
+      sourceFolderPath: layer?.sourceFolderPath ?? null,
       coordinate: cloneCoordinate(geometry.coordinates),
       geometryId: geometry.id,
       isVirtual: false,
-      nodeRole: classifyTopologyNode(owner),
       siteScopeId: owner.siteScopeId || graphContext.siteScopeId,
       datasetVersionId: owner.datasetVersionId || graphContext.datasetVersionId,
-    })
+    }
+    node.nodeRole = classifyTopologyNode(node)
+    nodes.set(owner.assetId, node)
   })
   return [...nodes.values()]
 }
 
-function createTopologyLines(parts, graphContext) {
+function createTopologyLines(parts, graphContext, layerById) {
   return parts
     .filter((geometry) => (
       geometry.geometryType === 'line_string'
@@ -184,6 +233,7 @@ function createTopologyLines(parts, graphContext) {
         sourceGeometryId: geometry.sourceGeometryId || geometry.id,
         ownerAssetId: geometry.owner.assetId,
         layerId: geometry.owner.layerId,
+        sourceFolderPath: layerById.get(geometry.owner.layerId)?.sourceFolderPath ?? null,
         category: geometry.owner.category || 'unmapped',
         assetType: geometry.owner.type || geometry.owner.category || 'unknown',
         coordinates,
@@ -196,6 +246,11 @@ function createTopologyLines(parts, graphContext) {
       return {
         ...line,
         lineRole: classifyTopologyLine(line),
+        networkId: `network:${semanticFamily(
+          line.category,
+          line.assetType,
+          classifyTopologyLine(line),
+        )}`,
       }
     })
 }
@@ -255,6 +310,7 @@ function resolveLineEndpoints({
       nodeId: candidates[0].nodeId,
       measureMeters: endpoint.measureMeters,
       distanceMeters: candidates[0].distanceMeters,
+      projectedCoordinate: cloneCoordinate(endpoint.coordinate),
       source: 'endpoint',
     })
   })
@@ -265,48 +321,34 @@ function resolvePointsOnLines({
   nodes,
   settings,
   anchorsByLineId,
-  ambiguousConnections,
 }) {
-  nodes.forEach((node) => {
-    const candidates = lines
-      .filter((line) => isTopologyPointLineCompatible(node, line))
-      .map((line) => {
+  lines.forEach((line) => {
+    const attachments = nodes
+      .filter((node) => isTopologyPointLineCompatible(node, line))
+      .map((node) => {
         const nearest = nearestPointOnLine(node.coordinate, line)
-        return { line, ...nearest }
+        return { node, ...nearest }
       })
-      .filter((candidate) => (
-        candidate.distanceMeters <= settings.pointOnLineToleranceMeters
-        && candidate.measureMeters > settings.endpointToleranceMeters
-        && lineRemaining(candidate.line, candidate.measureMeters)
+      .filter((attachment) => (
+        attachment.distanceMeters <= settings.pointOnLineToleranceMeters
+        && attachment.measureMeters > settings.endpointToleranceMeters
+        && lineRemaining(line, attachment.measureMeters)
           > settings.endpointToleranceMeters
       ))
       .sort((left, right) => (
-        left.distanceMeters - right.distanceMeters || left.line.id.localeCompare(right.line.id)
+        left.measureMeters - right.measureMeters
+        || left.distanceMeters - right.distanceMeters
+        || left.node.id.localeCompare(right.node.id)
       ))
 
-    if (!candidates.length) return
-    if (isAmbiguous(candidates, settings.ambiguityDeltaMeters)) {
-      ambiguousConnections.push({
-        kind: 'point_on_line',
-        nodeId: node.id,
-        coordinate: cloneCoordinate(node.coordinate),
-        candidates: candidates.map(({ line, distanceMeters, projectedCoordinate }) => ({
-          lineId: line.id,
-          sourceGeometryId: line.sourceGeometryId,
-          distanceMeters,
-          coordinate: projectedCoordinate,
-        })),
-        toleranceMeters: settings.pointOnLineToleranceMeters,
+    attachments.forEach((attachment) => {
+      anchorsByLineId.get(line.id).push({
+        nodeId: attachment.node.id,
+        measureMeters: attachment.measureMeters,
+        distanceMeters: attachment.distanceMeters,
+        projectedCoordinate: cloneCoordinate(attachment.projectedCoordinate),
+        source: 'point_on_line',
       })
-      return
-    }
-
-    const selected = candidates[0]
-    anchorsByLineId.get(selected.line.id).push({
-      nodeId: node.id,
-      measureMeters: selected.measureMeters,
-      distanceMeters: selected.distanceMeters,
-      source: 'point_on_line',
     })
   })
 }
@@ -380,6 +422,7 @@ function resolveLineIntersections({
             nodeId: junctionId,
             measureMeters: measureOnSegment(left, leftSegment, intersection.leftT),
             distanceMeters: useInventoryNode ? matchingNodes[0].distanceMeters : 0,
+            projectedCoordinate: cloneCoordinate(intersection.coordinate),
             source: 'line_intersection',
             isVirtual: !useInventoryNode,
           })
@@ -387,6 +430,7 @@ function resolveLineIntersections({
             nodeId: junctionId,
             measureMeters: measureOnSegment(right, rightSegment, intersection.rightT),
             distanceMeters: useInventoryNode ? matchingNodes[0].distanceMeters : 0,
+            projectedCoordinate: cloneCoordinate(intersection.coordinate),
             source: 'line_intersection',
             isVirtual: !useInventoryNode,
           })
@@ -394,6 +438,34 @@ function resolveLineIntersections({
       }
     }
   }
+}
+
+function collectLineAttachments(lines, anchorsByLineId) {
+  return lines.flatMap((line) => (
+    deduplicateAnchors(anchorsByLineId.get(line.id))
+      .filter(({ isVirtual }) => !isVirtual)
+      .sort((left, right) => (
+        left.measureMeters - right.measureMeters
+        || left.nodeId.localeCompare(right.nodeId)
+      ))
+      .map((anchor) => ({
+        nodeId: anchor.nodeId,
+        lineId: line.id,
+        pathGeometryId: line.sourceGeometryId,
+        networkId: line.networkId,
+        inferenceMethod: anchor.source === 'endpoint'
+          ? 'line_endpoint'
+          : 'point_on_line',
+        distanceMeters: anchor.distanceMeters,
+        chainage: anchor.measureMeters,
+        projectedPosition: cloneCoordinate(
+          anchor.projectedCoordinate
+            ?? coordinateAtMeasure(line, anchor.measureMeters),
+        ),
+        siteScopeId: line.siteScopeId,
+        datasetVersionId: line.datasetVersionId,
+      }))
+  ))
 }
 
 function createInternalEdges(lines, anchorsByLineId) {
@@ -412,12 +484,23 @@ function createInternalEdges(lines, anchorsByLineId) {
         sourceNodeId: source.nodeId,
         targetNodeId: target.nodeId,
         sourceGeometryId: line.sourceGeometryId,
+        pathGeometryId: line.sourceGeometryId,
         pathAssetId: line.ownerAssetId,
         category: line.category,
+        networkId: line.networkId,
         relationSource,
-        relationStatus: 'confirmed_inferred',
+        inferenceMethod: relationSource,
+        relationStatus: RELATION_STATUSES.INFERRED_PENDING,
         distanceMeters: Math.max(source.distanceMeters || 0, target.distanceMeters || 0),
         pathLengthMeters: Math.max(0, target.measureMeters - source.measureMeters),
+        chainage: {
+          sourceMeters: source.measureMeters,
+          targetMeters: target.measureMeters,
+        },
+        topologyEvidence: {
+          sourceAttachment: attachmentEvidence(source, line),
+          targetAttachment: attachmentEvidence(target, line),
+        },
         siteScopeId: line.siteScopeId,
         datasetVersionId: line.datasetVersionId,
       })
@@ -446,7 +529,7 @@ function collapseVirtualJunctions({
       if (inventoryNodeIds.has(current.nodeId)) {
         if (current.nodeId !== sourceNodeId) {
           const edge = collapsePath(sourceNodeId, current.nodeId, current.path)
-          const key = undirectedEdgeKey(edge.sourceNodeId, edge.targetNodeId)
+          const key = edge.id
           const existing = results.get(key)
           if (!existing || edge.pathLengthMeters < existing.pathLengthMeters) {
             results.set(key, edge)
@@ -475,6 +558,7 @@ function collapseVirtualJunctions({
 
 function collapsePath(sourceNodeId, targetNodeId, path) {
   const sourceGeometryIds = unique(path.map(({ sourceGeometryId }) => sourceGeometryId))
+    .sort()
   const pathAssetIds = unique(path.map(({ pathAssetId }) => pathAssetId).filter(Boolean))
   const relationSource = path.some(({ relationSource }) => (
     relationSource === 'inferred_point_on_line'
@@ -496,15 +580,32 @@ function collapsePath(sourceNodeId, targetNodeId, path) {
     targetAssetId: targetNodeId,
     relationType,
     relationSource,
-    relationStatus: 'confirmed_inferred',
+    inferenceMethod: relationSource,
+    relationStatus: RELATION_STATUSES.INFERRED_PENDING,
     pathGeometryId: sourceGeometryIds.length === 1 ? sourceGeometryIds[0] : undefined,
     sourceGeometryId: sourceGeometryIds.length === 1 ? sourceGeometryIds[0] : undefined,
     sourceGeometryIds,
     pathAssetId: pathAssetIds.length === 1 ? pathAssetIds[0] : undefined,
     category: path[0]?.category || 'unmapped',
-    networkId: `network:${semanticFamily(path[0]?.category)}`,
+    networkId: path[0]?.networkId || `network:${semanticFamily(path[0]?.category)}`,
     distanceMeters: Math.max(...path.map(({ distanceMeters = 0 }) => distanceMeters)),
     pathLengthMeters: path.reduce((total, edge) => total + edge.pathLengthMeters, 0),
+    chainage: path.length === 1
+      ? structuredClone(path[0].chainage)
+      : {
+        segments: path.map((edge) => ({
+          pathGeometryId: edge.pathGeometryId || edge.sourceGeometryId,
+          sourceMeters: edge.chainage?.sourceMeters,
+          targetMeters: edge.chainage?.targetMeters,
+        })),
+      },
+    topologyEvidence: {
+      inferenceMethod: relationSource,
+      attachments: path.flatMap((edge) => [
+        edge.topologyEvidence?.sourceAttachment,
+        edge.topologyEvidence?.targetAttachment,
+      ]).filter(Boolean),
+    },
     siteScopeId: path[0]?.siteScopeId ?? null,
     datasetVersionId: path[0]?.datasetVersionId ?? null,
   }
@@ -532,7 +633,8 @@ function mergeConfirmedEdges({
       targetAssetId: targetNodeId,
       relationType: relation.relationType || 'connected-to',
       relationSource: relation.relationSource || 'explicit',
-      relationStatus: relation.relationStatus || 'confirmed',
+      inferenceMethod: relation.inferenceMethod,
+      relationStatus: normalizeRelationStatus(relation),
       pathAssetId: relation.pathAssetId,
       pathGeometryId: relation.pathGeometryId || relation.sourceGeometryId,
       sourceGeometryId: relation.sourceGeometryId,
@@ -541,6 +643,11 @@ function mergeConfirmedEdges({
       category,
       networkId: relation.networkId || `network:${semanticFamily(category, source.assetType)}`,
       distanceMeters: relation.distanceMeters,
+      pathLengthMeters: relation.pathLengthMeters,
+      chainage: relation.chainage ? structuredClone(relation.chainage) : undefined,
+      topologyEvidence: relation.topologyEvidence
+        ? structuredClone(relation.topologyEvidence)
+        : undefined,
       siteScopeId: relation.siteScopeId || graphContext.siteScopeId,
       datasetVersionId: relation.datasetVersionId || graphContext.datasetVersionId,
       metadata: relation.metadata ? structuredClone(relation.metadata) : undefined,
@@ -570,13 +677,23 @@ function collectExplicitRelations({
   const aliasToNodeId = createAssetAliasIndex(assets, nodeById)
   const candidates = [
     ...relations
-      .filter((relation) => !relation.relationSource || relation.relationSource === 'explicit')
+      .filter((relation) => (
+        isUserConfirmedRelation(relation)
+        || isLegacyExplicitRelation(relation)
+      ))
       .map((relation) => ({
         ...structuredClone(relation),
-        relationSource: 'explicit',
-        relationStatus: 'confirmed',
+        relationSource: relation.relationSource || 'explicit',
+        relationStatus: normalizeRelationStatus({
+          ...relation,
+          relationSource: relation.relationSource || 'explicit',
+        }),
       })),
-    ...extractMetadataRelations(assets),
+    ...extractMetadataRelations(assets).map((relation) => ({
+      ...relation,
+      relationSource: 'explicit',
+      relationStatus: RELATION_STATUSES.EXPLICIT_CONFIRMED,
+    })),
   ]
   const confirmed = []
   const seenCandidateIds = new Set()
@@ -591,7 +708,7 @@ function collectExplicitRelations({
       relationId: candidate.id || `explicit-candidate:${index}`,
       sourceAssetId: rawSourceId || null,
       targetAssetId: rawTargetId || null,
-      relationSource: 'explicit',
+      relationSource: candidate.relationSource || 'explicit',
     }
 
     if (!sourceNodeId || !targetNodeId) {
@@ -608,7 +725,7 @@ function collectExplicitRelations({
       unresolvedEndpoints.push({
         ...diagnosticBase,
         endpoint: 'target',
-        reason: 'cross_site_relation_rejected',
+        reason: graphScopeMismatchReason(source, target, graphContext),
       })
       return
     }
@@ -634,13 +751,22 @@ function collectExplicitRelations({
       sourceAssetId: sourceNodeId,
       targetAssetId: targetNodeId,
       relationType: candidate.relationType || 'connected-to',
-      relationSource: 'explicit',
-      relationStatus: 'confirmed',
+      relationSource: candidate.relationSource || 'explicit',
+      relationStatus: normalizeRelationStatus(candidate),
       siteScopeId: candidate.siteScopeId || graphContext.siteScopeId,
       datasetVersionId: candidate.datasetVersionId || graphContext.datasetVersionId,
     })
   })
   return confirmed
+}
+
+function isLegacyExplicitRelation(relation = {}) {
+  const source = String(relation.relationSource ?? '').trim().toLowerCase()
+  const status = String(relation.relationStatus ?? '').trim().toLowerCase()
+  return !source
+    && !status
+    && Boolean(relation.sourceAssetId || relation.sourceNodeId)
+    && Boolean(relation.targetAssetId || relation.targetNodeId)
 }
 
 function extractMetadataRelations(assets) {
@@ -769,6 +895,15 @@ function sameGraphScope(source, target, graphContext) {
     && (!sourceVersion || !targetVersion || sourceVersion === targetVersion)
 }
 
+function graphScopeMismatchReason(source, target, graphContext) {
+  const sourceVersion = source?.datasetVersionId || graphContext.datasetVersionId
+  const targetVersion = target?.datasetVersionId || graphContext.datasetVersionId
+  if (sourceVersion && targetVersion && sourceVersion !== targetVersion) {
+    return 'cross_dataset_relation_rejected'
+  }
+  return 'cross_site_relation_rejected'
+}
+
 function buildAdjacencyIndex(nodes, edges) {
   const adjacency = Object.fromEntries(nodes.map(({ id }) => [id, []]))
   edges.forEach((edge) => {
@@ -869,6 +1004,45 @@ function nearestPointOnLine(coordinate, line) {
   return nearest
 }
 
+function coordinateAtMeasure(line, measureMeters) {
+  const clampedMeasure = clamp(measureMeters, 0, line.totalLengthMeters)
+  const segmentIndex = line.cumulativeLengths.findIndex((measure, index) => (
+    index < line.segmentLengths.length
+    && clampedMeasure <= measure + line.segmentLengths[index]
+  ))
+  const safeSegmentIndex = segmentIndex >= 0
+    ? segmentIndex
+    : Math.max(0, line.segmentLengths.length - 1)
+  const segmentLength = line.segmentLengths[safeSegmentIndex] || 0
+  const segmentStartMeasure = line.cumulativeLengths[safeSegmentIndex] || 0
+  const t = segmentLength
+    ? clamp((clampedMeasure - segmentStartMeasure) / segmentLength, 0, 1)
+    : 0
+  const start = line.coordinates[safeSegmentIndex]
+  const end = line.coordinates[safeSegmentIndex + 1] ?? start
+  return [
+    Number(start[0]) + (Number(end[0]) - Number(start[0])) * t,
+    Number(start[1]) + (Number(end[1]) - Number(start[1])) * t,
+  ]
+}
+
+function attachmentEvidence(anchor, line) {
+  return {
+    nodeId: anchor.nodeId,
+    inferenceMethod: anchor.source === 'endpoint'
+      ? 'line_endpoint'
+      : anchor.source === 'line_intersection'
+        ? 'line_intersection'
+        : 'point_on_line',
+    distanceMeters: anchor.distanceMeters || 0,
+    chainage: anchor.measureMeters,
+    projectedPosition: cloneCoordinate(
+      anchor.projectedCoordinate
+        ?? coordinateAtMeasure(line, anchor.measureMeters),
+    ),
+  }
+}
+
 function projectPointToSegment(point, start, end) {
   const referenceLatitude = (Number(start[1]) + Number(end[1]) + Number(point[1])) / 3
   const pointXY = localMeters(point, start, referenceLatitude)
@@ -925,6 +1099,7 @@ function semanticFamily(...values) {
   if (/\blan\b|\butp\b/.test(value)) return 'lan'
   if (/cctv|camera|kamera|junction|\bjb\b|nvr/.test(value)) return 'cctv'
   if (/access point|\bap\b|printer|peripheral/.test(value)) return 'peripheral'
+  if (/power|pln|listrik|tiang|pole/.test(value)) return 'infrastructure'
   if (/switch|server|rack|otb|core|router|infrastructure|infrastruktur/.test(value)) {
     return 'infrastructure'
   }
@@ -1014,13 +1189,29 @@ function internalRelationSource(source, target) {
 function deduplicateAnchors(anchors = []) {
   const uniqueAnchors = new Map()
   anchors.forEach((anchor) => {
-    const key = `${anchor.nodeId}:${Math.round(anchor.measureMeters * 100)}`
+    const key = anchor.isVirtual
+      ? `${anchor.nodeId}:${Math.round(anchor.measureMeters * 100)}`
+      : anchor.nodeId
     const existing = uniqueAnchors.get(key)
-    if (!existing || anchor.distanceMeters < existing.distanceMeters) {
+    const shouldReplace = !existing
+      || anchor.distanceMeters < existing.distanceMeters
+      || (
+        anchor.distanceMeters === existing.distanceMeters
+        && anchorSourcePriority(anchor.source) > anchorSourcePriority(existing.source)
+      )
+    if (shouldReplace) {
       uniqueAnchors.set(key, anchor)
     }
   })
   return [...uniqueAnchors.values()]
+}
+
+function anchorSourcePriority(source) {
+  return {
+    endpoint: 3,
+    point_on_line: 2,
+    line_intersection: 1,
+  }[source] ?? 0
 }
 
 function isAmbiguous(candidates, deltaMeters) {

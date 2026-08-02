@@ -8,6 +8,7 @@ import {
   normalizeAssetDisplayFields,
   resolveDuplicateShortLabels,
 } from '../domain/asset-display-name.js'
+import { buildRelationReadinessIndex } from '../domain/relation-readiness.js'
 
 const CATEGORY_STYLE = Object.freeze({
   cctv: { color: '#9698f4', softColor: '#f1f1fe', type: 'CCTV', order: 1 },
@@ -149,6 +150,22 @@ function adaptDatasetRecordsForMap(payload) {
   exportAssets.forEach((asset) => {
     asset.networkIds = networkIdsByAssetId.get(asset.id) ?? []
   })
+  const relationReadiness = buildRelationReadinessIndex({
+    topologyGraph,
+    assets,
+    networks,
+    layers,
+  })
+  assets.forEach((asset) => {
+    asset.relationReadiness = relationReadiness.assetsById[asset.id]
+  })
+  networks.forEach((network) => {
+    network.relationReadiness = relationReadiness.networksById[network.id]
+  })
+  layers.forEach((layer) => {
+    layer.relationReadiness = relationReadiness.layersById[layer.id]
+  })
+  topologyGraph.relationReadiness = relationReadiness.scope
 
   const counts = {
     networkCount: networks.length,
@@ -159,6 +176,10 @@ function adaptDatasetRecordsForMap(payload) {
     lineCount: geometries.filter(({ geometryType }) => geometryType === 'line_string').length,
     polygonCount: geometries.filter(({ geometryType }) => geometryType === 'polygon').length,
     geometryCount: geometries.length,
+    confirmedRelationCount: topologyGraph.edges.length,
+    inferredPendingCount: topologyGraph.candidateEdges?.length ?? 0,
+    unresolvedRelationCount: topologyGraph.unresolvedEndpoints?.length ?? 0,
+    isolatedAssetCount: topologyGraph.isolatedNodes?.length ?? 0,
     hiddenPlacemarkCount: exportAssets.filter(({ sourceStatus }) => sourceStatus === 'hidden').length,
   }
 
@@ -185,6 +206,7 @@ function adaptDatasetRecordsForMap(payload) {
     exportAssets,
     networks,
     topologyGraph,
+    relationReadiness,
     layers,
     counts,
     renderingSummary: {
@@ -300,6 +322,7 @@ function createSemanticNetworks({
   nodes,
   geometries,
   relations,
+  topologyGraph,
   featureByAssetId,
   layerById,
 }) {
@@ -335,10 +358,11 @@ function createSemanticNetworks({
   relations.forEach((relation) => {
     const relationLayer = relation.layerId ? layerById.get(relation.layerId) : null
     const source = featureByAssetId.get(relation.sourceAssetId)
-    const key = categoryKey(
-      relation.category || relationLayer?.category || source?.category,
-      source?.type,
-    )
+    const key = networkKeyFromRelation(relation)
+      || categoryKey(
+        relation.category || relationLayer?.category || source?.category,
+        source?.type,
+      )
     const group = ensureGroup(key)
     group.relations.push(structuredClone(relation))
     group.nodeIds.add(relation.sourceAssetId)
@@ -346,6 +370,18 @@ function createSemanticNetworks({
     group.assetIds.add(relation.sourceAssetId)
     group.assetIds.add(relation.targetAssetId)
     if (relation.layerId) group.layerIds.add(relation.layerId)
+  })
+  ;(topologyGraph?.candidateEdges ?? []).forEach((relation) => {
+    const key = networkKeyFromRelation(relation)
+      || categoryKey(relation.category)
+    const group = ensureGroup(key)
+    for (const assetId of [relation.sourceNodeId, relation.targetNodeId]) {
+      if (!featureByAssetId.has(assetId)) continue
+      group.nodeIds.add(assetId)
+      group.assetIds.add(assetId)
+      const layerId = featureByAssetId.get(assetId)?.layerId
+      if (layerId) group.layerIds.add(layerId)
+    }
   })
 
   return [...groups.values()]
@@ -369,8 +405,16 @@ function createSemanticNetworks({
       const polygonCount = networkGeometries.filter(
         ({ geometryType }) => geometryType === 'polygon',
       ).length
-      const bounds = geometryBounds(networkGeometries)
-      const displayBounds = geometryDisplayBounds(networkGeometries)
+      const nodePointGeometries = networkNodes.map((node) => ({
+        geometryType: 'point',
+        coordinates: node.coordinate,
+        displayCoordinates: { x: node.x, y: node.y },
+      }))
+      const bounds = geometryBounds([...networkGeometries, ...nodePointGeometries])
+      const displayBounds = geometryDisplayBounds([
+        ...networkGeometries,
+        ...nodePointGeometries,
+      ])
       const subcategories = summarizeNetworkContent(networkNodes, lineCount, polygonCount)
       return {
         id: networkId,
@@ -420,6 +464,13 @@ function createSemanticNetworks({
         ...(displayBounds ? { displayBounds } : {}),
       }
     })
+}
+
+function networkKeyFromRelation(relation) {
+  const networkId = String(relation?.networkId ?? '')
+  return networkId.startsWith('network:')
+    ? networkId.slice('network:'.length)
+    : null
 }
 
 function splitGeometryRecord(geometry) {
@@ -516,6 +567,14 @@ function annotateTopologyGraph(topologyGraph, siteScope) {
     ...scopeFields,
     nodes: topologyGraph.nodes.map((node) => ({ ...node, ...scopeFields })),
     edges: topologyGraph.edges.map((edge) => ({ ...edge, ...scopeFields })),
+    candidateEdges: (topologyGraph.candidateEdges ?? [])
+      .map((edge) => ({ ...edge, ...scopeFields })),
+    inferredEdges: (topologyGraph.inferredEdges ?? [])
+      .map((edge) => ({ ...edge, ...scopeFields })),
+    rejectedEdges: (topologyGraph.rejectedEdges ?? [])
+      .map((edge) => ({ ...edge, ...scopeFields })),
+    unresolvedRelations: (topologyGraph.unresolvedRelations ?? [])
+      .map((edge) => ({ ...edge, ...scopeFields })),
   }
 }
 

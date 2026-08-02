@@ -135,12 +135,13 @@ test('contextual filename uses the site, scope, version, and export date safely'
   ))
 })
 
-test('map context and toolbar present a compact branch name and admin data action', () => {
+test('map context and toolbar present a compact branch name and contextual export action', () => {
   const context = renderMapContextPill(activeContext)
   const controls = renderMapFloatingControls()
 
   assert.match(context, />Semarang</)
   assert.doesNotMatch(context, />Kantor Cabang Semarang</)
-  assert.match(controls, /Import \/ Export/)
+  assert.match(controls, />Export</)
+  assert.doesNotMatch(controls, /Import \/ Export/)
   assert.match(controls, /data-transfer-toggle/)
 })
