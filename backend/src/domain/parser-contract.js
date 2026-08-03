@@ -817,9 +817,10 @@ function buildTopologyInputBundle({
 
 /**
  * Rebuilds the topology projection for stored imports after the classifier
- * vocabulary changes. This is intentionally limited to role changes that are
- * supported by a valid Point/LineString geometry; source evidence is kept
- * intact and no geometry is modified.
+ * vocabulary changes. Stored objects are reclassified when their classifier
+ * version is stale, not only when they were previously unknown. This keeps
+ * source evidence and identities intact while allowing a new vocabulary to
+ * correct records such as a Junction Box stored as generic CCTV.
  */
 export function rebuildStoredTopologyInputBundle(record = {}) {
   const datasetVersion = record.datasetVersion
@@ -847,6 +848,20 @@ export function rebuildStoredTopologyInputBundle(record = {}) {
 
   const featureById = new Map(sourceFeatures.map((feature) => [feature.sourceFeatureId, feature]))
   const geometriesByFeature = groupBy(sourceGeometries, 'sourceFeatureId')
+  const sourceMetadataEntries = record.sourceMetadataEntries?.length
+    ? record.sourceMetadataEntries
+    : canonicalParser.sourceMetadataEntries ?? []
+  const semanticValuesByFeature = new Map()
+  sourceMetadataEntries.forEach((entry) => {
+    if (!entry?.sourceFeatureId || !entry.semanticField) return
+    const semanticValues = semanticValuesByFeature.get(entry.sourceFeatureId) ?? {}
+    if (semanticValues[entry.semanticField] === undefined) {
+      semanticValues[entry.semanticField] = String(
+        entry.normalizedValue ?? entry.sourceValue ?? '',
+      ).trim()
+    }
+    semanticValuesByFeature.set(entry.sourceFeatureId, semanticValues)
+  })
   const identityItems = new Map(
     (record.assetIdentityMap?.items
       ?? canonicalParser.assetIdentityMap?.items
@@ -856,8 +871,12 @@ export function rebuildStoredTopologyInputBundle(record = {}) {
   const repairedObjects = classifiedObjects.map((object) => {
     const identity = identityItems.get(object.sourceFeatureId)
     const withIdentity = applyStoredIdentity(object, identity)
-    if (!['unknown', 'review_required'].includes(object.objectRole)
-      && object.networkFamily !== 'unknown') {
+    const classifierIsStale = object.classificationRuleSetVersion
+      !== CLASSIFICATION_RULE_SET_VERSION
+    const requiresClassification = classifierIsStale
+      || ['unknown', 'review_required'].includes(object.objectRole)
+      || object.networkFamily === 'unknown'
+    if (!requiresClassification) {
       return withIdentity
     }
     const feature = featureById.get(object.sourceFeatureId)
@@ -866,7 +885,9 @@ export function rebuildStoredTopologyInputBundle(record = {}) {
     const classification = classifyFeature({
       feature,
       placemark: {},
-      metadata: { semanticValues: {} },
+      metadata: {
+        semanticValues: semanticValuesByFeature.get(object.sourceFeatureId) ?? {},
+      },
       geometries,
       datasetVersion,
     })
@@ -878,12 +899,8 @@ export function rebuildStoredTopologyInputBundle(record = {}) {
       ...withIdentity,
       objectRole: classification.objectRole,
       networkFamily: classification.networkFamily,
-      assetType: object.assetType && object.assetType !== 'unknown'
-        ? object.assetType
-        : classification.assetType,
-      category: object.category && object.category !== 'unknown'
-        ? object.category
-        : classification.category,
+      assetType: classification.assetType,
+      category: classification.category,
       classificationStatus: classification.classificationStatus,
       classificationScore: classification.classificationScore,
       classificationEvidence: classification.classificationEvidence,
