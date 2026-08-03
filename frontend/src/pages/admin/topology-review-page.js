@@ -228,7 +228,8 @@ async function initializeReview(container, mapData) {
   reviewMap.setState({
     selectedNetworkIds: scopedMapData.networks.map(({ id }) => id),
     dimOthers: true,
-    isolateSelectedCandidate: true,
+    // Keep the full cable context visible while emphasizing the selected candidate.
+    isolateSelectedCandidate: false,
   })
 
   bindSitePicker()

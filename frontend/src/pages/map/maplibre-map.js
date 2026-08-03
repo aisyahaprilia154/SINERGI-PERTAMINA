@@ -521,6 +521,9 @@ export function createMapLibreSurface(element, {
     const selectedCandidateGeometryIds = new Set(
       geometryIdsForCandidate(selectedCandidate),
     )
+    const selectedCandidateFocus = Boolean(
+      selectedCandidate && selectedCandidateGeometryIds.size,
+    )
     const isolateCandidate = Boolean(
       state.isolateSelectedCandidate
       && selectedCandidate
@@ -534,13 +537,15 @@ export function createMapLibreSurface(element, {
         const network = networkByGeometryId.get(geometry.id)
           ?? networkByGeometryId.get(geometry.sourceGeometryId)
         const active = !network || state.selectedNetworkIds.has(network.id)
+        const selectedCandidateGeometry = selectedCandidateGeometryIds.has(geometry.id)
+          || selectedCandidateGeometryIds.has(geometry.sourceGeometryId)
         return {
           geometry,
           network,
           active,
           highlighted: network?.id === state.highlightedNetworkId,
-          trace: selectedCandidateGeometryIds.has(geometry.id)
-            || selectedCandidateGeometryIds.has(geometry.sourceGeometryId)
+          candidateFocused: selectedCandidateFocus && !selectedCandidateGeometry,
+          trace: selectedCandidateGeometry
             || traceGeometryIds.has(geometry.id)
             || traceGeometryIds.has(geometry.sourceGeometryId),
         }
@@ -892,8 +897,9 @@ function drawProjectedLine(context, map, {
   active,
   highlighted,
   trace,
+  candidateFocused,
 }, pass) {
-  const opacity = active ? 0.94 : 0.13
+  const opacity = candidateFocused ? 0.16 : active || trace ? 0.94 : 0.13
   const width = trace ? 5.5 : highlighted ? 4.8 : 3
   context.beginPath()
   geometry.coordinates.forEach((coordinate, index) => {
@@ -1055,6 +1061,9 @@ function buildFeatureCollections({
   const selectedCandidateGeometryIds = new Set(
     geometryIdsForCandidate(selectedCandidateItem),
   )
+  const selectedCandidateFocus = Boolean(
+    selectedCandidateItem && selectedCandidateGeometryIds.size,
+  )
   const isolateCandidate = Boolean(
     state.isolateSelectedCandidate
     && selectedCandidateItem
@@ -1089,6 +1098,9 @@ function buildFeatureCollections({
     const highlighted = network?.id === state.highlightedNetworkId
     const selectedCandidateGeometry = selectedCandidateGeometryIds.has(geometry.id)
       || selectedCandidateGeometryIds.has(geometry.sourceGeometryId)
+    const candidateContextDimmed = selectedCandidateFocus
+      && geoType === 'LineString'
+      && !selectedCandidateGeometry
     if (isolateCandidate && !selectedCandidateGeometry) return
     const properties = {
       assetId: geometry.assetId ?? '',
@@ -1098,7 +1110,11 @@ function buildFeatureCollections({
       color: geoType === 'LineString'
         ? operationalLineColor(network, geometry.category)
         : network?.color ?? CATEGORY_COLORS[geometry.category] ?? '#708196',
-      opacity: selectedCandidateGeometry ? 1 : active ? 1 : state.dimOthers ? 0.16 : 0,
+      opacity: selectedCandidateGeometry
+        ? 1
+        : candidateContextDimmed
+          ? 0.16
+          : active ? 1 : state.dimOthers ? 0.16 : 0,
       selected: geometry.assetId === state.selectedAssetId,
       trace: traceIds.has(geometry.assetId) || traceGeometryIds.has(geometry.id)
         || traceGeometryIds.has(geometry.sourceGeometryId),
@@ -1112,7 +1128,7 @@ function buildFeatureCollections({
         || candidateGeometryIds.has(geometry.sourceGeometryId),
       selectedCandidate: selectedCandidateGeometry,
     }
-    if (properties.highlighted) properties.opacity = 1
+    if (properties.highlighted && !candidateContextDimmed) properties.opacity = 1
     const feature = {
       type: 'Feature',
       id: geometry.id,
