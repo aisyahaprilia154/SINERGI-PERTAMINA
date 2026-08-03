@@ -1,8 +1,19 @@
+import { randomUUID } from 'node:crypto'
 import { AppError } from '../errors.js'
+import {
+  buildAssetIdentityMapFromRecord,
+  createAssetIdentityResolver,
+} from '../domain/canonical-asset-identity.js'
+import {
+  rebuildStoredTopologyInputBundle,
+} from '../domain/parser-contract.js'
 import {
   generateRelationArtifacts,
   normalizeTopologySummary,
 } from './semantic-relation-engine.js'
+import {
+  withTopologyGraphRevision,
+} from './topology-graph-revision.js'
 
 export class TopologyService {
   constructor({
@@ -20,8 +31,10 @@ export class TopologyService {
   async regenerate(datasetVersionId, actorId, { reason } = {}) {
     const current = await this.repository.get(datasetVersionId)
     assertTopologyBundle(current)
+    const repaired = rebuildStoredTopologyInputBundle(current)
+    const topologyInputBundle = repaired.topologyInputBundle ?? current.topologyInputBundle
     const generatedAt = this.clock().toISOString()
-    const artifacts = generateRelationArtifacts(current.topologyInputBundle, {
+    const artifacts = generateRelationArtifacts(topologyInputBundle, {
       config: this.config,
       previousCandidates: current.topologyCandidates,
       previousRelations: current.confirmedRelations,
@@ -34,12 +47,36 @@ export class TopologyService {
       outcome: 'regenerated',
       details: {
         reason: normalizeReason(reason, false),
+        classificationRepair: {
+          changed: repaired.changed,
+          repairedCount: repaired.repairedCount,
+        },
         topologyRuleSetVersion: artifacts.topologyRuleSetVersion,
         before: current.topologySummary ?? null,
         after: artifacts.summary,
       },
     })
-    return this.repository.update(datasetVersionId, (record) => applyArtifacts(record, artifacts, {
+    return this.repository.update(datasetVersionId, (record) => applyArtifacts({
+      ...record,
+      topologyInputBundle,
+      ...(repaired.changed ? {
+        classifiedObjects: repaired.classifiedObjects,
+        canonicalParser: record.canonicalParser
+          ? {
+            ...record.canonicalParser,
+            classifiedObjects: repaired.classifiedObjects,
+            topologyInputBundle,
+            classificationRuleSetVersion: topologyInputBundle.semanticRuleSetVersion,
+          }
+          : record.canonicalParser,
+        parserVersions: record.parserVersions
+          ? {
+            ...record.parserVersions,
+            classificationRuleSetVersion: topologyInputBundle.semanticRuleSetVersion,
+          }
+          : record.parserVersions,
+      } : {}),
+    }, artifacts, {
       candidateHistory: reconcileCandidateHistory(record, artifacts, {
         eventId: event.id,
         generatedAt,
@@ -57,12 +94,13 @@ export class TopologyService {
 
   async getSummary(datasetVersionId) {
     const record = await this.repository.get(datasetVersionId)
+    const graph = normalizeTraceGraph(record, buildAssetIdentityMapFromRecord(record))
     return {
       datasetVersionId,
       topologyRuleSetVersion: record.topologyRuleSetVersion ?? null,
       summary: normalizeTopologySummary(
         record.topologySummary ?? emptySummary(),
-        record.topologyGraph,
+        graph,
         record.confirmedRelations,
       ),
       readiness: record.topologyReadiness ?? {
@@ -71,6 +109,7 @@ export class TopologyService {
       },
       validation: record.topologyValidation ?? null,
       lastGeneratedAt: record.topologyGeneratedAt ?? null,
+      graphRevision: graph.graphRevision,
     }
   }
 
@@ -90,19 +129,237 @@ export class TopologyService {
 
   async getGraph(datasetVersionId) {
     const record = await this.repository.get(datasetVersionId)
+    const graph = normalizeTraceGraph(record, buildAssetIdentityMapFromRecord(record))
     return {
       datasetVersionId,
-      graph: structuredClone(record.topologyGraph ?? {
-        datasetVersionId,
-        nodes: [],
-        edges: [],
-        components: [],
-        degreeByNode: {},
-        isolatedNodeIds: [],
-      }),
+      graph,
       validation: structuredClone(record.topologyValidation ?? null),
       confirmedRelations: structuredClone(record.confirmedRelations ?? []),
     }
+  }
+
+  async trace(datasetVersionId, request = {}, actorId = null) {
+    const normalized = normalizeTraceRequest(request)
+    const record = await this.repository.get(datasetVersionId)
+    const identityMap = buildAssetIdentityMapFromRecord(record)
+    const resolver = createAssetIdentityResolver(identityMap)
+    const graph = normalizeTraceGraph(record, identityMap)
+
+    if (normalized.graphRevision !== graph.graphRevision) {
+      const error = new AppError(
+        'Graph topology berubah sejak peta dimuat. Muat ulang dataset aktif sebelum tracing.',
+        {
+          code: 'topology_graph_stale',
+          statusCode: 409,
+          details: {
+            requestedGraphRevision: normalized.graphRevision,
+            currentGraphRevision: graph.graphRevision,
+            datasetVersionId,
+          },
+        },
+      )
+      await recordTraceAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result: { status: 'stale', graphRevision: graph.graphRevision },
+      })
+      throw error
+    }
+
+    const validationErrors = graphValidationErrorCount(record.topologyValidation)
+    if (validationErrors > 0) {
+      const error = new AppError(
+        'Tracing dihentikan karena confirmed graph tidak valid.',
+        {
+          code: 'topology_graph_invalid',
+          statusCode: 409,
+          details: {
+            datasetVersionId,
+            graphRevision: graph.graphRevision,
+            validationErrorCount: validationErrors,
+          },
+        },
+      )
+      await recordTraceAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result: { status: 'invalid', graphRevision: graph.graphRevision },
+      })
+      throw error
+    }
+
+    const scopeNodeIds = normalized.scopeAssetIds === null
+      ? null
+      : new Set(normalized.scopeAssetIds
+        .map((assetId) => resolveTraceAssetId(resolver, graph, assetId))
+        .filter(Boolean))
+    const traversalGraph = scopeNodeIds === null
+      ? graph
+      : restrictTraceGraph(graph, scopeNodeIds)
+    const nodeIds = new Set(traversalGraph.nodes.map(({ id }) => id))
+    const sourceAssetId = resolveTraceAssetId(
+      resolver,
+      graph,
+      normalized.sourceAssetId,
+    )
+    if (!sourceAssetId || !nodeIds.has(sourceAssetId)) {
+      const result = traceState({
+        datasetVersionId,
+        graphRevision: graph.graphRevision,
+        sourceAssetId: normalized.sourceAssetId,
+        targetAssetId: normalized.targetAssetId,
+        status: 'invalid-source',
+        reason: 'source_not_topology_node',
+        message: 'Aset ini belum terdaftar sebagai node topology.',
+      })
+      await recordTraceAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result,
+      })
+      return result
+    }
+
+    const targetAssetId = normalized.targetAssetId === null
+      ? null
+      : resolveTraceAssetId(resolver, graph, normalized.targetAssetId)
+    if (normalized.targetAssetId !== null && (!targetAssetId || !nodeIds.has(targetAssetId))) {
+      const result = traceState({
+        datasetVersionId,
+        graphRevision: graph.graphRevision,
+        sourceAssetId,
+        targetAssetId: normalized.targetAssetId,
+        status: 'invalid-target',
+        reason: 'target_not_topology_node',
+        message: 'Aset tujuan belum terdaftar sebagai node topology.',
+      })
+      await recordTraceAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result,
+      })
+      return result
+    }
+
+    const adjacency = buildTraceAdjacency(traversalGraph)
+    const componentId = componentIdForNode(traversalGraph, sourceAssetId)
+    if (targetAssetId === null) {
+      const destinations = reachableDestinations(adjacency, sourceAssetId)
+      const result = destinations.length
+        ? {
+          status: 'destinations',
+          datasetVersionId,
+          graphRevision: graph.graphRevision,
+          sourceAssetId,
+          componentId,
+          destinations,
+          direction: normalized.direction,
+          explanation: 'Tujuan dihitung dari confirmed operational graph.',
+        }
+        : traceState({
+          datasetVersionId,
+          graphRevision: graph.graphRevision,
+          sourceAssetId,
+          componentId,
+          status: 'unreachable',
+          reason: 'isolated-source',
+          message: 'Belum ada koneksi terkonfirmasi dari aset ini.',
+        })
+      await recordTraceAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result,
+      })
+      return result
+    }
+
+    if (sourceAssetId === targetAssetId) {
+      const result = {
+        status: 'found',
+        datasetVersionId,
+        graphRevision: graph.graphRevision,
+        componentId,
+        sourceAssetId,
+        targetAssetId,
+        nodeIds: [sourceAssetId],
+        edges: [],
+        hopCount: 0,
+        totalLengthMeters: null,
+        networkFamily: networkFamilyForNodes(traversalGraph, [sourceAssetId]),
+        direction: normalized.direction,
+        verifiedAt: record.topologyGeneratedAt ?? null,
+        explanation: 'Titik awal dan tujuan adalah aset yang sama.',
+      }
+      await recordTraceAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result,
+      })
+      return result
+    }
+
+    const path = findTracePath(adjacency, sourceAssetId, targetAssetId)
+    if (!path) {
+      const targetComponentId = componentIdForNode(traversalGraph, targetAssetId)
+      const reason = traversalGraph.degreeByNode?.[sourceAssetId] === 0
+        ? 'isolated-source'
+        : hasPendingCandidate(record, resolver, sourceAssetId, targetAssetId)
+          ? 'candidate_pending_review'
+          : componentId !== targetComponentId
+            ? 'different-component'
+            : 'unreachable'
+      const result = traceState({
+        datasetVersionId,
+        graphRevision: graph.graphRevision,
+        sourceAssetId,
+        targetAssetId,
+        componentId,
+        status: 'unreachable',
+        reason,
+        message: traceMessageForReason(reason),
+      })
+      await recordTraceAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result,
+      })
+      return result
+    }
+
+    const edges = path.map(({ edge, source, target }) => traceEdge(edge, source, target))
+    const result = {
+      status: 'found',
+      datasetVersionId,
+      graphRevision: graph.graphRevision,
+      componentId,
+      sourceAssetId,
+      targetAssetId,
+      nodeIds: [sourceAssetId, ...path.map(({ target }) => target)],
+      edges,
+      hopCount: edges.length,
+      totalLengthMeters: sumLength(edges),
+      networkFamily: networkFamilyForNodes(traversalGraph, [
+        sourceAssetId,
+        ...path.map(({ target }) => target),
+      ]),
+      direction: normalized.direction,
+      verifiedAt: record.topologyGeneratedAt ?? null,
+      explanation: 'Jalur menggunakan confirmed operational graph.',
+    }
+    await recordTraceAudit(this.auditLog, {
+      actorId,
+      datasetVersionId,
+      request: normalized,
+      result,
+    })
+    return result
   }
 
   async confirmCandidate(candidateId, actorId, { reason } = {}) {
@@ -113,14 +370,37 @@ export class TopologyService {
   }
 
   async confirmAllCandidates(datasetVersionId, actorId, { reason } = {}) {
+    return this.#confirmCandidatesBulk(datasetVersionId, actorId, {
+      reason,
+      action: 'confirm_all',
+      eventName: 'topology.candidates_bulk_confirmed',
+      predicate: isBulkConfirmableCandidate,
+    })
+  }
+
+  async confirmLineLabelCandidates(datasetVersionId, actorId, { reason } = {}) {
+    return this.#confirmCandidatesBulk(datasetVersionId, actorId, {
+      reason,
+      action: 'confirm_line_labels',
+      eventName: 'topology.line_label_connections_bulk_confirmed',
+      predicate: isLineLabelConfirmableCandidate,
+    })
+  }
+
+  async #confirmCandidatesBulk(datasetVersionId, actorId, {
+    reason,
+    action,
+    eventName,
+    predicate,
+  }) {
     const current = await this.repository.get(datasetVersionId)
     assertTopologyBundle(current)
     const candidates = current.topologyCandidates ?? []
-    const confirmable = candidates.filter(isBulkConfirmableCandidate)
+    const confirmable = candidates.filter(predicate)
     const normalizedReason = normalizeReason(reason, false)
     if (!confirmable.length) {
       return bulkReviewResponse(current, {
-        action: 'confirm_all',
+        action,
         affectedCount: 0,
       })
     }
@@ -128,7 +408,7 @@ export class TopologyService {
     const reviewedAt = this.clock().toISOString()
     const candidateIds = confirmable.map(({ candidateId }) => candidateId)
     const candidateIdSet = new Set(candidateIds)
-    const event = await this.auditLog.record('topology.candidates_bulk_confirmed', {
+    const event = await this.auditLog.record(eventName, {
       actorId,
       datasetVersionId,
       branchId: current.datasetVersion.branchId,
@@ -144,7 +424,7 @@ export class TopologyService {
       const nextCandidates = structuredClone(record.topologyCandidates ?? [])
       nextCandidates.forEach((candidate) => {
         if (!candidateIdSet.has(candidate.candidateId)) return
-        if (!isBulkConfirmableCandidate(candidate)) {
+        if (!predicate(candidate)) {
           throw new AppError('Daftar kandidat berubah sejak aksi bulk dimulai.', {
             code: 'stale_topology_bulk_review',
             statusCode: 409,
@@ -156,7 +436,7 @@ export class TopologyService {
           actorId,
           reviewedAt,
           reason: normalizedReason,
-          action: 'confirm_all',
+          action,
           auditEventId: event.id,
           before: 'candidate',
           after: 'confirmed',
@@ -165,7 +445,7 @@ export class TopologyService {
       return rebuildFromReviewedCandidates(record, nextCandidates, this.config, reviewedAt)
     })
     return bulkReviewResponse(updated, {
-      action: 'confirm_all',
+      action,
       affectedCount: candidateIds.length,
       auditEventId: event.id,
     })
@@ -261,6 +541,114 @@ export class TopologyService {
       return rebuildFromReviewedCandidates(record, nextCandidates, this.config, reviewedAt)
     })
     return candidateReviewResponse(updated, selected.candidateId)
+  }
+
+  async createDeviceRelation(datasetVersionId, actorId, {
+    sourceAssetId,
+    targetAssetId,
+    relationType = 'connected-to',
+    direction = 'undirected',
+    reason,
+  } = {}) {
+    const current = await this.repository.get(datasetVersionId)
+    assertTopologyBundle(current)
+    const normalizedSourceReference = normalizeTopologyAssetReference(
+      sourceAssetId,
+      'sourceAssetId',
+    )
+    const normalizedTargetReference = normalizeTopologyAssetReference(
+      targetAssetId,
+      'targetAssetId',
+    )
+    const normalizedRelationType = normalizeManualRelationType(relationType)
+    const normalizedDirection = normalizeManualDirection(direction)
+    const normalizedReason = normalizeReason(reason, true)
+    const initialSource = resolveManualDevice(current, normalizedSourceReference, 'sourceAssetId')
+    const initialTarget = resolveManualDevice(current, normalizedTargetReference, 'targetAssetId')
+    assertDistinctManualDevices(initialSource, initialTarget)
+    assertSameManualDeviceSite(initialSource, initialTarget)
+    assertNoConfirmedManualDevicePair(current, initialSource, initialTarget)
+
+    const createdAt = this.clock().toISOString()
+    const explicitRelationEvidenceId = `manual:${randomUUID()}`
+    const event = await this.auditLog.record('topology.manual_device_relation_confirmed', {
+      actorId,
+      datasetVersionId,
+      branchId: current.datasetVersion.branchId,
+      outcome: 'confirmed',
+      details: {
+        sourceAssetId: initialSource.canonicalAssetId,
+        targetAssetId: initialTarget.canonicalAssetId,
+        sourceTopologyAssetId: initialSource.topologyAssetId,
+        targetTopologyAssetId: initialTarget.topologyAssetId,
+        relationType: normalizedRelationType,
+        direction: normalizedDirection,
+        reason: normalizedReason,
+        explicitRelationEvidenceId,
+      },
+    })
+    const updated = await this.repository.update(datasetVersionId, (record) => {
+      const source = resolveManualDevice(record, normalizedSourceReference, 'sourceAssetId')
+      const target = resolveManualDevice(record, normalizedTargetReference, 'targetAssetId')
+      assertDistinctManualDevices(source, target)
+      assertSameManualDeviceSite(source, target)
+      assertNoConfirmedManualDevicePair(record, source, target)
+
+      const nextBundle = structuredClone(record.topologyInputBundle)
+      nextBundle.explicitRelations = [
+        ...(nextBundle.explicitRelations ?? []),
+        {
+          explicitRelationEvidenceId,
+          datasetVersionId: record.datasetVersion.id,
+          sourceReference: source.topologyAssetId,
+          targetReference: target.topologyAssetId,
+          relationType: normalizedRelationType,
+          direction: normalizedDirection,
+          source: 'manual_admin',
+          sourceKey: 'manual_device_connection',
+          manualConfirmation: {
+            actorId,
+            reviewedAt: createdAt,
+            reason: normalizedReason,
+            auditEventId: event.id,
+          },
+        },
+      ]
+      const artifacts = generateRelationArtifacts(nextBundle, {
+        config: this.config,
+        previousCandidates: record.topologyCandidates,
+        previousRelations: record.confirmedRelations,
+        generatedAt: createdAt,
+      })
+      const materialized = artifacts.confirmedRelations.find((relation) => (
+        relation.provenance === 'manual_admin'
+          && relation.auditEventId === event.id
+          && relation.verificationStatus === 'confirmed'
+      ))
+      if (!materialized) {
+        throw new AppError('Koneksi manual tidak berhasil dimaterialisasi ke confirmed graph.', {
+          code: 'topology_manual_relation_not_materialized',
+          statusCode: 409,
+        })
+      }
+      return applyArtifacts({
+        ...record,
+        topologyInputBundle: nextBundle,
+      }, artifacts)
+    })
+    const relation = updated.confirmedRelations.find((item) => (
+      item.provenance === 'manual_admin'
+        && item.auditEventId === event.id
+        && item.verificationStatus === 'confirmed'
+    ))
+    return {
+      datasetVersionId,
+      relation: structuredClone(relation),
+      graph: structuredClone(updated.topologyGraph),
+      summary: structuredClone(updated.topologySummary),
+      readiness: structuredClone(updated.topologyReadiness),
+      auditEventId: event.id,
+    }
   }
 
   async revokeRelation(relationId, actorId, { reason } = {}) {
@@ -527,7 +915,8 @@ export function applyArtifacts(record, artifacts, {
   candidateHistory = record.topologyCandidateHistory ?? [],
   topologyRun = null,
 } = {}) {
-  const legacyRelations = artifacts.graph.edges.map((edge) => ({
+  const graph = withTopologyGraphRevision(artifacts.graph)
+  const legacyRelations = graph.edges.map((edge) => ({
     id: edge.id,
     datasetVersionId: edge.datasetVersionId,
     sourceAssetId: edge.sourceAssetId,
@@ -549,7 +938,7 @@ export function applyArtifacts(record, artifacts, {
     topologyGeneratedAt: artifacts.generatedAt,
     topologyCandidates: artifacts.candidates,
     confirmedRelations: artifacts.confirmedRelations,
-    topologyGraph: artifacts.graph,
+    topologyGraph: graph,
     topologyValidation: artifacts.validation,
     topologyUnresolved: artifacts.unresolved,
     topologyEligibilityIssues: artifacts.eligibilityIssues,
@@ -641,12 +1030,21 @@ function bulkReviewResponse(record, {
     confirmedDeviceEdgeCount: record.topologyGraph?.edges?.length ?? 0,
     confirmedPathAttachmentCount: record.topologySummary?.confirmedPathAttachmentCount ?? 0,
     confirmedPathContinuationCount: record.topologySummary?.confirmedPathContinuationCount ?? 0,
+    remainingRecommendedCount: (record.topologyCandidates ?? [])
+      .filter(isBulkConfirmableCandidate).length,
+    remainingLineLabelCount: (record.topologyCandidates ?? [])
+      .filter(isLineLabelConfirmableCandidate).length,
   }
 }
 
 function isBulkConfirmableCandidate(candidate) {
   return candidate.candidateStatus === 'candidate'
     && candidate.proposalStatus === 'recommended'
+}
+
+function isLineLabelConfirmableCandidate(candidate) {
+  return isBulkConfirmableCandidate(candidate)
+    && ['line_label_connection', 'line_label_attachment'].includes(candidate.candidateType)
 }
 
 function candidateAuditSnapshot(candidate, status = candidate.candidateStatus) {
@@ -722,6 +1120,188 @@ function normalizeReason(value, required) {
   return reason || null
 }
 
+function normalizeTopologyAssetReference(value, field) {
+  const normalized = String(value ?? '').trim()
+  if (!normalized || normalized.length > 256
+    || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new AppError(`Field ${field} untuk koneksi manual tidak valid.`, {
+      code: `invalid_topology_manual_${field}`,
+      statusCode: 400,
+      details: { field },
+    })
+  }
+  return normalized
+}
+
+function normalizeManualRelationType(value) {
+  const normalized = String(value ?? 'connected-to').trim().toLowerCase()
+  if (normalized !== 'connected-to') {
+    throw new AppError('Jenis koneksi manual tidak didukung.', {
+      code: 'invalid_topology_manual_relation_type',
+      statusCode: 400,
+      details: { supportedRelationTypes: ['connected-to'] },
+    })
+  }
+  return normalized
+}
+
+function normalizeManualDirection(value) {
+  const normalized = String(value ?? 'undirected').trim().toLowerCase()
+  if (!['undirected', 'source_to_target', 'target_to_source', 'bidirectional']
+    .includes(normalized)) {
+    throw new AppError('Arah koneksi manual tidak didukung.', {
+      code: 'invalid_topology_manual_direction',
+      statusCode: 400,
+      details: {
+        supportedDirections: [
+          'undirected',
+          'source_to_target',
+          'target_to_source',
+          'bidirectional',
+        ],
+      },
+    })
+  }
+  return normalized
+}
+
+function resolveManualDevice(record, reference, field) {
+  const identityMap = buildAssetIdentityMapFromRecord(record)
+  const resolver = createAssetIdentityResolver(identityMap)
+  const objects = manualTopologyObjects(record, identityMap, resolver)
+  const canonicalReference = resolver.resolve(reference)
+  const match = objects.find((item) => (
+    item.canonicalAssetId === canonicalReference
+      || item.topologyAssetId === reference
+      || item.aliases.includes(reference)
+  ))
+  if (!match) {
+    throw new AppError(`Device untuk ${field} tidak ditemukan pada topology dataset.`, {
+      code: 'topology_manual_relation_asset_not_found',
+      statusCode: 404,
+      details: { field, assetId: reference },
+    })
+  }
+  if (match.object.objectRole !== 'device_node') {
+    throw new AppError('Koneksi manual hanya dapat dibuat antar device, bukan kabel atau path.', {
+      code: 'topology_manual_relation_device_required',
+      statusCode: 400,
+      details: { field, assetId: reference, objectRole: match.object.objectRole },
+    })
+  }
+  return match
+}
+
+function manualTopologyObjects(record, identityMap, resolver) {
+  const objects = [
+    ...(record.topologyInputBundle?.classifiedNodes ?? []),
+    ...(record.topologyInputBundle?.classifiedPaths ?? []),
+  ]
+  return objects.map((object) => {
+    const topologyAssetId = objectIdentityForManualRelation(object)
+    const identityItem = (identityMap.items ?? []).find((item) => (
+      item.canonicalAssetId === resolver.resolve(topologyAssetId)
+        || (item.aliasValues ?? []).includes(topologyAssetId)
+        || item.sourceFeatureId === object.sourceFeatureId
+    ))
+    const canonicalAssetId = resolver.resolve(topologyAssetId)
+      ?? identityItem?.canonicalAssetId
+      ?? topologyAssetId
+    return {
+      object,
+      topologyAssetId,
+      canonicalAssetId,
+      aliases: uniqueValues([
+        topologyAssetId,
+        object.canonicalAssetId,
+        object.assetId,
+        object.stableAssetId,
+        object.legacyAssetId,
+        object.onboardingIdentity,
+        object.sourceFeatureId,
+        ...Object.values(object.identityAliases ?? {}).flat(),
+        ...(identityItem?.aliasValues ?? []),
+      ]),
+    }
+  }).filter(({ topologyAssetId }) => Boolean(topologyAssetId))
+}
+
+function objectIdentityForManualRelation(object) {
+  return String(
+    object?.canonicalAssetId
+      ?? object?.assetId
+      ?? object?.onboardingIdentity
+      ?? '',
+  ).trim()
+}
+
+function assertDistinctManualDevices(source, target) {
+  if (source.canonicalAssetId !== target.canonicalAssetId
+    && source.topologyAssetId !== target.topologyAssetId) return
+  throw new AppError('Source dan target device harus berbeda.', {
+    code: 'topology_manual_relation_self_loop',
+    statusCode: 400,
+  })
+}
+
+function assertSameManualDeviceSite(source, target) {
+  if (source.object.siteId === target.object.siteId) return
+  throw new AppError('Koneksi manual lintas site tidak diizinkan.', {
+    code: 'topology_manual_relation_cross_site',
+    statusCode: 400,
+    details: {
+      sourceSiteId: source.object.siteId,
+      targetSiteId: target.object.siteId,
+    },
+  })
+}
+
+function assertNoConfirmedManualDevicePair(record, source, target) {
+  const identityMap = buildAssetIdentityMapFromRecord(record)
+  const graph = normalizeTraceGraph(record, identityMap)
+  const hasGraphPair = graph.edges.some((edge) => sameUndirectedPair(
+    edge.sourceAssetId,
+    edge.targetAssetId,
+    source.canonicalAssetId,
+    target.canonicalAssetId,
+  ))
+  const resolver = createAssetIdentityResolver(identityMap)
+  const hasRelationPair = (record.confirmedRelations ?? [])
+    .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+    .some((relation) => sameUndirectedPair(
+      resolver.resolve(relation.sourceAssetId) ?? relation.sourceAssetId,
+      resolver.resolve(relation.targetAssetId) ?? relation.targetAssetId,
+      source.canonicalAssetId,
+      target.canonicalAssetId,
+    ))
+  const hasManualEvidencePair = (record.topologyInputBundle?.explicitRelations ?? [])
+    .filter(({ source }) => source === 'manual_admin')
+    .some((relation) => {
+      const relationSource = resolver.resolve(relation.sourceReference) ?? relation.sourceReference
+      const relationTarget = resolver.resolve(relation.targetReference) ?? relation.targetReference
+      return sameUndirectedPair(
+        relationSource,
+        relationTarget,
+        source.canonicalAssetId,
+        target.canonicalAssetId,
+      )
+    })
+  if (!hasGraphPair && !hasRelationPair && !hasManualEvidencePair) return
+  throw new AppError('Koneksi antar device tersebut sudah terkonfirmasi.', {
+    code: 'topology_manual_relation_exists',
+    statusCode: 409,
+    details: {
+      sourceAssetId: source.canonicalAssetId,
+      targetAssetId: target.canonicalAssetId,
+    },
+  })
+}
+
+function sameUndirectedPair(leftSource, leftTarget, rightSource, rightTarget) {
+  return (leftSource === rightSource && leftTarget === rightTarget)
+    || (leftSource === rightTarget && leftTarget === rightSource)
+}
+
 function assertEntityId(value, kind) {
   if (!new RegExp(`^${kind}:[a-f0-9]{24}$`).test(String(value))) {
     throw new AppError(`Identifier ${kind} tidak valid.`, {
@@ -763,4 +1343,425 @@ function emptySummary() {
     isolatedNodeCount: 0,
     falseComponentMergeCount: 0,
   }
+}
+
+function normalizeTraceRequest(request) {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) {
+    throw new AppError('Request tracing tidak valid.', {
+      code: 'invalid_topology_trace_request',
+      statusCode: 400,
+    })
+  }
+  const sourceAssetId = normalizeTraceId(request.sourceAssetId, 'sourceAssetId', true)
+  const targetAssetId = request.targetAssetId === undefined || request.targetAssetId === null
+    ? null
+    : normalizeTraceId(request.targetAssetId, 'targetAssetId', false)
+  const graphRevision = normalizeTraceId(request.graphRevision, 'graphRevision', true)
+  const scopeAssetIds = request.scopeAssetIds === undefined || request.scopeAssetIds === null
+    ? null
+    : normalizeTraceScope(request.scopeAssetIds)
+  const direction = String(request.direction ?? 'both').trim().toLowerCase()
+  if (direction !== 'both') {
+    throw new AppError(
+      'Tracing saat ini hanya mendukung physical connectivity dua arah.',
+      {
+        code: 'unsupported_topology_trace_direction',
+        statusCode: 400,
+        details: { direction, supportedDirections: ['both'] },
+      },
+    )
+  }
+  return { sourceAssetId, targetAssetId, graphRevision, direction, scopeAssetIds }
+}
+
+function normalizeTraceScope(value) {
+  if (!Array.isArray(value) || value.length > 10000) {
+    throw new AppError('Scope asset tracing tidak valid.', {
+      code: 'invalid_topology_trace_scope',
+      statusCode: 400,
+    })
+  }
+  return value.map((item) => normalizeTraceId(item, 'scopeAssetId', true))
+}
+
+function normalizeTraceId(value, field, required) {
+  const normalized = String(value ?? '').trim()
+  if ((!normalized && required) || normalized.length > 256
+    || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new AppError(`Field ${field} untuk tracing tidak valid.`, {
+      code: `invalid_topology_trace_${field}`,
+      statusCode: 400,
+      details: { field },
+    })
+  }
+  return normalized || null
+}
+
+function normalizeTraceGraph(record, identityMap) {
+  const resolver = createAssetIdentityResolver(identityMap)
+  const sourceGraph = record.topologyGraph ?? {
+    datasetVersionId: record.datasetVersion?.id,
+    nodes: (record.assets ?? []).map((asset) => ({
+      id: asset.canonicalAssetId ?? asset.assetId ?? asset.id,
+      assetId: asset.canonicalAssetId ?? asset.assetId ?? asset.id,
+    })),
+    edges: (record.confirmedRelations ?? []).map((relation) => ({
+      ...relation,
+      id: relation.id ?? relation.relationId,
+      sourceNodeId: relation.sourceAssetId,
+      targetNodeId: relation.targetAssetId,
+    })),
+    components: [],
+    degreeByNode: {},
+    isolatedNodeIds: [],
+  }
+  const originalToCanonical = new Map()
+  const nodes = (sourceGraph.nodes ?? []).flatMap((node) => {
+    const originalId = node.canonicalAssetId ?? node.assetId ?? node.id
+    const canonicalAssetId = resolver.resolve(originalId) ?? originalId
+    if (!canonicalAssetId) return []
+    if (originalToCanonical.has(originalId)
+      && originalToCanonical.get(originalId) !== canonicalAssetId) return []
+    originalToCanonical.set(originalId, canonicalAssetId)
+    return [{
+      ...structuredClone(node),
+      id: canonicalAssetId,
+      assetId: canonicalAssetId,
+      canonicalAssetId,
+      sourceNodeId: originalId,
+    }]
+  })
+  const nodeIds = new Set(nodes.map(({ id }) => id))
+  const resolveNodeId = (value) => resolver.resolve(value)
+    ?? originalToCanonical.get(value)
+    ?? (nodeIds.has(value) ? value : null)
+  const edges = (sourceGraph.edges ?? []).flatMap((edge) => {
+    if (!isConfirmedGraphEdge(edge)) return []
+    const originalSource = edge.sourceAssetId ?? edge.sourceNodeId
+    const originalTarget = edge.targetAssetId ?? edge.targetNodeId
+    const sourceAssetId = resolveNodeId(originalSource)
+    const targetAssetId = resolveNodeId(originalTarget)
+    if (!sourceAssetId || !targetAssetId || sourceAssetId === targetAssetId
+      || !nodeIds.has(sourceAssetId) || !nodeIds.has(targetAssetId)) return []
+    return [{
+      ...structuredClone(edge),
+      sourceAssetId,
+      targetAssetId,
+      sourceNodeId: sourceAssetId,
+      targetNodeId: targetAssetId,
+      canonicalSourceAssetId: sourceAssetId,
+      canonicalTargetAssetId: targetAssetId,
+    }]
+  })
+  const degreeByNode = Object.fromEntries([...nodeIds].map((id) => [id, 0]))
+  edges.forEach((edge) => {
+    degreeByNode[edge.sourceAssetId] += 1
+    degreeByNode[edge.targetAssetId] += 1
+  })
+  const components = normalizeTraceComponents(
+    sourceGraph.components,
+    resolveNodeId,
+    nodeIds,
+    edges,
+  )
+  return withTopologyGraphRevision({
+    ...structuredClone(sourceGraph),
+    datasetVersionId: record.datasetVersion?.id ?? sourceGraph.datasetVersionId,
+    nodes,
+    edges,
+    components,
+    degreeByNode,
+    isolatedNodeIds: [...nodeIds].filter((id) => degreeByNode[id] === 0).sort(),
+  })
+}
+
+function normalizeTraceComponents(sourceComponents, resolveNodeId, nodeIds, edges) {
+  const components = (sourceComponents ?? []).map((component, index) => ({
+    ...structuredClone(component),
+    componentId: component.componentId ?? component.id ?? `component:${index + 1}`,
+    nodeIds: [...new Set((component.nodeIds ?? [])
+      .map(resolveNodeId)
+      .filter((id) => nodeIds.has(id)))].sort(),
+    edgeIds: (component.edgeIds ?? [])
+      .filter((edgeId) => edges.some((edge) => edge.id === edgeId))
+      .sort(),
+  })).filter(({ nodeIds: componentNodeIds }) => componentNodeIds.length)
+  return components.length ? components : traceConnectedComponents(nodeIds, edges)
+}
+
+function traceConnectedComponents(nodeIds, edges) {
+  const adjacency = new Map([...nodeIds].map((id) => [id, []]))
+  edges.forEach((edge) => {
+    adjacency.get(edge.sourceAssetId)?.push(edge.targetAssetId)
+    adjacency.get(edge.targetAssetId)?.push(edge.sourceAssetId)
+  })
+  const visited = new Set()
+  const components = []
+  for (const start of [...nodeIds].sort()) {
+    if (visited.has(start)) continue
+    const queue = [start]
+    const componentNodeIds = []
+    const componentNodeSet = new Set()
+    while (queue.length) {
+      const current = queue.shift()
+      if (visited.has(current)) continue
+      visited.add(current)
+      componentNodeSet.add(current)
+      componentNodeIds.push(current)
+      ;(adjacency.get(current) ?? []).sort().forEach((next) => {
+        if (!visited.has(next)) queue.push(next)
+      })
+    }
+    components.push({
+      componentId: `component:${components.length + 1}`,
+      nodeIds: componentNodeIds.sort(),
+      edgeIds: edges.filter((edge) => (
+        componentNodeSet.has(edge.sourceAssetId)
+          && componentNodeSet.has(edge.targetAssetId)
+      )).map(({ id }) => id).filter(Boolean).sort(),
+    })
+  }
+  return components
+}
+
+function isConfirmedGraphEdge(edge) {
+  if (edge.verificationStatus !== undefined) {
+    return edge.verificationStatus === 'confirmed'
+  }
+  if (edge.candidateStatus !== undefined) return edge.candidateStatus === 'confirmed'
+  if (edge.relationStatus !== undefined) return edge.relationStatus === 'confirmed'
+  return true
+}
+
+function resolveTraceAssetId(resolver, graph, value) {
+  return resolver.resolve(value)
+    ?? (graph.nodes.some(({ id }) => id === value) ? value : null)
+}
+
+function restrictTraceGraph(graph, nodeIds) {
+  const nodes = graph.nodes.filter(({ id }) => nodeIds.has(id))
+  const edges = graph.edges.filter((edge) => (
+    nodeIds.has(edge.sourceAssetId) && nodeIds.has(edge.targetAssetId)
+  ))
+  const degreeByNode = Object.fromEntries(nodes.map(({ id }) => [id, 0]))
+  edges.forEach((edge) => {
+    degreeByNode[edge.sourceAssetId] += 1
+    degreeByNode[edge.targetAssetId] += 1
+  })
+  const scopedNodeIds = new Set(nodes.map(({ id }) => id))
+  return {
+    ...graph,
+    nodes,
+    edges,
+    components: normalizeTraceComponents(
+      graph.components,
+      (id) => id,
+      scopedNodeIds,
+      edges,
+    ),
+    degreeByNode,
+    isolatedNodeIds: nodes
+      .filter(({ id }) => degreeByNode[id] === 0)
+      .map(({ id }) => id)
+      .sort(),
+  }
+}
+
+function buildTraceAdjacency(graph) {
+  const adjacency = new Map(graph.nodes.map(({ id }) => [id, []]))
+  graph.edges.forEach((edge) => {
+    if (!adjacency.has(edge.sourceAssetId) || !adjacency.has(edge.targetAssetId)) return
+    adjacency.get(edge.sourceAssetId).push({
+      target: edge.targetAssetId,
+      edge,
+    })
+    adjacency.get(edge.targetAssetId).push({
+      target: edge.sourceAssetId,
+      edge,
+    })
+  })
+  adjacency.forEach((relations) => relations.sort((left, right) => (
+    String(left.edge.id ?? '').localeCompare(String(right.edge.id ?? ''))
+      || left.target.localeCompare(right.target)
+  )))
+  return adjacency
+}
+
+function reachableDestinations(adjacency, sourceAssetId) {
+  if (!adjacency.has(sourceAssetId)) return []
+  const visited = new Set([sourceAssetId])
+  const queue = [{ assetId: sourceAssetId, distance: 0 }]
+  const destinations = []
+  while (queue.length) {
+    const current = queue.shift()
+    for (const relation of adjacency.get(current.assetId) ?? []) {
+      if (visited.has(relation.target)) continue
+      visited.add(relation.target)
+      destinations.push({ assetId: relation.target, distance: current.distance + 1 })
+      queue.push({ assetId: relation.target, distance: current.distance + 1 })
+    }
+  }
+  return destinations
+}
+
+function findTracePath(adjacency, sourceAssetId, targetAssetId) {
+  const visited = new Set([sourceAssetId])
+  const queue = [sourceAssetId]
+  const predecessor = new Map()
+  while (queue.length) {
+    const current = queue.shift()
+    for (const relation of adjacency.get(current) ?? []) {
+      if (visited.has(relation.target)) continue
+      visited.add(relation.target)
+      predecessor.set(relation.target, {
+        source: current,
+        edge: relation.edge,
+      })
+      if (relation.target === targetAssetId) {
+        const path = []
+        let target = targetAssetId
+        while (target !== sourceAssetId) {
+          const previous = predecessor.get(target)
+          if (!previous) return null
+          path.unshift({ source: previous.source, target, edge: previous.edge })
+          target = previous.source
+        }
+        return path
+      }
+      queue.push(relation.target)
+    }
+  }
+  return null
+}
+
+function traceEdge(edge, sourceAssetId, targetAssetId) {
+  const sourceGeometryIds = Array.isArray(edge.sourceGeometryIds)
+    ? edge.sourceGeometryIds
+    : edge.sourceGeometryId ? [edge.sourceGeometryId] : []
+  const pathAssetIds = Array.isArray(edge.pathAssetIds)
+    ? edge.pathAssetIds
+    : edge.pathAssetId ? [edge.pathAssetId] : []
+  return {
+    edgeId: edge.id,
+    sourceAssetId,
+    targetAssetId,
+    pathAssetIds: uniqueValues(pathAssetIds),
+    sourceGeometryIds: uniqueValues(sourceGeometryIds),
+    relationType: edge.relationType ?? 'connected-via-path',
+    direction: edge.direction ?? 'undirected',
+    relationSource: edge.relationSource ?? edge.provenance ?? 'manual_review',
+    verificationStatus: 'confirmed',
+    networkFamily: edge.networkFamily ?? null,
+    lengthMeters: finiteNumber(edge.lengthMeters ?? edge.distanceMeters),
+  }
+}
+
+function componentIdForNode(graph, nodeId) {
+  return graph.components.find(({ nodeIds }) => nodeIds.includes(nodeId))?.componentId ?? null
+}
+
+function networkFamilyForNodes(graph, nodeIds) {
+  const families = uniqueValues(nodeIds.map((nodeId) => (
+    graph.nodes.find((node) => node.id === nodeId)?.networkFamily
+  )).filter(Boolean))
+  if (!families.length) return null
+  return families.length === 1 ? families[0] : 'mixed'
+}
+
+function sumLength(edges) {
+  const lengths = edges.map(({ lengthMeters }) => lengthMeters).filter(Number.isFinite)
+  return lengths.length === edges.length
+    ? lengths.reduce((total, length) => total + length, 0)
+    : null
+}
+
+function graphValidationErrorCount(validation) {
+  return Number(validation?.summary?.errors)
+    || (validation?.issues ?? []).filter(({ severity }) => severity === 'error').length
+}
+
+function hasPendingCandidate(record, resolver, sourceAssetId, targetAssetId) {
+  return (record.topologyCandidates ?? [])
+    .filter(({ candidateStatus }) => ['candidate', 'ambiguous'].includes(candidateStatus))
+    .some((candidate) => {
+      const sourceIds = [candidate.sourcePathAssetId, candidate.targetPathAssetId]
+        .map((id) => resolver.resolve(id) ?? id)
+        .filter(Boolean)
+      const targetIds = [candidate.targetAssetId, candidate.targetPathAssetId, candidate.sourcePathAssetId]
+        .map((id) => resolver.resolve(id) ?? id)
+        .filter(Boolean)
+      return (sourceIds.includes(sourceAssetId) && targetIds.includes(targetAssetId))
+        || (sourceIds.includes(targetAssetId) && targetIds.includes(sourceAssetId))
+    })
+}
+
+function traceMessageForReason(reason) {
+  return {
+    'isolated-source': 'Belum ada koneksi terkonfirmasi dari aset ini.',
+    'different-component': 'Target berada di luar komponen yang sudah diverifikasi.',
+    candidate_pending_review: 'Jalur mungkin tersedia tetapi masih menunggu review topology.',
+    unreachable: 'Tidak ada jalur topologi terkonfirmasi antara aset awal dan tujuan.',
+  }[reason] ?? 'Jalur topologi tidak dapat ditemukan.'
+}
+
+function traceState({
+  datasetVersionId,
+  graphRevision,
+  sourceAssetId,
+  targetAssetId = null,
+  componentId = null,
+  status,
+  reason = null,
+  message,
+}) {
+  return {
+    status,
+    datasetVersionId,
+    graphRevision,
+    sourceAssetId,
+    targetAssetId,
+    componentId,
+    reason,
+    message,
+    nodeIds: [],
+    edges: [],
+    hopCount: 0,
+    totalLengthMeters: null,
+  }
+}
+
+async function recordTraceAudit(auditLog, {
+  actorId,
+  datasetVersionId,
+  request,
+  result,
+}) {
+  if (!auditLog?.record) return
+  try {
+    await auditLog.record('topology.trace_requested', {
+      actorId,
+      datasetVersionId,
+      outcome: result.status,
+      details: {
+        sourceAssetId: request.sourceAssetId,
+        targetAssetId: request.targetAssetId,
+        direction: request.direction,
+        requestedGraphRevision: request.graphRevision,
+        graphRevision: result.graphRevision ?? null,
+        resultStatus: result.status,
+        reason: result.reason ?? null,
+        hopCount: result.hopCount ?? null,
+      },
+    })
+  } catch {
+    // Tracing must remain available if telemetry storage is temporarily down.
+  }
+}
+
+function uniqueValues(values) {
+  return [...new Set(values.filter(Boolean))]
+}
+
+function finiteNumber(value) {
+  return Number.isFinite(Number(value)) ? Number(value) : null
 }

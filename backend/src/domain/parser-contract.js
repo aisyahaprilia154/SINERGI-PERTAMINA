@@ -4,7 +4,7 @@ import { buildCanonicalAssetIdentityMap } from './canonical-asset-identity.js'
 
 export const PARSER_VERSION = 'evidence-parser/1.0.0'
 export const NORMALIZER_VERSION = 'canonical-normalizer/1.0.0'
-export const CLASSIFICATION_RULE_SET_VERSION = 'semantic-classifier/1.0.0'
+export const CLASSIFICATION_RULE_SET_VERSION = 'semantic-classifier/1.1.0'
 export const METADATA_ALIAS_VERSION = 'metadata-aliases/1.0.0'
 export const FOLDER_MAPPING_VERSION = 'folder-mappings/1.0.0'
 export const STYLE_MAPPING_VERSION = 'style-mappings/1.0.0'
@@ -47,9 +47,19 @@ const ROLE_RULES = Object.freeze([
     geometryTypes: ['LineString'],
   },
   {
-    tokens: ['cctv', 'camera', 'kamera', 'nvr', 'junction box', 'jb cctv'],
+    tokens: ['junction box', 'juction box', 'jucntion box', 'jb cctv', 'jb'],
     objectRole: 'device_node',
     networkFamily: 'cctv',
+  },
+  {
+    tokens: ['cctv', 'camera', 'kamera', 'nvr'],
+    objectRole: 'device_node',
+    networkFamily: 'cctv',
+  },
+  {
+    tokens: ['tiang', 'pole', 'pylon'],
+    objectRole: 'device_node',
+    networkFamily: 'infrastructure',
   },
   {
     tokens: ['switch', 'server', 'router', 'otb', 'rack', 'core'],
@@ -403,6 +413,7 @@ export function buildCanonicalParserResult({
   const topologyInputBundle = buildTopologyInputBundle({
     datasetVersion,
     classifiedObjects: identityClassifiedObjects,
+    sourceFeatures,
     sourceGeometries,
     explicitRelationEvidence,
   })
@@ -742,10 +753,14 @@ function buildExplicitRelationEvidence({ metadata, sourceFeatureId, datasetVersi
 function buildTopologyInputBundle({
   datasetVersion,
   classifiedObjects,
+  sourceFeatures = [],
   sourceGeometries,
   explicitRelationEvidence,
 }) {
   const geometriesByFeature = groupBy(sourceGeometries, 'sourceFeatureId')
+  const sourceFeaturesById = new Map(
+    sourceFeatures.map((feature) => [feature.sourceFeatureId, feature]),
+  )
   const eligible = classifiedObjects.filter((object) => (
     ['device_node', 'cable_path'].includes(object.objectRole)
     && object.networkFamily !== 'unknown'
@@ -754,6 +769,8 @@ function buildTopologyInputBundle({
     ))
   ))
   const mapObject = (object) => ({
+    sourceName: sourceFeaturesById.get(object.sourceFeatureId)?.sourceName ?? null,
+    sourceFolderPath: sourceFeaturesById.get(object.sourceFeatureId)?.sourceFolderPath ?? null,
     assetId: object.canonicalAssetId ?? object.assetId,
     canonicalAssetId: object.canonicalAssetId ?? object.assetId,
     stableAssetId: object.stableAssetId ?? object.assetId ?? null,
@@ -796,6 +813,120 @@ function buildTopologyInputBundle({
     topologyRuleSetVersion: null,
     topologyReady: false,
   }
+}
+
+/**
+ * Rebuilds the topology projection for stored imports after the classifier
+ * vocabulary changes. This is intentionally limited to role changes that are
+ * supported by a valid Point/LineString geometry; source evidence is kept
+ * intact and no geometry is modified.
+ */
+export function rebuildStoredTopologyInputBundle(record = {}) {
+  const datasetVersion = record.datasetVersion
+  const canonicalParser = record.canonicalParser ?? {}
+  const sourceFeatures = record.sourceFeatures?.length
+    ? record.sourceFeatures
+    : canonicalParser.sourceFeatures ?? []
+  const sourceGeometries = record.sourceGeometries?.length
+    ? record.sourceGeometries
+    : canonicalParser.sourceGeometries ?? []
+  const classifiedObjects = record.classifiedObjects?.length
+    ? record.classifiedObjects
+    : canonicalParser.classifiedObjects ?? []
+  const explicitRelationEvidence = record.topologyInputBundle?.explicitRelations
+    ?? canonicalParser.explicitRelationEvidence
+    ?? []
+  if (!datasetVersion?.id || !classifiedObjects.length || !sourceFeatures.length) {
+    return {
+      topologyInputBundle: record.topologyInputBundle ?? null,
+      classifiedObjects: structuredClone(classifiedObjects),
+      repairedCount: 0,
+      changed: false,
+    }
+  }
+
+  const featureById = new Map(sourceFeatures.map((feature) => [feature.sourceFeatureId, feature]))
+  const geometriesByFeature = groupBy(sourceGeometries, 'sourceFeatureId')
+  const identityItems = new Map(
+    (record.assetIdentityMap?.items
+      ?? canonicalParser.assetIdentityMap?.items
+      ?? []).map((item) => [item.sourceFeatureId, item]),
+  )
+  let repairedCount = 0
+  const repairedObjects = classifiedObjects.map((object) => {
+    const identity = identityItems.get(object.sourceFeatureId)
+    const withIdentity = applyStoredIdentity(object, identity)
+    if (!['unknown', 'review_required'].includes(object.objectRole)
+      && object.networkFamily !== 'unknown') {
+      return withIdentity
+    }
+    const feature = featureById.get(object.sourceFeatureId)
+    const geometries = geometriesByFeature.get(object.sourceFeatureId) ?? []
+    if (!feature || !geometries.length) return withIdentity
+    const classification = classifyFeature({
+      feature,
+      placemark: {},
+      metadata: { semanticValues: {} },
+      geometries,
+      datasetVersion,
+    })
+    if (!isTopologyClassificationEligible(classification, geometries)) {
+      return withIdentity
+    }
+    repairedCount += 1
+    return {
+      ...withIdentity,
+      objectRole: classification.objectRole,
+      networkFamily: classification.networkFamily,
+      assetType: object.assetType && object.assetType !== 'unknown'
+        ? object.assetType
+        : classification.assetType,
+      category: object.category && object.category !== 'unknown'
+        ? object.category
+        : classification.category,
+      classificationStatus: classification.classificationStatus,
+      classificationScore: classification.classificationScore,
+      classificationEvidence: classification.classificationEvidence,
+      classificationRuleSetVersion: classification.classificationRuleSetVersion,
+    }
+  })
+  const topologyInputBundle = buildTopologyInputBundle({
+    datasetVersion,
+    classifiedObjects: repairedObjects,
+    sourceFeatures,
+    sourceGeometries,
+    explicitRelationEvidence,
+  })
+  return {
+    topologyInputBundle,
+    classifiedObjects: repairedObjects,
+    repairedCount,
+    changed: repairedCount > 0
+      || topologyInputBundle.semanticRuleSetVersion !== record.topologyInputBundle?.semanticRuleSetVersion,
+  }
+}
+
+function applyStoredIdentity(object, identity) {
+  if (!identity) return structuredClone(object)
+  return {
+    ...structuredClone(object),
+    canonicalAssetId: object.canonicalAssetId ?? identity.canonicalAssetId,
+    stableAssetId: object.stableAssetId ?? identity.stableAssetId ?? null,
+    onboardingIdentity: object.onboardingIdentity ?? identity.onboardingId,
+    legacyAssetId: object.legacyAssetId ?? identity.legacyId ?? null,
+    identityStatus: object.identityStatus ?? identity.identityStatus,
+    identityAliases: structuredClone(object.identityAliases ?? identity.aliases ?? {}),
+  }
+}
+
+function isTopologyClassificationEligible(classification, geometries) {
+  if (!['device_node', 'cable_path'].includes(classification.objectRole)) return false
+  const validGeometryTypes = new Set(
+    geometries.filter(({ valid }) => valid !== false).map(({ geometryType }) => geometryType),
+  )
+  return classification.objectRole === 'device_node'
+    ? validGeometryTypes.has('Point')
+    : validGeometryTypes.has('LineString')
 }
 
 function geometryMatchesRole(geometry, objectRole) {

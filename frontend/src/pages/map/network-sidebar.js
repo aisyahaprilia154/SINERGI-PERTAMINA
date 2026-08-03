@@ -2,9 +2,11 @@ export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, 
   locationGroups = [],
   selectedArea = null,
   topologyReadiness = null,
-} = {}) {
+  } = {}) {
   const countSummary = formatDatasetCounts(counts)
   const topologyReady = topologyReadiness?.ready ?? activeContext?.topologyReady ?? true
+  const traceAvailable = topologyReadiness?.traceAvailable ?? topologyReady
+  const topologyStatus = topologyReadiness?.status || (topologyReady ? 'ready' : 'not_ready')
   const topologyMessage = topologyReadiness?.message
     || 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.'
   return `
@@ -37,11 +39,15 @@ export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, 
           <span class="status-dot" title="Dataset aktif"></span>
         </section>
 
-        <section class="sidebar-topology-readiness ${topologyReady ? 'ready' : 'not-ready'}"
+        <section class="sidebar-topology-readiness ${topologyStatus}"
           role="status" aria-label="Status kesiapan topologi">
-          <strong>Topology-ready: ${topologyReady ? 'Yes' : 'No'}</strong>
-          <span>${escapeHtml(topologyReady
-            ? 'Tracing dan diagram dapat menggunakan graph terkonfirmasi.'
+          <strong>Topology: ${topologyStatus === 'partial_ready'
+            ? 'Partial'
+            : topologyReady ? 'Ready' : 'Not ready'}</strong>
+          <span>${escapeHtml(traceAvailable
+            ? topologyStatus === 'partial_ready'
+              ? 'Tracing tersedia hanya pada komponen terverifikasi.'
+              : 'Tracing dan diagram dapat menggunakan graph terkonfirmasi.'
             : topologyMessage)}</span>
         </section>
 

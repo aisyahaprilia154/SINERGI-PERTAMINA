@@ -180,6 +180,21 @@ export function createApp({
           await topologyService[method](topologyProjectionMatch[1]),
         )
       }
+      const topologyTraceMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/trace$/,
+        )
+        : null
+      if (topologyTraceMatch) {
+        const user = authenticator.authenticate(request)
+        assertTopologyService(topologyService)
+        const body = await readJsonBody(request)
+        return sendJson(
+          response,
+          200,
+          await topologyService.trace(topologyTraceMatch[1], body, user.id),
+        )
+      }
       const regenerateTopologyMatch = request.method === 'POST'
         ? url.pathname.match(
           /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/regenerate$/,
@@ -203,20 +218,41 @@ export function createApp({
       }
       const bulkTopologyActionMatch = request.method === 'POST'
         ? url.pathname.match(
-          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/(confirm-all|revoke-all)$/,
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/(confirm-all|confirm-line-labels|revoke-all)$/,
         )
         : null
       if (bulkTopologyActionMatch) {
         const user = requireAdministrator(request, authenticator)
         assertTopologyService(topologyService)
         const body = await readJsonBody(request)
-        const method = bulkTopologyActionMatch[2] === 'confirm-all'
-          ? 'confirmAllCandidates'
-          : 'revokeAllRelations'
+        const method = {
+          'confirm-all': 'confirmAllCandidates',
+          'confirm-line-labels': 'confirmLineLabelCandidates',
+          'revoke-all': 'revokeAllRelations',
+        }[bulkTopologyActionMatch[2]]
         return sendJson(
           response,
           200,
           await topologyService[method](bulkTopologyActionMatch[1], user.id, body),
+        )
+      }
+      const manualTopologyRelationMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/relations$/,
+        )
+        : null
+      if (manualTopologyRelationMatch) {
+        const user = requireAdministrator(request, authenticator)
+        assertTopologyService(topologyService)
+        const body = await readJsonBody(request)
+        return sendJson(
+          response,
+          200,
+          await topologyService.createDeviceRelation(
+            manualTopologyRelationMatch[1],
+            user.id,
+            body,
+          ),
         )
       }
       const candidateActionMatch = request.method === 'POST'

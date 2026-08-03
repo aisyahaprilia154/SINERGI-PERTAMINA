@@ -14,6 +14,7 @@ import {
   loadActiveDataset,
   loadDatasetProjection,
   loadTopologyProjection,
+  createTopologyRelation,
   reviewTopologyBulk,
   reviewTopologyCandidate,
   revokeTopologyRelation,
@@ -81,6 +82,11 @@ async function initializeReview(container, mapData) {
     networks: mapData.networks,
     topologyGraph: mapData.topologyGraph,
   })
+  const manualRelationAssets = scopedMapData.assets
+    .filter(({ hasPointGeometry }) => hasPointGeometry)
+    .sort((left, right) => (
+      `${left.name ?? ''} ${left.id}`.localeCompare(`${right.name ?? ''} ${right.id}`, 'id')
+    ))
   const initialLocationCandidates = candidatesForLocation()
   if (!initialLocationCandidates.some(({ candidateId }) => (
     candidateId === state.selectedCandidateId
@@ -190,6 +196,7 @@ async function initializeReview(container, mapData) {
       </main>
       ${renderBulkDialog()}
       ${renderDecisionDialog()}
+      ${renderManualRelationDialog(manualRelationAssets)}
     </div>
   `
 
@@ -228,6 +235,7 @@ async function initializeReview(container, mapData) {
   bindFilters()
   bindBulkDialog()
   bindDecisionDialog()
+  bindManualRelationDialog()
   renderAll()
 
   function bindSitePicker() {
@@ -269,7 +277,7 @@ async function initializeReview(container, mapData) {
     const candidate = projections.candidates.items.find(({ candidateId }) => (
       candidateId === state.selectedCandidateId
     ))
-    reviewMap.setCandidates(candidatesForLocation())
+    reviewMap.setCandidates(filterCandidates(candidatesForLocation(), state))
     reviewMap.setState({
       selectedCandidateId: candidate?.candidateId ?? null,
       selectedAssetId: candidate?.targetAssetId ?? null,
@@ -299,18 +307,35 @@ async function initializeReview(container, mapData) {
     const confirmableCount = projections.candidates.items.filter(
       isBulkConfirmableCandidate,
     ).length
+    const lineConfirmableCount = projections.candidates.items.filter(
+      isLineLabelConfirmableCandidate,
+    ).length
     const confirmedCount = projections.graph.confirmedRelations.filter(
       ({ verificationStatus }) => verificationStatus === 'confirmed',
     ).length
     const confirmedDeviceEdgeCount = projections.graph.graph?.edges?.length ?? 0
     const actions = container.querySelector('.review-bulk-actions')
     actions.innerHTML = `
+      <button class="button primary manual-relation-action" type="button"
+        ${manualRelationAssets.length >= 2 ? '' : 'disabled'}
+        title="${manualRelationAssets.length >= 2
+          ? 'Tambahkan koneksi langsung antar device'
+          : 'Minimal dua device bertitik diperlukan'}">
+        <span class="material-symbols-outlined" aria-hidden="true">add_link</span>
+        Tambah koneksi
+      </button>
       <details class="bulk-actions-menu">
         <summary class="button secondary">
           <span class="material-symbols-outlined" aria-hidden="true">more_horiz</span>
           Aksi massal
         </summary>
         <div>
+          <button class="confirm-line-labels" type="button"
+            ${lineConfirmableCount ? '' : 'disabled'}>
+            <span class="material-symbols-outlined" aria-hidden="true">route</span>
+            <span><strong>Konfirmasi koneksi dari garis</strong>
+              <small>${lineConfirmableCount} garis punya endpoint terbaca</small></span>
+          </button>
           <button class="confirm-all-candidates" type="button"
             ${confirmableCount ? '' : 'disabled'}>
             <span class="material-symbols-outlined" aria-hidden="true">done_all</span>
@@ -329,8 +354,14 @@ async function initializeReview(container, mapData) {
         escapeHtml(state.bulkMessage)
       }</p>` : ''}
     `
+    actions.querySelector('.manual-relation-action')?.addEventListener('click', () => {
+      openManualRelationDialog()
+    })
     actions.querySelector('.confirm-all-candidates')?.addEventListener('click', () => {
       openBulkDialog('confirm-all', confirmableCount)
+    })
+    actions.querySelector('.confirm-line-labels')?.addEventListener('click', () => {
+      openBulkDialog('confirm-line-labels', lineConfirmableCount)
     })
     actions.querySelector('.revoke-all-relations')?.addEventListener('click', () => {
       openBulkDialog('revoke-all', confirmedCount)
@@ -631,6 +662,88 @@ async function initializeReview(container, mapData) {
     dialog.showModal()
   }
 
+  function bindManualRelationDialog() {
+    const dialog = container.querySelector('.manual-relation-dialog')
+    const form = dialog.querySelector('form')
+    const source = dialog.querySelector('.manual-source-asset')
+    const target = dialog.querySelector('.manual-target-asset')
+    const reason = dialog.querySelector('.manual-relation-reason')
+    const message = dialog.querySelector('.manual-relation-message')
+    const submit = dialog.querySelector('.submit-manual-relation')
+    const cancel = dialog.querySelector('.cancel-manual-relation')
+    dialog.querySelector('.close-manual-relation').addEventListener('click', () => dialog.close())
+    cancel.addEventListener('click', () => dialog.close())
+    dialog.addEventListener('close', () => {
+      form.reset()
+      message.textContent = ''
+    })
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault()
+      const sourceAssetId = source.value
+      const targetAssetId = target.value
+      const normalizedReason = reason.value.trim()
+      if (!sourceAssetId || !targetAssetId) {
+        message.textContent = 'Pilih device sumber dan device tujuan terlebih dahulu.'
+        return
+      }
+      if (sourceAssetId === targetAssetId) {
+        message.textContent = 'Device sumber dan tujuan harus berbeda.'
+        return
+      }
+      if (normalizedReason.length < 3) {
+        message.textContent = 'Alasan konfirmasi minimal tiga karakter.'
+        return
+      }
+      submit.disabled = true
+      cancel.disabled = true
+      message.textContent = 'Menyimpan koneksi dan membangun ulang graph…'
+      try {
+        await createTopologyRelation({
+          datasetVersionId,
+          sourceAssetId,
+          targetAssetId,
+          reason: normalizedReason,
+        })
+        projections = await loadReviewProjections(datasetVersionId, mapData.geometries)
+        reviewMap.setTopologyGraph(scopeMapData({
+          selectedArea,
+          assets: mapData.assets,
+          diagramAssets: mapData.diagramAssets,
+          geometries: mapData.geometries,
+          exportAssets: mapData.exportAssets,
+          networks: mapData.networks,
+          topologyGraph: projections.graph.graph,
+        }).topologyGraph)
+        state.bulkStatus = 'success'
+        state.bulkMessage = 'Koneksi antar-device dikonfirmasi. Graph dan tracing diperbarui.'
+        dialog.close()
+        renderAll()
+      } catch (error) {
+        state.bulkStatus = 'error'
+        state.bulkMessage = ''
+        message.textContent = error.message
+      } finally {
+        submit.disabled = false
+        cancel.disabled = false
+      }
+    })
+  }
+
+  function openManualRelationDialog() {
+    const dialog = container.querySelector('.manual-relation-dialog')
+    const source = dialog.querySelector('.manual-source-asset')
+    const target = dialog.querySelector('.manual-target-asset')
+    const reason = dialog.querySelector('.manual-relation-reason')
+    const message = dialog.querySelector('.manual-relation-message')
+    if (manualRelationAssets.length < 2) return
+    source.value = manualRelationAssets[0].id
+    target.value = manualRelationAssets[1].id
+    reason.value = ''
+    message.textContent = ''
+    dialog.showModal()
+    source.focus()
+  }
+
   function bindBulkDialog() {
     const dialog = container.querySelector('.bulk-review-dialog')
     const form = dialog.querySelector('form')
@@ -657,21 +770,28 @@ async function initializeReview(container, mapData) {
   function openBulkDialog(action, count) {
     const dialog = container.querySelector('.bulk-review-dialog')
     const destructive = action === 'revoke-all'
+    const lineLabelAction = action === 'confirm-line-labels'
     dialog.dataset.action = action
     dialog.querySelector('.bulk-dialog-icon').textContent = destructive
       ? 'delete_sweep'
-      : 'done_all'
+      : lineLabelAction ? 'route' : 'done_all'
     dialog.querySelector('.bulk-dialog-title').textContent = destructive
       ? `Hapus ${count} konfirmasi?`
-      : `Konfirmasi ${count} koneksi yang direkomendasikan?`
+      : lineLabelAction
+        ? `Konfirmasi ${count} koneksi dari garis?`
+        : `Konfirmasi ${count} koneksi yang direkomendasikan?`
     dialog.querySelector('.bulk-dialog-description').textContent = destructive
       ? 'Semua relasi confirmed akan dikeluarkan dari graph dan tidak lagi dapat dipakai tracing.'
-      : 'Hanya kandidat berstatus recommended yang dikonfirmasi. Ambiguous, unresolved, rejected, dan revoked tidak ikut.'
+      : lineLabelAction
+        ? 'Sistem memakai urutan nama device pada garis dan lokasi sumbernya. Garis yang ambigu tidak ikut.'
+        : 'Hanya kandidat berstatus recommended yang dikonfirmasi. Ambiguous, unresolved, rejected, dan revoked tidak ikut.'
     dialog.querySelector('.bulk-reason-label').textContent = destructive
       ? 'Alasan penghapusan konfirmasi'
       : 'Catatan konfirmasi (opsional)'
     const submit = dialog.querySelector('.submit-bulk-action')
-    submit.textContent = destructive ? 'Hapus semua konfirmasi' : 'Konfirmasi semua'
+    submit.textContent = destructive
+      ? 'Hapus semua konfirmasi'
+      : lineLabelAction ? 'Konfirmasi koneksi dari garis' : 'Konfirmasi rekomendasi'
     submit.className = `button ${destructive ? 'danger' : 'primary'} submit-bulk-action`
     dialog.querySelector('.bulk-dialog-message').textContent = ''
     dialog.showModal()
@@ -694,9 +814,16 @@ async function initializeReview(container, mapData) {
       })
       projections = await loadReviewProjections(datasetVersionId, mapData.geometries)
       state.bulkStatus = 'success'
-      state.bulkMessage = action === 'confirm-all'
-        ? `${result.affectedCount} kandidat dikonfirmasi. Graph dan tracing telah diperbarui.`
-        : `${result.affectedCount} konfirmasi dihapus dari graph operasional.`
+      if (['confirm-all', 'confirm-line-labels'].includes(action)) {
+        const remaining = action === 'confirm-line-labels'
+          ? result.remainingLineLabelCount
+          : result.remainingRecommendedCount
+        state.bulkMessage = `${result.affectedCount} koneksi dikonfirmasi. Graph dan tracing telah diperbarui.${
+          remaining ? ` ${remaining} kandidat baru masih perlu ditinjau.` : ''
+        }`
+      } else {
+        state.bulkMessage = `${result.affectedCount} konfirmasi dihapus dari graph operasional.`
+      }
       dialog.close()
       renderAll()
     } catch (error) {
@@ -840,7 +967,7 @@ function filterCandidates(items, state) {
   return prioritizeTopologyCandidates(items).filter((candidate) => {
     const statusMatch = state.status === 'all'
       || (state.status === 'needs-review'
-        ? ['candidate', 'ambiguous'].includes(candidate.candidateStatus)
+        ? isReviewableCandidate(candidate)
         : candidate.candidateStatus === state.status)
     const familyMatch = state.family === 'all' || candidate.networkFamily === state.family
     const typeMatch = state.type === 'all' || candidate.candidateType === state.type
@@ -930,6 +1057,9 @@ function validCoordinate(value) {
 
 function statusLabel(candidate) {
   if (isBulkConfirmableCandidate(candidate)) return 'Direkomendasikan'
+  if (candidate.candidateStatus === 'candidate' && candidate.proposalStatus === 'not_selected') {
+    return 'Alternatif tidak dipilih'
+  }
   return {
     candidate: 'Perlu ditinjau',
     ambiguous: 'Belum pasti',
@@ -1012,6 +1142,52 @@ function renderDecisionDialog() {
   `
 }
 
+function renderManualRelationDialog(assets = []) {
+  const options = assets.map((asset) => `
+    <option value="${escapeHtml(asset.id)}">${escapeHtml(asset.name ?? 'Aset')} · ${escapeHtml(
+      asset.type ?? asset.category ?? 'Device',
+    )} · ${escapeHtml(shortReference(asset.id) ?? asset.id)}</option>
+  `).join('')
+  return `
+    <dialog class="decision-dialog manual-relation-dialog" aria-labelledby="manual-relation-title">
+      <form>
+        <header>
+          <span class="material-symbols-outlined decision-dialog-icon" aria-hidden="true">
+            add_link
+          </span>
+          <div>
+            <h2 class="decision-dialog-title" id="manual-relation-title">Tambah koneksi antar-device</h2>
+            <p class="decision-dialog-description">Pilih dua device yang memang terhubung secara fisik. Kabel atau path tidak dapat dipilih sebagai endpoint.</p>
+          </div>
+          <button class="icon-button close-manual-relation" type="button" aria-label="Tutup dialog">
+            <span class="material-symbols-outlined" aria-hidden="true">close</span>
+          </button>
+        </header>
+        <div class="decision-dialog-fields">
+          <label>
+            <span>Device sumber</span>
+            <select class="manual-source-asset" required>${options}</select>
+          </label>
+          <label>
+            <span>Device tujuan</span>
+            <select class="manual-target-asset" required>${options}</select>
+          </label>
+          <label>
+            <span>Alasan konfirmasi</span>
+            <textarea class="manual-relation-reason" rows="3" minlength="3" required
+              placeholder="Contoh: diverifikasi dari dokumentasi dan pengecekan lapangan"></textarea>
+          </label>
+        </div>
+        <p class="decision-dialog-message manual-relation-message" role="status"></p>
+        <footer>
+          <button class="button secondary cancel-manual-relation" type="button">Batal</button>
+          <button class="button primary submit-manual-relation" type="submit">Konfirmasi koneksi</button>
+        </footer>
+      </form>
+    </dialog>
+  `
+}
+
 function decisionDialogCopy(action) {
   return {
     reject: {
@@ -1057,9 +1233,7 @@ function decisionDialogCopy(action) {
 function renderReadiness(summary, locationCandidates = null) {
   const hasLocationScope = Array.isArray(locationCandidates)
   const openCount = hasLocationScope
-    ? locationCandidates.filter(({ candidateStatus }) => (
-      ['candidate', 'ambiguous', 'unresolved'].includes(candidateStatus)
-    )).length
+    ? locationCandidates.filter(isReviewableCandidate).length
     : summary.summary?.ambiguousCount ?? 0
   const readiness = hasLocationScope
     ? (openCount ? 'not_ready' : 'ready')
@@ -1076,6 +1250,16 @@ function renderReadiness(summary, locationCandidates = null) {
 function isBulkConfirmableCandidate(candidate) {
   return candidate.candidateStatus === 'candidate'
     && candidate.proposalStatus === 'recommended'
+}
+
+function isReviewableCandidate(candidate) {
+  return isBulkConfirmableCandidate(candidate)
+    || ['ambiguous', 'unresolved'].includes(candidate.candidateStatus)
+}
+
+function isLineLabelConfirmableCandidate(candidate) {
+  return isBulkConfirmableCandidate(candidate)
+    && ['line_label_connection', 'line_label_attachment'].includes(candidate.candidateType)
 }
 
 function reviewState(icon, title, message, loading = false) {
@@ -1101,6 +1285,8 @@ function labelCandidateType(value) {
     inline_device: 'Perangkat inline',
     endpoint_endpoint: 'Gap antar endpoint',
     intersection_with_junction: 'Intersection dengan junction',
+    line_label_connection: 'Koneksi dari nama garis',
+    line_label_attachment: 'Endpoint kabel dari nama garis',
     explicit_metadata: 'Metadata eksplisit',
     unresolved: 'Endpoint belum terhubung',
   }[value] ?? value

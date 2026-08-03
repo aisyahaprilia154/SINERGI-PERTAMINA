@@ -86,6 +86,38 @@ export async function loadTopologyProjection({
   )
 }
 
+export async function traceTopology({
+  datasetVersionId,
+  sourceAssetId,
+  targetAssetId = null,
+  graphRevision,
+  direction = 'both',
+  scopeAssetIds = null,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
+  if (!sourceAssetId) throw new TypeError('Source asset ID wajib tersedia.')
+  if (!graphRevision) throw new TypeError('Graph revision wajib tersedia.')
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + '/topology/trace',
+    {
+      token,
+      signal,
+      method: 'POST',
+      body: {
+        sourceAssetId,
+        graphRevision,
+        direction,
+        ...(Array.isArray(scopeAssetIds) ? { scopeAssetIds } : {}),
+        ...(targetAssetId ? { targetAssetId } : {}),
+      },
+    },
+  )
+}
+
 export async function loadDatasetProjection({
   datasetVersionId,
   projection,
@@ -131,7 +163,7 @@ export async function reviewTopologyBulk({
   apiBase = '',
 } = {}) {
   if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
-  if (!['confirm-all', 'revoke-all'].includes(action)) {
+  if (!['confirm-all', 'confirm-line-labels', 'revoke-all'].includes(action)) {
     throw new TypeError('Action bulk topology tidak valid.')
   }
   return topologyRequest(
@@ -142,6 +174,38 @@ export async function reviewTopologyBulk({
       signal,
       method: 'POST',
       body: { reason: String(reason ?? '').trim() || undefined },
+    },
+  )
+}
+
+export async function createTopologyRelation({
+  datasetVersionId,
+  sourceAssetId,
+  targetAssetId,
+  relationType = 'connected-to',
+  direction = 'undirected',
+  reason,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
+  if (!sourceAssetId) throw new TypeError('Source asset ID wajib tersedia.')
+  if (!targetAssetId) throw new TypeError('Target asset ID wajib tersedia.')
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + '/topology/relations',
+    {
+      token,
+      signal,
+      method: 'POST',
+      body: {
+        sourceAssetId,
+        targetAssetId,
+        relationType,
+        direction,
+        reason: String(reason ?? '').trim() || undefined,
+      },
     },
   )
 }
@@ -182,6 +246,8 @@ async function topologyRequest(url, {
     )
     error.code = payload?.error?.code
     error.status = response.status
+    error.details = payload?.error?.details ?? null
+    error.payload = payload
     throw error
   }
   return payload
