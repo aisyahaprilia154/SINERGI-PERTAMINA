@@ -136,6 +136,38 @@ test('classified junction enables a reviewable intersection candidate', () => {
   assert.deepEqual(intersection.sourceGeometryIds.sort(), ['geometry:FO-A', 'geometry:FO-B'])
 })
 
+test('multiple junction evidences for one path endpoint materialize as one relation', () => {
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [node('OTB-01', 'infrastructure', 'OTB Junction', [110, -7])],
+    paths: [
+      pathObject('FO-A', 'fiber_optic', 'Fiber Optic', [
+        [110, -7.001],
+        [110, -6.999],
+      ]),
+      pathObject('FO-B', 'fiber_optic', 'Fiber Optic', [
+        [109.999, -7],
+        [110.001, -7],
+      ]),
+      pathObject('FO-C', 'fiber_optic', 'Fiber Optic', [
+        [109.999, -7.001],
+        [110.001, -6.999],
+      ]),
+    ],
+  }), {
+    config: {
+      autoConfirmSpatialInference: true,
+      heldOutPrecision: 0.99,
+      pathAccuracy: 0.95,
+    },
+  })
+
+  const junctionRelations = result.confirmedRelations.filter(({ relationType }) => (
+    relationType === 'path-junction'
+  ))
+  assert.equal(junctionRelations.length, 3)
+  assert.equal(result.validation.summary.errors, 0)
+})
+
 test('nearly equal endpoint-device scores become ambiguous', () => {
   const result = generateRelationArtifacts(topologyBundle({
     nodes: [
