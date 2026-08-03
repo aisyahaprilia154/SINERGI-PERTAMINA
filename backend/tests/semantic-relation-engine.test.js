@@ -168,6 +168,32 @@ test('multiple junction evidences for one path endpoint materialize as one relat
   assert.equal(result.validation.summary.errors, 0)
 })
 
+test('tiang can be reviewed as an inline anchor on every nearby compatible path', () => {
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [node('T-021', 'infrastructure', 'Tiang', [110.00005, -7])],
+    paths: [
+      pathObject('FO-A', 'fiber_optic', 'Fiber Optic', [
+        [110, -7],
+        [110.00005, -7],
+        [110.001, -7],
+      ]),
+      pathObject('FO-B', 'fiber_optic', 'Fiber Optic', [
+        [110.00005, -7.001],
+        [110.00005, -7],
+        [110.00005, -6.999],
+      ]),
+    ],
+  }))
+
+  const inlineCandidates = result.candidates.filter(({ candidateType }) => (
+    candidateType === 'inline_device'
+  ))
+  assert.equal(inlineCandidates.length, 2)
+  assert.ok(inlineCandidates.every(({ candidateStatus, proposalStatus }) => (
+    candidateStatus === 'candidate' && proposalStatus === 'recommended'
+  )))
+})
+
 test('nearly equal endpoint-device scores become ambiguous', () => {
   const result = generateRelationArtifacts(topologyBundle({
     nodes: [
