@@ -821,11 +821,33 @@ function topologyLabelAliases(sourceName) {
   const tokens = normalizeToken(sourceName).split(' ').filter(Boolean)
   if (!tokens.length) return []
   const aliases = [tokens]
-  if (['cam', 'camera', 'kamera'].includes(tokens[0]) && tokens.length > 1) {
-    aliases.push(['c', ...tokens.slice(1)])
+  const baseTokens = stripDeviceLabelDecorators(tokens)
+  if (baseTokens.join(' ') !== tokens.join(' ')) aliases.push(baseTokens)
+  if (baseTokens[0] === 'jb' && baseTokens.length > 1) {
+    // Some source lines abbreviate the second endpoint, e.g. JB-004_005.
+    aliases.push(baseTokens.slice(1))
+    if (baseTokens[1] === 'cctv' && baseTokens.length > 2) {
+      aliases.push(['jb', ...baseTokens.slice(2)])
+    }
   }
-  if (tokens[0] === 'server') aliases.push(['svr'])
-  return aliases
+  if (['cam', 'camera', 'kamera'].includes(baseTokens[0]) && baseTokens.length > 1) {
+    aliases.push(['c', ...baseTokens.slice(1)])
+  }
+  if (baseTokens[0] === 'server') aliases.push(['svr'])
+  return [...new Map(aliases.map((alias) => [alias.join(' '), alias])).values()]
+}
+
+function stripDeviceLabelDecorators(tokens) {
+  const suffixes = new Set([
+    'exp',
+    'extended',
+    'wp',
+    'rekomendasi',
+    'recommendation',
+  ])
+  let end = tokens.length
+  while (end > 2 && suffixes.has(tokens[end - 1])) end -= 1
+  return tokens.slice(0, end)
 }
 
 function tokenSequencePositions(tokens, sequence) {
@@ -1959,7 +1981,7 @@ function compatiblePathNode(path, node) {
   if (path.siteId !== node.siteId) {
     return { compatible: false, score: 0, ruleId: 'hard-gate.site' }
   }
-  const type = normalizeToken(node.assetType)
+  const type = nodeSemanticText(node)
   if (path.networkFamily === node.networkFamily) {
     return {
       compatible: true,
@@ -2004,11 +2026,11 @@ function familiesCompatibleForRelation(source, target) {
 
 function inlineNodeAllowed(node) {
   return /junction|\bjb\b|switch|router|otb|splitter|coupler|core/
-    .test(normalizeToken(node.assetType))
+    .test(nodeSemanticText(node))
 }
 
 function nodeCapacity(node) {
-  const type = normalizeToken(node?.assetType)
+  const type = nodeSemanticText(node)
   if (/core|switch|router|nvr|server/.test(type)) return 48
   if (/junction|\bjb\b|otb|splitter|coupler/.test(type)) return 12
   if (/camera|cctv|access point|\bap\b|printer|terminal/.test(type)) return 1
@@ -2016,11 +2038,20 @@ function nodeCapacity(node) {
 }
 
 function endpointRoleScore(node, inline) {
-  const type = normalizeToken(node.assetType)
+  const type = nodeSemanticText(node)
   if (inline) return inlineNodeAllowed(node) ? 1 : 0
   if (/camera|cctv|access point|\bap\b|printer|terminal/.test(type)) return 1
   if (/junction|\bjb\b|switch|router|otb|core|nvr/.test(type)) return 0.9
   return 0.5
+}
+
+function nodeSemanticText(node) {
+  return normalizeToken([
+    node?.assetType,
+    node?.category,
+    node?.sourceName,
+    node?.sourceFolderPath,
+  ].filter(Boolean).join(' '))
 }
 
 function evidenceContext(evidence = []) {

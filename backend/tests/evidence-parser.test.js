@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   buildCanonicalParserResult,
   PARSER_VERSION,
+  rebuildStoredTopologyInputBundle,
 } from '../src/domain/parser-contract.js'
 import { parseKmlText } from '../src/import/kml-parser.js'
 
@@ -122,6 +123,44 @@ test('canonical evidence is deterministic, versioned, and topology bundle only c
   assert.ok(first.classifiedObjects.some(({ objectRole }) => objectRole === 'visual_only'))
   assert.ok(first.classifiedObjects.some(({ objectRole }) => objectRole === 'unknown'))
   assert.ok(first.sourceGeometries.some(({ valid }) => valid === false))
+})
+
+test('stored topology rebuild refreshes stale known classifications from source evidence', () => {
+  const parserOutput = parseKmlText(`<?xml version="1.0"?>
+    <kml><Document>
+      <Folder><name>JUNCTION BOX</name>
+        <Placemark id="jb-002"><name>JB-002-exp</name>
+          <Point><coordinates>110,-7</coordinates></Point>
+        </Placemark>
+      </Folder>
+    </Document></kml>`)
+  const parsed = buildCanonicalParserResult({
+    parserOutput,
+    datasetVersion: DATASET_VERSION,
+    sourceSelection: { selectedKmlPath: 'doc.kml', resources: [] },
+  })
+  const stale = {
+    ...structuredClone(parsed),
+    datasetVersion: DATASET_VERSION,
+    classifiedObjects: parsed.classifiedObjects.map((object) => ({
+      ...structuredClone(object),
+      assetType: 'cctv',
+      category: 'cctv',
+      classificationRuleSetVersion: 'semantic-classifier/1.0.0',
+    })),
+  }
+
+  const repaired = rebuildStoredTopologyInputBundle(stale)
+  const node = repaired.classifiedObjects.find(({ sourceFeatureId }) => (
+    sourceFeatureId === parsed.sourceFeatures[0].sourceFeatureId
+  ))
+
+  assert.equal(repaired.repairedCount, 1)
+  assert.equal(node.objectRole, 'device_node')
+  assert.equal(node.networkFamily, 'cctv')
+  assert.equal(node.assetType, 'junction box')
+  assert.equal(node.classificationRuleSetVersion, 'semantic-classifier/1.1.0')
+  assert.ok(repaired.changed)
 })
 
 test('overlay resources resolve relative to selected KML, deduplicate by checksum, and never fetch URLs', () => {

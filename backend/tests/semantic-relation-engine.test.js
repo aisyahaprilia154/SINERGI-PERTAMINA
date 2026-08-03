@@ -252,6 +252,50 @@ test('line endpoint labels create one bulk-reviewable device connection', () => 
   assert.ok(confirmed.graph.edges[0].sourceGeometryIds.includes('geometry:CBL-LABEL'))
 })
 
+test('line labels resolve decorated JB names and shorthand endpoint identifiers', () => {
+  const first = node('JB-001-exp', 'cctv', 'cctv', [110, -7])
+  const second = node('JB-002-exp', 'cctv', 'cctv', [110.001, -7])
+  const shorthandFirst = node('JB-004', 'cctv', 'cctv', [110.01, -7])
+  const shorthandSecond = node('JB-005', 'cctv', 'cctv', [110.011, -7])
+  ;[first, second, shorthandFirst, shorthandSecond].forEach(({ object }) => {
+    object.sourceFolderPath = '/site/JUNCTION BOX/JB Rekomendasi'
+  })
+  first.object.sourceName = 'JB-001-exp'
+  second.object.sourceName = 'JB-002-exp'
+  shorthandFirst.object.sourceName = 'JB-004'
+  shorthandSecond.object.sourceName = 'JB-005'
+
+  const decoratedPath = pathObject('FO-DECORATED', 'fiber_optic', 'Fiber Optic', [
+    [110, -7],
+    [110.001, -7],
+  ])
+  decoratedPath.object.sourceName = 'FO-JB-001_JB-002-'
+  decoratedPath.object.sourceFolderPath = '/site/KABEL/FIBER OPTIC/FO Rekomendasi'
+  const shorthandPath = pathObject('FO-SHORTHAND', 'fiber_optic', 'Fiber Optic', [
+    [110.01, -7],
+    [110.011, -7],
+  ])
+  shorthandPath.object.sourceName = 'FO-JB-004_005'
+  shorthandPath.object.sourceFolderPath = '/site/KABEL/FIBER OPTIC/FO Rekomendasi'
+
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [first, second, shorthandFirst, shorthandSecond],
+    paths: [decoratedPath, shorthandPath],
+  }))
+
+  assert.equal(result.unresolved.length, 0)
+  assert.ok(result.candidates.some(({ candidateType, targetAssetId }) => (
+    candidateType === 'line_label_connection' && targetAssetId === 'JB-002-exp'
+  )))
+  assert.ok(result.candidates.some(({ candidateType, targetAssetId }) => (
+    candidateType === 'line_label_connection' && targetAssetId === 'JB-005'
+  )))
+  assert.equal(
+    result.candidates.filter(({ candidateType }) => candidateType === 'line_label_attachment').length,
+    4,
+  )
+})
+
 test('manual explicit device relation is confirmed and can override family compatibility', () => {
   const result = generateRelationArtifacts(topologyBundle({
     nodes: [
