@@ -71,6 +71,26 @@ test('spatial auto-confirm requires both explicit policy approval and accuracy g
   assert.equal(approved.readiness.topologyReadiness, 'ready')
 })
 
+test('redundant confirmed attachments to the same path endpoint are materialized once', () => {
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [node('CAM-01', 'cctv', 'CCTV Camera', [110, -7])],
+    paths: [pathObject('CBL-01', 'cctv', 'CCTV Cable', [
+      [110, -7],
+      [110.00001, -7],
+    ])],
+  }), {
+    config: {
+      autoConfirmSpatialInference: true,
+      heldOutPrecision: 0.99,
+      pathAccuracy: 0.95,
+    },
+  })
+
+  assert.equal(result.confirmedRelations.length, 1)
+  assert.equal(result.confirmedRelations[0].relationKind, 'path_attachment')
+  assert.equal(result.validation.summary.errors, 0)
+})
+
 test('crossing lines do not connect without classified junction evidence', () => {
   const result = generateRelationArtifacts(topologyBundle({
     paths: [
@@ -185,6 +205,88 @@ test('valid explicit metadata is confirmed but dangling metadata blocks readines
     issueCode === 'explicit_relation_dangling'
   )))
   assert.equal(dangling.confirmedRelations.length, 0)
+})
+
+test('line endpoint labels create one bulk-reviewable device connection', () => {
+  const left = node('JB-A', 'cctv', 'Junction Box', [110, -7])
+  const right = node('CAM-B', 'cctv', 'CCTV Camera', [110.001, -7])
+  const cable = pathObject('CBL-LABEL', 'cctv', 'CCTV Cable', [
+    [110, -7],
+    [110.001, -7],
+  ])
+  left.object.sourceName = 'JB-A'
+  left.object.sourceFolderPath = '/site/CCTV'
+  right.object.sourceName = 'Cam-B'
+  right.object.sourceFolderPath = '/site/CCTV'
+  cable.object.sourceName = 'Jalur JB-A - C-B'
+  cable.object.sourceFolderPath = '/site/Cable'
+
+  const bundle = topologyBundle({
+    nodes: [left, right],
+    paths: [cable],
+  })
+  const pending = generateRelationArtifacts(bundle)
+  const labelCandidate = pending.candidates.find(({ candidateType }) => (
+    candidateType === 'line_label_connection'
+  ))
+  assert.ok(labelCandidate)
+  assert.equal(labelCandidate.candidateStatus, 'candidate')
+  assert.equal(labelCandidate.proposalStatus, 'recommended')
+  assert.equal(labelCandidate.relationKind, 'device_edge')
+
+  const confirmedCandidates = pending.candidates.map((candidate) => (
+    candidate.candidateId === labelCandidate.candidateId
+      ? {
+        ...candidate,
+        candidateStatus: 'confirmed',
+        proposalStatus: 'confirmed_by_admin_bulk',
+      }
+      : candidate
+  ))
+  const confirmed = generateRelationArtifacts(bundle, {
+    previousCandidates: confirmedCandidates,
+  })
+  assert.equal(confirmed.graph.edges.length, 1)
+  assert.equal(confirmed.confirmedRelations[0].provenance, 'line_label_inference')
+  assert.equal(confirmed.validation.summary.errors, 0)
+  assert.ok(confirmed.graph.edges[0].sourceGeometryIds.includes('geometry:CBL-LABEL'))
+})
+
+test('manual explicit device relation is confirmed and can override family compatibility', () => {
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [
+      node('CAM-A', 'cctv', 'CCTV Camera', [110, -7]),
+      node('SW-A', 'infrastructure', 'Switch', [110.001, -7]),
+    ],
+    explicitRelations: [{
+      explicitRelationEvidenceId: 'manual-1',
+      datasetVersionId: 'dv-topology',
+      sourceReference: 'CAM-A',
+      targetReference: 'SW-A',
+      relationType: 'connected-to',
+      direction: 'undirected',
+      source: 'manual_admin',
+      sourceKey: 'manual_device_connection',
+      manualConfirmation: {
+        actorId: 'admin-1',
+        reviewedAt: '2026-08-03T00:00:00.000Z',
+        reason: 'Diverifikasi dari dokumentasi lapangan.',
+        auditEventId: 'audit-1',
+      },
+    }],
+  }), {
+    config: { autoConfirmExplicitMetadata: false },
+  })
+
+  assert.equal(result.candidates.length, 1)
+  assert.equal(result.candidates[0].candidateStatus, 'confirmed')
+  assert.equal(result.candidates[0].proposalStatus, 'confirmed_by_admin')
+  assert.equal(result.confirmedRelations.length, 1)
+  assert.equal(result.confirmedRelations[0].provenance, 'manual_admin')
+  assert.equal(result.confirmedRelations[0].verifiedBy, 'admin-1')
+  assert.equal(result.confirmedRelations[0].auditEventId, 'audit-1')
+  assert.equal(result.graph.edges.length, 1)
+  assert.equal(result.validation.summary.errors, 0)
 })
 
 test('mixed dataset versions and invalid geometry references reject the whole bundle', () => {

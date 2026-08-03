@@ -15,14 +15,22 @@ export function buildSchematicGraph({
     ? topologyGraph.edges.map((edge, index) => ({
       sourceId: edge.sourceNodeId,
       targetId: edge.targetNodeId,
+      id: edge.id,
       networkId: edge.networkId || null,
       relationType: edge.relationType,
       relationSource: edge.relationSource,
       sourceGeometryId: edge.sourceGeometryId,
+      sourceGeometryIds: edge.sourceGeometryIds ?? [],
+      pathAssetIds: edge.pathAssetIds ?? [],
       order: index,
     }))
     : []
   const hasTopology = topologyEdges.length > 0
+  const topologyNodeIds = new Set(
+    (topologyGraph?.nodes ?? []).map((node) => node.canonicalAssetId ?? node.assetId ?? node.id),
+  )
+  const topologyAssets = () => uniqueIds([...topologyNodeIds])
+    .filter((assetId) => assetById.has(assetId))
 
   let mode = 'network'
   let anchorAssetId = null
@@ -46,7 +54,9 @@ export function buildSchematicGraph({
     sourceEdges = buildTraceEdges(tracePath, traceRelations, networks)
   } else if (scope === 'full-map') {
     mode = 'full-map'
-    nodeIds = uniqueIds(assets.map(({ id }) => id))
+    nodeIds = hasTopology
+      ? topologyAssets()
+      : uniqueIds(assets.map(({ id }) => id))
     sourceEdges = hasTopology
       ? topologyEdges
       : networks.flatMap((network) =>
@@ -85,12 +95,14 @@ export function buildSchematicGraph({
     nodeIds = uniqueIds([
       focusedAssetId,
       ...directEdges.flatMap((edge) => [edge.sourceId, edge.targetId]),
-    ]).filter((assetId) => assetById.has(assetId))
+    ]).filter((assetId) => assetById.has(assetId)
+      && (!hasTopology || topologyNodeIds.has(assetId)))
     sourceEdges = directEdges
   } else {
     const selectedNetworks = networks.filter((network) => selectedIds.has(network.id))
     nodeIds = uniqueIds(selectedNetworks.flatMap((network) => network.nodeIds || []))
-      .filter((assetId) => assetById.has(assetId))
+      .filter((assetId) => assetById.has(assetId)
+        && (!hasTopology || topologyNodeIds.has(assetId)))
     sourceEdges = hasTopology
       ? topologyEdges.filter(({ networkId }) => selectedIds.has(networkId))
       : selectedNetworks.flatMap((network) =>
@@ -122,7 +134,7 @@ export function buildSchematicGraph({
     .map((edge, index) => {
       const network = networkById.get(edge.networkId)
       return {
-        id: `${edge.networkId || 'relation'}:${edge.sourceId}:${edge.targetId}:${index}`,
+        id: edge.id || `${edge.networkId || 'relation'}:${edge.sourceId}:${edge.targetId}:${index}`,
         sourceId: edge.sourceId,
         targetId: edge.targetId,
         networkId: edge.networkId || null,
@@ -132,6 +144,8 @@ export function buildSchematicGraph({
         relationType: edge.relationType || 'explicit-network-edge',
         relationSource: edge.relationSource || 'explicit',
         sourceGeometryId: edge.sourceGeometryId,
+        sourceGeometryIds: edge.sourceGeometryIds ?? [],
+        pathAssetIds: edge.pathAssetIds ?? [],
         order: edge.order ?? index,
       }
     })
@@ -183,6 +197,9 @@ function buildTraceEdges(tracePath, traceRelations, networks) {
       relationType: relation?.relationType || 'explicit-network-edge',
       relationSource: relation?.relationSource || 'explicit',
       sourceGeometryId: relation?.sourceGeometryId,
+      sourceGeometryIds: relation?.sourceGeometryIds ?? [],
+      pathAssetIds: relation?.pathAssetIds ?? [],
+      id: relation?.edgeId || relation?.id,
       order: index,
     }
   })

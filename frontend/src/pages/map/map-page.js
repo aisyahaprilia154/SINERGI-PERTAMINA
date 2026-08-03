@@ -7,6 +7,7 @@ import {
   loadActiveAssetDetail,
   loadActiveDataset,
   loadDatasetProjection,
+  traceTopology,
 } from '../../services/active-dataset-service.js'
 import { renderAssetDetailDrawer } from './asset-detail-drawer.js'
 import { createMapLibreSurface } from './maplibre-map.js'
@@ -19,8 +20,6 @@ import {
 } from './network-sidebar-state.js'
 import {
   buildExplicitRelationGraph,
-  findReachableDestinations,
-  findTracePath,
   getConnectedAssets,
 } from './network-tracing.js'
 import { openSchematicDialog } from './diagram-dialog.js'
@@ -96,9 +95,17 @@ export async function renderMapPage(container) {
   } = mapData
   const topologyReadiness = mapData.topologyReadiness ?? {
     ready: false,
+    traceAvailable: false,
+    diagramAvailable: false,
     message: TOPOLOGY_NOT_READY_MESSAGE,
   }
-  const operationalTopologyGraph = topologyReadiness.ready
+  const globalTraceAvailable = topologyReadiness.traceAvailable
+    ?? topologyReadiness.ready
+    ?? false
+  const globalDiagramAvailable = topologyReadiness.diagramAvailable
+    ?? topologyReadiness.ready
+    ?? false
+  const operationalTopologyGraph = globalTraceAvailable
     ? fullTopologyGraph
     : emptyOperationalTopologyGraph(activeContext.datasetVersionId)
   const selectedArea = selectLocationGroup(window.location.search, locationGroups)
@@ -120,6 +127,8 @@ export async function renderMapPage(container) {
     networks: allNetworks,
     topologyGraph: operationalTopologyGraph,
   })
+  const traceAvailable = globalTraceAvailable && topologyGraph.edges.length > 0
+  const diagramAvailable = globalDiagramAvailable && topologyGraph.edges.length > 0
   const hasRenderableData = geometries.length > 0
   const resolvedOverlays = (overlayResult[0].status === 'fulfilled'
     ? overlayResult[0].value.items ?? []
@@ -152,6 +161,10 @@ export async function renderMapPage(container) {
     assetIds: validIds.assetIds,
     topologyGraph,
   })
+  const traceableAssetIds = new Set((topologyGraph.edges ?? []).flatMap((edge) => [
+    edge.sourceAssetId ?? edge.sourceNodeId,
+    edge.targetAssetId ?? edge.targetNodeId,
+  ]))
   const assetDetailCache = new Map()
   let assetDetailRequest = 0
   const state = {
@@ -163,6 +176,8 @@ export async function renderMapPage(container) {
     traceCandidates: [],
     traceError: null,
     traceExplanation: null,
+    traceResult: null,
+    traceGraphRevision: topologyGraph.graphRevision ?? null,
     assetDetailStatus: 'ready',
     assetDetailError: null,
     showAdditionalMetadata: false,
@@ -173,6 +188,7 @@ export async function renderMapPage(container) {
     dataStatus: 'loading',
     dataError: null,
   }
+  let traceRequestId = 0
 
   container.innerHTML = `
     <div class="map-app">
@@ -191,7 +207,7 @@ export async function renderMapPage(container) {
           assetsWithoutGeometry: renderingSummary.assetsWithoutGeometry,
           selectedArea,
           counts,
-          confirmedConnectionCount: topologyReadiness.ready ? topologyGraph.edges.length : 0,
+          confirmedConnectionCount: traceAvailable ? topologyGraph.edges.length : 0,
           topologyReadiness,
         })}
       </main>
@@ -330,6 +346,9 @@ export async function renderMapPage(container) {
       selectedNetworkIds: selection.selectedNetworkIds,
       selectedAssetId: selection.selectedAssetId,
       traceNodeIds: state.tracePath,
+      traceGeometryIds: state.traceRelations.flatMap((relation) => (
+        relation.sourceGeometryIds ?? []
+      )),
       connectedNodeIds,
       dimOthers: state.dimOthers,
     })
@@ -410,7 +429,11 @@ export async function renderMapPage(container) {
       showAdditionalMetadata: state.showAdditionalMetadata,
       trace: getDrawerTraceState(),
       topologyReady: topologyReadiness.ready,
-      topologyMessage: topologyReadiness.message || TOPOLOGY_NOT_READY_MESSAGE,
+      traceAvailable,
+      diagramAvailable,
+      topologyMessage: topologyReadiness.traceMessage
+        || topologyReadiness.message
+        || TOPOLOGY_NOT_READY_MESSAGE,
     })
     drawer.classList.add('open')
     drawer.setAttribute('aria-hidden', 'false')
@@ -484,6 +507,13 @@ export async function renderMapPage(container) {
       status: state.traceStatus,
       error: state.traceError,
       explanation: state.traceExplanation,
+      sourceAssetId: state.traceResult?.sourceAssetId ?? state.traceFromId,
+      targetAssetId: state.traceResult?.targetAssetId ?? state.traceToId,
+      graphRevision: state.traceResult?.graphRevision ?? state.traceGraphRevision,
+      hopCount: state.traceResult?.hopCount ?? null,
+      totalLengthMeters: state.traceResult?.totalLengthMeters ?? null,
+      networkFamily: state.traceResult?.networkFamily ?? null,
+      verifiedAt: state.traceResult?.verifiedAt ?? null,
       candidates: state.traceCandidates.map((candidate) => ({
         asset: assetById[candidate.assetId],
         distance: candidate.distance,
@@ -509,7 +539,7 @@ export async function renderMapPage(container) {
     banner.hidden = false
     const step = banner.querySelector('.trace-step')
     const title = banner.querySelector('strong')
-    const description = banner.querySelector('div span')
+    const description = banner.querySelector('.trace-step + div span')
     if (state.traceStatus === 'selecting-start') {
       step.textContent = '1'
       title.textContent = 'Pilih titik awal'
@@ -542,13 +572,18 @@ export async function renderMapPage(container) {
     state.traceCandidates = []
     state.traceError = null
     state.traceExplanation = null
+    state.traceResult = null
+    state.traceGraphRevision = topologyGraph.graphRevision ?? null
   }
 
-  function beginTracing(startId = null, { historyMode = 'push' } = {}) {
+  async function beginTracing(startId = null, { historyMode = 'push' } = {}) {
+    const requestId = ++traceRequestId
     resetTraceState()
-    if (!topologyReadiness.ready) {
+    if (!traceAvailable) {
       state.traceStatus = 'error'
-      state.traceError = topologyReadiness.message || TOPOLOGY_NOT_READY_MESSAGE
+      state.traceError = topologyReadiness.traceMessage
+        || topologyReadiness.message
+        || TOPOLOGY_NOT_READY_MESSAGE
       updateUrl(historyMode)
       updateTraceBanner()
       renderDrawer()
@@ -566,7 +601,16 @@ export async function renderMapPage(container) {
 
     if (!assetById[startId]) {
       state.traceStatus = 'error'
-      state.traceError = 'Aset awal tidak tersedia pada dataset aktif.'
+      state.traceError = 'Aset ini belum terdaftar sebagai node topology.'
+      updateUrl(historyMode)
+      updateTraceBanner()
+      renderDrawer()
+      syncMap()
+      return
+    }
+    if (!traceableAssetIds.has(startId)) {
+      state.traceStatus = 'error'
+      state.traceError = 'Belum ada koneksi terkonfirmasi dari aset ini.'
       updateUrl(historyMode)
       updateTraceBanner()
       renderDrawer()
@@ -576,15 +620,44 @@ export async function renderMapPage(container) {
 
     state.traceFromId = startId
     state.tracePath = [startId]
-    state.traceCandidates = findReachableDestinations(relationGraph, startId)
-      .sort((left, right) => left.distance - right.distance
-        || assetById[left.assetId].name.localeCompare(assetById[right.assetId].name, 'id'))
+    state.traceStatus = 'loading'
+    state.traceError = null
+    state.traceGraphRevision = topologyGraph.graphRevision ?? null
+    updateUrl(historyMode)
+    updateTraceBanner()
+    renderDrawer()
+    syncMap()
 
-    if (!state.traceCandidates.length) {
+    try {
+      const result = await traceTopology({
+        datasetVersionId: activeContext.datasetVersionId,
+        sourceAssetId: startId,
+        graphRevision: state.traceGraphRevision,
+        direction: 'both',
+        scopeAssetIds: validIds.assetIds,
+      })
+      if (requestId !== traceRequestId) return
+      state.traceResult = result
+      state.traceGraphRevision = result.graphRevision || state.traceGraphRevision
+      if (result.status === 'destinations' && result.destinations?.length) {
+        state.traceCandidates = result.destinations
+          .filter(({ assetId }) => assetById[assetId])
+          .sort((left, right) => left.distance - right.distance
+            || assetById[left.assetId].name.localeCompare(assetById[right.assetId].name, 'id'))
+        state.traceStatus = state.traceCandidates.length ? 'choosing' : 'error'
+        state.traceError = state.traceCandidates.length
+          ? null
+          : 'Target berada di luar area peta yang sedang dipilih.'
+      } else {
+        state.traceStatus = 'error'
+        state.traceCandidates = []
+        state.traceError = result.message || 'Belum ada koneksi terkonfirmasi dari aset ini.'
+      }
+    } catch (error) {
+      if (requestId !== traceRequestId) return
       state.traceStatus = 'error'
-      state.traceError = 'Tidak ada tujuan yang dapat dicapai melalui topologi terkonfirmasi dari aset ini.'
-    } else {
-      state.traceStatus = 'choosing'
+      state.traceError = traceErrorMessage(error)
+      state.traceCandidates = []
     }
     updateUrl(historyMode)
     updateTraceBanner()
@@ -592,8 +665,8 @@ export async function renderMapPage(container) {
     syncMap()
   }
 
-  function runTraceTo(targetId, { historyMode = 'push', defer = true } = {}) {
-    if (!topologyReadiness.ready) {
+  async function runTraceTo(targetId, { historyMode = 'push' } = {}) {
+    if (!traceAvailable) {
       beginTracing(null, { historyMode })
       return
     }
@@ -602,23 +675,35 @@ export async function renderMapPage(container) {
       return
     }
 
+    const requestId = ++traceRequestId
     state.traceToId = targetId
     state.traceStatus = 'loading'
     state.traceError = null
+    state.traceResult = null
     updateTraceBanner()
     renderDrawer()
     syncMap()
 
-    const finishTraversal = () => {
-      const result = findTracePath(relationGraph, state.traceFromId, targetId)
-      if (result.status === 'found' && result.assetIds.length > 1) {
+    try {
+      const result = await traceTopology({
+        datasetVersionId: activeContext.datasetVersionId,
+        sourceAssetId: state.traceFromId,
+        targetAssetId: targetId,
+        graphRevision: topologyGraph.graphRevision,
+        direction: 'both',
+        scopeAssetIds: validIds.assetIds,
+      })
+      if (requestId !== traceRequestId) return
+      state.traceResult = result
+      state.traceGraphRevision = result.graphRevision || state.traceGraphRevision
+      if (result.status === 'found' && result.nodeIds?.length > 1) {
         state.traceStatus = 'active'
-        state.tracePath = result.assetIds
-        state.traceRelations = result.relations
+        state.tracePath = result.nodeIds.filter((assetId) => assetById[assetId])
+        state.traceRelations = toUiTraceRelations(result.edges)
         state.traceExplanation = result.explanation
         state.traceError = null
         updateUrl(historyMode)
-        canvasApi.focusAssetBounds(result.assetIds)
+        canvasApi.focusAssetBounds(state.tracePath)
       } else {
         state.traceStatus = 'error'
         state.tracePath = state.traceFromId ? [state.traceFromId] : []
@@ -627,16 +712,23 @@ export async function renderMapPage(container) {
         state.traceError = result.message || 'Tujuan tracing tidak dapat digunakan.'
         updateUrl(historyMode)
       }
-      updateTraceBanner()
-      renderDrawer()
-      syncMap()
+    } catch (error) {
+      if (requestId !== traceRequestId) return
+      state.traceStatus = 'error'
+      state.tracePath = state.traceFromId ? [state.traceFromId] : []
+      state.traceRelations = []
+      state.traceExplanation = null
+      state.traceResult = null
+      state.traceError = traceErrorMessage(error)
+      updateUrl(historyMode)
     }
-
-    if (defer) window.requestAnimationFrame(finishTraversal)
-    else finishTraversal()
+    updateTraceBanner()
+    renderDrawer()
+    syncMap()
   }
 
   function stopTracing() {
+    traceRequestId += 1
     resetTraceState()
     updateUrl()
     updateTraceBanner()
@@ -645,9 +737,11 @@ export async function renderMapPage(container) {
   }
 
   function openSchematic() {
-    if (!topologyReadiness.ready) {
+    if (!diagramAvailable) {
       state.traceStatus = 'error'
-      state.traceError = topologyReadiness.message || TOPOLOGY_NOT_READY_MESSAGE
+      state.traceError = topologyReadiness.message
+        || topologyReadiness.traceMessage
+        || TOPOLOGY_NOT_READY_MESSAGE
       updateTraceBanner()
       renderDrawer()
       return
@@ -685,6 +779,27 @@ export async function renderMapPage(container) {
     })
   }
 
+  function traceErrorMessage(error) {
+    if (error?.code === 'topology_graph_stale') {
+      return 'Dataset atau graph berubah. Muat ulang peta untuk menggunakan versi terbaru.'
+    }
+    if (error?.code === 'topology_graph_invalid') {
+      return 'Tracing dihentikan karena confirmed graph tidak valid.'
+    }
+    return error?.message || 'Layanan tracing tidak dapat digunakan.'
+  }
+
+  function toUiTraceRelations(edges = []) {
+    return edges.map((edge) => ({
+      ...edge,
+      id: edge.edgeId || edge.id,
+      sourceGeometryId: edge.sourceGeometryIds?.[0] || edge.sourceGeometryId,
+      sourceGeometryIds: edge.sourceGeometryIds ?? [],
+      relationStatus: edge.verificationStatus || 'confirmed',
+      networkId: edge.networkId || null,
+    }))
+  }
+
   function openDataTransfer(initialMode = 'import') {
     openMapDataTransferDialog({
       activeContext,
@@ -694,8 +809,10 @@ export async function renderMapPage(container) {
       initialMode,
       onActivated: () => window.location.reload(),
       onOpenDiagram: openSchematic,
-      topologyReady: topologyReadiness.ready,
-      topologyMessage: topologyReadiness.message || TOPOLOGY_NOT_READY_MESSAGE,
+      topologyReady: diagramAvailable,
+      topologyMessage: topologyReadiness.message
+        || topologyReadiness.traceMessage
+        || TOPOLOGY_NOT_READY_MESSAGE,
     })
   }
 
@@ -836,54 +953,26 @@ export async function renderMapPage(container) {
     canvasApi.setDeclutterEnabled(state.declutterEnabled)
   }
 
-  function restoreStateFromUrl() {
+  async function restoreStateFromUrl() {
     const urlState = parseMapUrlState(window.location.search, validIds)
     selection.replace(urlState)
-    restoreTraceState(urlState)
+    await restoreTraceState(urlState)
     renderNetworkList()
     renderDrawer()
     syncMap()
   }
 
-  function restoreTraceState(urlState) {
-    resetTraceState()
+  async function restoreTraceState(urlState) {
     if (!urlState.traceFrom) {
+      traceRequestId += 1
+      resetTraceState()
       updateTraceBanner()
       return
     }
-
-    if (!topologyReadiness.ready) {
-      state.traceFromId = urlState.traceFrom
-      state.traceStatus = 'error'
-      state.traceError = topologyReadiness.message || TOPOLOGY_NOT_READY_MESSAGE
-      updateTraceBanner()
-      return
+    await beginTracing(urlState.traceFrom, { historyMode: 'replace' })
+    if (urlState.traceTo && state.traceStatus === 'choosing') {
+      await runTraceTo(urlState.traceTo, { historyMode: 'replace' })
     }
-
-    state.traceFromId = urlState.traceFrom
-    if (urlState.traceTo) {
-      state.traceToId = urlState.traceTo
-      const result = findTracePath(relationGraph, urlState.traceFrom, urlState.traceTo)
-      if (result.status === 'found' && result.assetIds.length > 1) {
-        state.traceStatus = 'active'
-        state.tracePath = result.assetIds
-        state.traceRelations = result.relations
-        state.traceExplanation = result.explanation
-        window.requestAnimationFrame(() => canvasApi.focusAssetBounds(result.assetIds))
-      } else {
-        state.traceStatus = 'error'
-        state.tracePath = [urlState.traceFrom]
-        state.traceError = result.message || 'Jalur tracing pada URL tidak tersedia.'
-      }
-    } else {
-      state.tracePath = [urlState.traceFrom]
-      state.traceCandidates = findReachableDestinations(relationGraph, urlState.traceFrom)
-      state.traceStatus = state.traceCandidates.length ? 'choosing' : 'error'
-      if (!state.traceCandidates.length) {
-        state.traceError = 'Tidak ada tujuan yang dapat dicapai melalui topologi terkonfirmasi dari aset ini.'
-      }
-    }
-    updateTraceBanner()
   }
 
   networkList.addEventListener('click', (event) => {
@@ -1049,7 +1138,7 @@ export async function renderMapPage(container) {
   })
 
   configureBasemapPicker()
-  restoreTraceState(initialUrlState)
+  void restoreStateFromUrl()
   updateUrl('replace')
   syncInactiveModeControls()
   loadSidebarData()

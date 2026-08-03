@@ -57,16 +57,30 @@ test('drawer renders an explainable ordered trace', () => {
     trace: {
       status: 'active',
       explanation: 'Jalur terpendek berdasarkan relasi eksplisit.',
+      sourceAssetId: 'cam-01',
+      targetAssetId: 'jb-01',
+      hopCount: 1,
+      totalLengthMeters: 42,
+      networkFamily: 'CCTV',
+      graphRevision: 'topology-graph:abc',
+      verifiedAt: '2026-08-03T10:00:00.000Z',
       pathAssets: [
         asset,
         { ...asset, id: 'jb-01', name: 'JB-CCTV-01', type: 'Junction box' },
       ],
-      relations: [{ networkName: 'CCTV Ring' }],
+      relations: [{
+        networkName: 'CCTV Ring',
+        pathAssetIds: ['cable-01'],
+        sourceGeometryIds: ['geometry-01'],
+      }],
     },
   })
 
   assert.match(html, /Jalur koneksi/)
   assert.match(html, /Jalur terpendek berdasarkan relasi eksplisit/)
+  assert.match(html, /topology-graph:abc/)
+  assert.match(html, /cable-01/)
+  assert.match(html, /geometry-01/)
   assert.match(html, /Hentikan tracing/)
   assert.doesNotMatch(html, /disabled aria-disabled="true"/)
 })
@@ -83,7 +97,7 @@ test('drawer supports loading and error states', () => {
   assert.match(error, /Coba lagi/)
 })
 
-test('drawer disables topology actions while the site is not topology-ready', () => {
+test('drawer keeps tracing clickable while the site is not topology-ready', () => {
   const html = renderAssetDetailDrawer({
     asset,
     assetNetworks: [network],
@@ -95,7 +109,8 @@ test('drawer disables topology actions while the site is not topology-ready', ()
   })
 
   assert.match(html, /Topology-ready: No/)
-  assert.match(html, /class="button primary trace-from"[^>]*disabled aria-disabled="true"/)
+  assert.match(html, /class="button primary trace-from"[^>]*title="Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\."/)
+  assert.doesNotMatch(html, /class="button primary trace-from"[^>]*\bdisabled\b/)
   assert.match(html, /class="button secondary open-schematic"[^>]*disabled aria-disabled="true"/)
   assert.match(html, /Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\./)
 })

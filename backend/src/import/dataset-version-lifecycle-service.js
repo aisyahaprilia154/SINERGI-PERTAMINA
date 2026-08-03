@@ -4,6 +4,7 @@ import {
   createAssetIdentityResolver,
 } from '../domain/canonical-asset-identity.js'
 import { normalizeTopologySummary } from '../topology/semantic-relation-engine.js'
+import { withTopologyGraphRevision } from '../topology/topology-graph-revision.js'
 
 export class DatasetVersionLifecycleService {
   constructor({
@@ -558,8 +559,7 @@ function normalizeTopologyGraph(record, identityMap) {
     canonicalNodeIds,
     edges,
   )
-  return {
-    graph: {
+  const graph = withTopologyGraphRevision({
       ...structuredClone(sourceGraph),
       datasetVersionId: record.datasetVersion?.id ?? sourceGraph.datasetVersionId,
       nodes,
@@ -570,7 +570,9 @@ function normalizeTopologyGraph(record, identityMap) {
         .filter(({ id }) => degreeByNode[id] === 0)
         .map(({ id }) => id)
         .sort(),
-    },
+    })
+  return {
+    graph,
     identity: {
       version: identityMap.version,
       migratedFromLegacyRecord: identityMap.migratedFromLegacyRecord === true,
@@ -638,14 +640,85 @@ function connectedComponents(nodeIds, edges) {
 
 function buildReadinessContract(record, topologyGraph) {
   const parserReadiness = record.readiness ?? {}
-  const topologyStatus = record.topologyReadiness?.topologyReadiness
+  const publicationTopologyStatus = record.topologyReadiness?.topologyReadiness
     ?? parserReadiness.topologyReadiness
     ?? 'not_ready'
-  const topologyReady = topologyStatus === 'ready' && topologyGraph.edges.length > 0
+  const topologyValidation = record.topologyValidation ?? {}
+  const validationIssues = topologyValidation.issues ?? []
+  const validationErrorCount = Number(topologyValidation.summary?.errors)
+    || validationIssues.filter(({ severity }) => severity === 'error').length
+  const validationWarningCount = Number(topologyValidation.summary?.warnings)
+    || validationIssues.filter(({ severity }) => severity === 'warning').length
+  const graphAvailable = topologyGraph.edges.length > 0
+  const graphValid = validationErrorCount === 0
+  const generated = Boolean(
+    record.topologyGeneratedAt
+      || record.topologyGraph
+      || record.topologyCandidates
+      || record.topologyInputBundle,
+  )
+  const traceAvailable = graphAvailable && graphValid
+  const topologyReady = publicationTopologyStatus === 'ready' && traceAvailable
+  const topologyStatus = !generated
+    ? 'not_generated'
+    : !graphValid
+      ? 'invalid'
+      : topologyReady
+        ? 'ready'
+        : traceAvailable
+          ? 'partial_ready'
+          : 'review_required'
+  const blockingReasons = [...(record.topologyReadiness?.blockingReasons ?? [])]
+  if (validationErrorCount > 0 && !blockingReasons.includes('confirmed_graph_invalid')) {
+    blockingReasons.push('confirmed_graph_invalid')
+  }
+  if (generated && !graphAvailable && !blockingReasons.includes('no_confirmed_device_edge')) {
+    blockingReasons.push('no_confirmed_device_edge')
+  }
+  const traceableComponentCount = (topologyGraph.components ?? [])
+    .filter((component) => (component.edgeIds ?? []).length > 0).length
+  const nodeCount = topologyGraph.nodes.length
+  const connectedDeviceCount = nodeCount - (topologyGraph.isolatedNodeIds ?? []).length
   return {
     mapReady: parserReadiness.mapReadiness ?? 'not_ready',
     inventoryReady: parserReadiness.inventoryReadiness ?? 'not_ready',
     topologyReady: topologyReady ? 'ready' : 'not_ready',
+    topologyStatus,
+    graphRevision: topologyGraph.graphRevision ?? null,
+    validation: {
+      status: validationErrorCount > 0
+        ? 'invalid'
+        : validationWarningCount > 0 ? 'valid_with_warnings' : 'valid',
+      errorCount: validationErrorCount,
+      warningCount: validationWarningCount,
+    },
+    coverage: {
+      stableIdentity: record.topologyReadiness?.stableIdentityCoverage ?? 0,
+      deviceCount: nodeCount,
+      connectedDeviceCount,
+      traceableComponentCount,
+      unresolvedEndpointCount: record.topologyReadiness?.unresolvedCount
+        ?? record.topologySummary?.unresolvedCount
+        ?? 0,
+    },
+    accuracy: {
+      heldOutPrecision: record.topologyReadiness?.heldOutPrecision ?? null,
+      pathAccuracy: record.topologyReadiness?.pathAccuracy ?? null,
+      autoConfirmAllowed: publicationTopologyStatus === 'ready' && traceAvailable,
+    },
+    capabilities: {
+      viewTopology: generated,
+      reviewTopology: Boolean(record.topologyInputBundle),
+      trace: traceAvailable,
+      diagram: traceAvailable,
+      autoConfirm: publicationTopologyStatus === 'ready' && traceAvailable,
+    },
+    blockers: blockingReasons.map((code) => ({
+      code,
+      scope: ['confirmed_graph_invalid', 'no_confirmed_device_edge'].includes(code)
+        ? 'graph'
+        : 'publication',
+    })),
     publicationStatus: record.datasetVersion?.publicationStatus ?? 'unpublished',
   }
 }

@@ -45,6 +45,7 @@ export function createMapLibreSurface(element, {
   onLayoutStatus = () => {},
 } = {}) {
   let currentCandidates = candidates
+  let currentTopologyGraph = topologyGraph
   const assetById = new Map(assets.map((asset) => [asset.id, asset]))
   const geometryById = new Map(geometries.map((geometry) => [geometry.id, geometry]))
   const networkById = new Map(networks.map((network) => [network.id, network]))
@@ -64,6 +65,7 @@ export function createMapLibreSurface(element, {
       .map(({ id }) => id)),
     selectedAssetId: null,
     traceNodeIds: [],
+    traceGeometryIds: [],
     connectedNodeIds: [],
     selectedCandidateId: null,
     dimOthers: true,
@@ -294,7 +296,7 @@ export function createMapLibreSurface(element, {
       networks,
       assetById,
       assetNetworkIds,
-      topologyGraph,
+      topologyGraph: currentTopologyGraph,
       candidates: currentCandidates,
       overlays,
       state,
@@ -501,13 +503,18 @@ export function createMapLibreSurface(element, {
     context.lineJoin = 'round'
 
     const traceIds = new Set(state.traceNodeIds)
-    const traceGeometryIds = new Set((topologyGraph.edges ?? []).flatMap((edge) => {
+    const requestedTraceGeometryIds = new Set(state.traceGeometryIds ?? [])
+    const traceGeometryIds = new Set((currentTopologyGraph.edges ?? []).flatMap((edge) => {
       const sourceId = edge.sourceAssetId ?? edge.sourceNodeId
       const targetId = edge.targetAssetId ?? edge.targetNodeId
-      return traceIds.has(sourceId) && traceIds.has(targetId)
+      const isTraceEdge = requestedTraceGeometryIds.size
+        ? (edge.sourceGeometryIds ?? []).some((id) => requestedTraceGeometryIds.has(id))
+        : traceIds.has(sourceId) && traceIds.has(targetId)
+      return isTraceEdge
         ? edge.sourceGeometryIds ?? []
         : []
     }))
+    requestedTraceGeometryIds.forEach((id) => traceGeometryIds.add(id))
     const selectedCandidate = currentCandidates.find(({ candidateId }) => (
       candidateId === state.selectedCandidateId
     ))
@@ -666,6 +673,13 @@ export function createMapLibreSurface(element, {
     setCandidates(nextCandidates = []) {
       currentCandidates = Array.isArray(nextCandidates) ? nextCandidates : []
       syncSources()
+    },
+    setTopologyGraph(nextGraph = { edges: [] }) {
+      currentTopologyGraph = nextGraph && typeof nextGraph === 'object'
+        ? nextGraph
+        : { edges: [] }
+      syncSources()
+      syncAdaptiveMarkers()
     },
     setHighlightedNetworkId(networkId) {
       state.highlightedNetworkId = networkById.has(networkId) ? networkId : null
@@ -1028,6 +1042,7 @@ function buildFeatureCollections({
     network.geometryIds?.forEach((geometryId) => networkByGeometry.set(geometryId, network))
   })
   const traceIds = new Set(state.traceNodeIds)
+  const requestedTraceGeometryIds = new Set(state.traceGeometryIds ?? [])
   const confirmedGeometryIds = new Set((topologyGraph.edges ?? []).flatMap(
     (edge) => edge.sourceGeometryIds ?? edge.sourceGeometryId ?? [],
   ))
@@ -1048,9 +1063,12 @@ function buildFeatureCollections({
   const traceGeometryIds = new Set((topologyGraph.edges ?? []).flatMap((edge) => {
     const sourceId = edge.sourceAssetId ?? edge.sourceNodeId
     const targetId = edge.targetAssetId ?? edge.targetNodeId
-    const inTrace = traceIds.has(sourceId) && traceIds.has(targetId)
+    const inTrace = requestedTraceGeometryIds.size
+      ? (edge.sourceGeometryIds ?? []).some((id) => requestedTraceGeometryIds.has(id))
+      : traceIds.has(sourceId) && traceIds.has(targetId)
     return inTrace ? edge.sourceGeometryIds ?? [] : []
   }))
+  requestedTraceGeometryIds.forEach((id) => traceGeometryIds.add(id))
   const connectedIds = new Set(state.connectedNodeIds)
   const collections = { points: [], lines: [], polygons: [], candidates: [], overlays: [] }
 

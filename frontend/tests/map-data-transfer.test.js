@@ -115,7 +115,7 @@ test('map context and toolbar present a compact branch name and admin data actio
   assert.match(finder, /aria-controls="map-asset-results"/)
 })
 
-test('map hides unready topology actions and displays the exact readiness message', () => {
+test('map keeps tracing clickable and displays the exact readiness message', () => {
   const topologyReadiness = {
     ready: false,
     message: 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.',
@@ -124,7 +124,8 @@ test('map hides unready topology actions and displays the exact readiness messag
   const controls = renderMapFloatingControls(activeContext, topologyReadiness)
 
   assert.match(context, /Topology-ready: No/)
-  assert.match(controls, /class="tool-button trace-toggle"[^>]*disabled aria-disabled="true"/)
+  assert.match(controls, /class="tool-button trace-toggle"[^>]*title="Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\."/)
+  assert.doesNotMatch(controls, /class="tool-button trace-toggle"[^>]*\bdisabled\b/)
   assert.match(controls, /class="tool-button diagram-toggle"[^>]*disabled aria-disabled="true"/)
   assert.match(controls, /Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\./)
 })

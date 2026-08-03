@@ -56,6 +56,8 @@ export function generateRelationArtifacts(topologyInputBundle, {
     ...generateInlineDeviceCandidates(nodes, spatialIndexes, settings),
     ...generateEndpointEndpointCandidates(spatialIndexes, settings),
     ...generateIntersectionCandidates(nodes, spatialIndexes, settings),
+    ...generateLineLabelConnectionCandidates(nodes, paths),
+    ...generateLineLabelAttachmentCandidates(nodes, paths, settings),
     ...generateExplicitCandidates(bundle, nodes, paths, eligibilityIssues),
   ]
   const candidates = scoreAndProposeCandidates(
@@ -322,6 +324,8 @@ function prepareNodes(bundle, issues) {
       identityAliases: structuredClone(object.identityAliases ?? {}),
       sourceFeatureId: object.sourceFeatureId,
       siteId: object.siteId,
+      sourceName: object.sourceName ?? null,
+      sourceFolderPath: object.sourceFolderPath ?? null,
       networkFamily: object.networkFamily,
       objectRole: 'device_node',
       assetType: object.assetType ?? 'unknown',
@@ -387,6 +391,8 @@ function preparePaths(bundle, issues, lineworkIssues) {
         identityAliases: structuredClone(object.identityAliases ?? {}),
         sourceFeatureId: object.sourceFeatureId,
         siteId: object.siteId,
+        sourceName: object.sourceName ?? null,
+        sourceFolderPath: object.sourceFolderPath ?? null,
         networkFamily: object.networkFamily,
         objectRole: 'cable_path',
         assetType: object.assetType ?? 'unknown',
@@ -665,6 +671,205 @@ function generateIntersectionCandidates(nodes, spatialIndexes, settings) {
   return candidates
 }
 
+function generateLineLabelConnectionCandidates(nodes, paths) {
+  const candidates = []
+  paths.filter((path) => path.sourceName).forEach((path) => {
+    const matchedNodes = lineLabelNodeSequence(path, nodes)
+    for (let index = 0; index < matchedNodes.length - 1; index += 1) {
+      const sourceNode = matchedNodes[index]
+      const targetNode = matchedNodes[index + 1]
+      if (sourceNode.id === targetNode.id || sourceNode.siteId !== targetNode.siteId) continue
+      const sourceCompatibility = compatiblePathNode(path, sourceNode)
+      const targetCompatibility = compatiblePathNode(path, targetNode)
+      if (!sourceCompatibility.compatible || !targetCompatibility.compatible) continue
+      const candidate = baseCandidate({
+        candidateType: 'line_label_connection',
+        sourceEndpointId: `line-label:${path.sourceFeatureId}:${index}:${sourceNode.id}:${targetNode.id}`,
+        sourcePath: sourceNode,
+        targetAssetId: targetNode.id,
+        targetNode,
+        distanceMeters: null,
+        sourceCoordinate: sourceNode.coordinate,
+        targetCoordinate: targetNode.coordinate,
+        measureMeters: null,
+        semanticCompatibility: Math.min(sourceCompatibility.score, targetCompatibility.score),
+        endpointRole: 1,
+        sourceContext: 1,
+        styleConsistency: 1,
+        angleScore: 1,
+        graphConsistency: 1,
+        evidence: [{
+          source: 'line_label',
+          ruleId: 'line.name.endpoint-sequence',
+          observedValue: path.sourceName,
+          normalizedValue: `${sourceNode.id}->${targetNode.id}`,
+          weight: SCORE_WEIGHTS.semanticCompatibility,
+          explanation: 'Urutan nama device pada garis dipakai sebagai evidence koneksi.',
+        }, {
+          source: 'spatial',
+          ruleId: 'line.name.same-source-location',
+          observedValue: path.sourceFolderPath ?? null,
+          normalizedValue: sourceLocationKey(path.sourceFolderPath),
+          weight: SCORE_WEIGHTS.sourceContext,
+          explanation: 'Device dibatasi ke lokasi sumber garis yang sama.',
+        }],
+      })
+      candidate.networkFamily = path.networkFamily
+      candidate.sourceFeatureId = path.sourceFeatureId
+      candidate.sourceGeometryIds = unique([
+        path.geometryId,
+        sourceNode.geometryId,
+        targetNode.geometryId,
+      ].filter(Boolean))
+      candidate.lineSourcePathAssetId = path.id
+      candidates.push(candidate)
+    }
+  })
+  return candidates
+}
+
+function generateLineLabelAttachmentCandidates(nodes, paths, settings) {
+  const candidates = []
+  paths.filter((path) => path.sourceName).forEach((path) => {
+    const matchedNodes = lineLabelNodeSequence(path, nodes)
+    if (matchedNodes.length < 2) return
+    const [startNode, endNode] = assignLineLabelEndpoints(path, matchedNodes)
+    lineEndpoints(path).forEach((endpoint, index) => {
+      const targetNode = index === 0 ? startNode : endNode
+      const compatibility = compatiblePathNode(path, targetNode)
+      if (!compatibility.compatible) return
+      const distanceMeters = geographicDistanceMeters(endpoint.coordinate, targetNode.coordinate)
+      if (distanceMeters > settings.searchRadiusMeters) return
+      candidates.push(baseCandidate({
+        candidateType: 'line_label_attachment',
+        sourceEndpointId: endpoint.id,
+        sourcePath: path,
+        targetAssetId: targetNode.id,
+        targetNode,
+        distanceMeters,
+        sourceCoordinate: endpoint.coordinate,
+        targetCoordinate: targetNode.coordinate,
+        measureMeters: endpoint.measureMeters,
+        semanticCompatibility: compatibility.score,
+        endpointRole: endpointRoleScore(targetNode, false),
+        sourceContext: 1,
+        styleConsistency: 1,
+        angleScore: 1,
+        graphConsistency: 1,
+        evidence: [{
+          source: 'line_label',
+          ruleId: 'line.name.endpoint-attachment',
+          observedValue: path.sourceName,
+          normalizedValue: `${endpoint.role}:${targetNode.id}`,
+          weight: SCORE_WEIGHTS.semanticCompatibility,
+          explanation: 'Nama device pada garis menentukan device yang dipasang pada endpoint kabel.',
+        }, {
+          source: 'spatial',
+          ruleId: 'line.endpoint.within-search-radius',
+          observedValue: distanceMeters,
+          normalizedValue: `${distanceMeters.toFixed(3)}m`,
+          weight: SCORE_WEIGHTS.distance,
+          explanation: `Endpoint garis berada dalam radius ${settings.searchRadiusMeters} meter dari device hasil pembacaan nama garis.`,
+        }],
+      }))
+    })
+  })
+  return candidates
+}
+
+function assignLineLabelEndpoints(path, matchedNodes) {
+  const first = matchedNodes[0]
+  const last = matchedNodes.at(-1)
+  const [start, end] = lineEndpoints(path)
+  const forwardDistance = geographicDistanceMeters(start.coordinate, first.coordinate)
+    + geographicDistanceMeters(end.coordinate, last.coordinate)
+  const reverseDistance = geographicDistanceMeters(start.coordinate, last.coordinate)
+    + geographicDistanceMeters(end.coordinate, first.coordinate)
+  return forwardDistance <= reverseDistance ? [first, last] : [last, first]
+}
+
+function lineLabelNodeSequence(path, nodes) {
+  const pathTokens = normalizeToken(path.sourceName).split(' ').filter(Boolean)
+  if (!pathTokens.length) return []
+  const localNodes = nodes.filter((node) => (
+    node.siteId === path.siteId
+      && sameSourceLocation(node.sourceFolderPath, path.sourceFolderPath)
+  ))
+  const matches = localNodes.flatMap((node) => {
+    const occurrences = topologyLabelAliases(node.sourceName)
+      .flatMap((alias) => tokenSequencePositions(pathTokens, alias)
+        .map((position) => ({ node, position, length: alias.length })))
+    if (!occurrences.length) return []
+    occurrences.sort((left, right) => right.length - left.length || left.position - right.position)
+    return [occurrences[0]]
+  }).sort((left, right) => left.position - right.position || right.length - left.length)
+
+  const accepted = []
+  matches.forEach((match) => {
+    const overlaps = accepted.some((previous) => (
+      match.position < previous.position + previous.length
+        && previous.position < match.position + match.length
+    ))
+    if (overlaps) return
+    if (accepted.some(({ node }) => node.id === match.node.id)) return
+    accepted.push(match)
+  })
+  return accepted.map(({ node }) => node)
+}
+
+function topologyLabelAliases(sourceName) {
+  const tokens = normalizeToken(sourceName).split(' ').filter(Boolean)
+  if (!tokens.length) return []
+  const aliases = [tokens]
+  if (['cam', 'camera', 'kamera'].includes(tokens[0]) && tokens.length > 1) {
+    aliases.push(['c', ...tokens.slice(1)])
+  }
+  if (tokens[0] === 'server') aliases.push(['svr'])
+  return aliases
+}
+
+function tokenSequencePositions(tokens, sequence) {
+  const positions = []
+  for (let index = 0; index <= tokens.length - sequence.length; index += 1) {
+    if (sequence.every((token, offset) => tokens[index + offset] === token)) {
+      positions.push(index)
+    }
+  }
+  return positions
+}
+
+function sameSourceLocation(left, right) {
+  const leftKey = sourceLocationKey(left)
+  const rightKey = sourceLocationKey(right)
+  return leftKey && rightKey ? leftKey === rightKey : true
+}
+
+function sourceLocationKey(value) {
+  const segments = String(value ?? '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .map(normalizeToken)
+    .filter(Boolean)
+  if (!segments.length) return ''
+  const layerMarkers = [
+    'cable',
+    'kabel',
+    'cctv',
+    'camera',
+    'junction box',
+    'juction box',
+    'jucntion box',
+    'tiang',
+    'server',
+    'switch',
+    'router',
+  ]
+  const layerIndex = segments.findIndex((segment) => layerMarkers.some((marker) => (
+    segment === marker || segment.includes(marker)
+  )))
+  return segments.slice(0, layerIndex > 0 ? layerIndex : Math.min(2, segments.length)).join('/')
+}
+
 function generateExplicitCandidates(bundle, nodes, paths, issues) {
   const objectByFeature = new Map([
     ...nodes.map((node) => [node.sourceFeatureId, node]),
@@ -741,6 +946,9 @@ function generateExplicitCandidates(bundle, nodes, paths, issues) {
       explicitRelationEvidenceId: relation.explicitRelationEvidenceId,
       explicitRelationType: relation.relationType,
       direction: normalizeDirection(relation.direction),
+      manualConfirmation: relation.source === 'manual_admin'
+        ? structuredClone(relation.manualConfirmation ?? null)
+        : null,
     }]
   })
 }
@@ -802,7 +1010,11 @@ function baseCandidate({
 
 function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, datasetVersionId) {
   const candidates = rawCandidates.map((candidate) => {
-    const distanceScore = candidate.candidateType === 'explicit_metadata'
+    const distanceScore = [
+      'explicit_metadata',
+      'line_label_connection',
+      'line_label_attachment',
+    ].includes(candidate.candidateType)
       ? 1
       : Math.exp(
         -(candidate.distanceMeters ** 2) / (2 * settings.distanceSigmaMeters ** 2),
@@ -861,6 +1073,7 @@ function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, dataset
       sourceCoordinate: candidate.sourceCoordinate,
       targetCoordinate: candidate.targetCoordinate,
       networkFamily: candidate.networkFamily,
+      manualConfirmation: candidate.manualConfirmation ?? null,
       ...compact({
         explicitRelationEvidenceId: candidate.explicitRelationEvidenceId,
         relationType: candidate.explicitRelationType,
@@ -880,20 +1093,44 @@ function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, dataset
       candidate.scoreMargin = next ? round(candidate.score - next.score, 6) : candidate.score
     })
     if (best.candidateType === 'explicit_metadata') {
-      best.proposalStatus = settings.autoConfirmExplicitMetadata
-        ? 'confirmed_by_explicit_policy'
+      const manualConfirmation = best.manualConfirmation
+      const shouldConfirm = settings.autoConfirmExplicitMetadata || Boolean(manualConfirmation)
+      best.proposalStatus = shouldConfirm
+        ? manualConfirmation ? 'confirmed_by_admin' : 'confirmed_by_explicit_policy'
         : 'recommended'
-      if (settings.autoConfirmExplicitMetadata) {
+      if (shouldConfirm) {
         best.candidateStatus = 'confirmed'
-        best.review = {
-          actorId: 'explicit-metadata-policy',
-          reviewedAt: generatedAt,
-          reason: 'Explicit metadata valid sesuai publication policy.',
-          action: 'auto_confirm_explicit',
-          before: 'candidate',
-          after: 'confirmed',
-        }
+        best.review = manualConfirmation
+          ? {
+            actorId: manualConfirmation.actorId,
+            reviewedAt: manualConfirmation.reviewedAt ?? generatedAt,
+            reason: manualConfirmation.reason,
+            action: 'manual_device_relation',
+            auditEventId: manualConfirmation.auditEventId ?? null,
+            before: 'candidate',
+            after: 'confirmed',
+          }
+          : {
+            actorId: 'explicit-metadata-policy',
+            reviewedAt: generatedAt,
+            reason: 'Explicit metadata valid sesuai publication policy.',
+            action: 'auto_confirm_explicit',
+            before: 'candidate',
+            after: 'confirmed',
+          }
       }
+      return
+    }
+    const lineLabelCandidate = group.find(isLineLabelCandidate)
+    if (lineLabelCandidate) {
+      group.forEach((candidate) => {
+        if (candidate === lineLabelCandidate) return
+        candidate.candidateStatus = 'candidate'
+        candidate.proposalStatus = 'not_selected'
+      })
+      lineLabelCandidate.candidateStatus = 'candidate'
+      lineLabelCandidate.proposalStatus = 'recommended'
+      lineLabelCandidate.scoreMargin = lineLabelCandidate.score
       return
     }
     if (best.score < settings.acceptanceThreshold) {
@@ -922,8 +1159,11 @@ function applyCapacityConstraints(candidates, nodes, settings, issues) {
       && candidate.candidateType !== 'explicit_metadata'
     ))
     .sort((left, right) => right.score - left.score || compareCandidate(left, right))
+  const capacityConstrained = recommended.filter((candidate) => (
+    !['line_label_connection', 'line_label_attachment'].includes(candidate.candidateType)
+  ))
   const targetCounts = new Map()
-  recommended.forEach((candidate) => {
+  capacityConstrained.forEach((candidate) => {
     const node = nodeById.get(candidate.targetAssetId)
     if (!node) return
     const count = targetCounts.get(node.id) ?? 0
@@ -991,7 +1231,7 @@ function buildConfirmedRelations({
   const previousByCandidate = new Map(asArray(previousRelations)
     .filter(({ candidateId }) => Boolean(candidateId))
     .map((relation) => [relation.candidateId, relation]))
-  return candidates.flatMap((candidate) => {
+  const relations = candidates.flatMap((candidate) => {
     const explicitlyConfirmed = candidate.candidateType === 'explicit_metadata'
       && settings.autoConfirmExplicitMetadata
       && !['rejected', 'revoked'].includes(candidate.candidateStatus)
@@ -1003,9 +1243,13 @@ function buildConfirmedRelations({
     const verifiedBy = candidate.review?.actorId
       ?? (explicitlyConfirmed ? 'explicit-metadata-policy' : 'publication-policy')
     const verifiedAt = candidate.review?.reviewedAt ?? generatedAt
-    const provenance = candidate.candidateType === 'explicit_metadata'
-      ? 'explicit_kml_metadata'
-      : 'spatial_inference'
+    const provenance = candidate.manualConfirmation
+      ? 'manual_admin'
+      : candidate.candidateType === 'explicit_metadata'
+        ? 'explicit_kml_metadata'
+        : ['line_label_connection', 'line_label_attachment'].includes(candidate.candidateType)
+          ? 'line_label_inference'
+          : 'spatial_inference'
     const baseRelation = {
       datasetVersionId: bundle.datasetVersion.id,
       sourceAssetId: candidate.sourcePathAssetId,
@@ -1013,7 +1257,11 @@ function buildConfirmedRelations({
       relationType: candidate.relationType ?? relationTypeForCandidate(candidate.candidateType),
       direction: candidate.direction ?? 'undirected',
       ...compact({
-        pathAssetId: ['endpoint_device', 'inline_device'].includes(candidate.candidateType)
+        pathAssetId: [
+          'endpoint_device',
+          'inline_device',
+          'line_label_attachment',
+        ].includes(candidate.candidateType)
           ? candidate.sourcePathAssetId
           : undefined,
       }),
@@ -1061,7 +1309,57 @@ function buildConfirmedRelations({
       sourceAssetId: source.sourceAssetId,
       anchorMeasureMeters: source.anchorMeasureMeters,
     }))
-  }).sort((left, right) => left.relationId.localeCompare(right.relationId))
+  })
+  return deduplicateRedundantConfirmedRelations(relations)
+    .sort((left, right) => left.relationId.localeCompare(right.relationId))
+}
+
+function deduplicateRedundantConfirmedRelations(relations) {
+  const materialized = new Map()
+  relations.forEach((relation) => {
+    const relationKind = relation.relationKind
+    if (relationKind === 'device_edge') {
+      const key = `${relationKind}|${undirectedKey(
+        relation.sourceAssetId,
+        relation.targetAssetId,
+        relation.relationType,
+      )}`
+      const previous = materialized.get(key)
+      if (!previous || confirmedRelationPreference(relation, previous) > 0) {
+        materialized.set(key, relation)
+      }
+      return
+    }
+    if (!['path_attachment', 'path_continuation'].includes(relationKind)) {
+      materialized.set(relation.relationId, relation)
+      return
+    }
+    const endpointKey = undirectedKey(
+      relation.sourceAssetId,
+      relation.targetAssetId,
+      relation.relationType,
+    )
+    const geometryKey = unique([
+      ...(relation.sourceGeometryIds ?? []),
+      relation.pathAssetId,
+    ]).sort().join('|')
+    const key = `${relationKind}|${endpointKey}|${geometryKey}`
+    const previous = materialized.get(key)
+    if (!previous || confirmedRelationPreference(relation, previous) > 0) {
+      materialized.set(key, relation)
+    }
+  })
+  return [...materialized.values()]
+}
+
+function confirmedRelationPreference(left, right) {
+  const leftScore = Number(left.evidence?.find(({ source }) => source === 'scoring')?.observedValue)
+  const rightScore = Number(right.evidence?.find(({ source }) => source === 'scoring')?.observedValue)
+  const normalizedLeftScore = Number.isFinite(leftScore) ? leftScore : -1
+  const normalizedRightScore = Number.isFinite(rightScore) ? rightScore : -1
+  return normalizedLeftScore - normalizedRightScore
+    || String(right.verifiedAt ?? '').localeCompare(String(left.verifiedAt ?? ''))
+    || String(right.relationId ?? '').localeCompare(String(left.relationId ?? ''))
 }
 
 export function buildConfirmedGraph({ bundle, nodes, paths, confirmedRelations }) {
@@ -1169,8 +1467,12 @@ function collapseConfirmedPath(bundle, sourceAssetId, targetAssetId, relations) 
       : []),
   ].filter(Boolean)))
   const candidateIds = unique(relations.map(({ candidateId }) => candidateId).filter(Boolean))
+  const allManual = relations.every(({ provenance }) => provenance === 'manual_admin')
   const allExplicit = relations.every(({ provenance }) => (
     provenance === 'explicit_kml_metadata'
+  ))
+  const allLineLabel = relations.every(({ provenance }) => (
+    provenance === 'line_label_inference'
   ))
   return {
     id: deterministicId(
@@ -1191,10 +1493,18 @@ function collapseConfirmedPath(bundle, sourceAssetId, targetAssetId, relations) 
     pathAssetId: pathAssetIds.length === 1 ? pathAssetIds[0] : undefined,
     pathAssetIds,
     sourceGeometryIds,
-    provenance: allExplicit ? 'explicit_kml_metadata' : 'spatial_inference',
+    provenance: allManual
+      ? 'manual_admin'
+      : allExplicit
+        ? 'explicit_kml_metadata'
+        : allLineLabel ? 'line_label_inference' : 'spatial_inference',
     verificationStatus: 'confirmed',
     relationStatus: 'confirmed',
-    relationSource: allExplicit ? 'explicit_kml_metadata' : 'spatial_inference',
+    relationSource: allManual
+      ? 'manual_admin'
+      : allExplicit
+        ? 'explicit_kml_metadata'
+        : allLineLabel ? 'line_label_inference' : 'spatial_inference',
     relationKind: 'device_edge',
     candidateId: candidateIds.length === 1 ? candidateIds[0] : undefined,
     candidateIds,
@@ -1231,7 +1541,8 @@ export function validateConfirmedGraph({
     if (source.siteId !== target.siteId) {
       issues.push(graphIssue(bundle, relation, 'cross_site_edge', 'error'))
     }
-    if (!familiesCompatibleForRelation(source, target)) {
+    if (!familiesCompatibleForRelation(source, target)
+      && !['manual_admin', 'line_label_inference'].includes(relation.provenance)) {
       issues.push(graphIssue(bundle, relation, 'incompatible_family_edge', 'error'))
     }
     if (relation.sourceAssetId === relation.targetAssetId) {
@@ -1663,7 +1974,17 @@ function compatiblePathNode(path, node) {
     lan: /switch|router|access point|\bap\b|printer|server|device|lan/,
     infrastructure: /switch|router|server|junction|\bjb\b|otb|core/,
   }[path.networkFamily]
-  const compatible = node.networkFamily === 'infrastructure' && approved?.test(type)
+  const compatible = (
+    node.networkFamily === 'infrastructure' && approved?.test(type)
+  ) || (
+    path.networkFamily === 'lan'
+      && node.networkFamily === 'cctv'
+      && /camera|cctv|junction|\bjb\b|nvr/.test(type)
+  ) || (
+    path.networkFamily === 'fiber_optic'
+      && node.networkFamily === 'cctv'
+      && /junction|\bjb\b|otb|fiber|switch/.test(type)
+  )
   return {
     compatible: Boolean(compatible),
     score: compatible ? 0.9 : 0,
@@ -1746,6 +2067,8 @@ function relationTypeForCandidate(type) {
     inline_device: 'path-inline-device',
     endpoint_endpoint: 'path-continuation',
     intersection_with_junction: 'path-junction',
+    line_label_connection: 'connected-to',
+    line_label_attachment: 'path-endpoint',
     explicit_metadata: 'connected-to',
   }[type] ?? 'connected-to'
 }
@@ -1927,6 +2250,10 @@ function connectedComponents(nodes, edges) {
 function candidateGroupKey(candidate) {
   if (candidate.candidateType === 'inline_device') return `inline:${candidate.targetAssetId}`
   return candidate.sourceEndpointId
+}
+
+function isLineLabelCandidate(candidate) {
+  return ['line_label_connection', 'line_label_attachment'].includes(candidate.candidateType)
 }
 
 function coordinateSequenceKey(coordinates) {

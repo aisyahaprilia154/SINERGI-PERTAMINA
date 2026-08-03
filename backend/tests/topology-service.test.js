@@ -155,6 +155,26 @@ test('bulk confirmation excludes ambiguous alternatives', async () => {
   )
 })
 
+test('line label bulk action confirms only connections read from line names', async () => {
+  const bundle = lineLabelReviewBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const auditLog = new MemoryAuditLog()
+  const service = new TopologyService({ repository, auditLog })
+
+  const result = await service.confirmLineLabelCandidates('dv-review', 'admin-1', {
+    reason: 'Nama endpoint garis diverifikasi dari sumber resmi.',
+  })
+  assert.equal(result.action, 'confirm_line_labels')
+  assert.equal(result.affectedCount, 3)
+  assert.equal(result.graph.edges.length, 1)
+  assert.equal(result.confirmedDeviceEdgeCount, 1)
+  assert.deepEqual(
+    auditLog.entries.map(({ event }) => event),
+    ['topology.line_label_connections_bulk_confirmed'],
+  )
+})
+
 test('reject requires reason and rejected candidates never enter operational graph', async () => {
   const bundle = reviewBundle()
   const initial = generateRelationArtifacts(bundle)
@@ -249,6 +269,220 @@ test('regeneration reconciles decisions and records topology runs without deleti
   assert.ok(auditLog.entries.some(({ event }) => event === 'topology.candidates_regenerated'))
 })
 
+test('manual device relation is audited, materialized, and retained across regeneration', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle, {
+    config: { autoConfirmExplicitMetadata: false },
+  })
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const auditLog = new MemoryAuditLog()
+  const times = [
+    '2026-08-03T01:00:00.000Z',
+    '2026-08-03T02:00:00.000Z',
+  ]
+  const service = new TopologyService({
+    repository,
+    auditLog,
+    config: { autoConfirmExplicitMetadata: false },
+    clock: () => new Date(times.shift()),
+  })
+
+  const created = await service.createDeviceRelation('dv-review', 'admin-1', {
+    sourceAssetId: 'CAM-01',
+    targetAssetId: 'CAM-END',
+    reason: 'Diverifikasi berdasarkan dokumentasi lapangan.',
+  })
+
+  assert.equal(created.relation.relationKind, 'device_edge')
+  assert.equal(created.relation.provenance, 'manual_admin')
+  assert.equal(created.relation.verifiedBy, 'admin-1')
+  assert.equal(created.relation.auditEventId, 'audit-1')
+  assert.equal(created.graph.edges.length, 1)
+  assert.equal(created.summary.confirmedDeviceEdgeCount, 1)
+  assert.equal(created.readiness.blockingReasons.includes('confirmed_graph_invalid'), false)
+  assert.equal(
+    (await repository.get('dv-review')).topologyInputBundle.explicitRelations.length,
+    1,
+  )
+  assert.equal(auditLog.entries[0].event, 'topology.manual_device_relation_confirmed')
+
+  const regenerated = await service.regenerate('dv-review', 'admin-1', {
+    reason: 'Pastikan relasi manual tetap persisten.',
+  })
+  assert.equal(regenerated.confirmedRelations.length, 1)
+  assert.equal(regenerated.confirmedRelations[0].provenance, 'manual_admin')
+  assert.equal(regenerated.topologyGraph.edges.length, 1)
+
+  await assert.rejects(
+    service.createDeviceRelation('dv-review', 'admin-1', {
+      sourceAssetId: 'CAM-END',
+      targetAssetId: 'CAM-01',
+      reason: 'Percobaan relasi duplikat.',
+    }),
+    (error) => error.code === 'topology_manual_relation_exists',
+  )
+})
+
+test('authoritative trace follows confirmed edges, returns geometry evidence, and protects revision', async () => {
+  const repository = new MemoryRepository([traceRecord()])
+  const auditLog = new MemoryAuditLog()
+  const service = new TopologyService({ repository, auditLog })
+  const graphProjection = await service.getGraph('dv-trace')
+  const graphRevision = graphProjection.graph.graphRevision
+
+  const destinations = await service.trace('dv-trace', {
+    sourceAssetId: 'asset-a',
+    graphRevision,
+  }, 'viewer-1')
+  assert.equal(destinations.status, 'destinations')
+  assert.deepEqual(destinations.destinations, [
+    { assetId: 'asset-b', distance: 1 },
+    { assetId: 'asset-c', distance: 2 },
+  ])
+
+  const scopedDestinations = await service.trace('dv-trace', {
+    sourceAssetId: 'asset-a',
+    graphRevision,
+    scopeAssetIds: ['asset-a', 'asset-b'],
+  })
+  assert.deepEqual(scopedDestinations.destinations, [
+    { assetId: 'asset-b', distance: 1 },
+  ])
+
+  const result = await service.trace('dv-trace', {
+    sourceAssetId: 'asset-a',
+    targetAssetId: 'asset-c',
+    graphRevision,
+    direction: 'both',
+  }, 'viewer-1')
+  assert.equal(result.status, 'found')
+  assert.deepEqual(result.nodeIds, ['asset-a', 'asset-b', 'asset-c'])
+  assert.equal(result.hopCount, 2)
+  assert.equal(result.totalLengthMeters, 30)
+  assert.deepEqual(result.edges.map(({ edgeId, sourceGeometryIds, pathAssetIds }) => ({
+    edgeId,
+    sourceGeometryIds,
+    pathAssetIds,
+  })), [
+    {
+      edgeId: 'edge-a-b',
+      sourceGeometryIds: ['geometry-cable-1'],
+      pathAssetIds: ['cable-1'],
+    },
+    {
+      edgeId: 'edge-b-c',
+      sourceGeometryIds: ['geometry-cable-2'],
+      pathAssetIds: ['cable-2'],
+    },
+  ])
+  assert.equal(result.graphRevision, graphRevision)
+
+  const candidateResult = await service.trace('dv-trace', {
+    sourceAssetId: 'asset-a',
+    targetAssetId: 'asset-d',
+    graphRevision,
+  })
+  assert.equal(candidateResult.status, 'unreachable')
+  assert.equal(candidateResult.reason, 'candidate_pending_review')
+
+  const invalidSource = await service.trace('dv-trace', {
+    sourceAssetId: 'not-a-node',
+    graphRevision,
+  })
+  assert.equal(invalidSource.status, 'invalid-source')
+
+  await assert.rejects(
+    service.trace('dv-trace', {
+      sourceAssetId: 'asset-a',
+      targetAssetId: 'asset-c',
+      graphRevision: 'topology-graph:stale',
+    }),
+    (error) => error.code === 'topology_graph_stale'
+      && error.details.currentGraphRevision === graphRevision,
+  )
+  assert.ok(auditLog.entries.some(({ event, outcome }) => (
+    event === 'topology.trace_requested' && outcome === 'found'
+  )))
+})
+
+test('authoritative trace stops when the confirmed graph has blocking validation errors', async () => {
+  const record = traceRecord()
+  record.topologyValidation = {
+    summary: { errors: 1, warnings: 0 },
+    issues: [{ severity: 'error', issueCode: 'duplicate_confirmed_edge' }],
+  }
+  const service = new TopologyService({
+    repository: new MemoryRepository([record]),
+    auditLog: new MemoryAuditLog(),
+  })
+  const graph = await service.getGraph('dv-trace')
+
+  await assert.rejects(
+    service.trace('dv-trace', {
+      sourceAssetId: 'asset-a',
+      targetAssetId: 'asset-c',
+      graphRevision: graph.graph.graphRevision,
+    }),
+    (error) => error.code === 'topology_graph_invalid'
+      && error.details.validationErrorCount === 1,
+  )
+})
+
+test('reviewed path is traceable and revoke invalidates the next graph revision', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const service = new TopologyService({
+    repository,
+    auditLog: new MemoryAuditLog(),
+  })
+  const startCandidate = initial.candidates.find(({ sourceEndpointId }) => (
+    sourceEndpointId === 'endpoint:geometry:CBL-01:start'
+  ))
+  const endCandidate = initial.candidates.find(({ sourceEndpointId }) => (
+    sourceEndpointId === 'endpoint:geometry:CBL-01:end'
+  ))
+
+  await service.confirmCandidate(startCandidate.candidateId, 'admin-1', {
+    reason: 'Endpoint awal diverifikasi.',
+  })
+  await service.confirmCandidate(endCandidate.candidateId, 'admin-1', {
+    reason: 'Endpoint akhir diverifikasi.',
+  })
+  const beforeRevoke = await service.getGraph('dv-review')
+  const traced = await service.trace('dv-review', {
+    sourceAssetId: 'CAM-01',
+    targetAssetId: 'CAM-END',
+    graphRevision: beforeRevoke.graph.graphRevision,
+  })
+  assert.equal(traced.status, 'found')
+  assert.equal(traced.hopCount, 1)
+  assert.deepEqual(traced.edges[0].sourceGeometryIds, ['geometry:CBL-01'])
+
+  const relation = (await repository.get('dv-review')).confirmedRelations.find(({ candidateId }) => (
+    candidateId === startCandidate.candidateId
+  ))
+  await service.revokeRelation(relation.relationId, 'admin-2', {
+    reason: 'Verifikasi lapangan membatalkan jalur.',
+  })
+  const afterRevoke = await service.getGraph('dv-review')
+  assert.notEqual(afterRevoke.graph.graphRevision, beforeRevoke.graph.graphRevision)
+  await assert.rejects(
+    service.trace('dv-review', {
+      sourceAssetId: 'CAM-01',
+      targetAssetId: 'CAM-END',
+      graphRevision: beforeRevoke.graph.graphRevision,
+    }),
+    (error) => error.code === 'topology_graph_stale',
+  )
+  const unavailable = await service.trace('dv-review', {
+    sourceAssetId: 'CAM-01',
+    targetAssetId: 'CAM-END',
+    graphRevision: afterRevoke.graph.graphRevision,
+  })
+  assert.equal(unavailable.status, 'unreachable')
+})
+
 function reviewBundle({ secondNode = false } = {}) {
   const nodes = [
     nodeRecord('CAM-01', [110.00001, -7]),
@@ -268,6 +502,94 @@ function reviewBundle({ secondNode = false } = {}) {
     explicitRelations: [],
     semanticRuleSetVersion: 'semantic-classifier/1.0.0',
     topologyRuleSetVersion: null,
+  }
+}
+
+function lineLabelReviewBundle() {
+  const bundle = reviewBundle()
+  bundle.classifiedNodes[0].sourceName = 'Cam-01'
+  bundle.classifiedNodes[0].sourceFolderPath = '/site/CCTV'
+  bundle.classifiedNodes[1].sourceName = 'Cam-END'
+  bundle.classifiedNodes[1].sourceFolderPath = '/site/CCTV'
+  bundle.classifiedPaths[0].sourceName = 'Jalur Cam-01 - Cam-END'
+  bundle.classifiedPaths[0].sourceFolderPath = '/site/Cable'
+  return bundle
+}
+
+function traceRecord() {
+  const nodes = ['asset-a', 'asset-b', 'asset-c', 'asset-d'].map((id) => ({
+    id,
+    assetId: id,
+    canonicalAssetId: id,
+    stableAssetId: id,
+    identityStatus: 'stable',
+    objectRole: 'device_node',
+    networkFamily: 'cctv',
+  }))
+  return {
+    datasetVersion: {
+      id: 'dv-trace',
+      datasetId: 'dataset-trace',
+      branchId: 'site-trace',
+      publicationStatus: 'published',
+    },
+    assets: nodes,
+    topologyGraph: {
+      datasetVersionId: 'dv-trace',
+      nodes,
+      edges: [
+        {
+          id: 'edge-a-b',
+          sourceAssetId: 'asset-a',
+          targetAssetId: 'asset-b',
+          sourceNodeId: 'asset-a',
+          targetNodeId: 'asset-b',
+          pathAssetIds: ['cable-1'],
+          sourceGeometryIds: ['geometry-cable-1'],
+          relationType: 'connected-via-path',
+          verificationStatus: 'confirmed',
+          relationStatus: 'confirmed',
+          lengthMeters: 10,
+        },
+        {
+          id: 'edge-b-c',
+          sourceAssetId: 'asset-b',
+          targetAssetId: 'asset-c',
+          sourceNodeId: 'asset-b',
+          targetNodeId: 'asset-c',
+          pathAssetIds: ['cable-2'],
+          sourceGeometryIds: ['geometry-cable-2'],
+          relationType: 'connected-via-path',
+          verificationStatus: 'confirmed',
+          relationStatus: 'confirmed',
+          lengthMeters: 20,
+        },
+        {
+          id: 'candidate-edge-a-d',
+          sourceAssetId: 'asset-a',
+          targetAssetId: 'asset-d',
+          candidateStatus: 'candidate',
+        },
+      ],
+      components: [],
+      degreeByNode: {},
+      isolatedNodeIds: [],
+    },
+    topologyCandidates: [{
+      candidateId: 'candidate-a-d',
+      sourcePathAssetId: 'asset-a',
+      targetAssetId: 'asset-d',
+      candidateStatus: 'candidate',
+    }],
+    topologyValidation: {
+      summary: { errors: 0, warnings: 1 },
+      issues: [{ severity: 'warning', issueCode: 'isolated_device' }],
+    },
+    topologyGeneratedAt: '2026-08-03T00:00:00.000Z',
+    topologyReadiness: {
+      topologyReadiness: 'not_ready',
+      blockingReasons: ['held_out_accuracy_not_proven'],
+    },
   }
 }
 

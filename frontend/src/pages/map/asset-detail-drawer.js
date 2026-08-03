@@ -8,6 +8,8 @@ export function renderAssetDetailDrawer({
   trace = {},
   showAdditionalMetadata = false,
   topologyReady = true,
+  traceAvailable = topologyReady,
+  diagramAvailable = topologyReady,
   topologyMessage = 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.',
 }) {
   if (status === 'loading') return renderLoadingState()
@@ -50,7 +52,7 @@ export function renderAssetDetailDrawer({
 
       ${renderTraceSection(trace)}
 
-      ${!topologyReady ? `
+      ${!traceAvailable ? `
         <section class="drawer-topology-readiness" role="status">
           <strong>Topology-ready: No</strong>
           <span>${escapeHtml(topologyMessage)}</span>
@@ -147,7 +149,7 @@ export function renderAssetDetailDrawer({
         </button>
       ` : `
         <button class="button primary trace-from" type="button"
-          ${topologyReady ? '' : `disabled aria-disabled="true" title="${escapeAttribute(topologyMessage)}"`}>
+          ${traceAvailable ? '' : `title="${escapeAttribute(topologyMessage)}"`}>
           <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>
           Telusuri jaringan
         </button>
@@ -159,7 +161,7 @@ export function renderAssetDetailDrawer({
           Buka detail aset
         </button>
         <button class="button secondary open-schematic" type="button"
-          ${topologyReady ? '' : `disabled aria-disabled="true" title="${escapeAttribute(topologyMessage)}"`}>
+          ${diagramAvailable ? '' : `disabled aria-disabled="true" title="${escapeAttribute(topologyMessage)}"`}>
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
           Buat diagram 2D
         </button>
@@ -223,6 +225,17 @@ function renderTraceSection(trace) {
   }
 
   if (trace.status === 'active') {
+    const sourceLabel = trace.sourceAssetId || trace.pathAssets?.[0]?.id || 'Belum tersedia'
+    const targetLabel = trace.targetAssetId
+      || trace.pathAssets?.at(-1)?.id
+      || 'Belum tersedia'
+    const hopLabel = Number.isFinite(Number(trace.hopCount))
+      ? String(trace.hopCount)
+      : 'Belum tersedia'
+    const lengthLabel = Number.isFinite(Number(trace.totalLengthMeters))
+      ? `${Number(trace.totalLengthMeters).toLocaleString('id-ID')} m`
+      : 'Belum tersedia'
+    const verifiedLabel = trace.verifiedAt || 'Belum tersedia'
     return `
       <section class="drawer-section trace-panel" aria-labelledby="trace-path-title">
         <div class="trace-panel-heading success">
@@ -232,9 +245,25 @@ function renderTraceSection(trace) {
             <p>${escapeHtml(trace.explanation || 'Urutan berdasarkan graph topologi terkonfirmasi.')}</p>
           </div>
         </div>
+        <dl class="asset-properties compact trace-metadata">
+          <div><dt>Dari</dt><dd>${escapeHtml(sourceLabel)}</dd></div>
+          <div><dt>Ke</dt><dd>${escapeHtml(targetLabel)}</dd></div>
+          <div><dt>Hop</dt><dd>${escapeHtml(hopLabel)}</dd></div>
+          <div><dt>Total panjang</dt><dd>${escapeHtml(lengthLabel)}</dd></div>
+          <div><dt>Network family</dt><dd>${escapeHtml(trace.networkFamily || 'Belum tersedia')}</dd></div>
+          <div><dt>Status</dt><dd>Confirmed</dd></div>
+          <div><dt>Graph revision</dt><dd>${escapeHtml(trace.graphRevision || 'Belum tersedia')}</dd></div>
+          <div><dt>Verified at</dt><dd>${escapeHtml(verifiedLabel)}</dd></div>
+        </dl>
         <ol class="trace-sequence">
           ${(trace.pathAssets || []).map((pathAsset, index) => {
             const relation = trace.relations?.[index]
+            const pathEvidence = relation?.pathAssetIds?.length
+              ? `Path: ${relation.pathAssetIds.join(', ')}`
+              : ''
+            const geometryEvidence = relation?.sourceGeometryIds?.length
+              ? `Geometry: ${relation.sourceGeometryIds.join(', ')}`
+              : ''
             return `
               <li>
                 <span class="trace-order">${index + 1}</span>
@@ -242,6 +271,8 @@ function renderTraceSection(trace) {
                   <strong>${escapeHtml(pathAsset.name)}</strong>
                   <small>${escapeHtml(pathAsset.id)}</small>
                   ${relation?.networkName ? `<em>${escapeHtml(relation.networkName)}</em>` : ''}
+                  ${pathEvidence ? `<small>${escapeHtml(pathEvidence)}</small>` : ''}
+                  ${geometryEvidence ? `<small>${escapeHtml(geometryEvidence)}</small>` : ''}
                 </span>
               </li>
             `
