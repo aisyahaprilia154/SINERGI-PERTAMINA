@@ -1339,8 +1339,12 @@ function buildConfirmedRelations({
 function deduplicateRedundantConfirmedRelations(relations) {
   const materialized = new Map()
   relations.forEach((relation) => {
-    const relationKind = relation.relationKind
-    if (relationKind === 'device_edge') {
+    const relationKind = relation.relationKind ?? persistedRelationKind(relation)
+    if (['device_edge', 'path_attachment', 'path_continuation'].includes(relationKind)) {
+      // A single operational edge may be supported by more than one generated
+      // candidate (for example, a path can intersect several other paths at
+      // the same junction). Keep one materialized relation per logical pair;
+      // the candidate history still preserves every reviewable piece of evidence.
       const key = `${relationKind}|${undirectedKey(
         relation.sourceAssetId,
         relation.targetAssetId,
@@ -1352,34 +1356,25 @@ function deduplicateRedundantConfirmedRelations(relations) {
       }
       return
     }
-    if (!['path_attachment', 'path_continuation'].includes(relationKind)) {
-      materialized.set(relation.relationId, relation)
-      return
-    }
-    const endpointKey = undirectedKey(
-      relation.sourceAssetId,
-      relation.targetAssetId,
-      relation.relationType,
-    )
-    const geometryKey = unique([
-      ...(relation.sourceGeometryIds ?? []),
-      relation.pathAssetId,
-    ]).sort().join('|')
-    const key = `${relationKind}|${endpointKey}|${geometryKey}`
-    const previous = materialized.get(key)
-    if (!previous || confirmedRelationPreference(relation, previous) > 0) {
-      materialized.set(key, relation)
-    }
+    materialized.set(relation.relationId, relation)
   })
   return [...materialized.values()]
 }
 
 function confirmedRelationPreference(left, right) {
+  const provenancePriority = {
+    manual_admin: 4,
+    explicit_kml_metadata: 3,
+    line_label_inference: 2,
+    spatial_inference: 1,
+  }
   const leftScore = Number(left.evidence?.find(({ source }) => source === 'scoring')?.observedValue)
   const rightScore = Number(right.evidence?.find(({ source }) => source === 'scoring')?.observedValue)
   const normalizedLeftScore = Number.isFinite(leftScore) ? leftScore : -1
   const normalizedRightScore = Number.isFinite(rightScore) ? rightScore : -1
-  return normalizedLeftScore - normalizedRightScore
+  return (provenancePriority[left.provenance] ?? 0)
+    - (provenancePriority[right.provenance] ?? 0)
+    || normalizedLeftScore - normalizedRightScore
     || String(right.verifiedAt ?? '').localeCompare(String(left.verifiedAt ?? ''))
     || String(right.relationId ?? '').localeCompare(String(left.relationId ?? ''))
 }
