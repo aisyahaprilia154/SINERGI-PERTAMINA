@@ -1986,10 +1986,10 @@ function compatiblePathNode(path, node) {
     }
   }
   const approved = {
-    cctv: /junction|\bjb\b|switch|nvr|server|router|camera|cctv/,
-    fiber_optic: /otb|junction|\bjb\b|switch|router|core|fiber|\bfo\b/,
-    lan: /switch|router|access point|\bap\b|printer|server|device|lan/,
-    infrastructure: /switch|router|server|junction|\bjb\b|otb|core/,
+    cctv: /junction|\bjb\b|switch|nvr|server|router|camera|cctv|tiang|pole/,
+    fiber_optic: /otb|junction|\bjb\b|switch|router|core|fiber|\bfo\b|tiang|pole/,
+    lan: /switch|router|access point|\bap\b|printer|server|device|lan|tiang|pole/,
+    infrastructure: /switch|router|server|junction|\bjb\b|otb|core|tiang|pole/,
   }[path.networkFamily]
   const compatible = (
     node.networkFamily === 'infrastructure' && approved?.test(type)
@@ -2020,7 +2020,7 @@ function familiesCompatibleForRelation(source, target) {
 }
 
 function inlineNodeAllowed(node) {
-  return /junction|\bjb\b|switch|router|otb|splitter|coupler|core/
+  return /junction|\bjb\b|switch|router|otb|splitter|coupler|core|tiang|pole/
     .test(nodeSemanticText(node))
 }
 
@@ -2274,7 +2274,9 @@ function connectedComponents(nodes, edges) {
 }
 
 function candidateGroupKey(candidate) {
-  if (candidate.candidateType === 'inline_device') return `inline:${candidate.targetAssetId}`
+  if (candidate.candidateType === 'inline_device') {
+    return `inline:${candidate.targetAssetId}|${candidate.sourcePathAssetId}`
+  }
   return candidate.sourceEndpointId
 }
 
