@@ -9,6 +9,11 @@ import {
   filterCandidatesByLocation,
   selectReviewLocationGroup,
 } from '../../domain/topology-review-location.js'
+import {
+  isRelationCategoryId,
+  RELATION_CATEGORIES,
+  relationCategoryForCandidate,
+} from '../../domain/topology-review-category.js'
 import { prioritizeTopologyCandidates } from '../../domain/topology-view-model.js'
 import {
   loadActiveDataset,
@@ -47,9 +52,11 @@ async function initializeReview(container, mapData) {
   const params = new URLSearchParams(window.location.search)
   const requestedStatus = params.get('status')
   const locationIndex = createReviewLocationIndex(mapData)
+  const requestedCategory = params.get('category')
   const state = {
     selectedCandidateId: params.get('reviewCandidateId'),
     status: requestedStatus === 'open' ? 'needs-review' : requestedStatus ?? 'needs-review',
+    category: isRelationCategoryId(requestedCategory) ? requestedCategory : 'all',
     family: params.get('family') ?? 'all',
     type: params.get('type') ?? 'all',
     minScore: Number(params.get('minScore') ?? 0),
@@ -148,6 +155,11 @@ async function initializeReview(container, mapData) {
                   placeholder="Nama aset atau kabel">
               </label>
               <label><span>Status</span><select class="candidate-status-filter"></select></label>
+            </div>
+            <div class="relation-category-section">
+              <span class="relation-category-label">Kelompok relasi</span>
+              <div class="relation-category-tabs" role="tablist"
+                aria-label="Kelompok relasi koneksi"></div>
             </div>
             <details class="advanced-filters">
               <summary>
@@ -260,6 +272,7 @@ async function initializeReview(container, mapData) {
       state.selectedCandidateId = items[0]?.candidateId ?? null
     }
     renderHeaderActions()
+    renderRelationCategories(candidatesForLocation())
     renderQueue(items)
     renderDetail()
     focusCandidateOnMap()
@@ -410,6 +423,38 @@ async function initializeReview(container, mapData) {
         state.selectedCandidateId = button.dataset.candidateId
         state.actionStatus = 'idle'
         state.actionMessage = ''
+        renderAll()
+      })
+    })
+  }
+
+  function renderRelationCategories(locationCandidates) {
+    const tabs = container.querySelector('.relation-category-tabs')
+    if (!tabs) return
+    const itemsWithoutCategory = filterCandidates(locationCandidates, state, {
+      ignoreCategory: true,
+    })
+    tabs.innerHTML = RELATION_CATEGORIES.map((category) => {
+      const count = category.id === 'all'
+        ? itemsWithoutCategory.length
+        : itemsWithoutCategory.filter((candidate) => (
+          relationCategoryForCandidate(candidate) === category.id
+        )).length
+      const selected = state.category === category.id
+      return `<button type="button" role="tab"
+        class="relation-category-tab${selected ? ' selected' : ''}"
+        aria-selected="${selected}" data-relation-category="${category.id}"
+        title="${escapeHtml(category.description)}">
+        <span>${escapeHtml(category.label)}</span>
+        <strong>${count}</strong>
+        <small>${escapeHtml(category.description)}</small>
+      </button>`
+    }).join('')
+    tabs.querySelectorAll('[data-relation-category]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const category = button.dataset.relationCategory
+        if (!isRelationCategoryId(category) || category === state.category) return
+        state.category = category
         renderAll()
       })
     })
@@ -902,6 +947,7 @@ async function initializeReview(container, mapData) {
     setOrDelete(query, 'area', state.area)
     setOrDelete(query, 'reviewCandidateId', state.selectedCandidateId)
     setOrDelete(query, 'status', state.status)
+    setOrDelete(query, 'category', state.category === 'all' ? null : state.category)
     setOrDelete(query, 'family', state.family)
     setOrDelete(query, 'type', state.type)
     setOrDelete(query, 'minScore', state.minScore ? state.minScore : null)
@@ -963,13 +1009,16 @@ async function loadReviewProjections(datasetVersionId, mapGeometries = []) {
   return { candidates, graph, summary, sourceFeatures: sourceFeaturePayload.items ?? [] }
 }
 
-function filterCandidates(items, state) {
+function filterCandidates(items, state, { ignoreCategory = false } = {}) {
   const query = state.search.trim().toLowerCase()
   return prioritizeTopologyCandidates(items).filter((candidate) => {
     const statusMatch = state.status === 'all'
       || (state.status === 'needs-review'
         ? isReviewableCandidate(candidate)
         : candidate.candidateStatus === state.status)
+    const categoryMatch = ignoreCategory
+      || state.category === 'all'
+      || relationCategoryForCandidate(candidate) === state.category
     const familyMatch = state.family === 'all' || candidate.networkFamily === state.family
     const typeMatch = state.type === 'all' || candidate.candidateType === state.type
     const scoreMatch = (candidate.score ?? 0) >= state.minScore
@@ -985,7 +1034,8 @@ function filterCandidates(items, state) {
       candidate.targetDisplayName,
       ...(candidate.sourceGeometryIds ?? []),
     ].filter(Boolean).join(' ').toLowerCase().includes(query)
-    return statusMatch && familyMatch && typeMatch && scoreMatch && distanceMatch && queryMatch
+    return statusMatch && categoryMatch && familyMatch && typeMatch
+      && scoreMatch && distanceMatch && queryMatch
   })
 }
 
