@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import http from 'node:http'
 import path from 'node:path'
 import { AppError, asAppError } from './errors.js'
@@ -34,6 +34,8 @@ export function createApp({
   const openFreeMapProxy = createOpenFreeMapProxy({ fetchImpl: basemapFetch })
   return http.createServer(async (request, response) => {
     setSecurityHeaders(response)
+    const correlationId = resolveCorrelationId(request)
+    response.setHeader('x-correlation-id', correlationId)
     const url = new URL(request.url, 'http://localhost')
 
     try {
@@ -61,6 +63,7 @@ export function createApp({
           repository,
           fileStore,
           auditLog,
+          correlationId,
         })
       }
       const activeAssetMatch = request.method === 'GET'
@@ -350,6 +353,7 @@ export function createApp({
           auditLog,
           jobQueue,
           importPipeline,
+          correlationId,
           clock,
         })
       }
@@ -437,6 +441,7 @@ export function createApp({
         await auditLog.record(`durable_job.${jobActionMatch[2]}`, {
           actorId: user.id,
           datasetVersionId: job.datasetVersionId,
+          correlationId,
           outcome: job.status,
           details: { jobId: job.jobId, jobType: job.jobType },
         })
@@ -462,6 +467,7 @@ export function createApp({
       const appError = asAppError(error)
       if (['authentication_required', 'invalid_token', 'forbidden'].includes(appError.code)) {
         await auditLog.record('dataset_import.authorization_denied', {
+          correlationId,
           outcome: appError.code,
           details: {
             method: request.method,
@@ -601,6 +607,7 @@ async function handleCreateImport({
   auditLog,
   jobQueue,
   importPipeline,
+  correlationId,
   clock,
 }) {
   let temporaryPath = null
@@ -682,6 +689,7 @@ async function handleCreateImport({
       actorId: user.id,
       datasetVersionId,
       branchId,
+      correlationId,
       outcome: 'processing',
       details: {
         sourceFilename: validated.sourceFilename,
@@ -753,6 +761,7 @@ async function handleCreateImport({
     await fileStore.removeTemporary(temporaryPath)
     await auditLog.record('dataset_import.upload_rejected', {
       actorId: user.id,
+      correlationId,
       outcome: 'rejected',
       details: {
         errorCode: error.code ?? 'internal_error',
@@ -771,6 +780,7 @@ async function handleSourceFileDownload({
   repository,
   fileStore,
   auditLog,
+  correlationId,
 }) {
   const user = authenticator.authenticate(request)
   let datasetVersion = null
@@ -788,6 +798,7 @@ async function handleSourceFileDownload({
       actorId: user.id,
       datasetVersionId,
       branchId: datasetVersion.branchId,
+      correlationId,
       outcome: 'success',
       details: {
         datasetId: datasetVersion.datasetId,
@@ -819,6 +830,7 @@ async function handleSourceFileDownload({
         actorId: user.id,
         datasetVersionId,
         branchId: datasetVersion?.branchId ?? null,
+        correlationId,
         outcome: incident ? 'incident' : 'denied',
         details: {
           datasetId: datasetVersion?.datasetId ?? null,
@@ -1022,6 +1034,12 @@ function setSecurityHeaders(response) {
   response.setHeader('x-content-type-options', 'nosniff')
   response.setHeader('content-security-policy', "default-src 'none'; frame-ancestors 'none'")
   response.setHeader('referrer-policy', 'no-referrer')
+}
+
+function resolveCorrelationId(request) {
+  const supplied = String(request.headers['x-correlation-id'] ?? '').trim()
+  if (/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(supplied)) return supplied
+  return randomUUID()
 }
 
 function createVersionName(importedAt) {

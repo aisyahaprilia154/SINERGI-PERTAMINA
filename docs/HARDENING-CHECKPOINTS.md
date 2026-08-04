@@ -647,6 +647,28 @@ Status: `complete (representative family matrix; production vocabulary pending)`
 Batas checkpoint: representative type coverage belum menggantikan production
 vocabulary/site mapping approval.
 
+## Checkpoint 32 - HTTP correlation ID audit envelope
+
+Status: `complete (request/audit envelope; metrics and full log context pending)`
+- 4 Agustus 2026.
+
+- Setiap HTTP response membawa `x-correlation-id`; server menghormati header
+  client yang memenuhi format aman atau membuat UUID v4 baru.
+- Correlation ID diteruskan ke audit event HTTP untuk authorization denied,
+  durable-job action, import accepted/rejected, dan source-file
+  download/incident. JSON Lines menyimpan field tervalidasi tanpa mengubah
+  sanitasi detail sensitif.
+- Regression khusus memverifikasi echo response, UUID generation, dan
+  correlation pada audit authorization event.
+- Full backend verification: `164/164` test, lint `89` file, build `37` source
+  file, dan `git diff --check` lulus.
+- Evidence detail: `docs/migrations/HTTP-CORRELATION-ID-2026-08-04.md`;
+  test utama `backend/tests/app-correlation-id.test.js`.
+
+Batas checkpoint: dashboard, metrics/alert fault injection, dan correlation
+context end-to-end untuk worker/service event serta dataset version/job ID/
+graph revision masih pending.
+
 ## Status berikutnya
 
 Task berikutnya adalah menjalankan live PostgreSQL restart/failover dengan
