@@ -127,6 +127,47 @@ test('atomic activation archives the previous version and publishes one shared p
   }
 })
 
+test('rollback reactivates the previous archived version and publishes a new pointer', async () => {
+  const fixture = await createLifecycleFixture()
+  try {
+    await fixture.repository.create(versionRecord('version-old', 'active'))
+    await fixture.repository.create(versionRecord('version-new', 'valid'))
+    await fixture.service.activate('version-new', 'admin-1', {
+      expectedActiveVersionId: 'version-old',
+    })
+
+    const result = await fixture.service.rollbackToPrevious(
+      'dataset-semarang',
+      'semarang',
+      'operator-rollback',
+      { expectedActiveVersionId: 'version-new' },
+    )
+    const active = await fixture.repository.resolveActiveVersion({
+      datasetId: 'dataset-semarang',
+      branchId: 'semarang',
+    })
+    const oldVersion = await fixture.repository.get('version-old')
+    const newVersion = await fixture.repository.get('version-new')
+
+    assert.equal(result.operation, 'rollback')
+    assert.equal(result.datasetVersion.id, 'version-old')
+    assert.equal(result.activePointer.datasetVersionId, 'version-old')
+    assert.equal(result.activePointer.previousVersionId, 'version-new')
+    assert.equal(active.record.datasetVersion.id, 'version-old')
+    assert.equal(oldVersion.datasetVersion.status, 'active')
+    assert.equal(newVersion.datasetVersion.status, 'archived')
+    assert.ok(fixture.auditEntries.some((entry) => (
+      entry.event === 'dataset_version.rolled_back'
+      && entry.details.previousVersionId === 'version-new'
+      && entry.details.newVersionId === 'version-old'
+      && entry.details.operation === 'rollback'
+      && entry.details.result === 'committed'
+    )))
+  } finally {
+    await fixture.close()
+  }
+})
+
 test('active map migrates legacy asset and topology IDs into one canonical identity', async () => {
   const fixture = await createLifecycleFixture()
   try {

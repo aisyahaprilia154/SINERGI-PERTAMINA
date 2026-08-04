@@ -385,6 +385,25 @@ export function createApp({
           }),
         )
       }
+      const rollbackMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/admin\/datasets\/([a-zA-Z0-9_-]+)\/branches\/([a-zA-Z0-9_-]+)\/rollback$/,
+        )
+        : null
+      if (rollbackMatch) {
+        const user = requireAdministrator(request, authenticator)
+        const body = await readJsonBody(request)
+        return sendJson(
+          response,
+          200,
+          await lifecycleService.rollbackToPrevious(
+            rollbackMatch[1],
+            rollbackMatch[2],
+            user.id,
+            { expectedActiveVersionId: body.expectedActiveVersionId },
+          ),
+        )
+      }
       const rejectionMatch = request.method === 'POST'
         ? url.pathname.match(/^\/api\/admin\/imports\/([a-zA-Z0-9_-]+)\/reject$/)
         : null

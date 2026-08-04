@@ -578,6 +578,26 @@ Status: `complete (engine timeout contract; worker/API SLO pending)` -
 Batas checkpoint: belum membuktikan cancellation worker, cleanup durable
 artifact, concurrent API p95, atau production capacity/SLO.
 
+## Checkpoint 28 - Atomic dataset/graph rollback pointer
+
+Status: `complete (JSON/lifecycle/API contract; PostgreSQL live drill pending)`
+- 4 Agustus 2026.
+
+- `DatasetVersionLifecycleService.rollbackToPrevious` mengambil previous
+  pointer, mengizinkan archived target yang tetap valid, memakai optimistic
+  expected-active guard, dan mempublikasikan pointer revision baru.
+- Rollback tidak menghapus data; cache invalidation dan audit berada pada
+  boundary yang sama. Event sukses `dataset_version.rolled_back` dan failure
+  `dataset_version.rollback_failed` dibedakan.
+- Route Administrator tersedia di
+  `POST /api/admin/datasets/:datasetId/branches/:branchId/rollback`.
+- Full backend verification: `160/160` test, lint `86` file, build `37` source
+  file, dan `git diff --check` lulus.
+- Evidence detail: `docs/migrations/DATASET-ROLLBACK-POINTER-2026-08-04.md`.
+
+Batas checkpoint: PostgreSQL live graph revision rows, backup/restore,
+operator drill, dan production approval masih pending.
+
 ## Status berikutnya
 
 Task berikutnya adalah menjalankan live PostgreSQL restart/failover dengan

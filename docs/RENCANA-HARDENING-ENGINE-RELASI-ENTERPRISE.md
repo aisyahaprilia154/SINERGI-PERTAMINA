@@ -608,7 +608,8 @@ test report, benchmark report, atau audit record.
 - [ ] Object storage, database, API, dan worker diuji end-to-end.
 - [x] Pagination candidate diuji melintasi beberapa halaman.
 - [ ] Aktivasi dataset tidak menampilkan graph setengah jadi.
-- [ ] Rollback rule set mengaktifkan kembali graph revision yang benar.
+- [x] Rollback rule set mengaktifkan kembali graph revision/pointer dataset
+  yang benar pada lifecycle contract.
 
 ### 10.3 Accuracy test
 
@@ -682,7 +683,8 @@ Checklist:
   pada adapter source storage saat ini.
 - [x] Dead-letter job dapat diperiksa dan di-retry.
 - [ ] Backup database berhasil di-restore ke environment bersih.
-- [ ] Graph revision sebelumnya dapat diaktifkan kembali.
+- [x] Graph revision sebelumnya dapat diaktifkan kembali pada lifecycle
+  contract.
 - [x] Audit event tetap konsisten setelah disconnect-before-commit retry pada
   isolated PostgreSQL mutation probe; broader transaction-failure matrix masih
   pending.
@@ -815,8 +817,9 @@ Rollback tidak menghapus data baru. Sistem harus:
 
 Checklist:
 
-- [ ] Rollback graph pointer diuji.
-- [ ] Rollback aplikasi tidak membutuhkan rollback data destruktif.
+- [x] Rollback graph pointer diuji pada lifecycle contract.
+- [x] Rollback aplikasi tidak membutuhkan rollback data destruktif pada
+  lifecycle contract.
 - [ ] Candidate yang direview selama canary tidak hilang.
 - [ ] Runbook rollback dapat dijalankan operator selain developer utama.
 
