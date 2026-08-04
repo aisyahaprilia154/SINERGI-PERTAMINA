@@ -20,6 +20,7 @@ export const DEFAULT_RELATION_ENGINE_CONFIG = Object.freeze({
   requiredPathAccuracy: 0.95,
   heldOutPrecision: null,
   pathAccuracy: null,
+  maxCandidateCount: 50000,
 })
 
 const SCORE_WEIGHTS = Object.freeze({
@@ -50,15 +51,16 @@ export function generateRelationArtifacts(topologyInputBundle, {
   const paths = preparePaths(bundle, eligibilityIssues, lineworkIssues)
   detectDuplicateAndOverlappingLinework(paths, lineworkIssues, bundle, settings)
   const spatialIndexes = buildSpatialIndexes(nodes, paths, settings)
+  const candidateBudget = createCandidateBudget(settings, bundle)
 
   const rawCandidates = [
-    ...generateEndpointDeviceCandidates(paths, spatialIndexes, settings),
-    ...generateInlineDeviceCandidates(nodes, spatialIndexes, settings),
-    ...generateEndpointEndpointCandidates(spatialIndexes, settings),
-    ...generateIntersectionCandidates(spatialIndexes, settings),
-    ...generateLineLabelConnectionCandidates(nodes, paths),
-    ...generateLineLabelAttachmentCandidates(nodes, paths, settings),
-    ...generateExplicitCandidates(bundle, nodes, paths, eligibilityIssues),
+    ...generateEndpointDeviceCandidates(paths, spatialIndexes, settings, candidateBudget),
+    ...generateInlineDeviceCandidates(nodes, spatialIndexes, settings, candidateBudget),
+    ...generateEndpointEndpointCandidates(spatialIndexes, settings, candidateBudget),
+    ...generateIntersectionCandidates(spatialIndexes, settings, candidateBudget),
+    ...generateLineLabelConnectionCandidates(nodes, paths, candidateBudget),
+    ...generateLineLabelAttachmentCandidates(nodes, paths, settings, candidateBudget),
+    ...generateExplicitCandidates(bundle, nodes, paths, eligibilityIssues, candidateBudget),
   ]
   const candidates = scoreAndProposeCandidates(
     rawCandidates,
@@ -241,7 +243,14 @@ export function createManualExplicitCandidate(topologyInputBundle, {
   const lineworkIssues = []
   const nodes = prepareNodes(bundle, eligibilityIssues)
   const paths = preparePaths(bundle, eligibilityIssues, lineworkIssues)
-  const rawCandidates = generateExplicitCandidates(bundle, nodes, paths, eligibilityIssues)
+  const candidateBudget = createCandidateBudget(settings, bundle)
+  const rawCandidates = generateExplicitCandidates(
+    bundle,
+    nodes,
+    paths,
+    eligibilityIssues,
+    candidateBudget,
+  )
   const candidates = scoreAndProposeCandidates(
     rawCandidates,
     settings,
@@ -717,7 +726,7 @@ function detectDuplicateAndOverlappingLinework(paths, issues, bundle, settings) 
   })
 }
 
-function generateEndpointDeviceCandidates(paths, spatialIndexes, settings) {
+function generateEndpointDeviceCandidates(paths, spatialIndexes, settings, candidateBudget) {
   const candidates = []
   paths.filter((path) => !path.duplicateOfGeometryId).forEach((path) => {
     lineEndpoints(path).forEach((endpoint) => {
@@ -729,7 +738,7 @@ function generateEndpointDeviceCandidates(paths, spatialIndexes, settings) {
         if (!compatibility.compatible) return
         const distanceMeters = geographicDistanceMeters(endpoint.coordinate, node.coordinate)
         if (distanceMeters > settings.searchRadiusMeters) return
-        candidates.push(baseCandidate({
+        pushCandidate(candidates, baseCandidate({
           candidateType: 'endpoint_device',
           sourceEndpointId: endpoint.id,
           sourcePath: path,
@@ -760,14 +769,14 @@ function generateEndpointDeviceCandidates(paths, spatialIndexes, settings) {
             weight: SCORE_WEIGHTS.semanticCompatibility,
             explanation: compatibility.explanation,
           }],
-        }))
+        }), candidateBudget, 'endpoint_device')
       })
     })
   })
   return candidates
 }
 
-function generateInlineDeviceCandidates(nodes, spatialIndexes, settings) {
+function generateInlineDeviceCandidates(nodes, spatialIndexes, settings, candidateBudget) {
   const candidates = []
   nodes.filter(inlineNodeAllowed).forEach((node) => {
     spatialIndexes.segments.queryPoint(
@@ -781,7 +790,7 @@ function generateInlineDeviceCandidates(nodes, spatialIndexes, settings) {
       if (nearest.measureMeters <= settings.minimumInlineEndpointDistanceMeters
         || path.totalLengthMeters - nearest.measureMeters
           <= settings.minimumInlineEndpointDistanceMeters) return
-      candidates.push(baseCandidate({
+      pushCandidate(candidates, baseCandidate({
         candidateType: 'inline_device',
         sourceEndpointId: `inline:${node.id}`,
         sourcePath: path,
@@ -812,13 +821,13 @@ function generateInlineDeviceCandidates(nodes, spatialIndexes, settings) {
           weight: SCORE_WEIGHTS.endpointRole,
           explanation: 'Device type diizinkan menjadi anchor di tengah jalur.',
         }],
-      }))
+      }), candidateBudget, 'inline_device')
     })
   })
   return candidates
 }
 
-function generateEndpointEndpointCandidates(spatialIndexes, settings) {
+function generateEndpointEndpointCandidates(spatialIndexes, settings, candidateBudget) {
   const endpointRecords = spatialIndexes.endpointRecords
   const candidates = []
   const seenPairs = new Set()
@@ -844,7 +853,7 @@ function generateEndpointEndpointCandidates(spatialIndexes, settings) {
         0,
         1 - deviation / settings.endpointContinuationAngleDegrees,
       )
-      candidates.push(baseCandidate({
+      pushCandidate(candidates, baseCandidate({
         candidateType: 'endpoint_endpoint',
         sourceEndpointId: left.id,
         sourcePath: left.path,
@@ -869,13 +878,13 @@ function generateEndpointEndpointCandidates(spatialIndexes, settings) {
           weight: SCORE_WEIGHTS.angle,
           explanation: 'Arah segmen ujung mendekati kontinuitas dan tidak memiliki device penghubung.',
         }],
-      }))
+      }), candidateBudget, 'endpoint_endpoint')
     })
   })
   return candidates
 }
 
-function generateIntersectionCandidates(spatialIndexes, settings) {
+function generateIntersectionCandidates(spatialIndexes, settings, candidateBudget) {
   const candidates = []
   spatialIndexes.segments.pathPairs().forEach(([left, right]) => {
       if (left.duplicateOfGeometryId) return
@@ -899,7 +908,7 @@ function generateIntersectionCandidates(spatialIndexes, settings) {
           .sort((a, b) => a.distanceMeters - b.distanceMeters || compareId(a.node, b.node))
         if (!junctions.length) return
         const selected = junctions[0]
-        candidates.push(baseCandidate({
+        pushCandidate(candidates, baseCandidate({
           candidateType: 'intersection_with_junction',
           sourceEndpointId: `intersection:${left.geometryId}:${right.geometryId}:${intersectionIndex}`,
           sourcePath: left,
@@ -928,13 +937,13 @@ function generateIntersectionCandidates(spatialIndexes, settings) {
             weight: SCORE_WEIGHTS.semanticCompatibility,
             explanation: 'Persilangan hanya menjadi candidate karena ada classified junction.',
           }],
-        }))
+        }), candidateBudget, 'intersection_with_junction')
       })
   })
   return candidates
 }
 
-function generateLineLabelConnectionCandidates(nodes, paths) {
+function generateLineLabelConnectionCandidates(nodes, paths, candidateBudget) {
   const candidates = []
   paths.filter((path) => path.sourceName).forEach((path) => {
     const matchedNodes = lineLabelNodeSequence(path, nodes)
@@ -985,13 +994,13 @@ function generateLineLabelConnectionCandidates(nodes, paths) {
         targetNode.geometryId,
       ].filter(Boolean))
       candidate.lineSourcePathAssetId = path.id
-      candidates.push(candidate)
+      pushCandidate(candidates, candidate, candidateBudget, 'line_label_connection')
     }
   })
   return candidates
 }
 
-function generateLineLabelAttachmentCandidates(nodes, paths, settings) {
+function generateLineLabelAttachmentCandidates(nodes, paths, settings, candidateBudget) {
   const candidates = []
   paths.filter((path) => path.sourceName).forEach((path) => {
     const matchedNodes = lineLabelNodeSequence(path, nodes)
@@ -1003,7 +1012,7 @@ function generateLineLabelAttachmentCandidates(nodes, paths, settings) {
       if (!compatibility.compatible) return
       const distanceMeters = geographicDistanceMeters(endpoint.coordinate, targetNode.coordinate)
       if (distanceMeters > settings.searchRadiusMeters) return
-      candidates.push(baseCandidate({
+      pushCandidate(candidates, baseCandidate({
         candidateType: 'line_label_attachment',
         sourceEndpointId: endpoint.id,
         sourcePath: path,
@@ -1034,7 +1043,7 @@ function generateLineLabelAttachmentCandidates(nodes, paths, settings) {
           weight: SCORE_WEIGHTS.distance,
           explanation: `Endpoint garis berada dalam radius ${settings.searchRadiusMeters} meter dari device hasil pembacaan nama garis.`,
         }],
-      }))
+      }), candidateBudget, 'line_label_attachment')
     })
   })
   return candidates
@@ -1155,7 +1164,7 @@ function sourceLocationKey(value) {
   return segments.slice(0, layerIndex > 0 ? layerIndex : Math.min(2, segments.length)).join('/')
 }
 
-function generateExplicitCandidates(bundle, nodes, paths, issues) {
+function generateExplicitCandidates(bundle, nodes, paths, issues, candidateBudget) {
   const objectByFeature = new Map([
     ...nodes.map((node) => [node.sourceFeatureId, node]),
     ...paths.map((path) => [path.sourceFeatureId, path]),
@@ -1175,7 +1184,8 @@ function generateExplicitCandidates(bundle, nodes, paths, issues) {
       if (!objectByIdentity.has(alias)) objectByIdentity.set(alias, object)
     })
   })
-  return bundle.explicitRelations.flatMap((relation) => {
+  const candidates = []
+  bundle.explicitRelations.forEach((relation) => {
     const source = relation.sourceReference
       ? objectByIdentity.get(relation.sourceReference)
       : objectByFeature.get(relation.sourceFeatureId)
@@ -1189,7 +1199,7 @@ function generateExplicitCandidates(bundle, nodes, paths, issues) {
         entityReference: relation.explicitRelationEvidenceId,
         readinessImpact: 'blocking',
       }))
-      return []
+      return
     }
     if (source.siteId !== target.siteId) {
       issues.push(topologyIssue(bundle, {
@@ -1200,9 +1210,9 @@ function generateExplicitCandidates(bundle, nodes, paths, issues) {
         entityReference: relation.explicitRelationEvidenceId,
         readinessImpact: 'blocking',
       }))
-      return []
+      return
     }
-    return [{
+    pushCandidate(candidates, {
       ...baseCandidate({
         candidateType: 'explicit_metadata',
         sourceEndpointId: `explicit:${relation.explicitRelationEvidenceId}`,
@@ -1234,8 +1244,9 @@ function generateExplicitCandidates(bundle, nodes, paths, issues) {
       manualConfirmation: relation.source === 'manual_admin'
         ? structuredClone(relation.manualConfirmation ?? null)
         : null,
-    }]
+    }, candidateBudget, 'explicit_metadata')
   })
+  return candidates
 }
 
 function baseCandidate({
@@ -1291,6 +1302,23 @@ function baseCandidate({
     },
     evidence,
   }
+}
+
+function createCandidateBudget(settings, bundle) {
+  return {
+    count: 0,
+    maxCount: settings.maxCandidateCount,
+    datasetVersionId: bundle.datasetVersion.id,
+    siteId: bundle.site,
+  }
+}
+
+function pushCandidate(candidates, candidate, budget, stage) {
+  if (budget.count >= budget.maxCount) {
+    throw candidateLimitExceeded(budget, stage)
+  }
+  budget.count += 1
+  candidates.push(candidate)
 }
 
 function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, datasetVersionId) {
@@ -2447,6 +2475,23 @@ function invalidBundle(message, details) {
   })
 }
 
+function candidateLimitExceeded(budget, stage) {
+  return new AppError(
+    `Candidate generation melewati hard limit ${budget.maxCount}.`,
+    {
+      code: 'topology_candidate_limit_exceeded',
+      statusCode: 422,
+      details: {
+        attemptedCandidateCount: budget.count + 1,
+        maxCandidateCount: budget.maxCount,
+        stage,
+        datasetVersionId: budget.datasetVersionId,
+        siteId: budget.siteId,
+      },
+    },
+  )
+}
+
 function normalizeConfig(config) {
   const value = { ...DEFAULT_RELATION_ENGINE_CONFIG, ...config }
   return {
@@ -2494,6 +2539,10 @@ function normalizeConfig(config) {
     ),
     heldOutPrecision: optionalUnitNumber(value.heldOutPrecision),
     pathAccuracy: optionalUnitNumber(value.pathAccuracy),
+    maxCandidateCount: positiveInteger(
+      value.maxCandidateCount,
+      DEFAULT_RELATION_ENGINE_CONFIG.maxCandidateCount,
+    ),
   }
 }
 
@@ -2698,6 +2747,11 @@ function compact(value) {
 function positiveNumber(value, fallback) {
   const number = Number(value)
   return Number.isFinite(number) && number > 0 ? number : fallback
+}
+
+function positiveInteger(value, fallback) {
+  const number = Number(value)
+  return Number.isInteger(number) && number > 0 ? number : fallback
 }
 
 function nonNegativeNumber(value, fallback) {

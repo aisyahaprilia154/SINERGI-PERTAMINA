@@ -246,6 +246,11 @@ export function createConfig(env = process.env, overrides = {}) {
         ?? optionalUnitNumberFrom(env.SINERGI_TOPOLOGY_HELD_OUT_PRECISION),
       pathAccuracy: overrides.topology?.pathAccuracy
         ?? optionalUnitNumberFrom(env.SINERGI_TOPOLOGY_PATH_ACCURACY),
+      maxCandidateCount: overrides.topology?.maxCandidateCount
+        ?? numberFrom(
+          env.SINERGI_TOPOLOGY_MAX_CANDIDATES,
+          DEFAULT_RELATION_ENGINE_CONFIG.maxCandidateCount,
+        ),
     },
     validation: {
       requireAssetName: overrides.validation?.requireAssetName

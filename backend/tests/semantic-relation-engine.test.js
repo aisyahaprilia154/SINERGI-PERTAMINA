@@ -214,6 +214,39 @@ test('nearly equal endpoint-device scores become ambiguous', () => {
   assert.ok(startCandidates.every(({ proposalStatus }) => proposalStatus === 'ambiguous'))
 })
 
+test('candidate explosion fails closed with a stage-specific diagnostic', () => {
+  const bundle = topologyBundle({
+    nodes: [
+      node('CAM-A', 'cctv', 'CCTV Camera', [110, -7]),
+      node('CAM-B', 'cctv', 'CCTV Camera', [110.00001, -7]),
+    ],
+    paths: [pathObject('CBL-01', 'cctv', 'CCTV Cable', [
+      [110, -7],
+      [110.001, -7],
+    ])],
+  })
+  const sourceBefore = structuredClone(bundle.geometries)
+
+  assert.throws(
+    () => generateRelationArtifacts(bundle, {
+      config: { maxCandidateCount: 1 },
+    }),
+    (error) => {
+      assert.equal(error.code, 'topology_candidate_limit_exceeded')
+      assert.equal(error.statusCode, 422)
+      assert.deepEqual(error.details, {
+        attemptedCandidateCount: 2,
+        maxCandidateCount: 1,
+        stage: 'endpoint_device',
+        datasetVersionId: 'dv-topology',
+        siteId: 'site-1',
+      })
+      return true
+    },
+  )
+  assert.deepEqual(bundle.geometries, sourceBefore)
+})
+
 test('endpoint gap candidate requires same family, continuation angle, and no nearby device', () => {
   const result = generateRelationArtifacts(topologyBundle({
     paths: [

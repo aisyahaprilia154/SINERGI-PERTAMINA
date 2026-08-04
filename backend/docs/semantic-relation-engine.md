@@ -30,6 +30,16 @@ menyamakan kedekatan geometris dengan konektivitas.
 7. Graph dibangun ulang hanya dari relasi confirmed.
 8. Readiness dan topology summary dipersistensikan bersama dataset version.
 
+## Candidate explosion guardrail
+
+Candidate discovery mempunyai hard limit default `50.000` kandidat per bundle.
+Limit dapat diubah secara eksplisit melalui `SINERGI_TOPOLOGY_MAX_CANDIDATES`
+atau `config.topology.maxCandidateCount`. Jika limit terlampaui, engine berhenti
+dengan error `topology_candidate_limit_exceeded` sebelum menghasilkan artifact
+parsial; diagnostic menyebut stage discovery, dataset version, site, jumlah
+yang dicoba, dan limit. Nilai ini adalah safety guardrail, bukan persetujuan
+kapasitas produksi atau pengganti load test.
+
 ## Jenis kandidat
 
 - `endpoint_device`: endpoint path ke perangkat kompatibel.
