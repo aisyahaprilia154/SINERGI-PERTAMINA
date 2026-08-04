@@ -554,6 +554,8 @@ Checklist:
 - [ ] Dashboard latency API/review tersedia.
 - [ ] Alert diuji dengan fault injection sederhana.
 - [ ] Log mempunyai correlation ID, dataset version, job ID, dan graph revision.
+- [x] HTTP request correlation ID dipantulkan pada response dan disimpan pada
+  audit event HTTP yang sudah berada di boundary app.
 - [ ] Log tidak menyimpan token, password, atau source data sensitif berlebihan.
 
 ## 9. Target nonfungsional yang harus disetujui
