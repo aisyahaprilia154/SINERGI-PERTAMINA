@@ -323,7 +323,10 @@ export class JsonDatasetVersionRepository {
         })
         break
       } catch (error) {
-        if (error.code !== 'EEXIST') throw error
+        // Windows can report EPERM for a short interval while another
+        // writer is releasing the same lock file. Treat it as contention and
+        // retry instead of failing a valid concurrent mutation.
+        if (!['EEXIST', 'EPERM'].includes(error.code)) throw error
         if (await this.#isStaleLock(lockPath)) {
           await unlink(lockPath).catch(() => {})
           continue

@@ -129,6 +129,82 @@ test('JSON repository preserves 20 concurrent reviewers on different candidates'
     )
     assert.equal(auditLog.index, 20)
   } finally {
+    await rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 50,
+    })
+  }
+})
+
+test('confirm and revoke concurrently preserve a valid topology state machine', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-review-confirm-revoke-'))
+  try {
+    const bundle = reviewBundle()
+    const initial = generateRelationArtifacts(bundle)
+    const repository = new JsonDatasetVersionRepository(path.join(root, 'dataset-versions'))
+    await repository.create(applyArtifacts(baseRecord(bundle), initial))
+    const auditLog = new MemoryAuditLog()
+    const confirmService = new TopologyService({ repository, auditLog })
+    const revokeService = new TopologyService({ repository, auditLog })
+    const startCandidate = initial.candidates.find(({ sourceEndpointId }) => (
+      sourceEndpointId === 'endpoint:geometry:CBL-01:start'
+    ))
+    const endCandidate = initial.candidates.find(({ sourceEndpointId }) => (
+      sourceEndpointId === 'endpoint:geometry:CBL-01:end'
+    ))
+    const firstConfirmation = await confirmService.confirmCandidate(
+      startCandidate.candidateId,
+      'admin-1',
+      { reason: 'Persiapan state machine concurrency.' },
+    )
+    const relation = firstConfirmation.confirmedRelations.find(({ candidateId }) => (
+      candidateId === startCandidate.candidateId
+    ))
+    assert.ok(relation)
+
+    const results = await Promise.allSettled([
+      revokeService.revokeRelation(relation.relationId, 'admin-2', {
+        reason: 'Revoke bersamaan untuk verifikasi state machine.',
+      }),
+      confirmService.confirmCandidate(endCandidate.candidateId, 'admin-3', {
+        reason: 'Confirm bersamaan untuk verifikasi state machine.',
+      }),
+    ])
+    assert.ok(results.some(({ status }) => status === 'fulfilled'))
+    for (const [index, result] of results.entries()) {
+      if (result.status === 'fulfilled') continue
+      assert.equal(result.reason.code, 'dataset_version_stale_revision')
+      if (index === 0) {
+        await revokeService.revokeRelation(relation.relationId, 'admin-2', {
+          reason: 'Retry revoke setelah konflik revision.',
+        })
+      } else {
+        await confirmService.confirmCandidate(endCandidate.candidateId, 'admin-3', {
+          reason: 'Retry confirm setelah konflik revision.',
+        })
+      }
+    }
+
+    const persisted = await repository.get(bundle.datasetVersion.id)
+    const startState = persisted.topologyCandidates.find(({ candidateId }) => (
+      candidateId === startCandidate.candidateId
+    ))
+    const endState = persisted.topologyCandidates.find(({ candidateId }) => (
+      candidateId === endCandidate.candidateId
+    ))
+    const activeRelations = persisted.confirmedRelations.filter(({ verificationStatus }) => (
+      verificationStatus === 'confirmed'
+    ))
+    assert.equal(startState.candidateStatus, 'revoked')
+    assert.equal(endState.candidateStatus, 'confirmed')
+    assert.equal(activeRelations.length, 1)
+    assert.equal(activeRelations[0].candidateId, endCandidate.candidateId)
+    assert.equal(persisted.topologyGraph.edges.length, 0)
+    assert.equal(persisted.recordRevision, 3)
+    assert.equal(auditLog.index, 3)
+  } finally {
     await rm(root, { recursive: true, force: true })
   }
 })
