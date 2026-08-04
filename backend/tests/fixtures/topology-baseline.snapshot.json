@@ -1,0 +1,78 @@
+{
+  "fixtureVersion": "topology-baseline-fixture/1.0.0",
+  "datasetVersionId": "dv-baseline-fixture",
+  "siteId": "site-baseline",
+  "topologyRuleSetVersion": "semantic-relation-engine/1.0.0",
+  "semanticRuleSetVersion": "semantic-classifier/1.0.0",
+  "summary": {
+    "candidateCount": 2,
+    "confirmedEdgeCount": 1,
+    "confirmedDeviceEdgeCount": 1,
+    "confirmedRelationCount": 1,
+    "confirmedPathAttachmentCount": 0,
+    "confirmedPathContinuationCount": 0,
+    "ambiguousCount": 0,
+    "rejectedCount": 0,
+    "revokedCount": 0,
+    "unresolvedCount": 0,
+    "componentCount": 1,
+    "isolatedNodeCount": 0,
+    "falseComponentMergeCount": 0
+  },
+  "candidates": [
+    {
+      "candidateId": "candidate:4a22dcf761966393b273a2dd",
+      "candidateType": "endpoint_device",
+      "sourceEndpointId": "endpoint:geometry:LAN-01:start",
+      "targetAssetId": "SW-01",
+      "candidateStatus": "candidate",
+      "proposalStatus": "recommended",
+      "relationKind": "path_attachment"
+    },
+    {
+      "candidateId": "candidate:823d169b04a8dbad37ed0daa",
+      "candidateType": "explicit_metadata",
+      "sourceEndpointId": "explicit:explicit-baseline-01",
+      "targetAssetId": "SW-02",
+      "candidateStatus": "confirmed",
+      "proposalStatus": "confirmed_by_explicit_policy",
+      "relationKind": "device_edge"
+    },
+    {
+      "candidateId": "candidate:a572bec5ab3a39cf34b3a264",
+      "candidateType": "endpoint_device",
+      "sourceEndpointId": "endpoint:geometry:LAN-01:end",
+      "targetAssetId": "SW-02",
+      "candidateStatus": "candidate",
+      "proposalStatus": "recommended",
+      "relationKind": "path_attachment"
+    }
+  ],
+  "confirmedRelations": [
+    {
+      "relationId": "relation:3fccc15f1b450b234588a1a8",
+      "sourceAssetId": "SW-01",
+      "targetAssetId": "SW-02",
+      "relationType": "connected-to",
+      "provenance": "explicit_kml_metadata",
+      "verificationStatus": "confirmed"
+    }
+  ],
+  "graph": {
+    "nodeIds": [
+      "SW-01",
+      "SW-02"
+    ],
+    "edgeIds": [
+      "topology-edge:8a75de22f97c401f92d064cc"
+    ],
+    "componentCount": 1,
+    "isolatedNodeIds": []
+  },
+  "readiness": {
+    "topologyReadiness": "not_ready",
+    "blockingReasons": [
+      "held_out_accuracy_not_proven"
+    ]
+  }
+}

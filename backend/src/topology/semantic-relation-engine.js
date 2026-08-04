@@ -48,14 +48,14 @@ export function generateRelationArtifacts(topologyInputBundle, {
   const lineworkIssues = []
   const nodes = prepareNodes(bundle, eligibilityIssues)
   const paths = preparePaths(bundle, eligibilityIssues, lineworkIssues)
-  detectDuplicateAndOverlappingLinework(paths, lineworkIssues, bundle)
+  detectDuplicateAndOverlappingLinework(paths, lineworkIssues, bundle, settings)
   const spatialIndexes = buildSpatialIndexes(nodes, paths, settings)
 
   const rawCandidates = [
     ...generateEndpointDeviceCandidates(paths, spatialIndexes, settings),
     ...generateInlineDeviceCandidates(nodes, spatialIndexes, settings),
     ...generateEndpointEndpointCandidates(spatialIndexes, settings),
-    ...generateIntersectionCandidates(nodes, spatialIndexes, settings),
+    ...generateIntersectionCandidates(spatialIndexes, settings),
     ...generateLineLabelConnectionCandidates(nodes, paths),
     ...generateLineLabelAttachmentCandidates(nodes, paths, settings),
     ...generateExplicitCandidates(bundle, nodes, paths, eligibilityIssues),
@@ -129,6 +129,272 @@ export function generateRelationArtifacts(topologyInputBundle, {
     summary,
     readiness,
   }
+}
+
+/**
+ * Rebuilds review-derived artifacts without running candidate discovery.
+ * Candidate review changes state on an already generated candidate collection;
+ * it should not rescan every spatial pair just to publish the resulting graph.
+ */
+export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
+  config = {},
+  candidates = [],
+  previousRelations = [],
+  previousGraph = {},
+  affectedAssetIds = [],
+  eligibilityIssues = [],
+  lineworkIssues = [],
+  generatedAt = new Date().toISOString(),
+} = {}) {
+  const settings = normalizeConfig(config)
+  const bundle = normalizeAndValidateBundle(topologyInputBundle)
+  const computedEligibilityIssues = []
+  const computedLineworkIssues = []
+  const nodes = prepareNodes(bundle, computedEligibilityIssues)
+  const paths = preparePaths(bundle, computedEligibilityIssues, computedLineworkIssues)
+  detectDuplicateAndOverlappingLinework(paths, computedLineworkIssues, bundle, settings)
+  const nextEligibilityIssues = mergeIssues(
+    eligibilityIssues,
+    computedEligibilityIssues,
+  )
+  const nextLineworkIssues = mergeIssues(
+    lineworkIssues,
+    computedLineworkIssues,
+  )
+  const normalizedCandidates = structuredClone(asArray(candidates))
+  const confirmedRelations = buildConfirmedRelations({
+    bundle,
+    candidates: normalizedCandidates,
+    previousRelations,
+    settings,
+    generatedAt,
+  })
+  const graph = rebuildConfirmedGraphIncrementally({
+    bundle,
+    nodes,
+    paths,
+    confirmedRelations,
+    previousGraph,
+    affectedAssetIds,
+  })
+  const validation = validateConfirmedGraph({
+    bundle,
+    nodes,
+    paths,
+    candidates: normalizedCandidates,
+    confirmedRelations,
+    graph,
+    lineworkIssues: nextLineworkIssues,
+  })
+  const unresolved = buildUnresolvedEndpoints(paths, normalizedCandidates)
+  const summary = buildSummary({
+    candidates: normalizedCandidates,
+    confirmedRelations,
+    graph,
+    unresolved,
+    validation,
+  })
+  const readiness = evaluateTopologyReadiness({
+    bundle,
+    candidates: normalizedCandidates,
+    confirmedRelations,
+    validation,
+    settings,
+    unresolved,
+  })
+
+  return {
+    schemaVersion: '1.0.0',
+    datasetVersionId: bundle.datasetVersion.id,
+    siteId: bundle.site,
+    topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+    semanticRuleSetVersion: bundle.semanticRuleSetVersion,
+    generatedAt,
+    config: settings,
+    candidates: normalizedCandidates,
+    confirmedRelations,
+    graph,
+    eligibilityIssues: nextEligibilityIssues,
+    lineworkIssues: nextLineworkIssues,
+    validation,
+    unresolved,
+    summary,
+    readiness,
+  }
+}
+
+/**
+ * Creates only the explicit candidate needed by a manual device relation.
+ * This keeps a manual review action off the spatial candidate discovery path.
+ */
+export function createManualExplicitCandidate(topologyInputBundle, {
+  relation,
+  config = {},
+  generatedAt = new Date().toISOString(),
+} = {}) {
+  const settings = normalizeConfig(config)
+  const bundle = normalizeAndValidateBundle({
+    ...topologyInputBundle,
+    explicitRelations: [structuredClone(relation)],
+  })
+  const eligibilityIssues = []
+  const lineworkIssues = []
+  const nodes = prepareNodes(bundle, eligibilityIssues)
+  const paths = preparePaths(bundle, eligibilityIssues, lineworkIssues)
+  const rawCandidates = generateExplicitCandidates(bundle, nodes, paths, eligibilityIssues)
+  const candidates = scoreAndProposeCandidates(
+    rawCandidates,
+    settings,
+    generatedAt,
+    bundle.datasetVersion.id,
+  )
+  candidates.forEach((candidate) => {
+    candidate.datasetVersionId = bundle.datasetVersion.id
+  })
+  return {
+    candidate: candidates[0] ?? null,
+    eligibilityIssues: mergeIssues(eligibilityIssues, lineworkIssues),
+  }
+}
+
+/**
+ * Rebuilds only the device components touched by a review mutation and merges
+ * them with the previous graph. The candidate collection is intentionally not
+ * regenerated here; callers pass the already-reviewed candidates.
+ */
+export function rebuildConfirmedGraphIncrementally({
+  bundle,
+  nodes,
+  paths,
+  confirmedRelations,
+  previousGraph = {},
+  affectedAssetIds = [],
+} = {}) {
+  const allNodes = asArray(nodes)
+  const previousNodes = asArray(previousGraph.nodes)
+  const currentNodeIds = new Set(allNodes.map(({ id }) => id))
+  const previousNodeIds = new Set(previousNodes.map(({ id }) => id))
+  const graphShapeChanged = currentNodeIds.size !== previousNodeIds.size
+    || [...currentNodeIds].some((id) => !previousNodeIds.has(id))
+  if (!previousNodes.length || graphShapeChanged) {
+    return buildConfirmedGraph({ bundle, nodes: allNodes, paths, confirmedRelations })
+  }
+
+  const scopeAssets = incrementalScopeAssets({
+    previousGraph,
+    confirmedRelations,
+    affectedAssetIds,
+  })
+  if (!scopeAssets.size) return structuredClone(previousGraph)
+
+  const affectedNodeIds = new Set([...scopeAssets].filter((id) => currentNodeIds.has(id)))
+  if (!affectedNodeIds.size || affectedNodeIds.size === currentNodeIds.size) {
+    return buildConfirmedGraph({ bundle, nodes: allNodes, paths, confirmedRelations })
+  }
+
+  const scopedRelations = confirmedRelations.filter((relation) => (
+    scopeAssets.has(relation.sourceAssetId)
+      && scopeAssets.has(relation.targetAssetId)
+  ))
+  const scopedPaths = paths.filter((path) => scopeAssets.has(path.id))
+  const rebuilt = buildConfirmedGraph({
+    bundle,
+    nodes: allNodes.filter(({ id }) => affectedNodeIds.has(id)),
+    paths: scopedPaths,
+    confirmedRelations: scopedRelations,
+  })
+  const retainedNodes = previousNodes.filter(({ id }) => !affectedNodeIds.has(id))
+  const retainedEdges = asArray(previousGraph.edges).filter((edge) => (
+    !affectedNodeIds.has(edge.sourceAssetId)
+      && !affectedNodeIds.has(edge.targetAssetId)
+  ))
+  const edges = [...retainedEdges, ...rebuilt.edges]
+    .sort((left, right) => left.id.localeCompare(right.id))
+  const graphNodes = [...retainedNodes, ...rebuilt.nodes]
+    .sort(compareId)
+  return finalizeConfirmedGraph({
+    datasetVersionId: bundle.datasetVersion.id,
+    topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+    nodes: graphNodes,
+    edges,
+  })
+}
+
+function incrementalScopeAssets({
+  previousGraph,
+  confirmedRelations,
+  affectedAssetIds,
+}) {
+  const scope = new Set(asArray(affectedAssetIds).filter(Boolean).map(String))
+  const previousEdges = asArray(previousGraph.edges)
+  previousEdges.forEach((edge) => {
+    if (!edgeTouchesAnyAsset(edge, scope)) return
+    scope.add(edge.sourceAssetId)
+    scope.add(edge.targetAssetId)
+  })
+  asArray(previousGraph.components).forEach((component) => {
+    if (!asArray(component.nodeIds).some((nodeId) => scope.has(nodeId))) return
+    asArray(component.nodeIds).forEach((nodeId) => scope.add(nodeId))
+  })
+
+  let changed = true
+  while (changed) {
+    changed = false
+    confirmedRelations.forEach((relation) => {
+      if (!scope.has(relation.sourceAssetId) && !scope.has(relation.targetAssetId)) return
+      const beforeSize = scope.size
+      scope.add(relation.sourceAssetId)
+      scope.add(relation.targetAssetId)
+      changed ||= scope.size !== beforeSize
+    })
+  }
+  return scope
+}
+
+function edgeTouchesAnyAsset(edge, assets) {
+  return [
+    edge.sourceAssetId,
+    edge.targetAssetId,
+    edge.pathAssetId,
+    ...asArray(edge.pathAssetIds),
+    ...asArray(edge.sourceGeometryIds),
+  ].filter(Boolean).some((value) => assets.has(String(value)))
+}
+
+function finalizeConfirmedGraph({
+  datasetVersionId,
+  topologyRuleSetVersion,
+  nodes,
+  edges,
+}) {
+  const degreeByNode = Object.fromEntries(nodes.map((node) => [
+    node.id,
+    edges.filter((edge) => (
+      edge.sourceAssetId === node.id || edge.targetAssetId === node.id
+    )).length,
+  ]))
+  return {
+    datasetVersionId,
+    topologyRuleSetVersion,
+    nodes,
+    edges,
+    components: connectedComponents(nodes, edges),
+    degreeByNode,
+    isolatedNodeIds: Object.entries(degreeByNode)
+      .filter(([, degree]) => degree === 0)
+      .map(([nodeId]) => nodeId)
+      .sort(),
+  }
+}
+
+function mergeIssues(...groups) {
+  const seen = new Set()
+  return groups.flatMap((group) => asArray(group)).filter((issue) => {
+    const key = issue?.issueId ?? stableStringify(issue)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 export function normalizeTopologySummary(
@@ -412,7 +678,7 @@ function preparePaths(bundle, issues, lineworkIssues) {
   ))
 }
 
-function detectDuplicateAndOverlappingLinework(paths, issues, bundle) {
+function detectDuplicateAndOverlappingLinework(paths, issues, bundle, settings) {
   const exact = new Map()
   paths.forEach((path) => {
     const forward = coordinateSequenceKey(path.coordinates)
@@ -434,25 +700,21 @@ function detectDuplicateAndOverlappingLinework(paths, issues, bundle) {
     }
   })
 
-  for (let leftIndex = 0; leftIndex < paths.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < paths.length; rightIndex += 1) {
-      const left = paths[leftIndex]
-      const right = paths[rightIndex]
-      if (left.duplicateOfGeometryId || right.duplicateOfGeometryId) continue
-      if (left.siteId !== right.siteId || left.networkFamily !== right.networkFamily) continue
-      if (!linesHaveCollinearOverlap(left, right)) continue
-      issues.push(topologyIssue(bundle, {
-        severity: 'warning',
-        issueCode: 'overlapping_linework',
-        scope: 'linework',
-        message: `Geometry ${left.geometryId} dan ${right.geometryId} overlap tanpa digabung.`,
-        entityReference: `${left.geometryId}|${right.geometryId}`,
-        readinessImpact: 'warning',
-      }))
-      left.overlaps = [...(left.overlaps ?? []), right.geometryId]
-      right.overlaps = [...(right.overlaps ?? []), left.geometryId]
-    }
-  }
+  buildSegmentIndex(paths, settings).pathPairs().forEach(([left, right]) => {
+    if (left.duplicateOfGeometryId || right.duplicateOfGeometryId) return
+    if (left.siteId !== right.siteId || left.networkFamily !== right.networkFamily) return
+    if (!linesHaveCollinearOverlap(left, right)) return
+    issues.push(topologyIssue(bundle, {
+      severity: 'warning',
+      issueCode: 'overlapping_linework',
+      scope: 'linework',
+      message: `Geometry ${left.geometryId} dan ${right.geometryId} overlap tanpa digabung.`,
+      entityReference: `${left.geometryId}|${right.geometryId}`,
+      readinessImpact: 'warning',
+    }))
+    left.overlaps = [...(left.overlaps ?? []), right.geometryId]
+    right.overlaps = [...(right.overlaps ?? []), left.geometryId]
+  })
 }
 
 function generateEndpointDeviceCandidates(paths, spatialIndexes, settings) {
@@ -613,7 +875,7 @@ function generateEndpointEndpointCandidates(spatialIndexes, settings) {
   return candidates
 }
 
-function generateIntersectionCandidates(nodes, spatialIndexes, settings) {
+function generateIntersectionCandidates(spatialIndexes, settings) {
   const candidates = []
   spatialIndexes.segments.pathPairs().forEach(([left, right]) => {
       if (left.duplicateOfGeometryId) return
@@ -622,7 +884,8 @@ function generateIntersectionCandidates(nodes, spatialIndexes, settings) {
         || left.siteId !== right.siteId
         || left.networkFamily !== right.networkFamily) return
       intersections(left, right).forEach((intersection, intersectionIndex) => {
-        const junctions = nodes
+        const junctions = spatialIndexes.nodes
+          .queryPoint(intersection.coordinate, settings.intersectionToleranceMeters)
           .filter((node) => (
             inlineNodeAllowed(node)
             && compatiblePathNode(left, node).compatible
@@ -1888,6 +2151,27 @@ function buildSpatialIndexes(nodes, paths, settings) {
     endpointRecords,
     segments: segmentIndex,
   }
+}
+
+function buildSegmentIndex(paths, settings) {
+  const coordinates = paths.flatMap(({ coordinates: lineCoordinates }) => lineCoordinates)
+  const referenceLatitude = coordinates.length
+    ? coordinates.reduce((total, coordinate) => total + Number(coordinate[1]), 0)
+      / coordinates.length
+    : 0
+  const cellSizeMeters = Math.max(
+    25,
+    settings.searchRadiusMeters,
+    settings.inlineSearchRadiusMeters,
+    settings.intersectionToleranceMeters,
+  )
+  const segmentIndex = new MeterGridIndex(referenceLatitude, cellSizeMeters)
+  paths.forEach((path) => {
+    path.coordinates.slice(1).forEach((end, index) => {
+      segmentIndex.insertBounds(path, path.coordinates[index], end)
+    })
+  })
+  return segmentIndex
 }
 
 class MeterGridIndex {

@@ -129,6 +129,25 @@ export class ImportFileStore {
     }
   }
 
+  resolveOriginalPath(storageKey) {
+    if (!storageKey) {
+      throw new AppError('File sumber asli tidak tersedia untuk durable job.', {
+        code: 'source_file_missing',
+        statusCode: 404,
+      })
+    }
+    const target = path.resolve(this.dataRoot, String(storageKey))
+    try {
+      assertWorkspaceChild(this.sourceRoot, target)
+    } catch {
+      throw new AppError('Referensi file sumber durable job tidak valid.', {
+        code: 'source_file_reference_invalid',
+        statusCode: 409,
+      })
+    }
+    return target
+  }
+
   async removeTemporary(filePath) {
     if (!filePath) return
     assertWorkspaceChild(this.uploadRoot, filePath)

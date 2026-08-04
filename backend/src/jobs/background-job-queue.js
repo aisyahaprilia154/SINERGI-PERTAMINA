@@ -7,7 +7,19 @@ export class BackgroundJobQueue {
   }
 
   enqueue(job) {
-    this.pending.push(job)
+    const task = typeof job === 'function'
+      ? job
+      : typeof job?.handler === 'function'
+        ? () => job.handler(job.payload ?? {}, {
+          job: descriptorWithoutHandler(job),
+          updateProgress: async () => {},
+          isCancellationRequested: async () => false,
+        })
+        : null
+    if (typeof task !== 'function') {
+      throw new TypeError('Background job harus berupa function atau descriptor dengan handler.')
+    }
+    this.pending.push(task)
     this.#drain()
   }
 
@@ -37,4 +49,9 @@ export class BackgroundJobQueue {
     if (this.running !== 0 || this.pending.length !== 0) return
     this.idleResolvers.splice(0).forEach((resolve) => resolve())
   }
+}
+
+function descriptorWithoutHandler(job) {
+  const { handler, ...descriptor } = job
+  return structuredClone(descriptor)
 }
