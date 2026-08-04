@@ -164,6 +164,8 @@ export class DatasetVersionLifecycleService {
 
   async activate(datasetVersionId, actorId, {
     expectedActiveVersionId,
+    allowArchived = false,
+    operation = 'activate',
   } = {}) {
     let target = null
     const activatedAt = this.clock().toISOString()
@@ -175,7 +177,7 @@ export class DatasetVersionLifecycleService {
         activatedAt,
         expectedActiveVersionId,
         validateTarget(record) {
-          if (!canActivate(record)) {
+          if (!canActivate(record, { allowArchived })) {
             throw new AppError(
               'Dataset version tidak dapat diaktifkan karena belum valid atau masih mempunyai blocking error.',
               {
@@ -210,7 +212,10 @@ export class DatasetVersionLifecycleService {
         }
       }
 
-      await this.auditLog.record('dataset_version.activated', {
+      const event = operation === 'rollback'
+        ? 'dataset_version.rolled_back'
+        : 'dataset_version.activated'
+      await this.auditLog.record(event, {
         actorId,
         datasetVersionId,
         branchId: transaction.pointer.branchId,
@@ -224,9 +229,11 @@ export class DatasetVersionLifecycleService {
           validationSummary: transaction.activated.validation?.summary ?? {},
           result: 'committed',
           activePointerRevision: transaction.pointer.revision,
+          operation,
         },
       }).catch(() => {})
       return {
+        operation,
         datasetVersion: withoutInternalStorage(transaction.activated.datasetVersion),
         archivedDatasetVersion: transaction.previous
           ? withoutInternalStorage(transaction.previous.datasetVersion)
@@ -238,24 +245,54 @@ export class DatasetVersionLifecycleService {
       }
     } catch (error) {
       const context = error.activationContext ?? {}
-      await this.auditLog.record('dataset_version.activation_failed', {
-        actorId,
-        datasetVersionId,
-        branchId: context.branchId ?? target?.datasetVersion.branchId ?? null,
-        outcome: 'failed',
-        details: {
-          datasetId: context.datasetId ?? target?.datasetVersion.datasetId ?? null,
-          previousVersionId: context.previousVersionId ?? null,
-          newVersionId: datasetVersionId,
-          activatedBy: actorId,
-          activatedAt,
-          validationSummary: target?.validation?.summary ?? {},
-          result: 'rolled_back',
-          errorCode: error.code ?? error.name,
+      await this.auditLog.record(
+        operation === 'rollback'
+          ? 'dataset_version.rollback_failed'
+          : 'dataset_version.activation_failed',
+        {
+          actorId,
+          datasetVersionId,
+          branchId: context.branchId ?? target?.datasetVersion.branchId ?? null,
+          outcome: 'failed',
+          details: {
+            datasetId: context.datasetId ?? target?.datasetVersion.datasetId ?? null,
+            previousVersionId: context.previousVersionId ?? null,
+            newVersionId: datasetVersionId,
+            activatedBy: actorId,
+            activatedAt,
+            validationSummary: target?.validation?.summary ?? {},
+            result: 'rolled_back',
+            errorCode: error.code ?? error.name,
+            operation,
+          },
         },
-      }).catch(() => {})
+      ).catch(() => {})
       throw error
     }
+  }
+
+  async rollbackToPrevious(datasetId, branchId, actorId, {
+    expectedActiveVersionId,
+  } = {}) {
+    const resolved = await this.#resolveActive(datasetId, branchId)
+    const previousVersionId = resolved.pointer.previousVersionId
+    if (!previousVersionId) {
+      throw new AppError('Tidak ada dataset version sebelumnya untuk rollback.', {
+        code: 'previous_dataset_version_not_found',
+        statusCode: 409,
+        details: {
+          datasetId,
+          branchId,
+          activeVersionId: resolved.record.datasetVersion.id,
+        },
+      })
+    }
+    return this.activate(previousVersionId, actorId, {
+      expectedActiveVersionId: expectedActiveVersionId
+        ?? resolved.record.datasetVersion.id,
+      allowArchived: true,
+      operation: 'rollback',
+    })
   }
 
   async reject(datasetVersionId, actorId) {
@@ -803,8 +840,10 @@ function readAssetProperty(asset, key) {
     ?? asset.properties?.[key]
 }
 
-function canActivate(record) {
-  return record.datasetVersion.status === 'valid'
+function canActivate(record, { allowArchived = false } = {}) {
+  const statusValid = record.datasetVersion.status === 'valid'
+    || (allowArchived && record.datasetVersion.status === 'archived')
+  return statusValid
     && record.datasetVersion.validationStatus === 'valid'
     && record.validation?.canActivate === true
     && !(record.issues ?? []).some((issue) => issue.canActivate === false)
