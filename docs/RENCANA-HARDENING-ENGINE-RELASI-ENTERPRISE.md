@@ -664,7 +664,7 @@ Checklist:
 - [ ] Review API p95 memenuhi target saat worker sedang sibuk.
 - [ ] Query plan membuktikan spatial/BTREE index digunakan.
 - [x] Candidate explosion mempunyai hard limit dan diagnostic yang jelas.
-- [ ] Timeout tidak meninggalkan partial artifact.
+- [x] Timeout tidak meninggalkan partial artifact pada engine generation.
 - [ ] Memory, CPU, database I/O, dan queue depth dilaporkan.
 
 ### 10.6 Recovery dan durability test

@@ -559,6 +559,25 @@ Status: `complete (current file-store adapter; external object storage pending)`
 Batas checkpoint: belum membuktikan provider object storage eksternal,
 retry/backoff provider, retention, atau alert production.
 
+## Checkpoint 27 - Topology generation timeout
+
+Status: `complete (engine timeout contract; worker/API SLO pending)` -
+4 Agustus 2026.
+
+- Engine mempunyai cooperative timeout default `60.000 ms`, dengan override
+  `config.topology.maxGenerationMilliseconds` atau
+  `SINERGI_TOPOLOGY_MAX_GENERATION_MS`.
+- Timeout menghasilkan `topology_generation_timeout` (`504`) dengan diagnostic
+  stage, elapsed/limit, candidate count/limit, dataset version, dan site.
+- Regression memakai 2.000 path dan timeout `1 ms`; engine fail-closed,
+  tidak mengembalikan partial artifact, dan tidak memutasi geometry input.
+- Full backend verification: `158/158` test, lint `85` file, build `37` source
+  file, dan `git diff --check` lulus.
+- Evidence detail: `docs/migrations/TOPOLOGY-GENERATION-TIMEOUT-2026-08-04.md`.
+
+Batas checkpoint: belum membuktikan cancellation worker, cleanup durable
+artifact, concurrent API p95, atau production capacity/SLO.
+
 ## Status berikutnya
 
 Task berikutnya adalah menjalankan live PostgreSQL restart/failover dengan
