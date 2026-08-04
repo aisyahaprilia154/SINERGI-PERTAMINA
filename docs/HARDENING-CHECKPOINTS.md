@@ -728,11 +728,29 @@ Status: `complete (JSON repository race contract; PostgreSQL/live load pending)`
 Batas checkpoint: HTTP race, PostgreSQL multi-instance, durable worker race,
 dan automatic client retry policy masih pending.
 
+## Checkpoint 36 - PostgreSQL live recovery preflight
+
+Status: `preflight complete; live restart/failover not executed`
+- 4 Agustus 2026.
+
+- Service Windows `postgresql-x64-18` terdeteksi running dan `pg_isready` pada
+  `127.0.0.1:5432` menerima koneksi.
+- Tidak ada `SINERGI_DATABASE_URL` atau credential environment PostgreSQL yang
+  tersedia pada task.
+- Runner dijalankan dan berhenti fail-closed dengan `database_url_required`
+  sebelum membuka pool atau me-restart service.
+- Evidence detail:
+  `docs/migrations/POSTGRES-LIVE-RECOVERY-PREFLIGHT-2026-08-04.md`.
+
+Batas checkpoint: ini bukan bukti live schema, auth, restart, failover,
+durability, atau backup/restore. Live drill menunggu kredensial dan otorisasi
+operator yang tepat.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
-regeneration/review. Berikutnya adalah live PostgreSQL restart/failover dengan
-kredensial operator; concurrency/load/SLO dan enterprise approval gates tetap
+regeneration/review. Live PostgreSQL restart/failover menunggu kredensial dan
+otorisasi operator; concurrency/load/SLO dan enterprise approval gates tetap
 terpisah.
 Setiap checkpoint hanya boleh ditandai selesai
 setelah test, lint/build, dan regression evidence lulus; bukti live database
