@@ -107,7 +107,7 @@ test('parallel network relations receive separate visual lanes', () => {
   assert.notDeepEqual(layout.edges[0].routePoints, layout.edges[1].routePoints)
 })
 
-test('full-map layout creates readable category sections', () => {
+test('legacy full-map input is rendered as a hierarchy without category grid sections', () => {
   const mapGraph = {
     status: 'ready',
     mode: 'full-map',
@@ -122,9 +122,8 @@ test('full-map layout creates readable category sections', () => {
   const northWest = fullLayout.nodes.find((node) => node.id === 'north-west')
   const southEast = fullLayout.nodes.find((node) => node.id === 'south-east')
 
-  assert.equal(fullLayout.strategy, 'category-sections')
-  assert.equal(fullLayout.sections.length, 1)
-  assert.equal(fullLayout.sections[0].nodeCount, 2)
+  assert.equal(fullLayout.strategy, 'hierarchy')
+  assert.equal(fullLayout.sections.length, 0)
   assert.ok(northWest.diagram.nodeX < southEast.diagram.nodeX)
   assert.equal(rectanglesOverlap(northWest.diagram, southEast.diagram), false)
 })

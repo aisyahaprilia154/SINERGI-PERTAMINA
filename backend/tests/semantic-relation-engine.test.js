@@ -252,6 +252,38 @@ test('line endpoint labels create one bulk-reviewable device connection', () => 
   assert.ok(confirmed.graph.edges[0].sourceGeometryIds.includes('geometry:CBL-LABEL'))
 })
 
+test('line endpoint labels resolve exported design-variant suffixes', () => {
+  const left = node('JB-A-EXP', 'cctv', 'Junction Box', [110, -7])
+  const right = node('JB-B', 'cctv', 'Junction Box', [110.001, -7])
+  const cable = pathObject('FO-LABEL', 'cctv', 'CCTV Cable', [
+    [110, -7],
+    [110.001, -7],
+  ])
+  left.object.sourceName = 'JB-A-exp'
+  left.object.sourceFolderPath = '/site/Junction Box'
+  right.object.sourceName = 'JB-B'
+  right.object.sourceFolderPath = '/site/Junction Box'
+  cable.object.sourceName = 'FO-JB-A_JB-B'
+  cable.object.sourceFolderPath = '/site/Cable/Fiber Optic'
+
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [left, right],
+    paths: [cable],
+  }))
+  const connection = result.candidates.find(({ candidateType, evidence }) => (
+    candidateType === 'line_label_connection'
+      && evidence.some(({ source, observedValue }) => (
+        source === 'line_label' && observedValue === 'FO-JB-A_JB-B'
+      ))
+  ))
+
+  assert.ok(connection)
+  assert.equal(connection.sourcePathAssetId, 'JB-A-EXP')
+  assert.equal(connection.targetAssetId, 'JB-B')
+  assert.equal(connection.candidateStatus, 'candidate')
+  assert.equal(connection.proposalStatus, 'recommended')
+})
+
 test('manual explicit device relation is confirmed and can override family compatibility', () => {
   const result = generateRelationArtifacts(topologyBundle({
     nodes: [

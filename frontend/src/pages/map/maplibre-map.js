@@ -7,6 +7,7 @@ import {
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { groundOverlayCoordinates } from '../../domain/ground-overlay.js'
+import { deriveAssetShortLabel } from '../../domain/asset-labels.js'
 import { getDefaultMapToken } from '../../services/active-dataset-service.js'
 import { buildAdaptiveAssetLayout } from './adaptive-asset-layout.js'
 import {
@@ -86,6 +87,12 @@ export function createMapLibreSurface(element, {
   let clusterLookup = new Map()
   const initialBounds = boundsForGeometries(geometries)
   const imageryTiles = String(import.meta.env.VITE_SINERGI_BASEMAP_TILES ?? '').trim()
+  const configuredImageryMaxZoom = Number(import.meta.env.VITE_SINERGI_BASEMAP_MAX_ZOOM ?? 18)
+  const imageryMaxZoom = Number.isInteger(configuredImageryMaxZoom)
+    && configuredImageryMaxZoom >= 0
+    && configuredImageryMaxZoom <= 22
+    ? configuredImageryMaxZoom
+    : 18
   const vectorTiles = String(
     import.meta.env.VITE_SINERGI_VECTOR_TILES_URL
       ?? '/api/basemap/openfreemap/planet',
@@ -95,7 +102,12 @@ export function createMapLibreSurface(element, {
   const loadedBasemapSourceIds = new Set()
   const map = new MapLibreMap({
     container: element,
-    style: createBaseStyle({ imageryTiles, vectorTiles, attribution: basemapAttribution }),
+    style: createBaseStyle({
+      imageryTiles,
+      imageryMaxZoom,
+      vectorTiles,
+      attribution: basemapAttribution,
+    }),
     center: initialBounds
       ? [(initialBounds[0] + initialBounds[2]) / 2, (initialBounds[1] + initialBounds[3]) / 2]
       : [117, -2],
@@ -947,7 +959,7 @@ function renderAdaptiveAssetMarker(marker) {
     marker.displaced ? 'displaced' : '',
     marker.active === false ? 'inactive' : '',
   ].filter(Boolean).join(' ')
-  const label = shortAssetLabel(marker.label || marker.id)
+  const label = deriveAssetShortLabel({ name: marker.label, id: marker.id, type: marker.type })
   const title = `${marker.label || marker.id} · ${marker.type} · posisi aktual dari KML`
   return `
     <button class="${classes}" type="button"
@@ -984,11 +996,6 @@ function iconForAsset(asset) {
   if (type.includes('lan') || type.includes('utp')) return 'lan'
   if (type.includes('tiang')) return 'location_on'
   return 'memory'
-}
-
-function shortAssetLabel(value) {
-  const label = String(value ?? '').trim()
-  return label.length > 18 ? `${label.slice(0, 17)}…` : label
 }
 
 function safeColor(value) {

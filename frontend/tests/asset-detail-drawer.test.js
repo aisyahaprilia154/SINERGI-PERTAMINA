@@ -97,7 +97,7 @@ test('drawer supports loading and error states', () => {
   assert.match(error, /Coba lagi/)
 })
 
-test('drawer keeps tracing clickable while the site is not topology-ready', () => {
+test('drawer disables tracing and explains when the selected asset is not topology-ready', () => {
   const html = renderAssetDetailDrawer({
     asset,
     assetNetworks: [network],
@@ -108,9 +108,9 @@ test('drawer keeps tracing clickable while the site is not topology-ready', () =
     trace: { status: 'idle' },
   })
 
-  assert.match(html, /Topology-ready: No/)
+  assert.match(html, /Relasi aset belum tersedia/)
+  assert.match(html, /trace-from[^>]*disabled/)
   assert.match(html, /class="button primary trace-from"[^>]*title="Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\."/)
-  assert.doesNotMatch(html, /class="button primary trace-from"[^>]*\bdisabled\b/)
   assert.match(html, /class="button secondary open-schematic"[^>]*disabled aria-disabled="true"/)
   assert.match(html, /Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\./)
 })

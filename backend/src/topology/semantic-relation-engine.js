@@ -821,11 +821,45 @@ function topologyLabelAliases(sourceName) {
   const tokens = normalizeToken(sourceName).split(' ').filter(Boolean)
   if (!tokens.length) return []
   const aliases = [tokens]
+  const baseTokens = trimTopologyLabelVariantSuffix(tokens)
+  if (baseTokens.length !== tokens.length) aliases.push(baseTokens)
   if (['cam', 'camera', 'kamera'].includes(tokens[0]) && tokens.length > 1) {
     aliases.push(['c', ...tokens.slice(1)])
   }
   if (tokens[0] === 'server') aliases.push(['svr'])
-  return aliases
+  return uniqueTokenSequences(aliases)
+}
+
+// Google Earth exports in this dataset use suffixes such as "-exp" and
+// "-fix" to distinguish a design variant of the same physical asset. Cable
+// labels omit that suffix (for example, "FO-JB-011_JB-012" while the node is
+// named "JB-011-exp"). Keep the full label as the first alias and add a
+// deterministic base alias so the endpoint name remains resolvable without
+// weakening the site/folder and distance checks applied by the caller.
+const TOPOLOGY_LABEL_VARIANT_SUFFIXES = new Set([
+  'exp',
+  'non',
+  'fix',
+  'relokasi',
+  'existing',
+  'baru',
+  'lama',
+])
+
+function trimTopologyLabelVariantSuffix(tokens) {
+  let end = tokens.length
+  while (end > 1 && TOPOLOGY_LABEL_VARIANT_SUFFIXES.has(tokens[end - 1])) end -= 1
+  return tokens.slice(0, end)
+}
+
+function uniqueTokenSequences(sequences) {
+  const seen = new Set()
+  return sequences.filter((sequence) => {
+    const key = sequence.join('\u0001')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 function tokenSequencePositions(tokens, sequence) {
