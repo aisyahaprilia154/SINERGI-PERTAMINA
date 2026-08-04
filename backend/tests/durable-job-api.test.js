@@ -76,3 +76,77 @@ test('durable job API exposes safe progress and supports Administrator cancel/re
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('durable job API exposes dead-letter state and allows Administrator retry', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-dead-letter-api-'))
+  const repository = new JsonDurableJobRepository(path.join(root, 'jobs'))
+  const queue = new DurableJobQueue({ repository, workerId: 'dead-letter-api-worker' })
+  const auditLog = new JsonLinesAuditLog(path.join(root, 'audit.jsonl'))
+  const app = createApp({
+    config: {},
+    authenticator: new TokenAuthenticator({
+      'admin-token': { id: 'admin-1', role: 'Administrator' },
+    }),
+    repository: {},
+    fileStore: {},
+    auditLog,
+    jobQueue: queue,
+    importPipeline: {},
+    lifecycleService: {},
+    topologyService: {},
+  })
+  let listening = false
+
+  try {
+    const created = await repository.create({
+      jobType: 'poison-operator-test',
+      datasetVersionId: 'dv-dead-letter-api',
+      inputFingerprint: 'sha256:dead-letter-api',
+      payload: { sourceStorageKey: 'private/poison.kml' },
+      maxAttempts: 1,
+    })
+    const claimed = await repository.claimNext({
+      workerId: 'poison-worker',
+      leaseMilliseconds: 60_000,
+    })
+    assert.equal(claimed.jobId, created.jobId)
+    const deadLetter = await repository.fail(created.jobId, 'poison-worker', {
+      errorCode: 'fixture_poison',
+      errorSummary: 'Fixture poison job.',
+      retryable: false,
+    })
+    assert.equal(deadLetter.status, 'dead_letter')
+
+    await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve))
+    listening = true
+    const address = app.address()
+    const origin = `http://127.0.0.1:${address.port}`
+
+    const visible = await fetch(`${origin}/api/admin/jobs/${created.jobId}`, {
+      headers: { authorization: 'Bearer admin-token' },
+    })
+    const visibleBody = await visible.json()
+    assert.equal(visible.status, 200)
+    assert.equal(visibleBody.job.status, 'dead_letter')
+    assert.equal(visibleBody.job.errorCode, 'fixture_poison')
+    assert.equal(Object.hasOwn(visibleBody.job, 'payload'), false)
+
+    const retried = await fetch(`${origin}/api/admin/jobs/${created.jobId}/retry`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer admin-token' },
+    })
+    const retriedBody = await retried.json()
+    assert.equal(retried.status, 200)
+    assert.equal(retriedBody.job.status, 'queued')
+    assert.equal(retriedBody.job.attemptCount, 0)
+    assert.equal(retriedBody.job.errorCode, null)
+  } finally {
+    if (listening) {
+      await new Promise((resolve, reject) => {
+        app.close((error) => error ? reject(error) : resolve())
+      })
+    }
+    await queue.stop()
+    await rm(root, { recursive: true, force: true })
+  }
+})
