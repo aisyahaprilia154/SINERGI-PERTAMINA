@@ -598,6 +598,22 @@ Status: `complete (JSON/lifecycle/API contract; PostgreSQL live drill pending)`
 Batas checkpoint: PostgreSQL live graph revision rows, backup/restore,
 operator drill, dan production approval masih pending.
 
+## Checkpoint 29 - Deterministic topology rerun
+
+Status: `complete (in-process artifact contract; cross-worker persistence
+pending)` - 4 Agustus 2026.
+
+- Regression test menjalankan bundle clone dua kali dengan rule-set dan
+  `generatedAt` sama, lalu deep-equal seluruh artifact.
+- Candidate, relation, graph revision, validation, readiness, dan summary
+  terbukti identik pada scope engine in-process.
+- Tiga full-suite run berurutan masing-masing `161/161` test lulus; lint `86`
+  file, build `37` source file, dan `git diff --check` juga lulus.
+- Evidence detail: `docs/migrations/TOPOLOGY-DETERMINISTIC-RERUN-2026-08-04.md`.
+
+Batas checkpoint: belum membuktikan cross-process/instance durable retry,
+PostgreSQL persistence, atau stored-artifact deduplication.
+
 ## Status berikutnya
 
 Task berikutnya adalah menjalankan live PostgreSQL restart/failover dengan
