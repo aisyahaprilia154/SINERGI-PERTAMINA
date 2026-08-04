@@ -78,10 +78,11 @@ PostGIS `3.6.2`. Password values were not stored in the repository.
 - Review state, relation, graph revision, and audit event are PostgreSQL-backed;
   transaction coupling now has runtime/contract, HTTP fault-injection, and
   live pilot concurrency evidence.
-- Durable jobs are PostgreSQL-backed and the primary pilot passed; restart/
-  recovery under process failure, retry idempotency across instances,
-  20-reviewer load, and representative 10,000/50,000-object SLO evidence
-  remain pending.
+- Durable jobs are PostgreSQL-backed and the primary pilot passed. A later
+  process-level lease recovery probe also passed; database server
+  restart/failover, retry idempotency across instances, 20-reviewer load, and
+  representative 10,000/50,000-object SLO evidence remain pending. See
+  `LIVE-POSTGRES-PROCESS-RECOVERY-2026-08-04.md`.
 - Accuracy gold set, SSO/RBAC, security review, operational runbook,
   observability sign-off, canary, and organization approvals are external
   gates, not solvable by local database credentials alone.

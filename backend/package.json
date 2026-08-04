@@ -16,6 +16,7 @@
     "db:primary-pilot": "node scripts/database-primary-pilot.mjs",
     "db:concurrency": "node scripts/database-concurrency.mjs",
     "db:query-plan": "node scripts/database-query-plan.mjs",
+    "db:postgres-process-recovery": "node scripts/database-postgres-process-recovery.mjs",
     "db:live-verify": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-live-verification.ps1",
     "db:backup-restore": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-backup-restore.ps1",
     "db:http-review-replay": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-http-review-replay.ps1"

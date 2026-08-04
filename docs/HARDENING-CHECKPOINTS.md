@@ -359,10 +359,35 @@ lookup, primary pilot, concurrency, dan query plan lulus. Checkpoint ini belum
 membuktikan PostgreSQL process restart/recovery, database disconnect recovery,
 retry lintas instance, atau production-sized SLO.
 
+## Checkpoint 18 - PostgreSQL process-level durable job restart/recovery
+
+Status: `complete (local PostgreSQL process-level lease recovery scope)` - 4 Agustus 2026.
+
+- Runner live: `backend/scripts/database-postgres-process-recovery.mjs`,
+  command `npm run db:postgres-process-recovery`.
+- Child process pertama membuka pool PostgreSQL, claim job, menulis bukti claim,
+  lalu exit code `17` tanpa menyelesaikan job.
+- Replacement process membuka pool baru, menemukan lease kedaluwarsa,
+  memulihkan `1` job, claim ulang, dan complete.
+- Live evidence: PostgreSQL 18/PostGIS `3.6.2`; final status `succeeded`,
+  `finalAttemptCount = 2`, `finalRevision = 4`, dan enqueue ulang
+  `idempotencyDeduplicated = true`.
+- Runner membersihkan job probe yang dibuatnya pada `finally`; fixture menolak
+  memulai jika queue memiliki job `queued`/`retry_wait` lain agar tidak
+  memproses pekerjaan di luar scope.
+- Regression evidence lokal: backend `141/141` test, lint `80` file, build
+  `36` source file, dan `git diff --check` lulus.
+- Evidence terpisah: `docs/migrations/LIVE-POSTGRES-PROCESS-RECOVERY-2026-08-04.md`.
+
+Batas checkpoint: bukti ini memakai satu database PostgreSQL lokal dan satu
+job probe; belum membuktikan database disconnect retry tanpa duplicate relation,
+PostgreSQL server restart/failover, multi-instance production load, object
+storage recovery, atau disaster recovery backup/restore.
+
 ## Status berikutnya
 
-Task berikutnya adalah PostgreSQL live restart/recovery, mutation idempotency
-yang lebih luas, load/SLO, dan enterprise approval gates. Setiap
+Task berikutnya adalah database disconnect/failover recovery, mutation
+idempotency yang lebih luas, load/SLO, dan enterprise approval gates. Setiap
 checkpoint hanya boleh ditandai selesai setelah test, lint/build, dan regression
 evidence lulus; bukti live database harus dilaporkan terpisah dari test
 contract. Bukti lokal yang sudah lulus tidak mengubah status enterprise `NO-GO`

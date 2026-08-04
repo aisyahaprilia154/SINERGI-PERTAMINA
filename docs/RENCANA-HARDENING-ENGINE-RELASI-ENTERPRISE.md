@@ -371,8 +371,9 @@ SHA256(job_type + dataset_version_id + input_fingerprint + rule_set_version)
 
 Checklist:
 
-- [x] Job tetap tersedia setelah API/worker restart pada durable JSON queue;
-  PostgreSQL live recovery tetap pending.
+- [x] Job tetap tersedia setelah API/worker restart pada durable JSON queue dan
+  replacement process PostgreSQL memulihkan lease live; database disconnect dan
+  production recovery tetap pending.
 - [ ] Worker yang mati tidak meninggalkan job terkunci selamanya.
 - [ ] Retry memakai exponential backoff dan maksimum percobaan.
 - [ ] Poison job masuk dead-letter queue.
@@ -631,7 +632,8 @@ test report, benchmark report, atau audit record.
   bulk/select-target/revoke dan PostgreSQL live masih pending.
 - [ ] Dua worker tidak mengambil job yang sama.
 - [x] Worker lock yang expired dapat diambil alih dengan aman pada uji
-  lintas-process durable JSON queue; PostgreSQL live masih pending.
+  lintas-process durable JSON queue dan replacement process PostgreSQL live;
+  multi-worker production dan database disconnect masih pending.
 
 ### 10.5 Performance dan load test
 
@@ -662,9 +664,11 @@ Checklist:
 ### 10.6 Recovery dan durability test
 
 - [x] Restart API saat upload tidak menghilangkan job pada process-level
-  durable JSON test; PostgreSQL live recovery tetap pending.
+  durable JSON test; PostgreSQL process-level durable job recovery live juga
+  lulus pada fixture lease.
 - [x] Restart worker saat inference membuat job diulang dengan aman pada uji
-  lintas-process durable JSON queue; PostgreSQL live masih pending.
+  lintas-process durable JSON queue; replacement process PostgreSQL live juga
+  memulihkan lease dan menyelesaikan job yang sama.
 - [ ] Database disconnect menghasilkan retry tanpa duplicate relation.
 - [ ] Object storage unavailable menghasilkan error yang dapat ditindaklanjuti.
 - [ ] Dead-letter job dapat diperiksa dan di-retry.
