@@ -41,6 +41,7 @@ export async function createPostgresPool({
   idleTimeoutMilliseconds = 30_000,
   connectionTimeoutMilliseconds = 5_000,
   ssl = false,
+  logger = console,
   loadPg = () => import('pg'),
 } = {}) {
   const normalizedConnectionString = requireConnectionString(connectionString)
@@ -52,13 +53,21 @@ export async function createPostgresPool({
       'Dependency PostgreSQL tidak menyediakan Pool yang valid.',
     )
   }
-  return new Pool({
+  const pool = new Pool({
     connectionString: normalizedConnectionString,
     max: positiveInteger(max, 10),
     idleTimeoutMillis: positiveInteger(idleTimeoutMilliseconds, 30_000),
     connectionTimeoutMillis: positiveInteger(connectionTimeoutMilliseconds, 5_000),
     ssl: ssl === true,
   })
+  if (typeof pool.on === 'function') {
+    pool.on('error', (error) => {
+      const code = String(error?.code ?? 'client_error')
+      const message = String(error?.message ?? error)
+      logger?.error?.(`[postgres-pool] ${code}: ${message}`)
+    })
+  }
+  return pool
 }
 
 /**

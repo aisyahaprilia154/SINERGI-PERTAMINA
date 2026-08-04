@@ -67,6 +67,7 @@ export async function createDatasetVersionRepositoryRuntime({
     idleTimeoutMilliseconds: config.database?.idleTimeoutMilliseconds,
     connectionTimeoutMilliseconds: config.database?.connectionTimeoutMilliseconds,
     ssl: config.database?.ssl,
+    logger,
   })
   try {
     if (isPostgresPrimary) {

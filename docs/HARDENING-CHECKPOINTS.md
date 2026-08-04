@@ -334,6 +334,31 @@ Batas checkpoint: hanya process-level JSON runtime. PostgreSQL live
 restart/recovery, database disconnect, object storage failure, multi-instance
 coordination, dan production lock/lease policy tetap pending.
 
+## Checkpoint 17 - PostgreSQL pool error boundary dan live verification stability
+
+Status: `complete (pool/runtime live verification scope)` - 4 Agustus 2026.
+
+- `createPostgresPool` sekarang memasang listener `error` pada pool dan
+  meneruskan logger runtime; error client idle tidak lagi dibiarkan menjadi
+  uncaught EventEmitter error.
+- Regression awal: run kedua live verification berhenti pada `db:concurrency`
+  dengan exit code Windows `0xC0000409`; PostgreSQL hanya mencatat koneksi
+  client terputus paksa, bukan server database crash.
+- Setelah perubahan, targeted `db:concurrency` lulus dengan satu writer sukses,
+  satu `dataset_version_stale_revision`, dan nol unexpected failure.
+- Rerun penuh `db:live-verify` selesai sampai `Live verification selesai.`;
+  primary PostgreSQL, concurrency, required indexes, dan index-scan query plan
+  lulus pada PostgreSQL 18/PostGIS `3.6.2`.
+- Regression evidence lokal: backend `141/141` test, lint `78` file, build
+  `36` source file, dan `git diff --check` lulus.
+- Evidence terpisah: `docs/migrations/LIVE-POSTGRES-POOL-ERROR-BOUNDARY-2026-08-04.md`.
+
+Batas checkpoint: `db:shadow-pilot` tetap melaporkan `record_extra_in_shadow`
+untuk row test historis, termasuk satu row dari run yang crash; `get`, active
+lookup, primary pilot, concurrency, dan query plan lulus. Checkpoint ini belum
+membuktikan PostgreSQL process restart/recovery, database disconnect recovery,
+retry lintas instance, atau production-sized SLO.
+
 ## Status berikutnya
 
 Task berikutnya adalah PostgreSQL live restart/recovery, mutation idempotency
