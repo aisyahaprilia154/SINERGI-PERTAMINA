@@ -234,9 +234,36 @@ test('select-target confirms only an alternative from the same endpoint', async 
   assert.equal(
     record.topologyCandidates.find(({ candidateId }) => (
       candidateId === candidates[0].candidateId
-    )).candidateStatus,
+  )).candidateStatus,
     'rejected',
   )
+})
+
+test('select-target retry replays one committed mutation receipt', async () => {
+  const bundle = reviewBundle({ secondNode: true })
+  const initial = generateRelationArtifacts(bundle)
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const auditLog = new MemoryAuditLog()
+  const service = new TopologyService({ repository, auditLog })
+  const candidates = initial.candidates.filter(({ sourceEndpointId }) => (
+    sourceEndpointId === 'endpoint:geometry:CBL-01:start'
+  ))
+  const input = {
+    targetCandidateId: candidates[1].candidateId,
+    reason: 'Target alternatif dikonfirmasi dari bukti lapangan.',
+    idempotencyKey: 'select-target-retry-2026-08-04-001',
+  }
+
+  const first = await service.selectTarget(candidates[0].candidateId, 'admin-1', input)
+  const retry = await service.selectTarget(candidates[0].candidateId, 'admin-1', input)
+
+  assert.deepEqual(retry, first)
+  assert.equal(auditLog.entries.length, 1)
+  const record = await repository.get('dv-review')
+  assert.equal(record.topologyMutationReceipts.length, 1)
+  assert.equal(record.topologyCandidates.filter(({ candidateStatus }) => (
+    candidateStatus === 'confirmed'
+  )).length, 1)
 })
 
 test('regeneration reconciles decisions and records topology runs without deleting audit history', async () => {
@@ -321,6 +348,154 @@ test('manual device relation is audited, materialized, and retained across regen
     }),
     (error) => error.code === 'topology_manual_relation_exists',
   )
+})
+
+test('manual relation retry does not create a duplicate relation or audit event', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle, {
+    config: { autoConfirmExplicitMetadata: false },
+  })
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const auditLog = new MemoryAuditLog()
+  const service = new TopologyService({
+    repository,
+    auditLog,
+    config: { autoConfirmExplicitMetadata: false },
+  })
+  const input = {
+    sourceAssetId: 'CAM-01',
+    targetAssetId: 'CAM-END',
+    reason: 'Relasi diverifikasi oleh administrator lapangan.',
+    idempotencyKey: 'manual-relation-retry-2026-08-04-001',
+  }
+
+  const first = await service.createDeviceRelation('dv-review', 'admin-1', input)
+  const retry = await service.createDeviceRelation('dv-review', 'admin-1', input)
+
+  assert.deepEqual(retry, first)
+  assert.equal(auditLog.entries.length, 1)
+  const record = await repository.get('dv-review')
+  assert.equal(record.topologyInputBundle.explicitRelations.length, 1)
+  assert.equal(record.confirmedRelations.filter(({ provenance }) => (
+    provenance === 'manual_admin'
+  )).length, 1)
+  assert.equal(record.topologyMutationReceipts.length, 1)
+})
+
+test('concurrent manual relation retry audits only the lock winner', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle, {
+    config: { autoConfirmExplicitMetadata: false },
+  })
+  const repository = new SerializedMemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  let releaseAudit
+  let firstAuditStartedResolve
+  const firstAuditStarted = new Promise((resolve) => {
+    firstAuditStartedResolve = resolve
+  })
+  const auditLog = new MemoryAuditLog({
+    beforeRecord: async ({ index }) => {
+      if (index !== 1) return
+      firstAuditStartedResolve()
+      await new Promise((resolve) => {
+        releaseAudit = resolve
+      })
+    },
+  })
+  const firstService = new TopologyService({
+    repository,
+    auditLog,
+    config: { autoConfirmExplicitMetadata: false },
+  })
+  const secondService = new TopologyService({
+    repository,
+    auditLog,
+    config: { autoConfirmExplicitMetadata: false },
+  })
+  const input = {
+    sourceAssetId: 'CAM-01',
+    targetAssetId: 'CAM-END',
+    reason: 'Concurrent retry dikonfirmasi oleh administrator.',
+    idempotencyKey: 'manual-relation-concurrent-2026-08-04-001',
+  }
+
+  const firstPromise = firstService.createDeviceRelation('dv-review', 'admin-1', input)
+  await firstAuditStarted
+  const secondPromise = secondService.createDeviceRelation('dv-review', 'admin-1', input)
+  releaseAudit()
+  const [first, second] = await Promise.all([firstPromise, secondPromise])
+
+  assert.deepEqual(second, first)
+  assert.equal(auditLog.entries.length, 1)
+  const record = await repository.get('dv-review')
+  assert.equal(record.topologyInputBundle.explicitRelations.length, 1)
+  assert.equal(record.topologyMutationReceipts.length, 1)
+})
+
+test('revoke retry replays after the revoked relation leaves the active relation set', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const auditLog = new MemoryAuditLog()
+  const service = new TopologyService({ repository, auditLog })
+  const startCandidate = initial.candidates.find(({ sourceEndpointId }) => (
+    sourceEndpointId === 'endpoint:geometry:CBL-01:start'
+  ))
+  const endCandidate = initial.candidates.find(({ sourceEndpointId }) => (
+    sourceEndpointId === 'endpoint:geometry:CBL-01:end'
+  ))
+  await service.confirmCandidate(startCandidate.candidateId, 'admin-1', {
+    reason: 'Endpoint awal telah diverifikasi.',
+  })
+  const confirmed = await service.confirmCandidate(endCandidate.candidateId, 'admin-1', {
+    reason: 'Endpoint akhir telah diverifikasi.',
+  })
+  const relationId = confirmed.confirmedRelations.find(({ candidateId }) => (
+    candidateId === startCandidate.candidateId
+  )).relationId
+  const input = {
+    reason: 'Relasi dibatalkan setelah verifikasi lapangan.',
+    idempotencyKey: 'revoke-retry-2026-08-04-001',
+  }
+
+  const first = await service.revokeRelation(relationId, 'admin-2', input)
+  const retry = await service.revokeRelation(relationId, 'admin-2', input)
+
+  assert.deepEqual(retry, first)
+  assert.equal(auditLog.entries.filter(({ event }) => event === 'topology.relation_revoked').length, 1)
+  const record = await repository.get('dv-review')
+  assert.equal(record.topologyMutationReceipts.length, 1)
+  assert.equal(record.confirmedRelations.some(({ relationId: id }) => id === relationId), false)
+})
+
+test('bulk confirm and revoke retries commit one audit event per action', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const auditLog = new MemoryAuditLog()
+  const service = new TopologyService({ repository, auditLog })
+
+  const confirmInput = {
+    reason: 'Kandidat recommended disetujui setelah review bersama.',
+    idempotencyKey: 'bulk-confirm-retry-2026-08-04-001',
+  }
+  const firstConfirm = await service.confirmAllCandidates('dv-review', 'admin-1', confirmInput)
+  const retryConfirm = await service.confirmAllCandidates('dv-review', 'admin-1', confirmInput)
+  assert.deepEqual(retryConfirm, firstConfirm)
+
+  const revokeInput = {
+    reason: 'Seluruh relasi perlu ditinjau ulang oleh operator.',
+    idempotencyKey: 'bulk-revoke-retry-2026-08-04-001',
+  }
+  const firstRevoke = await service.revokeAllRelations('dv-review', 'admin-2', revokeInput)
+  const retryRevoke = await service.revokeAllRelations('dv-review', 'admin-2', revokeInput)
+  assert.deepEqual(retryRevoke, firstRevoke)
+
+  assert.deepEqual(auditLog.entries.map(({ event }) => event), [
+    'topology.candidates_bulk_confirmed',
+    'topology.relations_bulk_revoked',
+  ])
+  assert.equal((await repository.get('dv-review')).topologyMutationReceipts.length, 2)
 })
 
 test('authoritative trace follows confirmed edges, returns geometry evidence, and protects revision', async () => {
@@ -684,9 +859,52 @@ class MemoryRepository {
   }
 }
 
+class SerializedMemoryRepository extends MemoryRepository {
+  constructor(records) {
+    super(records)
+    this.lockTailById = new Map()
+  }
+
+  async update(id, updater, { expectedRevision } = {}) {
+    const previous = this.lockTailById.get(id) ?? Promise.resolve()
+    let release
+    const currentLock = new Promise((resolve) => {
+      release = resolve
+    })
+    const queued = previous.then(() => currentLock)
+    this.lockTailById.set(id, queued)
+    await previous
+    try {
+      const current = await this.get(id)
+      const currentRevision = Number.isInteger(current.recordRevision)
+        ? current.recordRevision
+        : 0
+      if (expectedRevision !== undefined && expectedRevision !== currentRevision) {
+        throw Object.assign(new Error('stale record'), {
+          code: 'dataset_version_stale_revision',
+          statusCode: 409,
+        })
+      }
+      const next = typeof updater === 'function'
+        ? await updater(current)
+        : { ...current, ...updater }
+      const normalized = {
+        ...next,
+        recordRevision: currentRevision + 1,
+      }
+      this.records.set(id, structuredClone(normalized))
+      return structuredClone(normalized)
+    } finally {
+      release()
+      if (this.lockTailById.get(id) === queued) this.lockTailById.delete(id)
+    }
+  }
+}
+
 class MemoryAuditLog {
-  constructor() {
+  constructor({ beforeRecord = null } = {}) {
     this.entries = []
+    this.beforeRecord = beforeRecord
   }
 
   async record(event, input) {
@@ -695,6 +913,7 @@ class MemoryAuditLog {
       event,
       ...structuredClone(input),
     }
+    await this.beforeRecord?.({ index: this.entries.length + 1, event })
     this.entries.push(entry)
     return entry
   }

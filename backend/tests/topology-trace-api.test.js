@@ -101,6 +101,7 @@ test('manual topology relation API is administrator-only and forwards device ref
       headers: {
         authorization: 'Bearer admin',
         'content-type': 'application/json',
+        'idempotency-key': 'manual-relation-api-2026-08-04-001',
       },
       body: JSON.stringify(requestBody),
     },
@@ -116,7 +117,14 @@ test('manual topology relation API is administrator-only and forwards device ref
       provenance: 'manual_admin',
     },
   })
-  assert.deepEqual(calls, [['dv-1', 'admin-1', requestBody]])
+  assert.deepEqual(calls, [[
+    'dv-1',
+    'admin-1',
+    {
+      ...requestBody,
+      idempotencyKey: 'manual-relation-api-2026-08-04-001',
+    },
+  ]])
 })
 
 test('line label bulk topology API forwards the dedicated confirmation action', async (t) => {
@@ -154,6 +162,7 @@ test('line label bulk topology API forwards the dedicated confirmation action', 
       headers: {
         authorization: 'Bearer admin',
         'content-type': 'application/json',
+        'idempotency-key': 'bulk-review-api-2026-08-04-001',
       },
       body: JSON.stringify(requestBody),
     },
@@ -164,5 +173,12 @@ test('line label bulk topology API forwards the dedicated confirmation action', 
     action: 'confirm_line_labels',
     affectedCount: 4,
   })
-  assert.deepEqual(calls, [['dv-1', 'admin-1', requestBody]])
+  assert.deepEqual(calls, [[
+    'dv-1',
+    'admin-1',
+    {
+      ...requestBody,
+      idempotencyKey: 'bulk-review-api-2026-08-04-001',
+    },
+  ]])
 })

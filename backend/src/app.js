@@ -247,6 +247,12 @@ export function createApp({
         const user = requireAdministrator(request, authenticator)
         assertTopologyService(topologyService)
         const body = await readJsonBody(request)
+        const mutationInput = {
+          ...body,
+          ...(request.headers['idempotency-key'] !== undefined
+            ? { idempotencyKey: request.headers['idempotency-key'] }
+            : {}),
+        }
         const method = {
           'confirm-all': 'confirmAllCandidates',
           'confirm-line-labels': 'confirmLineLabelCandidates',
@@ -255,7 +261,7 @@ export function createApp({
         return sendJson(
           response,
           200,
-          await topologyService[method](bulkTopologyActionMatch[1], user.id, body),
+          await topologyService[method](bulkTopologyActionMatch[1], user.id, mutationInput),
         )
       }
       const manualTopologyRelationMatch = request.method === 'POST'
@@ -267,13 +273,19 @@ export function createApp({
         const user = requireAdministrator(request, authenticator)
         assertTopologyService(topologyService)
         const body = await readJsonBody(request)
+        const mutationInput = {
+          ...body,
+          ...(request.headers['idempotency-key'] !== undefined
+            ? { idempotencyKey: request.headers['idempotency-key'] }
+            : {}),
+        }
         return sendJson(
           response,
           200,
           await topologyService.createDeviceRelation(
             manualTopologyRelationMatch[1],
             user.id,
-            body,
+            mutationInput,
           ),
         )
       }
@@ -310,13 +322,19 @@ export function createApp({
         const user = requireAdministrator(request, authenticator)
         assertTopologyService(topologyService)
         const body = await readJsonBody(request)
+        const mutationInput = {
+          ...body,
+          ...(request.headers['idempotency-key'] !== undefined
+            ? { idempotencyKey: request.headers['idempotency-key'] }
+            : {}),
+        }
         return sendJson(
           response,
           200,
           await topologyService.revokeRelation(
             decodePathSegment(revokeRelationMatch[1]),
             user.id,
-            body,
+            mutationInput,
           ),
         )
       }

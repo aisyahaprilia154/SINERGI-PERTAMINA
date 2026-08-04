@@ -409,11 +409,38 @@ PostgreSQL lokal dengan disconnect sebelum commit. PostgreSQL server
 restart/failover, retry lintas instance, multi-worker production load, object
 storage recovery, dan disaster recovery backup/restore tetap pending.
 
+## Checkpoint 20 - topology review mutation idempotency yang diperluas
+
+Status: `complete (local aggregate contract + HTTP wiring)` - 4 Agustus 2026.
+
+- `Idempotency-Key` diteruskan oleh endpoint bulk topology, manual relation,
+  dan revoke; candidate action tetap mempertahankan header yang sama.
+- Receipt/fingerprint sekarang mencakup `select-target`, manual device
+  relation, single revoke, bulk confirm, line-label confirm, dan bulk revoke.
+- Receipt mengikat action, resource, actor, dan input; reuse key untuk mutation
+  berbeda ditolak.
+- Replay dilakukan sebelum snapshot validation dan setelah stale revision,
+  sehingga retry mengembalikan response commit pertama tanpa relation atau
+  audit event ganda.
+- Audit event mutation diperoleh setelah record lock dan validasi state; uji
+  concurrent manual relation membuktikan satu pemenang, satu relation, satu
+  audit event, dan response identik.
+- Evidence: `docs/migrations/TOPOLOGY-REVIEW-IDEMPOTENCY-2026-08-04.md`;
+  `backend/tests/topology-service.test.js`;
+  `backend/tests/topology-trace-api.test.js`.
+- Verification: backend `147/147` test, lint `81` file, build `36` source
+  file, dan `git diff --check` lulus.
+
+Batas checkpoint: scope live PostgreSQL masih mencakup satu mutation
+disconnect-before-commit pada Checkpoint 19. PostgreSQL server failover,
+retry lintas instance, 20-reviewer load, receipt retention policy production,
+dan production-sized SLO tetap pending.
+
 ## Status berikutnya
 
-Task berikutnya adalah PostgreSQL server restart/failover, mutation idempotency
-yang lebih luas, load/SLO, dan enterprise approval gates. Setiap checkpoint
-hanya boleh ditandai selesai setelah test, lint/build, dan regression evidence
-lulus; bukti live database harus dilaporkan terpisah dari test contract. Bukti
-lokal yang sudah lulus tidak mengubah status enterprise `NO-GO` sebelum
-production cutover, recovery, security, dan approval gates selesai.
+Task berikutnya adalah PostgreSQL server restart/failover, concurrency/load/SLO,
+dan enterprise approval gates. Setiap checkpoint hanya boleh ditandai selesai
+setelah test, lint/build, dan regression evidence lulus; bukti live database
+harus dilaporkan terpisah dari test contract. Bukti lokal yang sudah lulus tidak
+mengubah status enterprise `NO-GO` sebelum production cutover, recovery,
+security, dan approval gates selesai.
