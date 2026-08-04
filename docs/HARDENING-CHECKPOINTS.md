@@ -461,6 +461,22 @@ live. Eksekusi live memerlukan connection string/kredensial dan hak restart
 service pada environment operator; failover/replica switchover, multi-instance
 retry, dan disaster recovery tetap pending.
 
+## Checkpoint 22 - Repository benchmark fixture dan command
+
+Status: `complete (fixture/command scope)` - 4 Agustus 2026.
+
+- Checklist plan untuk fixture dan command benchmark ditandai selesai.
+- Fixture tersimpan di `backend/tests/fixtures/topology-baseline-fixture.js`
+  dengan snapshot regression di `backend/tests/fixtures/topology-baseline.snapshot.json`.
+- Command tersimpan di `backend/benchmarks/topology-baseline.mjs` dan package
+  script `npm run benchmark:topology`.
+- Re-run `npm run benchmark:topology -- --sizes=1000,2000,4000` lulus dengan
+  `validationErrors: 0`, candidate `0`, dan output JSON untuk seluruh ukuran;
+  detail dicatat di `docs/benchmarks/TOPOLOGY-BASELINE-2026-08-04.md`.
+- Batas evidence: fixture ini sparse dan belum membuktikan dense,
+  intersection-heavy, long-line, ambiguous-heavy, 10.000/50.000 object,
+  concurrent API p95, atau enterprise SLO.
+
 ## Status berikutnya
 
 Task berikutnya adalah menjalankan live PostgreSQL restart/failover dengan
