@@ -426,6 +426,19 @@ test('duplicate and zero-length linework are diagnosed without modifying source'
   assert.equal(result.graph.edges.length, 0)
 })
 
+test('partially overlapping linework is detected through spatially filtered path pairs', () => {
+  const left = pathObject('FO-A', 'fiber_optic', 'Fiber Optic', [
+    [110, -7],
+    [110.002, -7],
+  ])
+  const right = pathObject('FO-B', 'fiber_optic', 'Fiber Optic', [
+    [110.001, -7],
+    [110.003, -7],
+  ])
+  const result = generateRelationArtifacts(topologyBundle({ paths: [left, right] }))
+  assert.ok(result.lineworkIssues.some(({ issueCode }) => issueCode === 'overlapping_linework'))
+})
+
 function topologyBundle({
   nodes = [],
   paths = [],

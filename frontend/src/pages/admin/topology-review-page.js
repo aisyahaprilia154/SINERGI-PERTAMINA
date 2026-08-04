@@ -18,6 +18,7 @@ import { prioritizeTopologyCandidates } from '../../domain/topology-view-model.j
 import {
   loadActiveDataset,
   loadDatasetProjection,
+  loadAllTopologyCandidates,
   loadTopologyProjection,
   createTopologyRelation,
   reviewTopologyBulk,
@@ -607,7 +608,7 @@ async function initializeReview(container, mapData) {
       await reviewTopologyCandidate({
         candidateId: candidate.candidateId,
         action,
-        body: { reason, ...extra },
+        body: { ...reviewSnapshotBody(), reason, ...extra },
       })
     }, actionSuccessMessage(action))
   }
@@ -667,6 +668,7 @@ async function initializeReview(container, mapData) {
             await revokeTopologyRelation({
               relationId: context.relation.relationId,
               reason,
+              ...reviewSnapshotBody(),
             })
           }, 'Koneksi dibatalkan dan dikeluarkan dari graph operasional.')
         } else {
@@ -749,6 +751,7 @@ async function initializeReview(container, mapData) {
           sourceAssetId,
           targetAssetId,
           reason: normalizedReason,
+          ...reviewSnapshotBody(),
         })
         projections = await loadReviewProjections(datasetVersionId, mapData.geometries)
         reviewMap.setTopologyGraph(scopeMapData({
@@ -857,6 +860,7 @@ async function initializeReview(container, mapData) {
         datasetVersionId,
         action,
         reason,
+        ...reviewSnapshotBody(),
       })
       projections = await loadReviewProjections(datasetVersionId, mapData.geometries)
       state.bulkStatus = 'success'
@@ -879,6 +883,17 @@ async function initializeReview(container, mapData) {
     } finally {
       submit.disabled = false
       cancel.disabled = false
+    }
+  }
+
+  function reviewSnapshotBody() {
+    return {
+      ...(projections.candidates.graphRevision !== undefined
+        ? { expectedGraphRevision: projections.candidates.graphRevision }
+        : {}),
+      ...(projections.candidates.candidateRevision !== undefined
+        ? { expectedCandidateRevision: projections.candidates.candidateRevision }
+        : {}),
     }
   }
 
@@ -959,7 +974,7 @@ async function initializeReview(container, mapData) {
 
 async function loadReviewProjections(datasetVersionId, mapGeometries = []) {
   const [candidates, graph, summary, sourceFeaturePayload] = await Promise.all([
-    loadTopologyProjection({ datasetVersionId, projection: 'candidates' }),
+    loadAllTopologyCandidates({ datasetVersionId }),
     loadTopologyProjection({ datasetVersionId, projection: 'graph' }),
     loadTopologyProjection({ datasetVersionId, projection: 'summary' }),
     loadDatasetProjection({ datasetVersionId, projection: 'source-features' })

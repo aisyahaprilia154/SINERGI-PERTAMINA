@@ -40,6 +40,7 @@ export class ImportPipeline {
     sourcePath,
     extension,
     actorId,
+    progressReporter = null,
   }) {
     let workspace = null
     let resources = []
@@ -53,12 +54,12 @@ export class ImportPipeline {
     })
 
     try {
-      await this.#progress(datasetVersionId, 20, 'reading_source')
+      await this.#progress(datasetVersionId, 20, 'reading_source', progressReporter)
       let parserOutput
 
       if (extension === '.kmz') {
         workspace = await this.fileStore.createWorkspace()
-        await this.#progress(datasetVersionId, 30, 'extracting_kmz')
+        await this.#progress(datasetVersionId, 30, 'extracting_kmz', progressReporter)
         const extracted = await extractKmzArchive(sourcePath, workspace, this.limits)
         resources = extracted.resources
         packageInfo = {
@@ -95,14 +96,14 @@ export class ImportPipeline {
           ignoredEntries: [],
           entryCount: 1,
         }
-        await this.#progress(datasetVersionId, 50, 'parsing_kml')
+        await this.#progress(datasetVersionId, 50, 'parsing_kml', progressReporter)
         parserOutput = await parseKmlFile(sourcePath, {
           ...this.limits,
           folderMappings: this.folderMappings,
         })
       }
 
-      await this.#progress(datasetVersionId, 70, 'validating_import')
+      await this.#progress(datasetVersionId, 70, 'validating_import', progressReporter)
       const current = await this.repository.get(datasetVersionId)
       const sourceSelection = {
         selectedKmlPath,
@@ -146,7 +147,7 @@ export class ImportPipeline {
         expectedBranchId: current.datasetVersion.branchId,
       })
 
-      await this.#progress(datasetVersionId, 90, 'persisting_result')
+      await this.#progress(datasetVersionId, 90, 'persisting_result', progressReporter)
       const completedAt = this.clock().toISOString()
       const record = {
         ...result,
@@ -172,6 +173,7 @@ export class ImportPipeline {
           styleMappingVersion: canonicalParser.styleMappingVersion,
         },
         processing: {
+          ...current.processing,
           progress: 100,
           stage: result.datasetVersion.status,
           completedAt,
@@ -189,6 +191,7 @@ export class ImportPipeline {
           summary: result.datasetVersion.summary,
         },
       })
+      await this.#progress(datasetVersionId, 100, result.datasetVersion.status, progressReporter)
       return record
     } catch (error) {
       const appError = asAppError(error)
@@ -209,7 +212,7 @@ export class ImportPipeline {
     }
   }
 
-  async #progress(datasetVersionId, progress, stage) {
+  async #progress(datasetVersionId, progress, stage, progressReporter = null) {
     await this.repository.update(datasetVersionId, (record) => ({
       ...record,
       processing: {
@@ -219,6 +222,7 @@ export class ImportPipeline {
         updatedAt: this.clock().toISOString(),
       },
     }))
+    await Promise.resolve(progressReporter?.(progress, stage)).catch(() => {})
   }
 
   async #markInvalid(datasetVersionId, error) {
@@ -239,6 +243,7 @@ export class ImportPipeline {
         geometries: failed.geometries ?? [],
         relations: failed.relations ?? [],
         processing: {
+          ...record.processing,
           progress: 100,
           stage: 'invalid',
           completedAt: this.clock().toISOString(),

@@ -8,12 +8,21 @@ import {
   rebuildStoredTopologyInputBundle,
 } from '../domain/parser-contract.js'
 import {
+  createManualExplicitCandidate,
   generateRelationArtifacts,
   normalizeTopologySummary,
+  rebuildConfirmedRelationArtifacts,
 } from './semantic-relation-engine.js'
 import {
   withTopologyGraphRevision,
 } from './topology-graph-revision.js'
+import {
+  createCandidateCollectionRevision,
+  normalizeCandidateQuery,
+  paginateCandidates,
+  summarizeCandidates,
+  TopologyCandidateQueryIndex,
+} from './topology-candidate-pagination.js'
 
 export class TopologyService {
   constructor({
@@ -26,70 +35,75 @@ export class TopologyService {
     this.auditLog = auditLog
     this.config = config
     this.clock = clock
+    this.candidateQueryIndexes = new Map()
   }
 
   async regenerate(datasetVersionId, actorId, { reason } = {}) {
-    const current = await this.repository.get(datasetVersionId)
-    assertTopologyBundle(current)
-    const repaired = rebuildStoredTopologyInputBundle(current)
-    const topologyInputBundle = repaired.topologyInputBundle ?? current.topologyInputBundle
-    const generatedAt = this.clock().toISOString()
-    const artifacts = generateRelationArtifacts(topologyInputBundle, {
-      config: this.config,
-      previousCandidates: current.topologyCandidates,
-      previousRelations: current.confirmedRelations,
-      generatedAt,
-    })
-    const event = await this.auditLog.record('topology.candidates_regenerated', {
-      actorId,
-      datasetVersionId,
-      branchId: current.datasetVersion.branchId,
-      outcome: 'regenerated',
-      details: {
-        reason: normalizeReason(reason, false),
-        classificationRepair: {
-          changed: repaired.changed,
-          repairedCount: repaired.repairedCount,
-        },
-        topologyRuleSetVersion: artifacts.topologyRuleSetVersion,
-        before: current.topologySummary ?? null,
-        after: artifacts.summary,
-      },
-    })
-    return this.repository.update(datasetVersionId, (record) => applyArtifacts({
-      ...record,
-      topologyInputBundle,
-      ...(repaired.changed ? {
-        classifiedObjects: repaired.classifiedObjects,
-        canonicalParser: record.canonicalParser
-          ? {
-            ...record.canonicalParser,
-            classifiedObjects: repaired.classifiedObjects,
-            topologyInputBundle,
-            classificationRuleSetVersion: topologyInputBundle.semanticRuleSetVersion,
-          }
-          : record.canonicalParser,
-        parserVersions: record.parserVersions
-          ? {
-            ...record.parserVersions,
-            classificationRuleSetVersion: topologyInputBundle.semanticRuleSetVersion,
-          }
-          : record.parserVersions,
-      } : {}),
-    }, artifacts, {
-      candidateHistory: reconcileCandidateHistory(record, artifacts, {
-        eventId: event.id,
+    return this.#withMutationTransaction(async ({ repository, auditLog }) => {
+      const current = await repository.get(datasetVersionId)
+      assertTopologyBundle(current)
+      const repaired = rebuildStoredTopologyInputBundle(current)
+      const topologyInputBundle = repaired.topologyInputBundle ?? current.topologyInputBundle
+      const generatedAt = this.clock().toISOString()
+      const artifacts = generateRelationArtifacts(topologyInputBundle, {
+        config: this.config,
+        previousCandidates: current.topologyCandidates,
+        previousRelations: current.confirmedRelations,
         generatedAt,
-      }),
-      topologyRun: {
-        runId: event.id,
+      })
+      const event = await auditLog.record('topology.candidates_regenerated', {
         actorId,
-        generatedAt,
-        reason: normalizeReason(reason, false),
-        topologyRuleSetVersion: artifacts.topologyRuleSetVersion,
-        summary: artifacts.summary,
-      },
-    }))
+        datasetVersionId,
+        branchId: current.datasetVersion.branchId,
+        outcome: 'regenerated',
+        details: {
+          reason: normalizeReason(reason, false),
+          classificationRepair: {
+            changed: repaired.changed,
+            repairedCount: repaired.repairedCount,
+          },
+          topologyRuleSetVersion: artifacts.topologyRuleSetVersion,
+          before: current.topologySummary ?? null,
+          after: artifacts.summary,
+        },
+      })
+      return repository.update(datasetVersionId, (record) => applyArtifacts({
+        ...record,
+        topologyInputBundle,
+        ...(repaired.changed ? {
+          classifiedObjects: repaired.classifiedObjects,
+          canonicalParser: record.canonicalParser
+            ? {
+              ...record.canonicalParser,
+              classifiedObjects: repaired.classifiedObjects,
+              topologyInputBundle,
+              classificationRuleSetVersion: topologyInputBundle.semanticRuleSetVersion,
+            }
+            : record.canonicalParser,
+          parserVersions: record.parserVersions
+            ? {
+              ...record.parserVersions,
+              classificationRuleSetVersion: topologyInputBundle.semanticRuleSetVersion,
+            }
+            : record.parserVersions,
+        } : {}),
+      }, artifacts, {
+        candidateHistory: reconcileCandidateHistory(record, artifacts, {
+          eventId: event.id,
+          generatedAt,
+        }),
+        topologyRun: {
+          runId: event.id,
+          actorId,
+          generatedAt,
+          reason: normalizeReason(reason, false),
+          topologyRuleSetVersion: artifacts.topologyRuleSetVersion,
+          summary: artifacts.summary,
+        },
+      }), {
+        expectedRevision: recordRevision(current),
+      })
+    })
   }
 
   async getSummary(datasetVersionId) {
@@ -110,20 +124,54 @@ export class TopologyService {
       validation: record.topologyValidation ?? null,
       lastGeneratedAt: record.topologyGeneratedAt ?? null,
       graphRevision: graph.graphRevision,
+      candidateRevision: createCandidateCollectionRevision(record.topologyCandidates ?? []),
+      recordRevision: recordRevision(record),
     }
   }
 
-  async getCandidates(datasetVersionId) {
+  async getCandidates(datasetVersionId, query = {}) {
     const record = await this.repository.get(datasetVersionId)
+    const candidates = record.topologyCandidates ?? []
+    const graph = normalizeTraceGraph(record, buildAssetIdentityMapFromRecord(record))
+    const candidateRevision = createCandidateCollectionRevision(candidates)
+    const cached = this.candidateQueryIndexes.get(datasetVersionId)
+    const index = cached?.revision === candidateRevision
+      ? cached.index
+      : new TopologyCandidateQueryIndex(candidates)
+    if (cached?.revision !== candidateRevision) {
+      this.candidateQueryIndexes.set(datasetVersionId, {
+        revision: candidateRevision,
+        index,
+      })
+    }
+    const normalizedQuery = normalizeCandidateQuery(query ?? {})
+    const page = paginateCandidates(index, {
+      ...normalizedQuery,
+      graphRevision: graph.graphRevision,
+      candidateRevision,
+    })
     return {
       datasetVersionId,
       topologyRuleSetVersion: record.topologyRuleSetVersion ?? null,
-      items: structuredClone(record.topologyCandidates ?? []),
+      items: page.items,
+      nextCursor: page.nextCursor,
+      pageInfo: page.pageInfo,
+      summary: summarizeCandidates(page.filteredCandidates),
+      datasetSummary: summarizeCandidates(candidates),
+      query: {
+        status: normalizedQuery.status,
+        site: normalizedQuery.site,
+        networkFamily: normalizedQuery.networkFamily,
+        minScore: normalizedQuery.minScore,
+      },
+      graphRevision: graph.graphRevision,
+      candidateRevision,
       unresolved: structuredClone(record.topologyUnresolved ?? []),
       eligibilityIssues: structuredClone(record.topologyEligibilityIssues ?? []),
       lineworkIssues: structuredClone(record.topologyLineworkIssues ?? []),
       history: structuredClone(record.topologyCandidateHistory ?? []),
       runs: structuredClone(record.topologyRuns ?? []),
+      recordRevision: recordRevision(record),
     }
   }
 
@@ -362,28 +410,46 @@ export class TopologyService {
     return result
   }
 
-  async confirmCandidate(candidateId, actorId, { reason } = {}) {
+  async confirmCandidate(candidateId, actorId, {
+    reason,
+    expectedGraphRevision,
+    expectedCandidateRevision,
+  } = {}) {
     return this.#reviewCandidate(candidateId, actorId, {
       action: 'confirm',
       reason: normalizeReason(reason, false),
+      expectedGraphRevision,
+      expectedCandidateRevision,
     })
   }
 
-  async confirmAllCandidates(datasetVersionId, actorId, { reason } = {}) {
+  async confirmAllCandidates(datasetVersionId, actorId, {
+    reason,
+    expectedGraphRevision,
+    expectedCandidateRevision,
+  } = {}) {
     return this.#confirmCandidatesBulk(datasetVersionId, actorId, {
       reason,
       action: 'confirm_all',
       eventName: 'topology.candidates_bulk_confirmed',
       predicate: isBulkConfirmableCandidate,
+      expectedGraphRevision,
+      expectedCandidateRevision,
     })
   }
 
-  async confirmLineLabelCandidates(datasetVersionId, actorId, { reason } = {}) {
+  async confirmLineLabelCandidates(datasetVersionId, actorId, {
+    reason,
+    expectedGraphRevision,
+    expectedCandidateRevision,
+  } = {}) {
     return this.#confirmCandidatesBulk(datasetVersionId, actorId, {
       reason,
       action: 'confirm_line_labels',
       eventName: 'topology.line_label_connections_bulk_confirmed',
       predicate: isLineLabelConfirmableCandidate,
+      expectedGraphRevision,
+      expectedCandidateRevision,
     })
   }
 
@@ -392,76 +458,102 @@ export class TopologyService {
     action,
     eventName,
     predicate,
+    expectedGraphRevision,
+    expectedCandidateRevision,
   }) {
-    const current = await this.repository.get(datasetVersionId)
-    assertTopologyBundle(current)
-    const candidates = current.topologyCandidates ?? []
-    const confirmable = candidates.filter(predicate)
-    const normalizedReason = normalizeReason(reason, false)
-    if (!confirmable.length) {
-      return bulkReviewResponse(current, {
-        action,
-        affectedCount: 0,
-      })
-    }
-
-    const reviewedAt = this.clock().toISOString()
-    const candidateIds = confirmable.map(({ candidateId }) => candidateId)
-    const candidateIdSet = new Set(candidateIds)
-    const event = await this.auditLog.record(eventName, {
-      actorId,
-      datasetVersionId,
-      branchId: current.datasetVersion.branchId,
-      outcome: 'confirmed',
-      details: {
-        candidateCount: candidateIds.length,
-        candidateIds,
-        reason: normalizedReason,
-        topologyRuleSetVersion: current.topologyRuleSetVersion ?? null,
-      },
-    })
-    const updated = await this.repository.update(datasetVersionId, (record) => {
-      const nextCandidates = structuredClone(record.topologyCandidates ?? [])
-      nextCandidates.forEach((candidate) => {
-        if (!candidateIdSet.has(candidate.candidateId)) return
-        if (!predicate(candidate)) {
-          throw new AppError('Daftar kandidat berubah sejak aksi bulk dimulai.', {
-            code: 'stale_topology_bulk_review',
-            statusCode: 409,
-          })
-        }
-        candidate.candidateStatus = 'confirmed'
-        candidate.proposalStatus = 'confirmed_by_admin_bulk'
-        candidate.review = reviewRecord({
-          actorId,
-          reviewedAt,
-          reason: normalizedReason,
+    return this.#withMutationTransaction(async ({ repository, auditLog }) => {
+      const current = await repository.get(datasetVersionId)
+      assertTopologyBundle(current)
+      assertReviewSnapshot(current, { expectedGraphRevision, expectedCandidateRevision })
+      const candidates = current.topologyCandidates ?? []
+      const confirmable = candidates.filter(predicate)
+      const normalizedReason = normalizeReason(reason, false)
+      if (!confirmable.length) {
+        return bulkReviewResponse(current, {
           action,
-          auditEventId: event.id,
-          before: 'candidate',
-          after: 'confirmed',
+          affectedCount: 0,
         })
+      }
+
+      const reviewedAt = this.clock().toISOString()
+      const candidateIds = confirmable.map(({ candidateId }) => candidateId)
+      const candidateIdSet = new Set(candidateIds)
+      const event = await auditLog.record(eventName, {
+        actorId,
+        datasetVersionId,
+        branchId: current.datasetVersion.branchId,
+        outcome: 'confirmed',
+        details: {
+          candidateCount: candidateIds.length,
+          candidateIds,
+          reason: normalizedReason,
+          topologyRuleSetVersion: current.topologyRuleSetVersion ?? null,
+        },
       })
-      return rebuildFromReviewedCandidates(record, nextCandidates, this.config, reviewedAt)
-    })
-    return bulkReviewResponse(updated, {
-      action,
-      affectedCount: candidateIds.length,
-      auditEventId: event.id,
+      const updated = await repository.update(datasetVersionId, (record) => {
+        assertReviewSnapshot(record, { expectedGraphRevision, expectedCandidateRevision })
+        const nextCandidates = structuredClone(record.topologyCandidates ?? [])
+        nextCandidates.forEach((candidate) => {
+          if (!candidateIdSet.has(candidate.candidateId)) return
+          if (!predicate(candidate)) {
+            throw new AppError('Daftar kandidat berubah sejak aksi bulk dimulai.', {
+              code: 'stale_topology_bulk_review',
+              statusCode: 409,
+            })
+          }
+          candidate.candidateStatus = 'confirmed'
+          candidate.proposalStatus = 'confirmed_by_admin_bulk'
+          candidate.review = reviewRecord({
+            actorId,
+            reviewedAt,
+            reason: normalizedReason,
+            action,
+            auditEventId: event.id,
+            before: 'candidate',
+            after: 'confirmed',
+          })
+        })
+        return rebuildFromReviewedCandidates(
+          record,
+          nextCandidates,
+          this.config,
+          reviewedAt,
+          confirmable.flatMap(candidateAssetReferences),
+        )
+      }, {
+        expectedRevision: recordRevision(current),
+      })
+      return bulkReviewResponse(updated, {
+        action,
+        affectedCount: candidateIds.length,
+        auditEventId: event.id,
+      })
     })
   }
 
-  async rejectCandidate(candidateId, actorId, { reason } = {}) {
+  async rejectCandidate(candidateId, actorId, {
+    reason,
+    expectedGraphRevision,
+    expectedCandidateRevision,
+  } = {}) {
     return this.#reviewCandidate(candidateId, actorId, {
       action: 'reject',
       reason: normalizeReason(reason, true),
+      expectedGraphRevision,
+      expectedCandidateRevision,
     })
   }
 
-  async skipCandidate(candidateId, actorId, { reason } = {}) {
+  async skipCandidate(candidateId, actorId, {
+    reason,
+    expectedGraphRevision,
+    expectedCandidateRevision,
+  } = {}) {
     return this.#reviewCandidate(candidateId, actorId, {
       action: 'skip',
       reason: normalizeReason(reason, false),
+      expectedGraphRevision,
+      expectedCandidateRevision,
     })
   }
 
@@ -469,8 +561,12 @@ export class TopologyService {
     targetCandidateId,
     targetAssetId,
     reason,
+    expectedGraphRevision,
+    expectedCandidateRevision,
   } = {}) {
-    const located = await this.#findCandidate(candidateId)
+    return this.#withMutationTransaction(async ({ repository, auditLog }) => {
+      const located = await this.#findCandidate(candidateId, repository)
+    assertReviewSnapshot(located.record, { expectedGraphRevision, expectedCandidateRevision })
     const candidates = located.record.topologyCandidates ?? []
     const original = candidates.find((candidate) => candidate.candidateId === candidateId)
     const selected = targetCandidateId
@@ -496,7 +592,7 @@ export class TopologyService {
     }
     const reviewedAt = this.clock().toISOString()
     const normalizedReason = normalizeReason(reason, true)
-    const event = await this.auditLog.record('topology.candidate_target_selected', {
+    const event = await auditLog.record('topology.candidate_target_selected', {
       actorId,
       datasetVersionId: located.datasetVersionId,
       branchId: located.record.datasetVersion.branchId,
@@ -509,7 +605,8 @@ export class TopologyService {
         topologyRuleSetVersion: selected.topologyRuleSetVersion,
       },
     })
-    const updated = await this.repository.update(located.datasetVersionId, (record) => {
+    const updated = await repository.update(located.datasetVersionId, (record) => {
+      assertReviewSnapshot(record, { expectedGraphRevision, expectedCandidateRevision })
       const nextCandidates = structuredClone(record.topologyCandidates ?? [])
       const currentOriginal = nextCandidates.find(({ candidateId: id }) => id === candidateId)
       const currentSelected = nextCandidates.find(({ candidateId: id }) => (
@@ -538,9 +635,21 @@ export class TopologyService {
         before: selected.candidateStatus,
         after: 'confirmed',
       })
-      return rebuildFromReviewedCandidates(record, nextCandidates, this.config, reviewedAt)
+      return rebuildFromReviewedCandidates(
+        record,
+        nextCandidates,
+        this.config,
+        reviewedAt,
+        [
+          ...candidateAssetReferences(original),
+          ...candidateAssetReferences(selected),
+        ],
+      )
+    }, {
+      expectedRevision: recordRevision(located.record),
     })
-    return candidateReviewResponse(updated, selected.candidateId)
+      return candidateReviewResponse(updated, selected.candidateId)
+    })
   }
 
   async createDeviceRelation(datasetVersionId, actorId, {
@@ -549,9 +658,13 @@ export class TopologyService {
     relationType = 'connected-to',
     direction = 'undirected',
     reason,
+    expectedGraphRevision,
+    expectedCandidateRevision,
   } = {}) {
-    const current = await this.repository.get(datasetVersionId)
+    return this.#withMutationTransaction(async ({ repository, auditLog }) => {
+    const current = await repository.get(datasetVersionId)
     assertTopologyBundle(current)
+    assertReviewSnapshot(current, { expectedGraphRevision, expectedCandidateRevision })
     const normalizedSourceReference = normalizeTopologyAssetReference(
       sourceAssetId,
       'sourceAssetId',
@@ -571,7 +684,7 @@ export class TopologyService {
 
     const createdAt = this.clock().toISOString()
     const explicitRelationEvidenceId = `manual:${randomUUID()}`
-    const event = await this.auditLog.record('topology.manual_device_relation_confirmed', {
+    const event = await auditLog.record('topology.manual_device_relation_confirmed', {
       actorId,
       datasetVersionId,
       branchId: current.datasetVersion.branchId,
@@ -587,7 +700,8 @@ export class TopologyService {
         explicitRelationEvidenceId,
       },
     })
-    const updated = await this.repository.update(datasetVersionId, (record) => {
+    const updated = await repository.update(datasetVersionId, (record) => {
+      assertReviewSnapshot(record, { expectedGraphRevision, expectedCandidateRevision })
       const source = resolveManualDevice(record, normalizedSourceReference, 'sourceAssetId')
       const target = resolveManualDevice(record, normalizedTargetReference, 'targetAssetId')
       assertDistinctManualDevices(source, target)
@@ -614,10 +728,31 @@ export class TopologyService {
           },
         },
       ]
-      const artifacts = generateRelationArtifacts(nextBundle, {
+      const manualCandidate = createManualExplicitCandidate(nextBundle, {
+        relation: nextBundle.explicitRelations.at(-1),
         config: this.config,
-        previousCandidates: record.topologyCandidates,
+        generatedAt: createdAt,
+      })
+      if (!manualCandidate.candidate) {
+        throw new AppError('Koneksi manual tidak dapat dibuat menjadi candidate explicit.', {
+          code: 'topology_manual_relation_candidate_missing',
+          statusCode: 409,
+        })
+      }
+      const artifacts = rebuildConfirmedRelationArtifacts(nextBundle, {
+        config: this.config,
+        candidates: [
+          ...(record.topologyCandidates ?? []),
+          manualCandidate.candidate,
+        ],
         previousRelations: record.confirmedRelations,
+        previousGraph: record.topologyGraph,
+        affectedAssetIds: [source.topologyAssetId, target.topologyAssetId],
+        eligibilityIssues: [
+          ...(record.topologyEligibilityIssues ?? []),
+          ...manualCandidate.eligibilityIssues,
+        ],
+        lineworkIssues: record.topologyLineworkIssues,
         generatedAt: createdAt,
       })
       const materialized = artifacts.confirmedRelations.find((relation) => (
@@ -635,6 +770,8 @@ export class TopologyService {
         ...record,
         topologyInputBundle: nextBundle,
       }, artifacts)
+    }, {
+      expectedRevision: recordRevision(current),
     })
     const relation = updated.confirmedRelations.find((item) => (
       item.provenance === 'manual_admin'
@@ -649,17 +786,24 @@ export class TopologyService {
       readiness: structuredClone(updated.topologyReadiness),
       auditEventId: event.id,
     }
+    })
   }
 
-  async revokeRelation(relationId, actorId, { reason } = {}) {
-    const located = await this.#findRelation(relationId)
+  async revokeRelation(relationId, actorId, {
+    reason,
+    expectedGraphRevision,
+    expectedCandidateRevision,
+  } = {}) {
+    return this.#withMutationTransaction(async ({ repository, auditLog }) => {
+    const located = await this.#findRelation(relationId, repository)
+    assertReviewSnapshot(located.record, { expectedGraphRevision, expectedCandidateRevision })
     const relation = located.relation
     if (relation.verificationStatus !== 'confirmed') {
       throw invalidTransition(relation.verificationStatus, 'revoked')
     }
     const revokedAt = this.clock().toISOString()
     const normalizedReason = normalizeReason(reason, true)
-    const event = await this.auditLog.record('topology.relation_revoked', {
+    const event = await auditLog.record('topology.relation_revoked', {
       actorId,
       datasetVersionId: located.datasetVersionId,
       branchId: located.record.datasetVersion.branchId,
@@ -676,7 +820,8 @@ export class TopologyService {
         topologyRuleSetVersion: relation.topologyRuleSetVersion,
       },
     })
-    const updated = await this.repository.update(located.datasetVersionId, (record) => {
+    const updated = await repository.update(located.datasetVersionId, (record) => {
+      assertReviewSnapshot(record, { expectedGraphRevision, expectedCandidateRevision })
       const currentRelation = (record.confirmedRelations ?? [])
         .find(({ relationId: id }) => id === relationId)
       if (!currentRelation || currentRelation.verificationStatus !== 'confirmed') {
@@ -707,12 +852,26 @@ export class TopologyService {
           after: 'revoked',
         })
       }
-      const rebuilt = rebuildFromReviewedCandidates(record, nextCandidates, this.config, revokedAt)
+      const rebuilt = rebuildFromReviewedCandidates(
+        record,
+        nextCandidates,
+        this.config,
+        revokedAt,
+        [
+          relation.sourceAssetId,
+          relation.targetAssetId,
+          relation.pathAssetId,
+          ...(relation.pathAssetIds ?? []),
+          ...(relation.sourceGeometryIds ?? []),
+        ],
+      )
       rebuilt.topologyRelationHistory = [
         ...(record.topologyRelationHistory ?? []),
         revoked,
       ]
       return rebuilt
+    }, {
+      expectedRevision: recordRevision(located.record),
     })
     return {
       datasetVersionId: located.datasetVersionId,
@@ -726,11 +885,18 @@ export class TopologyService {
       graph: updated.topologyGraph,
       readiness: updated.topologyReadiness,
     }
+    })
   }
 
-  async revokeAllRelations(datasetVersionId, actorId, { reason } = {}) {
-    const current = await this.repository.get(datasetVersionId)
+  async revokeAllRelations(datasetVersionId, actorId, {
+    reason,
+    expectedGraphRevision,
+    expectedCandidateRevision,
+  } = {}) {
+    return this.#withMutationTransaction(async ({ repository, auditLog }) => {
+    const current = await repository.get(datasetVersionId)
     assertTopologyBundle(current)
+    assertReviewSnapshot(current, { expectedGraphRevision, expectedCandidateRevision })
     const relations = (current.confirmedRelations ?? [])
       .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
     const normalizedReason = normalizeReason(reason, true)
@@ -744,7 +910,7 @@ export class TopologyService {
     const revokedAt = this.clock().toISOString()
     const relationIds = relations.map(({ relationId }) => relationId)
     const candidateIds = new Set(relations.map(({ candidateId }) => candidateId).filter(Boolean))
-    const event = await this.auditLog.record('topology.relations_bulk_revoked', {
+    const event = await auditLog.record('topology.relations_bulk_revoked', {
       actorId,
       datasetVersionId,
       branchId: current.datasetVersion.branchId,
@@ -758,7 +924,8 @@ export class TopologyService {
         topologyRuleSetVersion: current.topologyRuleSetVersion ?? null,
       },
     })
-    const updated = await this.repository.update(datasetVersionId, (record) => {
+    const updated = await repository.update(datasetVersionId, (record) => {
+      assertReviewSnapshot(record, { expectedGraphRevision, expectedCandidateRevision })
       const currentRelations = (record.confirmedRelations ?? [])
         .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
       const currentRelationIds = new Set(currentRelations.map(({ relationId }) => relationId))
@@ -797,12 +964,21 @@ export class TopologyService {
         nextCandidates,
         this.config,
         revokedAt,
+        currentRelations.flatMap((relation) => [
+          relation.sourceAssetId,
+          relation.targetAssetId,
+          relation.pathAssetId,
+          ...(relation.pathAssetIds ?? []),
+          ...(relation.sourceGeometryIds ?? []),
+        ]),
       )
       rebuilt.topologyRelationHistory = [
         ...(record.topologyRelationHistory ?? []),
         ...revokedRelations,
       ]
       return rebuilt
+    }, {
+      expectedRevision: recordRevision(current),
     })
     return bulkReviewResponse(updated, {
       action: 'revoke_all',
@@ -810,10 +986,18 @@ export class TopologyService {
       affectedCandidateCount: candidateIds.size,
       auditEventId: event.id,
     })
+    })
   }
 
-  async #reviewCandidate(candidateId, actorId, { action, reason }) {
-    const located = await this.#findCandidate(candidateId)
+  async #reviewCandidate(candidateId, actorId, {
+    action,
+    reason,
+    expectedGraphRevision,
+    expectedCandidateRevision,
+  }) {
+    return this.#withMutationTransaction(async ({ repository, auditLog }) => {
+    const located = await this.#findCandidate(candidateId, repository)
+    assertReviewSnapshot(located.record, { expectedGraphRevision, expectedCandidateRevision })
     const candidate = located.candidate
     const targetStatus = {
       confirm: 'confirmed',
@@ -827,7 +1011,7 @@ export class TopologyService {
       throw invalidTransition(candidate.candidateStatus, targetStatus)
     }
     const reviewedAt = this.clock().toISOString()
-    const event = await this.auditLog.record(`topology.candidate_${action}ed`, {
+    const event = await auditLog.record(`topology.candidate_${action}ed`, {
       actorId,
       datasetVersionId: located.datasetVersionId,
       branchId: located.record.datasetVersion.branchId,
@@ -840,7 +1024,8 @@ export class TopologyService {
         topologyRuleSetVersion: candidate.topologyRuleSetVersion,
       },
     })
-    const updated = await this.repository.update(located.datasetVersionId, (record) => {
+    const updated = await repository.update(located.datasetVersionId, (record) => {
+      assertReviewSnapshot(record, { expectedGraphRevision, expectedCandidateRevision })
       const nextCandidates = structuredClone(record.topologyCandidates ?? [])
       const current = nextCandidates.find(({ candidateId: id }) => id === candidateId)
       if (!current) throw candidateNotFound(candidateId)
@@ -858,14 +1043,42 @@ export class TopologyService {
         before: candidate.candidateStatus,
         after: targetStatus,
       })
-      return rebuildFromReviewedCandidates(record, nextCandidates, this.config, reviewedAt)
+      return rebuildFromReviewedCandidates(
+        record,
+        nextCandidates,
+        this.config,
+        reviewedAt,
+        candidateAssetReferences(candidate),
+      )
     })
     return candidateReviewResponse(updated, candidateId)
+    })
   }
 
-  async #findCandidate(candidateId) {
+  async #withMutationTransaction(operation) {
+    if (typeof this.repository.withTransaction !== 'function') {
+      return operation({
+        repository: this.repository,
+        auditLog: this.auditLog,
+      })
+    }
+    if (typeof this.auditLog.withExecutor !== 'function') {
+      throw new AppError('Audit log transaksional belum dikonfigurasi.', {
+        code: 'transactional_audit_unavailable',
+        statusCode: 503,
+      })
+    }
+    return this.repository.withTransaction(async ({ client, repository }) => (
+      operation({
+        repository,
+        auditLog: this.auditLog.withExecutor(client),
+      })
+    ))
+  }
+
+  async #findCandidate(candidateId, repository = this.repository) {
     assertEntityId(candidateId, 'candidate')
-    const matches = (await this.repository.list()).flatMap((record) => (
+    const matches = (await repository.list()).flatMap((record) => (
       (record.topologyCandidates ?? [])
         .filter(({ candidateId: id }) => id === candidateId)
         .map((candidate) => ({
@@ -884,9 +1097,9 @@ export class TopologyService {
     return matches[0]
   }
 
-  async #findRelation(relationId) {
+  async #findRelation(relationId, repository = this.repository) {
     assertEntityId(relationId, 'relation')
-    const matches = (await this.repository.list()).flatMap((record) => (
+    const matches = (await repository.list()).flatMap((record) => (
       (record.confirmedRelations ?? [])
         .filter(({ relationId: id }) => id === relationId)
         .map((relation) => ({
@@ -976,11 +1189,21 @@ export function applyArtifacts(record, artifacts, {
   }
 }
 
-function rebuildFromReviewedCandidates(record, candidates, config, generatedAt) {
-  const artifacts = generateRelationArtifacts(record.topologyInputBundle, {
+function rebuildFromReviewedCandidates(
+  record,
+  candidates,
+  config,
+  generatedAt,
+  affectedAssetIds = [],
+) {
+  const artifacts = rebuildConfirmedRelationArtifacts(record.topologyInputBundle, {
     config,
-    previousCandidates: candidates,
+    candidates,
     previousRelations: record.confirmedRelations,
+    previousGraph: record.topologyGraph,
+    affectedAssetIds,
+    eligibilityIssues: record.topologyEligibilityIssues,
+    lineworkIssues: record.topologyLineworkIssues,
     generatedAt,
   })
   return applyArtifacts(record, artifacts)
@@ -1007,6 +1230,7 @@ function candidateReviewResponse(record, candidateId) {
     confirmedRelations: structuredClone(record.confirmedRelations ?? []),
     graph: structuredClone(record.topologyGraph),
     readiness: structuredClone(record.topologyReadiness),
+    ...reviewSnapshot(record),
   }
 }
 
@@ -1034,7 +1258,53 @@ function bulkReviewResponse(record, {
       .filter(isBulkConfirmableCandidate).length,
     remainingLineLabelCount: (record.topologyCandidates ?? [])
       .filter(isLineLabelConfirmableCandidate).length,
+    ...reviewSnapshot(record),
   }
+}
+
+function candidateAssetReferences(candidate) {
+  return [
+    candidate?.sourcePathAssetId,
+    candidate?.targetAssetId,
+    candidate?.targetPathAssetId,
+    ...(candidate?.sourceGeometryIds ?? []),
+  ].filter(Boolean)
+}
+
+function reviewSnapshot(record) {
+  return {
+    graphRevision: record.topologyGraph?.graphRevision ?? null,
+    candidateRevision: createCandidateCollectionRevision(record.topologyCandidates ?? []),
+    recordRevision: recordRevision(record),
+  }
+}
+
+function recordRevision(record) {
+  const revision = Number(record?.recordRevision)
+  return Number.isInteger(revision) && revision >= 0 ? revision : 0
+}
+
+function assertReviewSnapshot(record, {
+  expectedGraphRevision,
+  expectedCandidateRevision,
+} = {}) {
+  const current = reviewSnapshot(record)
+  const graphMatches = expectedGraphRevision === undefined
+    || expectedGraphRevision === current.graphRevision
+  const candidateMatches = expectedCandidateRevision === undefined
+    || expectedCandidateRevision === current.candidateRevision
+  if (graphMatches && candidateMatches) return
+  throw new AppError('State topology berubah sejak review dimuat.', {
+    code: 'stale_topology_review',
+    statusCode: 409,
+    details: {
+      expectedGraphRevision: expectedGraphRevision ?? null,
+      currentGraphRevision: current.graphRevision,
+      expectedCandidateRevision: expectedCandidateRevision ?? null,
+      currentCandidateRevision: current.candidateRevision,
+      currentRecordRevision: current.recordRevision,
+    },
+  })
 }
 
 function isBulkConfirmableCandidate(candidate) {
