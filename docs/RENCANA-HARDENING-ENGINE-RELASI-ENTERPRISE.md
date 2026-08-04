@@ -632,7 +632,8 @@ test report, benchmark report, atau audit record.
 ### 10.4 Concurrency test
 
 - [x] Concurrent dataset activation mempunyai lock pada repository saat ini.
-- [ ] 20 reviewer mengubah candidate berbeda tanpa lost update.
+- [x] 20 reviewer mengubah candidate berbeda tanpa lost update pada JSON
+  repository contract; HTTP/PostgreSQL load masih pending.
 - [x] Dua reviewer mengubah candidate sama: satu sukses, satu menerima 409.
 - [ ] Confirm dan revoke bersamaan menghasilkan state machine yang valid.
 - [ ] Full regeneration dan review bersamaan tidak menghapus keputusan review.
