@@ -541,6 +541,24 @@ Status: `complete (JSON durable API contract; PostgreSQL live evidence pending)`
 Batas checkpoint: belum membuktikan PostgreSQL live dead-letter workflow,
 retention, alerting/dashboard, atau approval production.
 
+## Checkpoint 26 - Source storage incident handling
+
+Status: `complete (current file-store adapter; external object storage pending)`
+- 4 Agustus 2026.
+
+- Existing upload/source-file regression menguji object source hilang dan
+  checksum berubah.
+- Error actionable yang dipastikan: `source_file_missing` (`404`) dan
+  `source_file_integrity_failed` (`409`); path internal tidak bocor dan audit
+  incident tercatat.
+- Full backend verification: `157/157` test, lint `85` file, build `37` source
+  file, dan `git diff --check` lulus.
+- Evidence detail: `docs/migrations/SOURCE-STORAGE-INCIDENT-2026-08-04.md`;
+  test utama `backend/tests/upload-pipeline.test.js`.
+
+Batas checkpoint: belum membuktikan provider object storage eksternal,
+retry/backoff provider, retention, atau alert production.
+
 ## Status berikutnya
 
 Task berikutnya adalah menjalankan live PostgreSQL restart/failover dengan
