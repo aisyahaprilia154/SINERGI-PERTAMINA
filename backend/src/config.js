@@ -258,6 +258,8 @@ export function createConfig(env = process.env, overrides = {}) {
         ?? numberFrom(env.SINERGI_JOB_CONCURRENCY, 1),
       leaseMilliseconds: overrides.jobs?.leaseMilliseconds
         ?? numberFrom(env.SINERGI_JOB_LEASE_MS, 5 * 60 * 1000),
+      lockStaleMilliseconds: overrides.jobs?.lockStaleMilliseconds
+        ?? numberFrom(env.SINERGI_JOB_LOCK_STALE_MS, 5 * 60 * 1000),
       pollMilliseconds: overrides.jobs?.pollMilliseconds
         ?? numberFrom(env.SINERGI_JOB_POLL_MS, 100),
     },

@@ -247,8 +247,8 @@ Status: `complete (pilot fixture)` - 4 Agustus 2026.
   dan `git diff --check` lulus.
 
 Batas checkpoint: fixture ini kecil. Replay production-sized, 20 reviewer,
-retry idempotency, concurrent confirm/revoke, API/PostgreSQL restart-recovery,
-dan SLO tetap pending.
+retry idempotency, concurrent confirm/revoke, PostgreSQL restart-recovery, dan
+SLO tetap pending.
 
 ## Checkpoint 13 - process-level worker restart recovery
 
@@ -266,9 +266,8 @@ Status: `complete (durable JSON worker scope)` - 4 Agustus 2026.
   lint `76` file, build `35` source file, dan `git diff --check` lulus.
 
 Batas checkpoint: ini membuktikan restart worker pada durable JSON queue.
-Restart API saat upload, PostgreSQL live recovery/multi-instance, database
-disconnect, object storage failure, dan retry idempotency pada mutation HTTP
-belum selesai.
+PostgreSQL live recovery/multi-instance, database disconnect, object storage
+failure, dan retry idempotency pada mutation HTTP belum selesai.
 
 ## Checkpoint 14 - HTTP review retry idempotency
 
@@ -312,9 +311,32 @@ Batas checkpoint: scope masih JSON aggregate single-candidate. Bulk review,
 select-target, manual relation, revoke, PostgreSQL live replay, multi-instance
 recovery, dan receipt retention policy production tetap pending.
 
+## Checkpoint 16 - API restart recovery pada durable JSON queue
+
+Status: `complete (process-level JSON runtime scope)` - 4 Agustus 2026.
+
+- Test proses: `backend/tests/api-restart-recovery.test.js` menjalankan server
+  nyata, menerima upload Administrator, memastikan descriptor job tersimpan,
+  menghentikan proses API, lalu menyalakan proses API kedua dengan data root
+  yang sama.
+- Endpoint job dan status dataset setelah restart tetap menemukan job ID dan
+  dataset version ID yang sama; job dapat mencapai state terminal tanpa
+  kehilangan descriptor atau idempotency key.
+- Runtime JSON menerima `SINERGI_JOB_LOCK_STALE_MS` dan meneruskannya ke
+  repository durable. Retry lock memakai timer yang tetap aktif agar startup
+  tidak keluar dengan top-level await unresolved ketika membersihkan stale
+  lock.
+- Test proses lulus 3/3 pengulangan.
+- Evidence: backend `141/141` test, lint `78` file, build `36` source file,
+  dan `git diff --check` lulus.
+
+Batas checkpoint: hanya process-level JSON runtime. PostgreSQL live
+restart/recovery, database disconnect, object storage failure, multi-instance
+coordination, dan production lock/lease policy tetap pending.
+
 ## Status berikutnya
 
-Task berikutnya adalah API/PostgreSQL restart-recovery, mutation idempotency
+Task berikutnya adalah PostgreSQL live restart/recovery, mutation idempotency
 yang lebih luas, load/SLO, dan enterprise approval gates. Setiap
 checkpoint hanya boleh ditandai selesai setelah test, lint/build, dan regression
 evidence lulus; bukti live database harus dilaporkan terpisah dari test

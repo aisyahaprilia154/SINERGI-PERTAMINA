@@ -29,7 +29,9 @@ const auditLog = repositoryRuntime.mode === 'postgres'
   : new JsonLinesAuditLog(path.join(config.dataRoot, 'audit', 'imports.jsonl'))
 const jobRepository = repositoryRuntime.mode === 'postgres'
   ? new PostgresDurableJobRepository(repositoryRuntime.pool)
-  : new JsonDurableJobRepository(path.join(config.dataRoot, 'jobs'))
+  : new JsonDurableJobRepository(path.join(config.dataRoot, 'jobs'), {
+    staleLockMilliseconds: config.jobs?.lockStaleMilliseconds,
+  })
 const lifecycleService = new DatasetVersionLifecycleService({
   repository,
   auditLog,
