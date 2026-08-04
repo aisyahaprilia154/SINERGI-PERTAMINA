@@ -628,12 +628,13 @@ test report, benchmark report, atau audit record.
 - [ ] Confirm dan revoke bersamaan menghasilkan state machine yang valid.
 - [ ] Full regeneration dan review bersamaan tidak menghapus keputusan review.
 - [x] Retry request dengan idempotency key tidak membuat audit/relation ganda
-  pada single-candidate JSON HTTP confirm, termasuk concurrent same-key;
-  bulk/select-target/revoke dan PostgreSQL live masih pending.
+  pada single-candidate JSON HTTP confirm, termasuk concurrent same-key, dan
+  PostgreSQL disconnect-before-commit retry; bulk/select-target/revoke,
+  PostgreSQL server failover, serta multi-instance production masih pending.
 - [ ] Dua worker tidak mengambil job yang sama.
 - [x] Worker lock yang expired dapat diambil alih dengan aman pada uji
   lintas-process durable JSON queue dan replacement process PostgreSQL live;
-  multi-worker production dan database disconnect masih pending.
+  multi-worker production masih pending.
 
 ### 10.5 Performance dan load test
 
@@ -669,12 +670,16 @@ Checklist:
 - [x] Restart worker saat inference membuat job diulang dengan aman pada uji
   lintas-process durable JSON queue; replacement process PostgreSQL live juga
   memulihkan lease dan menyelesaikan job yang sama.
-- [ ] Database disconnect menghasilkan retry tanpa duplicate relation.
+- [x] Database disconnect menghasilkan retry tanpa duplicate relation pada
+  isolated PostgreSQL mutation probe; server restart/failover dan retry lintas
+  instance masih pending.
 - [ ] Object storage unavailable menghasilkan error yang dapat ditindaklanjuti.
 - [ ] Dead-letter job dapat diperiksa dan di-retry.
 - [ ] Backup database berhasil di-restore ke environment bersih.
 - [ ] Graph revision sebelumnya dapat diaktifkan kembali.
-- [ ] Audit event tetap konsisten setelah kegagalan transaksi.
+- [x] Audit event tetap konsisten setelah disconnect-before-commit retry pada
+  isolated PostgreSQL mutation probe; broader transaction-failure matrix masih
+  pending.
 
 ### 10.7 Security dan governance test
 
