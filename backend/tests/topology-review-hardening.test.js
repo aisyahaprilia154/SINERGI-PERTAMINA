@@ -132,6 +132,148 @@ test('two reviewers on the same candidate produce one winner and a 409 conflict'
   }
 })
 
+test('HTTP review accepts graph and candidate revisions emitted by the candidate API', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-review-http-revision-'))
+  try {
+    const bundle = reviewBundle()
+    const initial = generateRelationArtifacts(bundle)
+    const repository = new JsonDatasetVersionRepository(path.join(root, 'dataset-versions'))
+    await repository.create(applyArtifacts(baseRecord(bundle), initial))
+    const auditLog = new MemoryAuditLog()
+    const topologyService = new TopologyService({ repository, auditLog })
+    const app = createApp({
+      config: {},
+      authenticator: new TokenAuthenticator({
+        'admin-token': { id: 'admin-1', role: 'Administrator' },
+      }),
+      repository,
+      fileStore: {},
+      auditLog,
+      jobQueue: {},
+      importPipeline: {},
+      lifecycleService: {},
+      topologyService,
+    })
+    await listen(app)
+    const origin = `http://127.0.0.1:${app.address().port}`
+
+    try {
+      const candidatesResponse = await fetch(
+        `${origin}/api/dataset-versions/${bundle.datasetVersion.id}/topology/candidates`,
+        { headers: { authorization: 'Bearer admin-token' } },
+      )
+      const candidatesBody = await candidatesResponse.json()
+      assert.equal(candidatesResponse.status, 200)
+      const candidate = candidatesBody.items.find(({ candidateStatus }) => (
+        candidateStatus === 'candidate'
+      ))
+      assert.ok(candidate)
+
+      const reviewResponse = await fetch(
+        `${origin}/api/topology/candidates/${encodeURIComponent(candidate.candidateId)}/confirm`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer admin-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            reason: 'HTTP graph revision contract test.',
+            expectedGraphRevision: candidatesBody.graphRevision,
+            expectedCandidateRevision: candidatesBody.candidateRevision,
+          }),
+        },
+      )
+      assert.equal(reviewResponse.status, 200)
+      const reviewBody = await reviewResponse.json()
+      assert.equal(reviewBody.candidate.candidateStatus, 'confirmed')
+      assert.notEqual(reviewBody.graphRevision, candidatesBody.graphRevision)
+      assert.notEqual(reviewBody.candidateRevision, candidatesBody.candidateRevision)
+    } finally {
+      await close(app)
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('HTTP review retry with the same idempotency key replays one committed result', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-review-idempotency-'))
+  try {
+    const bundle = reviewBundle()
+    const initial = generateRelationArtifacts(bundle)
+    const repository = new JsonDatasetVersionRepository(path.join(root, 'dataset-versions'))
+    await repository.create(applyArtifacts(baseRecord(bundle), initial))
+    const auditLog = new MemoryAuditLog()
+    const topologyService = new TopologyService({ repository, auditLog })
+    const app = createApp({
+      config: {},
+      authenticator: new TokenAuthenticator({
+        'admin-token': { id: 'admin-1', role: 'Administrator' },
+      }),
+      repository,
+      fileStore: {},
+      auditLog,
+      jobQueue: {},
+      importPipeline: {},
+      lifecycleService: {},
+      topologyService,
+    })
+    await listen(app)
+    const origin = `http://127.0.0.1:${app.address().port}`
+    const idempotencyKey = 'review-retry-2026-08-04-001'
+
+    try {
+      const candidate = initial.candidates.find(({ sourceEndpointId }) => (
+        sourceEndpointId === 'endpoint:geometry:CBL-01:start'
+      ))
+      const endpoint = `${origin}/api/topology/candidates/${encodeURIComponent(candidate.candidateId)}/confirm`
+      const request = {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer admin-token',
+          'content-type': 'application/json',
+          'idempotency-key': idempotencyKey,
+        },
+        body: JSON.stringify({ reason: 'Retry idempotency contract test.' }),
+      }
+
+      const firstResponse = await fetch(endpoint, request)
+      const firstBody = await firstResponse.json()
+      const retryResponse = await fetch(endpoint, request)
+      const retryBody = await retryResponse.json()
+      assert.equal(firstResponse.status, 200)
+      assert.equal(retryResponse.status, 200)
+      assert.deepEqual(retryBody, firstBody)
+
+      const persisted = await repository.get(bundle.datasetVersion.id)
+      assert.equal(auditLog.index, 1)
+      assert.equal(persisted.recordRevision, 1)
+      assert.equal(
+        persisted.confirmedRelations.filter(({ verificationStatus }) => (
+          verificationStatus === 'confirmed'
+        )).length,
+        1,
+      )
+      assert.equal(persisted.topologyMutationReceipts.length, 1)
+      assert.equal(persisted.topologyMutationReceipts[0].key, idempotencyKey)
+
+      const reusedResponse = await fetch(endpoint, {
+        ...request,
+        body: JSON.stringify({ reason: 'Same key, different mutation.' }),
+      })
+      const reusedBody = await reusedResponse.json()
+      assert.equal(reusedResponse.status, 409)
+      assert.equal(reusedBody.error.code, 'idempotency_key_reused')
+      assert.equal(auditLog.index, 1)
+    } finally {
+      await close(app)
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('HTTP review rolls back state and audit when the transactional write fails', async () => {
   const bundle = reviewBundle()
   const initial = generateRelationArtifacts(bundle)

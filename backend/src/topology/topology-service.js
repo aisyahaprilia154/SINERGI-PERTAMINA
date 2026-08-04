@@ -23,6 +23,13 @@ import {
   summarizeCandidates,
   TopologyCandidateQueryIndex,
 } from './topology-candidate-pagination.js'
+import {
+  appendTopologyMutationReceipt,
+  assertTopologyMutationFingerprint,
+  createTopologyMutationFingerprint,
+  findTopologyMutationReceipt,
+  normalizeTopologyIdempotencyKey,
+} from './topology-idempotency.js'
 
 export class TopologyService {
   constructor({
@@ -414,12 +421,14 @@ export class TopologyService {
     reason,
     expectedGraphRevision,
     expectedCandidateRevision,
+    idempotencyKey,
   } = {}) {
     return this.#reviewCandidate(candidateId, actorId, {
       action: 'confirm',
       reason: normalizeReason(reason, false),
       expectedGraphRevision,
       expectedCandidateRevision,
+      idempotencyKey,
     })
   }
 
@@ -535,12 +544,14 @@ export class TopologyService {
     reason,
     expectedGraphRevision,
     expectedCandidateRevision,
+    idempotencyKey,
   } = {}) {
     return this.#reviewCandidate(candidateId, actorId, {
       action: 'reject',
       reason: normalizeReason(reason, true),
       expectedGraphRevision,
       expectedCandidateRevision,
+      idempotencyKey,
     })
   }
 
@@ -548,12 +559,14 @@ export class TopologyService {
     reason,
     expectedGraphRevision,
     expectedCandidateRevision,
+    idempotencyKey,
   } = {}) {
     return this.#reviewCandidate(candidateId, actorId, {
       action: 'skip',
       reason: normalizeReason(reason, false),
       expectedGraphRevision,
       expectedCandidateRevision,
+      idempotencyKey,
     })
   }
 
@@ -994,64 +1007,102 @@ export class TopologyService {
     reason,
     expectedGraphRevision,
     expectedCandidateRevision,
+    idempotencyKey,
   }) {
-    return this.#withMutationTransaction(async ({ repository, auditLog }) => {
-    const located = await this.#findCandidate(candidateId, repository)
-    assertReviewSnapshot(located.record, { expectedGraphRevision, expectedCandidateRevision })
-    const candidate = located.candidate
-    const targetStatus = {
-      confirm: 'confirmed',
-      reject: 'rejected',
-      skip: 'ambiguous',
-    }[action]
-    const allowed = action === 'confirm'
-      ? ['candidate', 'ambiguous', 'revoked']
-      : ['candidate', 'ambiguous']
-    if (!allowed.includes(candidate.candidateStatus)) {
-      throw invalidTransition(candidate.candidateStatus, targetStatus)
-    }
-    const reviewedAt = this.clock().toISOString()
-    const event = await auditLog.record(`topology.candidate_${action}ed`, {
-      actorId,
-      datasetVersionId: located.datasetVersionId,
-      branchId: located.record.datasetVersion.branchId,
-      outcome: targetStatus,
-      details: {
-        before: candidateAuditSnapshot(candidate),
-        after: candidateAuditSnapshot(candidate, targetStatus),
-        reason,
-        candidateEvidence: candidate.evidence,
-        topologyRuleSetVersion: candidate.topologyRuleSetVersion,
-      },
-    })
-    const updated = await repository.update(located.datasetVersionId, (record) => {
-      assertReviewSnapshot(record, { expectedGraphRevision, expectedCandidateRevision })
-      const nextCandidates = structuredClone(record.topologyCandidates ?? [])
-      const current = nextCandidates.find(({ candidateId: id }) => id === candidateId)
-      if (!current) throw candidateNotFound(candidateId)
-      assertCurrentCandidateState(current, candidate.candidateStatus)
-      current.candidateStatus = targetStatus
-      current.proposalStatus = action === 'confirm'
-        ? 'confirmed_by_admin'
-        : action === 'reject' ? 'rejected_by_admin' : 'skipped_by_admin'
-      current.review = reviewRecord({
-        actorId,
-        reviewedAt,
-        reason,
+    const normalizedIdempotencyKey = normalizeTopologyIdempotencyKey(idempotencyKey)
+    const fingerprint = normalizedIdempotencyKey
+      ? createTopologyMutationFingerprint({
         action,
-        auditEventId: event.id,
-        before: candidate.candidateStatus,
-        after: targetStatus,
+        resourceId: candidateId,
+        actorId,
+        input: {
+          reason,
+          expectedGraphRevision: expectedGraphRevision ?? null,
+          expectedCandidateRevision: expectedCandidateRevision ?? null,
+        },
       })
-      return rebuildFromReviewedCandidates(
-        record,
-        nextCandidates,
-        this.config,
-        reviewedAt,
-        candidateAssetReferences(candidate),
-      )
-    })
-    return candidateReviewResponse(updated, candidateId)
+      : null
+    return this.#withMutationTransaction(async ({ repository, auditLog }) => {
+      const located = await this.#findCandidate(candidateId, repository)
+      if (normalizedIdempotencyKey) {
+        const receipt = findTopologyMutationReceipt(located.record, normalizedIdempotencyKey)
+        if (receipt) {
+          assertTopologyMutationFingerprint(receipt, fingerprint)
+          return structuredClone(receipt.response)
+        }
+      }
+      const updated = await repository.update(located.datasetVersionId, async (record) => {
+        const existingReceipt = findTopologyMutationReceipt(record, normalizedIdempotencyKey)
+        if (existingReceipt) {
+          assertTopologyMutationFingerprint(existingReceipt, fingerprint)
+          return record
+        }
+        assertReviewSnapshot(record, { expectedGraphRevision, expectedCandidateRevision })
+        const nextCandidates = structuredClone(record.topologyCandidates ?? [])
+        const current = nextCandidates.find(({ candidateId: id }) => id === candidateId)
+        if (!current) throw candidateNotFound(candidateId)
+        const targetStatus = {
+          confirm: 'confirmed',
+          reject: 'rejected',
+          skip: 'ambiguous',
+        }[action]
+        const allowed = action === 'confirm'
+          ? ['candidate', 'ambiguous', 'revoked']
+          : ['candidate', 'ambiguous']
+        if (!allowed.includes(current.candidateStatus)) {
+          throw invalidTransition(current.candidateStatus, targetStatus)
+        }
+        const reviewedAt = this.clock().toISOString()
+        const event = await auditLog.record(`topology.candidate_${action}ed`, {
+          actorId,
+          datasetVersionId: located.datasetVersionId,
+          branchId: record.datasetVersion.branchId,
+          outcome: targetStatus,
+          details: {
+            before: candidateAuditSnapshot(current),
+            after: candidateAuditSnapshot(current, targetStatus),
+            reason,
+            candidateEvidence: current.evidence,
+            topologyRuleSetVersion: current.topologyRuleSetVersion,
+          },
+        })
+        const beforeStatus = current.candidateStatus
+        current.candidateStatus = targetStatus
+        current.proposalStatus = action === 'confirm'
+          ? 'confirmed_by_admin'
+          : action === 'reject' ? 'rejected_by_admin' : 'skipped_by_admin'
+        current.review = reviewRecord({
+          actorId,
+          reviewedAt,
+          reason,
+          action,
+          auditEventId: event.id,
+          before: beforeStatus,
+          after: targetStatus,
+        })
+        const rebuilt = rebuildFromReviewedCandidates(
+          record,
+          nextCandidates,
+          this.config,
+          reviewedAt,
+          candidateAssetReferences(current),
+        )
+        if (!normalizedIdempotencyKey) return rebuilt
+        const response = candidateReviewResponse({
+          ...rebuilt,
+          recordRevision: recordRevision(record) + 1,
+        }, candidateId)
+        return appendTopologyMutationReceipt(rebuilt, {
+          key: normalizedIdempotencyKey,
+          fingerprint,
+          action,
+          resourceId: candidateId,
+          actorId,
+          response,
+          createdAt: reviewedAt,
+        })
+      })
+      return candidateReviewResponse(updated, candidateId)
     })
   }
 
@@ -1272,8 +1323,9 @@ function candidateAssetReferences(candidate) {
 }
 
 function reviewSnapshot(record) {
+  const graph = normalizeTraceGraph(record, buildAssetIdentityMapFromRecord(record))
   return {
-    graphRevision: record.topologyGraph?.graphRevision ?? null,
+    graphRevision: graph.graphRevision,
     candidateRevision: createCandidateCollectionRevision(record.topologyCandidates ?? []),
     recordRevision: recordRevision(record),
   }

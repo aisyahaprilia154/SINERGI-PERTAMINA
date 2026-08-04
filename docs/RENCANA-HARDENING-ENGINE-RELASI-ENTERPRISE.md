@@ -315,9 +315,9 @@ berhasil atau gagal bersama-sama.
 
 Checklist:
 
-- [ ] Optimistic concurrency diterapkan pada candidate dan graph revision.
-- [ ] Audit event berada dalam transaksi yang sama dengan perubahan state.
-- [ ] Dua reviewer pada candidate yang sama menghasilkan satu pemenang.
+- [x] Optimistic concurrency diterapkan pada candidate dan graph revision.
+- [x] Audit event berada dalam transaksi yang sama dengan perubahan state.
+- [x] Dua reviewer pada candidate yang sama menghasilkan satu pemenang.
 - [ ] Dua reviewer pada candidate berbeda tidak saling menghapus perubahan.
 - [ ] Retry setelah network timeout tidak menghasilkan relation ganda.
 
@@ -587,7 +587,7 @@ test report, benchmark report, atau audit record.
 - [x] Duplicate dan zero-length linework didiagnosis.
 - [x] Explicit metadata dangling tidak menghasilkan dangling graph edge.
 - [x] Revoked relation tidak masuk operational graph.
-- [ ] Property test: urutan input tidak mengubah output.
+- [x] Property test: urutan input tidak mengubah output.
 - [ ] Property test: menjalankan job dua kali menghasilkan artifact yang sama.
 - [ ] Fuzz test geometry ekstrem, sangat panjang, dan koordinat dekat batas dunia.
 - [ ] Rule-set compatibility matrix diuji untuk seluruh pasangan family.
@@ -622,12 +622,15 @@ test report, benchmark report, atau audit record.
 
 - [x] Concurrent dataset activation mempunyai lock pada repository saat ini.
 - [ ] 20 reviewer mengubah candidate berbeda tanpa lost update.
-- [ ] Dua reviewer mengubah candidate sama: satu sukses, satu menerima 409.
+- [x] Dua reviewer mengubah candidate sama: satu sukses, satu menerima 409.
 - [ ] Confirm dan revoke bersamaan menghasilkan state machine yang valid.
 - [ ] Full regeneration dan review bersamaan tidak menghapus keputusan review.
-- [ ] Retry request dengan idempotency key tidak membuat audit/relation ganda.
+- [x] Retry request dengan idempotency key tidak membuat audit/relation ganda
+  pada single-candidate HTTP confirm; bulk/select-target/revoke, concurrent
+  same-key, dan PostgreSQL live masih pending.
 - [ ] Dua worker tidak mengambil job yang sama.
-- [ ] Worker lock yang expired dapat diambil alih dengan aman.
+- [x] Worker lock yang expired dapat diambil alih dengan aman pada uji
+  lintas-process durable JSON queue; PostgreSQL live masih pending.
 
 ### 10.5 Performance dan load test
 
@@ -658,7 +661,9 @@ Checklist:
 ### 10.6 Recovery dan durability test
 
 - [ ] Restart API saat upload tidak menghilangkan job.
-- [ ] Restart worker saat inference membuat job diulang dengan aman.
+- [x] Restart worker saat inference membuat job diulang dengan aman pada uji
+  lintas-process durable JSON queue; restart API dan PostgreSQL live masih
+  pending.
 - [ ] Database disconnect menghasilkan retry tanpa duplicate relation.
 - [ ] Object storage unavailable menghasilkan error yang dapat ditindaklanjuti.
 - [ ] Dead-letter job dapat diperiksa dan di-retry.
@@ -728,9 +733,9 @@ Exit criterion:
 
 ### Fase 3 — Transactional review dan incremental graph
 
-- [ ] Tambahkan optimistic revision.
-- [x] Satukan state change dan audit dalam transaksi; live HTTP replay dan
-  multi-reviewer load masih pending.
+- [x] Tambahkan optimistic revision.
+- [x] Satukan state change dan audit dalam transaksi; live HTTP replay pilot
+  lulus, sedangkan multi-reviewer load masih pending.
 - [ ] Implement incremental component rebuild.
 - [x] Tambahkan pagination candidate.
 - [x] Jalankan repository concurrency test; API-level multi-reviewer load masih

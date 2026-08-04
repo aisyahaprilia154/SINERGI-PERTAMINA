@@ -288,13 +288,19 @@ export function createApp({
         const candidateId = decodePathSegment(candidateActionMatch[1])
         const body = await readJsonBody(request)
         const action = candidateActionMatch[2]
+        const mutationInput = {
+          ...body,
+          ...(request.headers['idempotency-key'] !== undefined
+            ? { idempotencyKey: request.headers['idempotency-key'] }
+            : {}),
+        }
         const result = action === 'select-target'
-          ? await topologyService.selectTarget(candidateId, user.id, body)
+          ? await topologyService.selectTarget(candidateId, user.id, mutationInput)
           : await topologyService[{
             confirm: 'confirmCandidate',
             reject: 'rejectCandidate',
             skip: 'skipCandidate',
-          }[action]](candidateId, user.id, body)
+          }[action]](candidateId, user.id, mutationInput)
         return sendJson(response, 200, result)
       }
       const revokeRelationMatch = request.method === 'POST'
