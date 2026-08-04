@@ -525,6 +525,22 @@ Status: `complete (guardrail and regression scope; capacity SLO pending)` -
 Batas checkpoint: hard limit ini bukan bukti dense workload, 50.000-object
 stress, worker capacity, API p95, atau enterprise SLO.
 
+## Checkpoint 25 - Dead-letter admin API
+
+Status: `complete (JSON durable API contract; PostgreSQL live evidence pending)`
+- 4 Agustus 2026.
+
+- API contract test membuat poison job, memindahkannya ke `dead_letter`,
+  menampilkan state dan error secara aman, lalu mengulang job ke `queued`.
+- Public response tidak mengembalikan payload source; retry mereset attempt dan
+  error fields; route tetap Administrator-only pada coverage API.
+- Full backend verification: `157/157` test, lint `85` file, build `37` source
+  file, dan `git diff --check` lulus.
+- Evidence detail: `docs/migrations/DEAD-LETTER-ADMIN-API-2026-08-04.md`.
+
+Batas checkpoint: belum membuktikan PostgreSQL live dead-letter workflow,
+retention, alerting/dashboard, atau approval production.
+
 ## Status berikutnya
 
 Task berikutnya adalah menjalankan live PostgreSQL restart/failover dengan

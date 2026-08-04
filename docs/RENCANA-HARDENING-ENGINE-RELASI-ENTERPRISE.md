@@ -679,7 +679,7 @@ Checklist:
   isolated PostgreSQL mutation probe; server restart/failover dan retry lintas
   instance masih pending.
 - [ ] Object storage unavailable menghasilkan error yang dapat ditindaklanjuti.
-- [ ] Dead-letter job dapat diperiksa dan di-retry.
+- [x] Dead-letter job dapat diperiksa dan di-retry.
 - [ ] Backup database berhasil di-restore ke environment bersih.
 - [ ] Graph revision sebelumnya dapat diaktifkan kembali.
 - [x] Audit event tetap konsisten setelah disconnect-before-commit retry pada
