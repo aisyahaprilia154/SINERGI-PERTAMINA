@@ -40,6 +40,13 @@ parsial; diagnostic menyebut stage discovery, dataset version, site, jumlah
 yang dicoba, dan limit. Nilai ini adalah safety guardrail, bukan persetujuan
 kapasitas produksi atau pengganti load test.
 
+Generation juga mempunyai cooperative timeout default `60.000 ms`, yang dapat
+diubah melalui `SINERGI_TOPOLOGY_MAX_GENERATION_MS` atau
+`config.topology.maxGenerationMilliseconds`. Timeout diperiksa di antara
+discovery stage dan kandidat; jika terlampaui engine melempar
+`topology_generation_timeout` (`504`) dengan stage, elapsed/limit, dan dataset
+context, tanpa mengembalikan artifact parsial.
+
 ## Jenis kandidat
 
 - `endpoint_device`: endpoint path ke perangkat kompatibel.

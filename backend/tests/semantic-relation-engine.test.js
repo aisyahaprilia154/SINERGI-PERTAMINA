@@ -247,6 +247,33 @@ test('candidate explosion fails closed with a stage-specific diagnostic', () => 
   assert.deepEqual(bundle.geometries, sourceBefore)
 })
 
+test('topology generation timeout fails closed before returning partial artifacts', () => {
+  const bundle = topologyBundle({
+    paths: Array.from({ length: 2000 }, (_, index) => pathObject(
+      `TIMEOUT-${String(index).padStart(4, '0')}`,
+      'fiber_optic',
+      'Fiber Optic',
+      [[110, -7 + index * 0.002], [110.001, -7 + index * 0.002]],
+    )),
+  })
+  const sourceBefore = structuredClone(bundle.geometries)
+
+  assert.throws(
+    () => generateRelationArtifacts(bundle, {
+      config: { maxGenerationMilliseconds: 1 },
+    }),
+    (error) => {
+      assert.equal(error.code, 'topology_generation_timeout')
+      assert.equal(error.statusCode, 504)
+      assert.equal(error.details.timeoutMilliseconds, 1)
+      assert.ok(error.details.elapsedMilliseconds > 1)
+      assert.equal(typeof error.details.stage, 'string')
+      return true
+    },
+  )
+  assert.deepEqual(bundle.geometries, sourceBefore)
+})
+
 test('endpoint gap candidate requires same family, continuation angle, and no nearby device', () => {
   const result = generateRelationArtifacts(topologyBundle({
     paths: [

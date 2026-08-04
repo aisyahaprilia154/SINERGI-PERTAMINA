@@ -21,6 +21,7 @@ export const DEFAULT_RELATION_ENGINE_CONFIG = Object.freeze({
   heldOutPrecision: null,
   pathAccuracy: null,
   maxCandidateCount: 50000,
+  maxGenerationMilliseconds: 60000,
 })
 
 const SCORE_WEIGHTS = Object.freeze({
@@ -45,13 +46,15 @@ export function generateRelationArtifacts(topologyInputBundle, {
 } = {}) {
   const settings = normalizeConfig(config)
   const bundle = normalizeAndValidateBundle(topologyInputBundle)
+  const candidateBudget = createCandidateBudget(settings, bundle)
   const eligibilityIssues = []
   const lineworkIssues = []
   const nodes = prepareNodes(bundle, eligibilityIssues)
   const paths = preparePaths(bundle, eligibilityIssues, lineworkIssues)
   detectDuplicateAndOverlappingLinework(paths, lineworkIssues, bundle, settings)
+  assertGenerationBudget(candidateBudget, 'linework_validation')
   const spatialIndexes = buildSpatialIndexes(nodes, paths, settings)
-  const candidateBudget = createCandidateBudget(settings, bundle)
+  assertGenerationBudget(candidateBudget, 'spatial_index')
 
   const rawCandidates = [
     ...generateEndpointDeviceCandidates(paths, spatialIndexes, settings, candidateBudget),
@@ -729,6 +732,7 @@ function detectDuplicateAndOverlappingLinework(paths, issues, bundle, settings) 
 function generateEndpointDeviceCandidates(paths, spatialIndexes, settings, candidateBudget) {
   const candidates = []
   paths.filter((path) => !path.duplicateOfGeometryId).forEach((path) => {
+    assertGenerationBudget(candidateBudget, 'endpoint_device')
     lineEndpoints(path).forEach((endpoint) => {
       spatialIndexes.nodes.queryPoint(
         endpoint.coordinate,
@@ -779,6 +783,7 @@ function generateEndpointDeviceCandidates(paths, spatialIndexes, settings, candi
 function generateInlineDeviceCandidates(nodes, spatialIndexes, settings, candidateBudget) {
   const candidates = []
   nodes.filter(inlineNodeAllowed).forEach((node) => {
+    assertGenerationBudget(candidateBudget, 'inline_device')
     spatialIndexes.segments.queryPoint(
       node.coordinate,
       settings.inlineSearchRadiusMeters,
@@ -832,6 +837,7 @@ function generateEndpointEndpointCandidates(spatialIndexes, settings, candidateB
   const candidates = []
   const seenPairs = new Set()
   endpointRecords.forEach((left) => {
+    assertGenerationBudget(candidateBudget, 'endpoint_endpoint')
     spatialIndexes.endpoints.queryPoint(
       left.coordinate,
       settings.searchRadiusMeters,
@@ -887,6 +893,7 @@ function generateEndpointEndpointCandidates(spatialIndexes, settings, candidateB
 function generateIntersectionCandidates(spatialIndexes, settings, candidateBudget) {
   const candidates = []
   spatialIndexes.segments.pathPairs().forEach(([left, right]) => {
+      assertGenerationBudget(candidateBudget, 'intersection_with_junction')
       if (left.duplicateOfGeometryId) return
       if (right.duplicateOfGeometryId
         || left.id === right.id
@@ -946,6 +953,7 @@ function generateIntersectionCandidates(spatialIndexes, settings, candidateBudge
 function generateLineLabelConnectionCandidates(nodes, paths, candidateBudget) {
   const candidates = []
   paths.filter((path) => path.sourceName).forEach((path) => {
+    assertGenerationBudget(candidateBudget, 'line_label_connection')
     const matchedNodes = lineLabelNodeSequence(path, nodes)
     for (let index = 0; index < matchedNodes.length - 1; index += 1) {
       const sourceNode = matchedNodes[index]
@@ -1003,6 +1011,7 @@ function generateLineLabelConnectionCandidates(nodes, paths, candidateBudget) {
 function generateLineLabelAttachmentCandidates(nodes, paths, settings, candidateBudget) {
   const candidates = []
   paths.filter((path) => path.sourceName).forEach((path) => {
+    assertGenerationBudget(candidateBudget, 'line_label_attachment')
     const matchedNodes = lineLabelNodeSequence(path, nodes)
     if (matchedNodes.length < 2) return
     const [startNode, endNode] = assignLineLabelEndpoints(path, matchedNodes)
@@ -1186,6 +1195,7 @@ function generateExplicitCandidates(bundle, nodes, paths, issues, candidateBudge
   })
   const candidates = []
   bundle.explicitRelations.forEach((relation) => {
+    assertGenerationBudget(candidateBudget, 'explicit_metadata')
     const source = relation.sourceReference
       ? objectByIdentity.get(relation.sourceReference)
       : objectByFeature.get(relation.sourceFeatureId)
@@ -1308,17 +1318,42 @@ function createCandidateBudget(settings, bundle) {
   return {
     count: 0,
     maxCount: settings.maxCandidateCount,
+    startedAt: Date.now(),
+    timeoutMilliseconds: settings.maxGenerationMilliseconds,
     datasetVersionId: bundle.datasetVersion.id,
     siteId: bundle.site,
   }
 }
 
 function pushCandidate(candidates, candidate, budget, stage) {
+  assertGenerationBudget(budget, stage)
   if (budget.count >= budget.maxCount) {
     throw candidateLimitExceeded(budget, stage)
   }
   budget.count += 1
   candidates.push(candidate)
+}
+
+function assertGenerationBudget(budget, stage) {
+  const elapsedMilliseconds = Date.now() - budget.startedAt
+  if (elapsedMilliseconds <= budget.timeoutMilliseconds) return
+  throw new AppError(
+    `Topology generation melewati timeout ${budget.timeoutMilliseconds} ms.`,
+    {
+      code: 'topology_generation_timeout',
+      statusCode: 504,
+      expose: true,
+      details: {
+        elapsedMilliseconds,
+        timeoutMilliseconds: budget.timeoutMilliseconds,
+        stage,
+        candidateCount: budget.count,
+        maxCandidateCount: budget.maxCount,
+        datasetVersionId: budget.datasetVersionId,
+        siteId: budget.siteId,
+      },
+    },
+  )
 }
 
 function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, datasetVersionId) {
@@ -2542,6 +2577,10 @@ function normalizeConfig(config) {
     maxCandidateCount: positiveInteger(
       value.maxCandidateCount,
       DEFAULT_RELATION_ENGINE_CONFIG.maxCandidateCount,
+    ),
+    maxGenerationMilliseconds: positiveInteger(
+      value.maxGenerationMilliseconds,
+      DEFAULT_RELATION_ENGINE_CONFIG.maxGenerationMilliseconds,
     ),
   }
 }

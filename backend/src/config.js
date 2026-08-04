@@ -251,6 +251,11 @@ export function createConfig(env = process.env, overrides = {}) {
           env.SINERGI_TOPOLOGY_MAX_CANDIDATES,
           DEFAULT_RELATION_ENGINE_CONFIG.maxCandidateCount,
         ),
+      maxGenerationMilliseconds: overrides.topology?.maxGenerationMilliseconds
+        ?? numberFrom(
+          env.SINERGI_TOPOLOGY_MAX_GENERATION_MS,
+          DEFAULT_RELATION_ENGINE_CONFIG.maxGenerationMilliseconds,
+        ),
     },
     validation: {
       requireAssetName: overrides.validation?.requireAssetName
