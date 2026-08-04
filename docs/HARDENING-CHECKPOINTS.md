@@ -436,10 +436,36 @@ disconnect-before-commit pada Checkpoint 19. PostgreSQL server failover,
 retry lintas instance, 20-reviewer load, receipt retention policy production,
 dan production-sized SLO tetap pending.
 
+## Checkpoint 21 - PostgreSQL server recovery runner
+
+Status: `complete (runner contract; live restart evidence pending)` - 4 Agustus 2026.
+
+- Orchestration contract: `backend/src/database/postgres-server-recovery.js`.
+- Live command: `backend/scripts/database-postgres-server-recovery.mjs`;
+  package command `npm run db:postgres-server-recovery`.
+- Runner membuka pool sebelum dan sesudah restart, memverifikasi schema,
+  membuat probe durable job yang fingerprint-nya unik, menutup pool sebelum
+  restart, menunggu `pg_isready`, lalu claim/complete job yang sama dan
+  memverifikasi enqueue deduplication.
+- Fixture menolak queue `queued`/`retry_wait` yang tidak kosong dan cleanup
+  hanya menghapus job probe milik runner.
+- Contract evidence: `backend/tests/postgres-server-recovery.test.js`, `5/5`
+  lulus. Command live tanpa `SINERGI_DATABASE_URL` berhenti dengan
+  `database_url_required` sebelum restart service.
+- Full backend verification: `152/152` test, lint `84` file, build `37`
+  source file, dan `git diff --check` lulus.
+- Evidence terpisah: `docs/migrations/POSTGRES-SERVER-RECOVERY-RUNNER-2026-08-04.md`.
+
+Batas checkpoint: ini belum membuktikan PostgreSQL server restart/failover
+live. Eksekusi live memerlukan connection string/kredensial dan hak restart
+service pada environment operator; failover/replica switchover, multi-instance
+retry, dan disaster recovery tetap pending.
+
 ## Status berikutnya
 
-Task berikutnya adalah PostgreSQL server restart/failover, concurrency/load/SLO,
-dan enterprise approval gates. Setiap checkpoint hanya boleh ditandai selesai
+Task berikutnya adalah menjalankan live PostgreSQL restart/failover dengan
+kredensial operator, lalu concurrency/load/SLO dan enterprise approval gates.
+Setiap checkpoint hanya boleh ditandai selesai
 setelah test, lint/build, dan regression evidence lulus; bukti live database
 harus dilaporkan terpisah dari test contract. Bukti lokal yang sudah lulus tidak
 mengubah status enterprise `NO-GO` sebelum production cutover, recovery,
