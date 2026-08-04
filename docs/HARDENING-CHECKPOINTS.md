@@ -631,6 +631,22 @@ Status: `complete (deterministic geometry corpus; adversarial fuzz pending)` -
 Batas checkpoint: belum mencakup randomized fuzz campaign, dateline wrapping,
 50.000-object stress, atau production geometry distribution.
 
+## Checkpoint 31 - Topology compatibility matrix
+
+Status: `complete (representative family matrix; production vocabulary pending)`
+- 4 Agustus 2026.
+
+- Test menguji seluruh 16 pasangan path/node family untuk `cctv`,
+  `fiber_optic`, `lan`, dan `infrastructure`.
+- Same-family, approved cross-family, dan incompatible-family outcomes
+  diverifikasi melalui endpoint candidate output.
+- Full backend verification: `163/163` test, lint `88` file, build `37` source
+  file, dan `git diff --check` lulus.
+- Evidence detail: `docs/migrations/TOPOLOGY-COMPATIBILITY-MATRIX-2026-08-04.md`.
+
+Batas checkpoint: representative type coverage belum menggantikan production
+vocabulary/site mapping approval.
+
 ## Status berikutnya
 
 Task berikutnya adalah menjalankan live PostgreSQL restart/failover dengan

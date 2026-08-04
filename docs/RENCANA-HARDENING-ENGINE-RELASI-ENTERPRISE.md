@@ -597,7 +597,8 @@ test report, benchmark report, atau audit record.
   pada input/rule-set/generation time yang sama.
 - [x] Fuzz test geometry ekstrem, sangat panjang, dan koordinat dekat batas
   dunia pada deterministic corpus.
-- [ ] Rule-set compatibility matrix diuji untuk seluruh pasangan family.
+- [x] Rule-set compatibility matrix diuji untuk seluruh pasangan family
+  representative.
 
 ### 10.2 Integration test
 
