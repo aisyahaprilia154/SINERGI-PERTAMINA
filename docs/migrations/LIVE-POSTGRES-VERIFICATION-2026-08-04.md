@@ -67,13 +67,13 @@ PostGIS `3.6.2`. Password values were not stored in the repository.
 
 ## Still not proven for enterprise GO
 
-- The production server now uses PostgreSQL as source of truth when
+- The production server uses PostgreSQL as source of truth when
   `SINERGI_STORAGE_MODE=postgres` (or when `SINERGI_DATABASE_URL` is present
-  without a mode override). A live HTTP production-review transaction has not
-  yet been exercised end-to-end.
+  without a mode override). Live HTTP review replay passed on a pilot fixture;
+  production-sized HTTP replay remains pending.
 - Review state, relation, graph revision, and audit event are PostgreSQL-backed;
-  transaction coupling now has runtime/contract and HTTP fault-injection
-  evidence. Live production-sized HTTP replay remains pending.
+  transaction coupling now has runtime/contract, HTTP fault-injection, and
+  live pilot concurrency evidence.
 - Durable jobs are PostgreSQL-backed and the primary pilot passed; restart/
   recovery under process failure, retry idempotency across instances,
   20-reviewer load, and representative 10,000/50,000-object SLO evidence

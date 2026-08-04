@@ -1,6 +1,6 @@
 # Transactional HTTP review dan audit — 4 Agustus 2026
 
-Status: `complete (runtime + contract evidence)`.
+Status: `complete (runtime + contract + live pilot evidence)`.
 
 ## Perubahan
 
@@ -27,13 +27,19 @@ Status: `complete (runtime + contract evidence)`.
   kembali ke snapshot awal dan tidak ada audit event yang committed.
 - Success path HTTP membuktikan `review.auditEventId` sama dengan audit entry
   yang committed.
-- Backend verification: `135/135` test, lint `72` file, build `35` source
+- Live PostgreSQL HTTP replay menjalankan dua confirm bersamaan dengan snapshot
+  yang sama: satu request sukses `200` dan satu request stale menerima `409`.
+- Replay menyimpan tepat satu audit event, dua confirmed relation, satu graph
+  revision `validated`, dan nol graph revision `active` untuk fixture
+  unpublished. JSON tidak digunakan sebagai primary.
+- Regression test mengunci bahwa graph/candidate revision dari candidate API
+  dapat dipakai langsung oleh mutation HTTP.
+- Backend verification: `137/137` test, lint `74` file, build `35` source
   file, dan `git diff --check` lulus.
 
 ## Batas evidence
 
-Ini membuktikan wiring runtime dan HTTP contract/failure semantics. Replay
-end-to-end terhadap production-sized live PostgreSQL API masih pending, karena
-perlu environment database aplikasi yang disiapkan khusus untuk test tersebut.
-Restart/recovery, idempotency retry, 20-reviewer load, SLO production,
+Ini membuktikan wiring runtime, HTTP contract/failure semantics, dan replay
+end-to-end pada fixture pilot live PostgreSQL. Replay production-sized,
+restart/recovery, idempotency retry, 20-reviewer load, SLO production,
 security, canary, dan approval gates tetap pending.

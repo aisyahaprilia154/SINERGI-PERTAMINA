@@ -179,9 +179,9 @@ Status: `complete (runtime primary + shadow)` — 4 Agustus 2026.
 - Evidence: backend 135/135 test, lint 72 file, dan build 35 source file lulus.
 
 Batas checkpoint: migration apply, pilot row-count, shadow compare, query plan,
-backup/restore, dan repository concurrency terhadap PostgreSQL 18/PostGIS lokal
-sudah lulus. Live HTTP replay, restart/recovery, production load/SLO, dan
-approval gates tetap pending.
+backup/restore, repository concurrency, dan live HTTP pilot replay terhadap
+PostgreSQL 18/PostGIS lokal sudah lulus. Restart/recovery, production load/SLO,
+dan approval gates tetap pending.
 
 ## Checkpoint 10 - transactional review seam dan incremental graph rebuild
 
@@ -206,18 +206,94 @@ Status: `complete (runtime/transaction-contract scope)` - 4 Agustus 2026.
   source file; frontend `151/151` test, lint `85` file, production build;
   `git diff --check` lulus.
 
-Batas checkpoint: contract transaction dan HTTP fault injection sudah lulus;
-replay end-to-end terhadap live production-sized PostgreSQL API belum
-dijalankan. Local PostgreSQL primary, credential, PostGIS, migration, shadow
-compare, query plan, backup/restore, dan repository concurrency sudah lulus.
-20-reviewer load, retry idempotency, concurrent confirm/revoke melalui API,
-durable full-regeneration worker, restart/recovery, dan production SLO tetap
-pending.
+Batas checkpoint: contract transaction, HTTP fault injection, dan live pilot
+HTTP replay sudah lulus. Replay production-sized, 20-reviewer load, retry
+idempotency, concurrent confirm/revoke melalui API, durable full-regeneration
+worker, restart/recovery, dan production SLO tetap pending.
+
+## Checkpoint 11 - topology input-order determinism
+
+Status: `complete` - 4 Agustus 2026.
+
+- Property test: `backend/tests/topology-determinism.test.js`.
+- Test menjalankan 12 permutasi deterministik atas classified node, classified
+  path, geometry, dan explicit relation.
+- Setiap permutasi menghasilkan artifact topology yang sama dengan baseline,
+  dengan `generatedAt` dan input fixture yang sama.
+- Evidence: backend `136/136` test, lint `73` file, build `35` source file,
+  dan `git diff --check` lulus.
+
+Batas checkpoint: property ini belum menggantikan fuzz geometry, compatibility
+matrix test, atau load test production-sized.
+
+## Checkpoint 12 - live PostgreSQL HTTP review replay
+
+Status: `complete (pilot fixture)` - 4 Agustus 2026.
+
+- Runner: `backend/scripts/topology-http-review-replay.mjs` dan command
+  `npm run db:http-review-replay`.
+- Regression menemukan dan memperbaiki mismatch graph revision antara response
+  candidate/summary API dan mutation snapshot contract.
+- Dua confirm HTTP concurrent dengan snapshot yang sama menghasilkan tepat
+  satu `200` dan satu `409 stale_topology_review`.
+- PostgreSQL projection setelah winner: satu audit event, dua confirmed
+  relation, satu graph revision `validated`, dan nol graph revision `active`.
+- Dataset evidence `live-http-review-b49c5c026da142bfb5d646dbe1d51c02`
+  dipertahankan karena audit log append-only; dataset tetap unpublished dan
+  tidak menjadi graph aktif.
+- Evidence report:
+  `docs/migrations/LIVE-HTTP-REVIEW-REPLAY-2026-08-04.md`.
+- Verification: backend `137/137` test, lint `74` file, build `35` source file,
+  dan `git diff --check` lulus.
+
+Batas checkpoint: fixture ini kecil. Replay production-sized, 20 reviewer,
+retry idempotency, concurrent confirm/revoke, API/PostgreSQL restart-recovery,
+dan SLO tetap pending.
+
+## Checkpoint 13 - process-level worker restart recovery
+
+Status: `complete (durable JSON worker scope)` - 4 Agustus 2026.
+
+- Worker fixture: `backend/tests/fixtures/durable-job-process-worker.mjs`.
+- Test: `backend/tests/durable-job-process-recovery.test.js`.
+- Child process sengaja berhenti setelah job berhasil di-claim tanpa menulis
+  completion. Worker pengganti membuka root durable yang sama dan mengambil
+  lease setelah kedaluwarsa.
+- Job yang sama selesai pada attempt kedua; artifact ditulis tepat satu kali
+  dengan create-only write; enqueue ulang dengan input fingerprint dan
+  rule-set yang sama tetap mengembalikan job yang sama sebagai deduplicated.
+- Evidence: test terisolasi lulus 3/3 pengulangan; backend `138/138` test,
+  lint `76` file, build `35` source file, dan `git diff --check` lulus.
+
+Batas checkpoint: ini membuktikan restart worker pada durable JSON queue.
+Restart API saat upload, PostgreSQL live recovery/multi-instance, database
+disconnect, object storage failure, dan retry idempotency pada mutation HTTP
+belum selesai.
+
+## Checkpoint 14 - HTTP review retry idempotency
+
+Status: `complete (single-candidate JSON aggregate scope)` - 4 Agustus 2026.
+
+- Idempotency helper: `backend/src/topology/topology-idempotency.js`.
+- Service: single-candidate `confirm`, `reject`, dan `skip` menyimpan receipt
+  bersama aggregate, dengan fingerprint action/resource/actor/input.
+- API membaca header `Idempotency-Key`. Retry confirm dengan key dan payload
+  yang sama mengembalikan response commit pertama tanpa audit event atau
+  confirmed relation tambahan.
+- Reuse key untuk payload berbeda ditolak dengan `409 idempotency_key_reused`.
+- Evidence: `backend/tests/topology-review-hardening.test.js`; backend
+  `139/139` test, lint `77` file, build `36` source file, dan
+  `git diff --check` lulus.
+
+Batas checkpoint: bukti HTTP langsung mencakup confirm pada JSON aggregate.
+Bulk review, select-target, manual relation, revoke, concurrent same-key
+requests, PostgreSQL live replay, dan receipt retention policy production
+tetap pending.
 
 ## Status berikutnya
 
-Task berikutnya adalah live HTTP replay, restart/recovery, load/SLO, dan
-enterprise approval gates. Setiap
+Task berikutnya adalah API/PostgreSQL restart-recovery, mutation idempotency
+yang lebih luas, load/SLO, dan enterprise approval gates. Setiap
 checkpoint hanya boleh ditandai selesai setelah test, lint/build, dan regression
 evidence lulus; bukti live database harus dilaporkan terpisah dari test
 contract. Bukti lokal yang sudah lulus tidak mengubah status enterprise `NO-GO`
