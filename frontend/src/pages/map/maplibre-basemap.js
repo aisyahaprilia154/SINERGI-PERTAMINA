@@ -3,7 +3,12 @@
 export const BASEMAP_LOAD_TIMEOUT_MS = 25_000
 export const BASEMAP_RETRY_DELAYS_MS = Object.freeze([600, 1_800])
 
-export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
+export function createBaseStyle({
+  imageryTiles,
+  imageryMaxZoom = 18,
+  vectorTiles,
+  attribution,
+}) {
   const sources = {}
   const layers = [{
     id: 'safe-background',
@@ -15,6 +20,7 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
       type: 'raster',
       tiles: [imageryTiles],
       tileSize: 256,
+      maxzoom: imageryMaxZoom,
       ...(attribution ? { attribution } : {}),
     }
     layers.push({

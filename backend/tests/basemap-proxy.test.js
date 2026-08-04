@@ -125,3 +125,81 @@ test('OpenFreeMap proxy retries a transient upstream response', async (t) => {
   assert.equal(response.status, 200)
   assert.equal(attempts, 2)
 })
+
+test('imagery proxy serves raster tiles from the configured provider on the same origin', async (t) => {
+  const calls = []
+  const tileTemplate = 'https://imagery.example.test/world/tile/{z}/{y}/{x}'
+  const app = createApp({
+    config: { basemap: { imageryTileTemplate: tileTemplate } },
+    basemapFetch: async (url, options) => {
+      calls.push({ url, options })
+      return new Response(Uint8Array.from([255, 216, 255, 217]), {
+        headers: { 'content-type': 'image/jpeg; charset=binary' },
+      })
+    },
+    auditLog: { async record() {} },
+  })
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise((resolve) => app.close(resolve)))
+  const { port } = app.address()
+
+  const response = await fetch(
+    `http://127.0.0.1:${port}/api/basemap/imagery/tiles/14/13217/8511.jpg`,
+  )
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('content-type'), 'image/jpeg')
+  assert.equal(response.headers.get('cache-control'), 'public, max-age=86400')
+  assert.deepEqual([...new Uint8Array(await response.arrayBuffer())], [255, 216, 255, 217])
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].url, 'https://imagery.example.test/world/tile/14/8511/13217')
+  assert.match(calls[0].options.headers.accept, /image\/jpeg/)
+})
+
+test('imagery proxy rejects invalid tile coordinates without contacting upstream', async (t) => {
+  let fetchCount = 0
+  const app = createApp({
+    config: {
+      basemap: {
+        imageryTileTemplate: 'https://imagery.example.test/{z}/{y}/{x}',
+      },
+    },
+    basemapFetch: async () => {
+      fetchCount += 1
+      return new Response(null, { status: 500 })
+    },
+    auditLog: { async record() {} },
+  })
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise((resolve) => app.close(resolve)))
+  const { port } = app.address()
+
+  const response = await fetch(
+    `http://127.0.0.1:${port}/api/basemap/imagery/tiles/14/999999/0.jpg`,
+  )
+  assert.equal(response.status, 400)
+  assert.equal((await response.json()).error.code, 'invalid_imagery_tile')
+  assert.equal(fetchCount, 0)
+})
+
+test('imagery proxy rejects non-image provider responses', async (t) => {
+  const app = createApp({
+    config: {
+      basemap: {
+        imageryTileTemplate: 'https://imagery.example.test/{z}/{y}/{x}',
+      },
+    },
+    basemapFetch: async () => new Response('<html>error</html>', {
+      headers: { 'content-type': 'text/html' },
+    }),
+    auditLog: { async record() {} },
+  })
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise((resolve) => app.close(resolve)))
+  const { port } = app.address()
+
+  const response = await fetch(
+    `http://127.0.0.1:${port}/api/basemap/imagery/tiles/1/1/1.jpg`,
+  )
+  assert.equal(response.status, 502)
+  assert.equal((await response.json()).error.code, 'imagery_upstream_unavailable')
+})

@@ -1,6 +1,7 @@
 import http from 'node:http'
 import path from 'node:path'
 import { AppError, asAppError } from './errors.js'
+import { createImageryProxy } from './http/imagery-proxy.js'
 import { receiveImportUpload } from './http/multipart-upload.js'
 import { createOpenFreeMapProxy } from './http/openfreemap-proxy.js'
 import { createProcessingRecord } from './import/import-pipeline.js'
@@ -29,6 +30,10 @@ export function createApp({
   clock = () => new Date(),
 }) {
   const openFreeMapProxy = createOpenFreeMapProxy({ fetchImpl: basemapFetch })
+  const imageryProxy = createImageryProxy({
+    fetchImpl: basemapFetch,
+    tileTemplate: config?.basemap?.imageryTileTemplate,
+  })
   return http.createServer(async (request, response) => {
     setSecurityHeaders(response)
     const url = new URL(request.url, 'http://localhost')
@@ -40,6 +45,11 @@ export function createApp({
       if (request.method === 'GET'
         && url.pathname.startsWith('/api/basemap/openfreemap/')
         && await openFreeMapProxy.handle(url.pathname, response)) {
+        return
+      }
+      if (request.method === 'GET'
+        && url.pathname.startsWith('/api/basemap/imagery/')
+        && await imageryProxy.handle(url.pathname, response)) {
         return
       }
       if (request.method === 'GET' && url.pathname === '/api/admin/import-config') {

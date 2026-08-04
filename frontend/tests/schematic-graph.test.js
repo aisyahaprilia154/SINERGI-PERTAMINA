@@ -38,6 +38,7 @@ test('trace has priority and preserves its explicit connection order', () => {
       { networkId: 'cctv', relationType: 'explicit-network-edge' },
       { networkId: 'cctv', relationType: 'explicit-network-edge' },
     ],
+    scope: 'trace',
   })
 
   assert.equal(graph.mode, 'trace')
@@ -49,17 +50,16 @@ test('trace has priority and preserves its explicit connection order', () => {
   ])
 })
 
-test('focused asset graph contains only its direct explicit relations', () => {
+test('focused asset selects its complete connected component', () => {
   const graph = buildSchematicGraph({
     assets,
     networks,
     focusedAssetId: 'jb',
   })
 
-  assert.equal(graph.mode, 'focus')
-  assert.deepEqual(new Set(graph.nodes.map((node) => node.id)), new Set(['core', 'jb', 'cam']))
-  assert.equal(graph.edges.length, 2)
-  assert.equal(graph.nodes.some((node) => node.id === 'printer'), false)
+  assert.equal(graph.mode, 'network')
+  assert.deepEqual(new Set(graph.nodes.map((node) => node.id)), new Set(['core', 'jb', 'cam', 'printer']))
+  assert.equal(graph.edges.length, 3)
 })
 
 test('selected network graph excludes assets from unselected networks', () => {
@@ -75,7 +75,7 @@ test('selected network graph excludes assets from unselected networks', () => {
   assert.equal(graph.nodes.find((node) => node.id === 'core').ip, '10.42.0.1')
 })
 
-test('diagram uses the same confirmed topology edges as tracing and map', () => {
+test('diagram excludes inferred topology edges that are not confirmed', () => {
   const graph = buildSchematicGraph({
     assets,
     networks,
@@ -93,13 +93,11 @@ test('diagram uses the same confirmed topology edges as tracing and map', () => 
     focusedAssetId: 'core',
   })
 
-  assert.deepEqual(graph.edges.map(({ sourceId, targetId }) => [sourceId, targetId]), [
-    ['core', 'cam'],
-  ])
-  assert.equal(graph.edges[0].relationSource, 'inferred_endpoint')
+  assert.equal(graph.status, 'empty')
+  assert.deepEqual(graph.edges, [])
 })
 
-test('builder keeps the complete branch scope without an arbitrary asset limit', () => {
+test('builder returns the required empty state when a scope has no confirmed edge', () => {
   const manyAssets = Array.from({ length: 31 }, (_, index) => ({
     id: `asset-${index}`,
     name: `Asset ${index}`,
@@ -116,8 +114,9 @@ test('builder keeps the complete branch scope without an arbitrary asset limit',
     selectedNetworkIds: ['large'],
   })
 
-  assert.equal(graph.status, 'ready')
-  assert.equal(graph.nodes.length, 31)
+  assert.equal(graph.status, 'empty')
+  assert.equal(graph.nodeCount, 31)
+  assert.match(graph.message, /belum ada relasi yang telah dikonfirmasi/)
 })
 
 test('builder never writes diagram coordinates into source assets', () => {
@@ -130,7 +129,7 @@ test('builder never writes diagram coordinates into source assets', () => {
   assert.equal('diagram' in assets[0], false)
 })
 
-test('full-map scope includes every active network and preserves map display positions separately', () => {
+test('legacy full-map request resolves to one connected network component', () => {
   const positionedAssets = assets.map((asset, index) => ({
     ...asset,
     x: index / assets.length,
@@ -143,15 +142,12 @@ test('full-map scope includes every active network and preserves map display pos
     tracePath: ['cam', 'jb'],
   })
 
-  assert.equal(graph.mode, 'full-map')
+  assert.equal(graph.mode, 'network')
   assert.deepEqual(
     new Set(graph.nodes.map((node) => node.id)),
     new Set(['core', 'jb', 'cam', 'printer']),
   )
-  assert.deepEqual(graph.nodes[0].sourcePosition, {
-    x: positionedAssets[0].x,
-    y: positionedAssets[0].y,
-  })
+  assert.equal(graph.nodes[0].sourcePosition, undefined)
   assert.equal('diagram' in positionedAssets[0], false)
 })
 

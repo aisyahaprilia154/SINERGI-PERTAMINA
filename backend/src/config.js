@@ -153,6 +153,10 @@ export function createConfig(env = process.env, overrides = {}) {
     allowedBranchIds,
     datasetIdsByBranch,
     authTokens,
+    basemap: {
+      imageryTileTemplate: overrides.basemap?.imageryTileTemplate
+        ?? optionalText(env.SINERGI_IMAGERY_TILE_TEMPLATE),
+    },
     upload: {
       maxFileSize: overrides.upload?.maxFileSize
         ?? numberFrom(env.SINERGI_MAX_UPLOAD_BYTES, 50 * MEBIBYTE),
@@ -258,6 +262,11 @@ function optionalUnitNumberFrom(value) {
   if (value === undefined || value === null || value === '') return null
   const parsed = Number(value)
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : null
+}
+
+function optionalText(value) {
+  const normalized = String(value ?? '').trim()
+  return normalized || null
 }
 
 function parseJsonObject(value, fallback) {

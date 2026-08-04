@@ -38,6 +38,16 @@ test('Vite leaves MapLibre out of dependency optimization so its worker URL stay
   assert.equal(config.server?.strictPort, true)
 })
 
+test('local runner enables satellite imagery through the same-origin backend proxy', async () => {
+  const source = await readFile(new URL('../../scripts/dev.mjs', import.meta.url), 'utf8')
+
+  assert.match(source, /SINERGI_IMAGERY_TILE_TEMPLATE/)
+  assert.match(source, /\/api\/basemap\/imagery\/tiles\/\{z\}\/\{x\}\/\{y\}\.jpg/)
+  assert.match(source, /VITE_SINERGI_BASEMAP_TILES: localImageryTiles/)
+  assert.match(source, /VITE_SINERGI_BASEMAP_MAX_ZOOM: imageryMaxZoom/)
+  assert.match(source, /VITE_SINERGI_BASEMAP_ATTRIBUTION: imageryAttribution/)
+})
+
 test('user map mounts MapLibre with area scope and never loads review candidates', async () => {
   const source = await readFile(
     new URL('../src/pages/map/map-page.js', import.meta.url),
@@ -96,6 +106,7 @@ test('MapLibre basemap is environment-configured and operational data is fail-sa
   )
 
   assert.match(source, /VITE_SINERGI_BASEMAP_TILES/)
+  assert.match(source, /VITE_SINERGI_BASEMAP_MAX_ZOOM/)
   assert.match(source, /VITE_SINERGI_VECTOR_TILES_URL/)
   assert.match(source, /\/api\/basemap\/openfreemap\/planet/)
   assert.doesNotMatch(source, /services\.arcgisonline\.com/)
@@ -133,6 +144,7 @@ test('fallback and vector basemap styles are valid and use a visible neutral can
   })
   const fieldStyle = createBaseStyle({
     imageryTiles: 'https://imagery.example.test/{z}/{x}/{y}.jpg',
+    imageryMaxZoom: 18,
     vectorTiles: 'https://tiles.openfreemap.org/planet',
     attribution: 'Imagery test',
   })
@@ -145,6 +157,7 @@ test('fallback and vector basemap styles are valid and use a visible neutral can
       ?.layout?.visibility,
     'none',
   )
+  assert.equal(fieldStyle.sources['satellite-imagery']?.maxzoom, 18)
   assert.ok(fieldStyle.layers.some(({ id }) => id === 'basemap-poi-labels'))
   assert.ok(fieldStyle.layers.some(({ id }) => id === 'basemap-house-numbers'))
   assert.equal(

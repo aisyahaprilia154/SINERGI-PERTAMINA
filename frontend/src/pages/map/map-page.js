@@ -30,6 +30,7 @@ import {
   emptyOperationalTopologyGraph,
   TOPOLOGY_NOT_READY_MESSAGE,
 } from '../../domain/topology-readiness.js'
+import { evaluateRelationReadiness } from '../../domain/relation-readiness.js'
 
 export async function renderMapPage(container) {
   document.title = 'Peta Jaringan — SINERGI'
@@ -127,8 +128,9 @@ export async function renderMapPage(container) {
     networks: allNetworks,
     topologyGraph: operationalTopologyGraph,
   })
-  const traceAvailable = globalTraceAvailable && topologyGraph.edges.length > 0
-  const diagramAvailable = globalDiagramAvailable && topologyGraph.edges.length > 0
+  const scopeRelationReadiness = evaluateRelationReadiness({ assets, topologyGraph })
+  const traceAvailable = globalTraceAvailable && scopeRelationReadiness.canTrace
+  const diagramAvailable = globalDiagramAvailable && scopeRelationReadiness.canCreateDiagram
   const hasRenderableData = geometries.length > 0
   const resolvedOverlays = (overlayResult[0].status === 'fulfilled'
     ? overlayResult[0].value.items ?? []
@@ -419,6 +421,11 @@ export async function renderMapPage(container) {
         network: networks.find((network) => network.id === relation.networkId),
       }))
       .filter((item) => item.asset)
+    const selectedRelationReadiness = evaluateRelationReadiness({
+      assets,
+      topologyGraph,
+      selectedAssetId: asset.id,
+    })
     drawer.innerHTML = renderAssetDetailDrawer({
       status: state.assetDetailStatus,
       errorMessage: state.assetDetailError,
@@ -429,9 +436,10 @@ export async function renderMapPage(container) {
       showAdditionalMetadata: state.showAdditionalMetadata,
       trace: getDrawerTraceState(),
       topologyReady: topologyReadiness.ready,
-      traceAvailable,
-      diagramAvailable,
-      topologyMessage: topologyReadiness.traceMessage
+      traceAvailable: globalTraceAvailable && selectedRelationReadiness.canTrace,
+      diagramAvailable: globalDiagramAvailable && selectedRelationReadiness.canCreateDiagram,
+      topologyMessage: selectedRelationReadiness.unavailableReason
+        || topologyReadiness.traceMessage
         || topologyReadiness.message
         || TOPOLOGY_NOT_READY_MESSAGE,
     })
@@ -709,7 +717,9 @@ export async function renderMapPage(container) {
         state.tracePath = state.traceFromId ? [state.traceFromId] : []
         state.traceRelations = []
         state.traceExplanation = null
-        state.traceError = result.message || 'Tujuan tracing tidak dapat digunakan.'
+        const sourceName = assetById[state.traceFromId]?.name || 'aset awal'
+        const targetName = assetById[targetId]?.name || 'aset tujuan'
+        state.traceError = `Jalur tidak ditemukan antara ${sourceName} dan ${targetName} pada koneksi terkonfirmasi.`
         updateUrl(historyMode)
       }
     } catch (error) {
@@ -746,15 +756,16 @@ export async function renderMapPage(container) {
       renderDrawer()
       return
     }
-    const fullMapGraph = buildSchematicGraph({
-      assets: diagramAssets,
+    const networkGraph = buildSchematicGraph({
+      assets,
       networks,
       topologyGraph,
-      scope: 'full-map',
-      topologyReady: topologyReadiness.ready,
+      selectedNetworkIds: [...selection.selectedNetworkIds],
+      focusedAssetId: selection.selectedAssetId,
+      scope: 'network',
     })
     const traceGraph = buildSchematicGraph({
-      assets: diagramAssets,
+      assets,
       networks,
       topologyGraph,
       scope: 'trace',
@@ -764,17 +775,18 @@ export async function renderMapPage(container) {
     })
     openSchematicDialog({
       diagrams: {
-        'full-map': {
-          graph: fullMapGraph,
-          layout: calculateSchematicLayout(fullMapGraph, { preserveMapOrientation: true }),
+        network: {
+          graph: networkGraph,
+          layout: calculateSchematicLayout(networkGraph),
         },
         trace: {
           graph: traceGraph,
-          layout: calculateSchematicLayout(traceGraph, { preserveMapOrientation: true }),
+          layout: calculateSchematicLayout(traceGraph),
         },
       },
       activeContext,
       selectedAssetId: selection.selectedAssetId,
+      initialMode: state.traceStatus === 'active' ? 'trace' : 'network',
       onSelectAsset: selectAssetFromDiagram,
     })
   }

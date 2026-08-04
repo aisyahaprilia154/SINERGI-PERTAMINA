@@ -6,6 +6,17 @@ const projectRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const localAdminToken = process.env.SINERGI_LOCAL_ADMIN_TOKEN ?? 'local-admin'
 const backendPort = process.env.SINERGI_PORT ?? '5000'
 const frontendPort = process.env.SINERGI_DEV_FRONTEND_PORT
+const branchIds = process.env.SINERGI_BRANCH_IDS ?? 'semarang'
+const branchDatasets = process.env.SINERGI_BRANCH_DATASETS
+  ?? JSON.stringify({ semarang: 'dataset-semarang' })
+const imageryTileTemplate = process.env.SINERGI_IMAGERY_TILE_TEMPLATE
+  ?? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/'
+    + 'tile/{z}/{y}/{x}'
+const localImageryTiles = process.env.VITE_SINERGI_BASEMAP_TILES
+  ?? '/api/basemap/imagery/tiles/{z}/{x}/{y}.jpg'
+const imageryMaxZoom = process.env.VITE_SINERGI_BASEMAP_MAX_ZOOM ?? '18'
+const imageryAttribution = process.env.VITE_SINERGI_BASEMAP_ATTRIBUTION
+  ?? 'Sources: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
 const authTokens = process.env.SINERGI_AUTH_TOKENS ?? JSON.stringify({
   [localAdminToken]: {
     id: 'local-admin',
@@ -21,6 +32,9 @@ const services = [
     env: {
       ...process.env,
       SINERGI_AUTH_TOKENS: authTokens,
+      SINERGI_BRANCH_IDS: branchIds,
+      SINERGI_BRANCH_DATASETS: branchDatasets,
+      SINERGI_IMAGERY_TILE_TEMPLATE: imageryTileTemplate,
     },
   },
   {
@@ -35,6 +49,9 @@ const services = [
       SINERGI_API_TARGET: process.env.SINERGI_API_TARGET
         ?? `http://127.0.0.1:${backendPort}`,
       VITE_SINERGI_ADMIN_TOKEN: localAdminToken,
+      VITE_SINERGI_BASEMAP_TILES: localImageryTiles,
+      VITE_SINERGI_BASEMAP_MAX_ZOOM: imageryMaxZoom,
+      VITE_SINERGI_BASEMAP_ATTRIBUTION: imageryAttribution,
     },
   },
 ]

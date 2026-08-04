@@ -3421,8 +3421,8 @@
 
 /* Read-only SVG schematic preview */
 .schematic-dialog {
-  --schematic-canvas: var(--color-surface-subtle);
-  width: min(1120px, calc(100vw - var(--space-8)));
+  --schematic-canvas: #f8fafc;
+  width: min(1240px, calc(100vw - var(--space-8)));
   height: min(820px, calc(100dvh - var(--space-8)));
   max-height: none;
   overflow: hidden;
@@ -3432,6 +3432,14 @@
   height: 100%;
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+}
+
+.schematic-content {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  overflow: hidden;
+  background: var(--schematic-canvas);
 }
 
 .schematic-header {
@@ -3575,6 +3583,55 @@
   background: var(--schematic-canvas);
   scrollbar-color: var(--color-border-strong) transparent;
   scrollbar-width: thin;
+  cursor: grab;
+}
+
+.schematic-board.panning {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.schematic-summary {
+  min-width: 0;
+  padding: var(--space-4);
+  overflow: auto;
+  border-left: 1px solid var(--color-divider);
+  background: #fff;
+}
+
+.schematic-summary section {
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.schematic-summary h3 {
+  margin: 0 0 var(--space-2);
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--font-size-caption);
+}
+
+.schematic-summary dl,
+.schematic-summary p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-micro);
+  line-height: 1.45;
+}
+
+.schematic-summary dl > div {
+  padding: 5px 0;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.schematic-summary dd {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-weight: 700;
 }
 
 .schematic-viewport {
@@ -3589,10 +3646,29 @@
 .schematic-svg {
   max-width: none;
   display: block;
-  background: var(--schematic-canvas);
+  background: #fff;
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-sm);
   transform-origin: top left;
+}
+
+.png-scale {
+  height: 38px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-micro);
+}
+
+.png-scale select {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-weight: 700;
 }
 
 .schematic-svg .diagram-node:hover .node-ring {
@@ -3695,6 +3771,14 @@
 
   .schematic-board {
     padding: var(--space-2);
+  }
+
+  .schematic-content {
+    grid-template-columns: 1fr;
+  }
+
+  .schematic-summary {
+    display: none;
   }
 
   .schematic-footer {
