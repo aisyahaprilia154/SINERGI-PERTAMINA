@@ -656,7 +656,7 @@ Checklist:
 
 - [x] Benchmark sintetis awal 1.000, 2.000, dan 4.000 path dicatat pada audit
   3 Agustus 2026.
-- [ ] Benchmark mempunyai fixture dan command yang tersimpan di repository.
+- [x] Benchmark mempunyai fixture dan command yang tersimpan di repository.
 - [ ] 10.000 objek sparse memenuhi SLO.
 - [ ] 10.000 objek dense memenuhi SLO atau mempunyai guardrail resmi.
 - [ ] 50.000 objek stress test tidak menyebabkan out-of-memory.

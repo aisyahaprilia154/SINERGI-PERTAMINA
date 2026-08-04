@@ -1,6 +1,7 @@
 # Baseline topology benchmark — 4 Agustus 2026
 
-Status: baseline reproducible, bukan bukti kapasitas enterprise.
+Status: baseline reproducible dan fixture/command repository tervalidasi ulang,
+bukan bukti kapasitas enterprise.
 
 Command:
 
@@ -34,6 +35,20 @@ Interpretasi checkpoint:
 - Runtime masih baseline engine lama; task spatial prefilter berikutnya harus
   mempertahankan snapshot dan menurunkan pertumbuhan runtime pada fixture
   tersebar.
+
+Re-run fixture/command pada 4 Agustus 2026 (`npm run benchmark:topology --
+--sizes=1000,2000,4000`) menghasilkan JSON valid dengan `validationErrors: 0`
+untuk seluruh ukuran:
+
+| Path | Runtime | RSS | Candidate | Unresolved |
+|---:|---:|---:|---:|---:|
+| 1.000 | 139,718 ms | 71,19 MiB | 0 | 2.000 |
+| 2.000 | 175,117 ms | 95,30 MiB | 0 | 4.000 |
+| 4.000 | 246,174 ms | 148,80 MiB | 0 | 8.000 |
+
+Re-run ini membuktikan command dan fixture dapat dijalankan dari repository;
+angka tersebut tidak mengubah batas evidence terhadap workload dense,
+production-sized, atau target SLO.
 
 Target awal yang menunggu persetujuan Product/Infrastructure:
 
