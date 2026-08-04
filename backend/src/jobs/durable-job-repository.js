@@ -634,10 +634,7 @@ function assertSafeJobId(jobId) {
 }
 
 function delay(milliseconds) {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, milliseconds)
-    timer.unref?.()
-  })
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
 function isRetryableLockError(error) {
