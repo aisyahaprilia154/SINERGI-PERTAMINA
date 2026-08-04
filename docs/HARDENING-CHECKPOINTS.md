@@ -708,11 +708,32 @@ Status: `complete (JSON state-machine contract; HTTP/PostgreSQL load pending)`
 Batas checkpoint: HTTP load, PostgreSQL multi-instance, dan regeneration/review
 race masih pending; automatic client retry policy juga belum ditetapkan.
 
+## Checkpoint 35 - Full regeneration/review race
+
+Status: `complete (JSON repository race contract; PostgreSQL/live load pending)`
+- 4 Agustus 2026.
+
+- Regression menjalankan full topology regeneration dan confirm candidate
+  secara bersamaan pada dataset version yang sama.
+- Optimistic revision conflict dipulihkan dengan retry eksplisit memakai
+  snapshot terbaru; kedua urutan serialisasi yang sah diuji.
+- Hasil akhir tetap memiliki candidate `confirmed`, relation termaterialisasi,
+  dan satu topology run; keputusan review tidak hilang.
+- Suite topology-review-hardening lulus lima kali berturut-turut.
+- Full backend verification: `167/167` test, lint `89` file, build `37` source
+  file, dan `git diff --check` lulus.
+- Evidence detail:
+  `docs/migrations/REGENERATION-REVIEW-RACE-2026-08-04.md`.
+
+Batas checkpoint: HTTP race, PostgreSQL multi-instance, durable worker race,
+dan automatic client retry policy masih pending.
+
 ## Status berikutnya
 
-Task berikutnya adalah menutup regeneration/review race secara lokal sebelum
-live PostgreSQL restart/failover dengan kredensial operator; concurrency/load/
-SLO dan enterprise approval gates tetap terpisah.
+Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
+regeneration/review. Berikutnya adalah live PostgreSQL restart/failover dengan
+kredensial operator; concurrency/load/SLO dan enterprise approval gates tetap
+terpisah.
 Setiap checkpoint hanya boleh ditandai selesai
 setelah test, lint/build, dan regression evidence lulus; bukti live database
 harus dilaporkan terpisah dari test contract. Bukti lokal yang sudah lulus tidak
