@@ -10,6 +10,7 @@
     "test": "node --test",
     "build": "node scripts/build.mjs",
     "benchmark:topology": "node benchmarks/topology-baseline.mjs",
+    "benchmark:topology:guarded": "node benchmarks/topology-baseline.mjs --sizes=10000 --max-duration-ms=60000 --max-rss-mib=512",
     "db:migrate": "node scripts/database-migrate.mjs",
     "db:pilot": "node scripts/database-pilot.mjs",
     "db:shadow-pilot": "node scripts/database-shadow-pilot.mjs",

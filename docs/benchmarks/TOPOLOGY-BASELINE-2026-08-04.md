@@ -8,7 +8,12 @@ Command:
 ```text
 cd backend
 npm run benchmark:topology
+npm run benchmark:topology:guarded
 ```
+
+`benchmark:topology:guarded` menjalankan sparse 10.000 path dengan budget
+runtime 60 detik dan peak RSS 512 MiB. Budget yang terlampaui membuat command
+exit non-zero dan report menyertakan metric serta limit yang dilanggar.
 
 Fixture dan command tersimpan di repository:
 
@@ -16,6 +21,7 @@ Fixture dan command tersimpan di repository:
 - `backend/tests/fixtures/topology-baseline.snapshot.json`
 - `backend/tests/topology-baseline-snapshot.test.js`
 - `backend/benchmarks/topology-baseline.mjs`
+- `backend/tests/topology-benchmark.test.js`
 
 Rule set: `semantic-relation-engine/1.0.0`.
 
@@ -49,6 +55,15 @@ untuk seluruh ukuran:
 Re-run ini membuktikan command dan fixture dapat dijalankan dari repository;
 angka tersebut tidak mengubah batas evidence terhadap workload dense,
 production-sized, atau target SLO.
+
+Runner sekarang juga melaporkan fixture-build time, wall-clock runtime, CPU
+user/system time, current RSS, peak RSS, Node/platform, dan budget violations.
+I/O database serta queue depth tidak dilaporkan karena benchmark ini sengaja
+in-process dan tidak memakai PostgreSQL/worker.
+
+Guarded 10.000 sparse re-run pada environment ini menghasilkan fixture-build
+`19,636 ms`, runtime `704,096 ms`, peak RSS `250,45 MiB`, CPU user/system
+`766/203 ms`, dan `budgetViolations: []` pada budget `60.000 ms / 512 MiB`.
 
 Target awal yang menunggu persetujuan Product/Infrastructure:
 

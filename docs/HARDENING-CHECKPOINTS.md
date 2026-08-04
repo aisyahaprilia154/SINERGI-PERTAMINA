@@ -473,9 +473,35 @@ Status: `complete (fixture/command scope)` - 4 Agustus 2026.
 - Re-run `npm run benchmark:topology -- --sizes=1000,2000,4000` lulus dengan
   `validationErrors: 0`, candidate `0`, dan output JSON untuk seluruh ukuran;
   detail dicatat di `docs/benchmarks/TOPOLOGY-BASELINE-2026-08-04.md`.
+- Command guarded `npm run benchmark:topology:guarded` tersedia untuk sparse
+  10.000 path dengan budget runtime `60.000 ms` dan peak RSS `512 MiB`; budget
+  violation menghasilkan exit non-zero dan diagnostic terstruktur.
 - Batas evidence: fixture ini sparse dan belum membuktikan dense,
   intersection-heavy, long-line, ambiguous-heavy, 10.000/50.000 object,
   concurrent API p95, atau enterprise SLO.
+
+## Checkpoint 23 - Guarded sparse benchmark dan resource report
+
+Status: `complete (local guarded benchmark scope; enterprise SLO pending)` -
+4 Agustus 2026.
+
+- Runner benchmark kini melaporkan fixture-build time, wall-clock runtime, CPU
+  user/system, current/peak RSS, runtime platform, dan budget violations.
+- Command `npm run benchmark:topology:guarded` menjalankan 10.000 sparse path
+  dengan budget runtime `60.000 ms` dan peak RSS `512 MiB`.
+- Evidence lokal: runtime `704,096 ms`, peak RSS `250,45 MiB`, CPU
+  `766/203 ms`, candidate `0`, validation error `0`, dan budget violations
+  kosong.
+- Contract test `backend/tests/topology-benchmark.test.js`: `3/3` lulus;
+  full backend verification sesudah perubahan: `155/155` test, lint `85` file,
+  build `37` source file.
+- Budget failure menghasilkan exit non-zero dan diagnostic terstruktur; ini
+  diuji terpisah dengan budget runtime yang sengaja terlalu kecil.
+
+Batas checkpoint: ini hanya in-process JavaScript sparse fixture. Belum ada
+bukti dense/intersection-heavy/long-line/ambiguous-heavy, 50.000 stress yang
+aman pada worker target, database I/O, queue depth, concurrent API p95, atau
+enterprise SLO/sign-off.
 
 ## Status berikutnya
 
