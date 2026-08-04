@@ -503,6 +503,28 @@ bukti dense/intersection-heavy/long-line/ambiguous-heavy, 50.000 stress yang
 aman pada worker target, database I/O, queue depth, concurrent API p95, atau
 enterprise SLO/sign-off.
 
+## Checkpoint 24 - Candidate explosion hard limit
+
+Status: `complete (guardrail and regression scope; capacity SLO pending)` -
+4 Agustus 2026.
+
+- Engine memakai hard limit default `50.000` raw candidates per topology
+  bundle, dengan override eksplisit `config.topology.maxCandidateCount` atau
+  `SINERGI_TOPOLOGY_MAX_CANDIDATES`.
+- Semua discovery stage memakai budget yang sama. Saat limit terlampaui,
+  engine berhenti dengan `topology_candidate_limit_exceeded` (`422`) sebelum
+  artifact parsial dikembalikan.
+- Diagnostic mencantumkan attempted/max count, stage, dataset version, dan
+  site; input geometry tetap tidak berubah.
+- Regression test limit `1` terhadap dua endpoint candidate lulus dan
+  membuktikan stage `endpoint_device` serta diagnostic lengkap.
+- Full backend verification: `156/156` test, lint `85` file, build `37` source
+  file, dan `git diff --check` lulus.
+- Evidence detail: `docs/migrations/TOPOLOGY-CANDIDATE-LIMIT-2026-08-04.md`.
+
+Batas checkpoint: hard limit ini bukan bukti dense workload, 50.000-object
+stress, worker capacity, API p95, atau enterprise SLO.
+
 ## Status berikutnya
 
 Task berikutnya adalah menjalankan live PostgreSQL restart/failover dengan

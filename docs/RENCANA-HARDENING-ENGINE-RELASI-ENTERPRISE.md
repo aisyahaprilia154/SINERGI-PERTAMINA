@@ -663,7 +663,7 @@ Checklist:
 - [ ] Candidate API p95 memenuhi target pada concurrent traffic.
 - [ ] Review API p95 memenuhi target saat worker sedang sibuk.
 - [ ] Query plan membuktikan spatial/BTREE index digunakan.
-- [ ] Candidate explosion mempunyai hard limit dan diagnostic yang jelas.
+- [x] Candidate explosion mempunyai hard limit dan diagnostic yang jelas.
 - [ ] Timeout tidak meninggalkan partial artifact.
 - [ ] Memory, CPU, database I/O, dan queue depth dilaporkan.
 
@@ -738,7 +738,7 @@ Exit criterion:
 - [ ] Ganti path-pair scan dengan spatial prefilter.
 - [ ] Ganti global junction scan dengan indexed radius query.
 - [ ] Optimalkan degree, validation, dan component calculation.
-- [ ] Tambahkan guardrail candidate explosion.
+- [x] Tambahkan guardrail candidate explosion.
 - [ ] Jalankan load test 10.000 objek.
 
 Exit criterion:
