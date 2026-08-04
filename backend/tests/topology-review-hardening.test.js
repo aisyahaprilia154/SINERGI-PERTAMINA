@@ -96,6 +96,43 @@ test('JSON review updates serialize different candidates without lost updates', 
   }
 })
 
+test('JSON repository preserves 20 concurrent reviewers on different candidates', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-review-twenty-'))
+  try {
+    const bundle = twentyReviewerBundle()
+    const initial = generateRelationArtifacts(bundle)
+    const repository = new JsonDatasetVersionRepository(path.join(root, 'dataset-versions'))
+    await repository.create(applyArtifacts(baseRecord(bundle), initial))
+    const auditLog = new MemoryAuditLog()
+    const services = Array.from({ length: 20 }, () => new TopologyService({
+      repository,
+      auditLog,
+    }))
+    const candidates = initial.candidates.filter(({ candidateStatus }) => (
+      ['candidate', 'ambiguous'].includes(candidateStatus)
+    ))
+    assert.equal(candidates.length, 20)
+
+    const results = await Promise.all(candidates.map((candidate, index) => (
+      services[index].confirmCandidate(candidate.candidateId, `reviewer-${index + 1}`, {
+        reason: `Concurrent reviewer ${index + 1}.`,
+      })
+    )))
+
+    assert.equal(results.length, 20)
+    const persisted = await repository.get(bundle.datasetVersion.id)
+    assert.equal(persisted.recordRevision, 20)
+    assert.equal(
+      persisted.topologyCandidates.filter(({ candidateStatus }) => candidateStatus === 'confirmed')
+        .length,
+      20,
+    )
+    assert.equal(auditLog.index, 20)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('two reviewers on the same candidate produce one winner and a 409 conflict', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-review-conflict-'))
   try {
@@ -515,6 +552,38 @@ function reviewBundle({ includeIsolatedNode = false } = {}) {
     classifiedNodes: nodes.map(({ object }) => object),
     classifiedPaths: [pathRecordValue.object],
     geometries: [...nodes.map(({ geometry }) => geometry), pathRecordValue.geometry],
+    explicitRelations: [],
+    semanticRuleSetVersion: 'semantic-classifier/1.0.0',
+  }
+}
+
+function twentyReviewerBundle() {
+  const nodes = []
+  const paths = []
+  const geometries = []
+  for (let index = 0; index < 20; index += 1) {
+    const offset = index * 0.01
+    const node = nodeRecord(`CAM-BATCH-${String(index + 1).padStart(2, '0')}`, [
+      110.00001 + offset,
+      -7,
+    ])
+    const cable = pathRecord(`CBL-BATCH-${String(index + 1).padStart(2, '0')}`, [
+      [110 + offset, -7],
+      [110.001 + offset, -7],
+    ])
+    nodes.push(node.object)
+    paths.push(cable.object)
+    geometries.push(node.geometry, cable.geometry)
+  }
+  return {
+    datasetVersion: {
+      id: 'dv-review-hardening',
+      sourceChecksum: `sha256:${'c'.repeat(64)}`,
+    },
+    site: 'site-1',
+    classifiedNodes: nodes,
+    classifiedPaths: paths,
+    geometries,
     explicitRelations: [],
     semanticRuleSetVersion: 'semantic-classifier/1.0.0',
   }

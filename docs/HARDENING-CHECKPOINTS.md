@@ -669,10 +669,29 @@ Batas checkpoint: dashboard, metrics/alert fault injection, dan correlation
 context end-to-end untuk worker/service event serta dataset version/job ID/
 graph revision masih pending.
 
+## Checkpoint 33 - Twenty reviewer concurrency
+
+Status: `complete (JSON repository concurrency contract; PostgreSQL/live load pending)`
+- 4 Agustus 2026.
+
+- Regression membuat 20 candidate berbeda dan menjalankan 20
+  `TopologyService.confirmCandidate` secara bersamaan dengan actor berbeda.
+- Semua mutation berhasil; `recordRevision=20`, tepat 20 candidate menjadi
+  `confirmed`, dan 20 audit event tercatat.
+- Full backend verification: `165/165` test, lint `89` file, build `37` source
+  file, dan `git diff --check` lulus.
+- Evidence detail: `docs/migrations/TWENTY-REVIEWER-CONCURRENCY-2026-08-04.md`;
+  test utama `backend/tests/topology-review-hardening.test.js`.
+
+Batas checkpoint: bukti ini hanya mencakup JSON repository pada satu host.
+HTTP load 20 reviewer, PostgreSQL multi-instance, confirm/revoke bersamaan,
+dan regeneration/review race masih pending.
+
 ## Status berikutnya
 
-Task berikutnya adalah menjalankan live PostgreSQL restart/failover dengan
-kredensial operator, lalu concurrency/load/SLO dan enterprise approval gates.
+Task berikutnya adalah menutup state-machine concurrency dan regeneration/review
+race secara lokal sebelum live PostgreSQL restart/failover dengan kredensial
+operator; concurrency/load/SLO dan enterprise approval gates tetap terpisah.
 Setiap checkpoint hanya boleh ditandai selesai
 setelah test, lint/build, dan regression evidence lulus; bukti live database
 harus dilaporkan terpisah dari test contract. Bukti lokal yang sudah lulus tidak
