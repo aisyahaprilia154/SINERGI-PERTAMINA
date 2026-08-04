@@ -274,6 +274,104 @@ test('HTTP review retry with the same idempotency key replays one committed resu
   }
 })
 
+test('concurrent HTTP review retry with the same idempotency key commits once', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-review-concurrent-idempotency-'))
+  try {
+    const bundle = reviewBundle()
+    const initial = generateRelationArtifacts(bundle)
+    const repository = new JsonDatasetVersionRepository(path.join(root, 'dataset-versions'))
+    await repository.create(applyArtifacts(baseRecord(bundle), initial))
+    let releaseFirstAudit
+    let firstAuditStartedResolve
+    const firstAuditStarted = new Promise((resolve) => {
+      firstAuditStartedResolve = resolve
+    })
+    const auditLog = new MemoryAuditLog({
+      beforeRecord: async ({ index }) => {
+        if (index !== 1) return
+        releaseFirstAudit = () => {}
+        await new Promise((resolve) => {
+          releaseFirstAudit = resolve
+          firstAuditStartedResolve()
+        })
+      },
+    })
+    const originalUpdate = repository.update.bind(repository)
+    let updateCalls = 0
+    let secondUpdateStartedResolve
+    const secondUpdateStarted = new Promise((resolve) => {
+      secondUpdateStartedResolve = resolve
+    })
+    repository.update = async (...args) => {
+      updateCalls += 1
+      if (updateCalls === 2) secondUpdateStartedResolve()
+      return originalUpdate(...args)
+    }
+    const topologyService = new TopologyService({ repository, auditLog })
+    const app = createApp({
+      config: {},
+      authenticator: new TokenAuthenticator({
+        'admin-token': { id: 'admin-1', role: 'Administrator' },
+      }),
+      repository,
+      fileStore: {},
+      auditLog,
+      jobQueue: {},
+      importPipeline: {},
+      lifecycleService: {},
+      topologyService,
+    })
+    await listen(app)
+    const origin = `http://127.0.0.1:${app.address().port}`
+    const idempotencyKey = 'review-concurrent-retry-2026-08-04-001'
+    const candidate = initial.candidates.find(({ sourceEndpointId }) => (
+      sourceEndpointId === 'endpoint:geometry:CBL-01:start'
+    ))
+    const endpoint = `${origin}/api/topology/candidates/${encodeURIComponent(candidate.candidateId)}/confirm`
+    const makeRequest = () => ({
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer admin-token',
+        'content-type': 'application/json',
+        'idempotency-key': idempotencyKey,
+      },
+      body: JSON.stringify({ reason: 'Concurrent retry idempotency contract test.' }),
+    })
+
+    try {
+      const responsesPromise = Promise.all([
+        fetch(endpoint, makeRequest()),
+        fetch(endpoint, makeRequest()),
+      ])
+      await firstAuditStarted
+      await secondUpdateStarted
+      releaseFirstAudit()
+      const [firstResponse, secondResponse] = await responsesPromise
+      const firstBody = await firstResponse.json()
+      const secondBody = await secondResponse.json()
+      assert.equal(firstResponse.status, 200)
+      assert.equal(secondResponse.status, 200)
+      assert.deepEqual(secondBody, firstBody)
+      assert.equal(updateCalls, 2)
+
+      const persisted = await repository.get(bundle.datasetVersion.id)
+      assert.equal(auditLog.index, 1)
+      assert.equal(persisted.recordRevision, 1)
+      assert.equal(
+        persisted.confirmedRelations.filter(({ verificationStatus }) => (
+          verificationStatus === 'confirmed'
+        )).length,
+        1,
+      )
+      assert.equal(persisted.topologyMutationReceipts.length, 1)
+    } finally {
+      await close(app)
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('HTTP review rolls back state and audit when the transactional write fails', async () => {
   const bundle = reviewBundle()
   const initial = generateRelationArtifacts(bundle)
@@ -461,12 +559,14 @@ function candidateAssetReferences(candidate) {
 }
 
 class MemoryAuditLog {
-  constructor() {
+  constructor({ beforeRecord = null } = {}) {
     this.index = 0
+    this.beforeRecord = beforeRecord
   }
 
   async record(event, input) {
     this.index += 1
+    await this.beforeRecord?.({ index: this.index, event })
     return { id: `audit-${this.index}`, event, ...structuredClone(input) }
   }
 }

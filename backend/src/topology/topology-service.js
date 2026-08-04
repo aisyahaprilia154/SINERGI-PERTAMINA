@@ -1022,88 +1022,96 @@ export class TopologyService {
         },
       })
       : null
-    return this.#withMutationTransaction(async ({ repository, auditLog }) => {
-      const located = await this.#findCandidate(candidateId, repository)
-      if (normalizedIdempotencyKey) {
-        const receipt = findTopologyMutationReceipt(located.record, normalizedIdempotencyKey)
-        if (receipt) {
-          assertTopologyMutationFingerprint(receipt, fingerprint)
-          return structuredClone(receipt.response)
+    try {
+      return await this.#withMutationTransaction(async ({ repository, auditLog }) => {
+        const located = await this.#findCandidate(candidateId, repository)
+        if (normalizedIdempotencyKey) {
+          const receipt = findTopologyMutationReceipt(located.record, normalizedIdempotencyKey)
+          if (receipt) {
+            assertTopologyMutationFingerprint(receipt, fingerprint)
+            return structuredClone(receipt.response)
+          }
         }
-      }
-      const updated = await repository.update(located.datasetVersionId, async (record) => {
-        const existingReceipt = findTopologyMutationReceipt(record, normalizedIdempotencyKey)
-        if (existingReceipt) {
-          assertTopologyMutationFingerprint(existingReceipt, fingerprint)
-          return record
-        }
-        assertReviewSnapshot(record, { expectedGraphRevision, expectedCandidateRevision })
-        const nextCandidates = structuredClone(record.topologyCandidates ?? [])
-        const current = nextCandidates.find(({ candidateId: id }) => id === candidateId)
-        if (!current) throw candidateNotFound(candidateId)
-        const targetStatus = {
-          confirm: 'confirmed',
-          reject: 'rejected',
-          skip: 'ambiguous',
-        }[action]
-        const allowed = action === 'confirm'
-          ? ['candidate', 'ambiguous', 'revoked']
-          : ['candidate', 'ambiguous']
-        if (!allowed.includes(current.candidateStatus)) {
-          throw invalidTransition(current.candidateStatus, targetStatus)
-        }
-        const reviewedAt = this.clock().toISOString()
-        const event = await auditLog.record(`topology.candidate_${action}ed`, {
-          actorId,
-          datasetVersionId: located.datasetVersionId,
-          branchId: record.datasetVersion.branchId,
-          outcome: targetStatus,
-          details: {
-            before: candidateAuditSnapshot(current),
-            after: candidateAuditSnapshot(current, targetStatus),
+        const updated = await repository.update(located.datasetVersionId, async (record) => {
+          assertReviewSnapshot(record, { expectedGraphRevision, expectedCandidateRevision })
+          const nextCandidates = structuredClone(record.topologyCandidates ?? [])
+          const current = nextCandidates.find(({ candidateId: id }) => id === candidateId)
+          if (!current) throw candidateNotFound(candidateId)
+          const targetStatus = {
+            confirm: 'confirmed',
+            reject: 'rejected',
+            skip: 'ambiguous',
+          }[action]
+          const allowed = action === 'confirm'
+            ? ['candidate', 'ambiguous', 'revoked']
+            : ['candidate', 'ambiguous']
+          if (!allowed.includes(current.candidateStatus)) {
+            throw invalidTransition(current.candidateStatus, targetStatus)
+          }
+          const reviewedAt = this.clock().toISOString()
+          const event = await auditLog.record(`topology.candidate_${action}ed`, {
+            actorId,
+            datasetVersionId: located.datasetVersionId,
+            branchId: record.datasetVersion.branchId,
+            outcome: targetStatus,
+            details: {
+              before: candidateAuditSnapshot(current),
+              after: candidateAuditSnapshot(current, targetStatus),
+              reason,
+              candidateEvidence: current.evidence,
+              topologyRuleSetVersion: current.topologyRuleSetVersion,
+            },
+          })
+          const beforeStatus = current.candidateStatus
+          current.candidateStatus = targetStatus
+          current.proposalStatus = action === 'confirm'
+            ? 'confirmed_by_admin'
+            : action === 'reject' ? 'rejected_by_admin' : 'skipped_by_admin'
+          current.review = reviewRecord({
+            actorId,
+            reviewedAt,
             reason,
-            candidateEvidence: current.evidence,
-            topologyRuleSetVersion: current.topologyRuleSetVersion,
-          },
-        })
-        const beforeStatus = current.candidateStatus
-        current.candidateStatus = targetStatus
-        current.proposalStatus = action === 'confirm'
-          ? 'confirmed_by_admin'
-          : action === 'reject' ? 'rejected_by_admin' : 'skipped_by_admin'
-        current.review = reviewRecord({
-          actorId,
-          reviewedAt,
-          reason,
-          action,
-          auditEventId: event.id,
-          before: beforeStatus,
-          after: targetStatus,
-        })
-        const rebuilt = rebuildFromReviewedCandidates(
-          record,
-          nextCandidates,
-          this.config,
-          reviewedAt,
-          candidateAssetReferences(current),
-        )
-        if (!normalizedIdempotencyKey) return rebuilt
-        const response = candidateReviewResponse({
-          ...rebuilt,
-          recordRevision: recordRevision(record) + 1,
-        }, candidateId)
-        return appendTopologyMutationReceipt(rebuilt, {
-          key: normalizedIdempotencyKey,
-          fingerprint,
-          action,
-          resourceId: candidateId,
-          actorId,
-          response,
-          createdAt: reviewedAt,
-        })
+            action,
+            auditEventId: event.id,
+            before: beforeStatus,
+            after: targetStatus,
+          })
+          const rebuilt = rebuildFromReviewedCandidates(
+            record,
+            nextCandidates,
+            this.config,
+            reviewedAt,
+            candidateAssetReferences(current),
+          )
+          if (!normalizedIdempotencyKey) return rebuilt
+          const response = candidateReviewResponse({
+            ...rebuilt,
+            recordRevision: recordRevision(record) + 1,
+          }, candidateId)
+          return appendTopologyMutationReceipt(rebuilt, {
+            key: normalizedIdempotencyKey,
+            fingerprint,
+            action,
+            resourceId: candidateId,
+            actorId,
+            response,
+            createdAt: reviewedAt,
+          })
+        }, normalizedIdempotencyKey
+          ? { expectedRevision: recordRevision(located.record) }
+          : undefined)
+        return candidateReviewResponse(updated, candidateId)
       })
-      return candidateReviewResponse(updated, candidateId)
-    })
+    } catch (error) {
+      if (!normalizedIdempotencyKey || error?.code !== 'dataset_version_stale_revision') {
+        throw error
+      }
+      const latest = await this.#findCandidate(candidateId)
+      const receipt = findTopologyMutationReceipt(latest.record, normalizedIdempotencyKey)
+      if (!receipt) throw error
+      assertTopologyMutationFingerprint(receipt, fingerprint)
+      return structuredClone(receipt.response)
+    }
   }
 
   async #withMutationTransaction(operation) {

@@ -626,8 +626,8 @@ test report, benchmark report, atau audit record.
 - [ ] Confirm dan revoke bersamaan menghasilkan state machine yang valid.
 - [ ] Full regeneration dan review bersamaan tidak menghapus keputusan review.
 - [x] Retry request dengan idempotency key tidak membuat audit/relation ganda
-  pada single-candidate HTTP confirm; bulk/select-target/revoke, concurrent
-  same-key, dan PostgreSQL live masih pending.
+  pada single-candidate JSON HTTP confirm, termasuk concurrent same-key;
+  bulk/select-target/revoke dan PostgreSQL live masih pending.
 - [ ] Dua worker tidak mengambil job yang sama.
 - [x] Worker lock yang expired dapat diambil alih dengan aman pada uji
   lintas-process durable JSON queue; PostgreSQL live masih pending.

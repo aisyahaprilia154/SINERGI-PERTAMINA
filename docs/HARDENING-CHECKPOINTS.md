@@ -286,9 +286,31 @@ Status: `complete (single-candidate JSON aggregate scope)` - 4 Agustus 2026.
   `git diff --check` lulus.
 
 Batas checkpoint: bukti HTTP langsung mencakup confirm pada JSON aggregate.
-Bulk review, select-target, manual relation, revoke, concurrent same-key
-requests, PostgreSQL live replay, dan receipt retention policy production
-tetap pending.
+Bulk review, select-target, manual relation, revoke, PostgreSQL live replay,
+dan receipt retention policy production tetap pending. Concurrent same-key
+request mempunyai checkpoint terpisah pada Checkpoint 15.
+
+## Checkpoint 15 - concurrent same-key HTTP review idempotency
+
+Status: `complete (single-candidate JSON aggregate scope)` - 4 Agustus 2026.
+
+- Service memakai expected aggregate revision hanya ketika mutation membawa
+  idempotency key.
+- Request kedua yang tiba saat request pertama masih memegang record lock
+  tidak menaikkan `recordRevision`, tidak menulis audit event kedua, dan
+  mengembalikan receipt response yang sama setelah stale revision terdeteksi.
+- Test HTTP menahan audit request pertama, memastikan request kedua benar-benar
+  masuk ke jalur concurrent update, lalu memverifikasi dua response `200` yang
+  identik, satu audit event, satu confirmed relation, satu receipt, dan
+  `recordRevision = 1`.
+- Test yang sama lulus 3/3 pengulangan.
+- Evidence: `backend/tests/topology-review-hardening.test.js`; backend
+  `140/140` test, lint `77` file, build `36` source file, dan
+  `git diff --check` lulus.
+
+Batas checkpoint: scope masih JSON aggregate single-candidate. Bulk review,
+select-target, manual relation, revoke, PostgreSQL live replay, multi-instance
+recovery, dan receipt retention policy production tetap pending.
 
 ## Status berikutnya
 
