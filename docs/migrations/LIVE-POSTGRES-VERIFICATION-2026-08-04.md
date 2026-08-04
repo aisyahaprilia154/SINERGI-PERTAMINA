@@ -2,6 +2,10 @@
 
 Scope: local PostgreSQL 18 on `127.0.0.1:5432`, database `sinergi`.
 
+The matrix below is the earlier baseline snapshot. The post-fix rerun and its
+bounded shadow-list caveat are recorded separately in
+`LIVE-POSTGRES-POOL-ERROR-BOUNDARY-2026-08-04.md`.
+
 ## Current evidence
 
 | Check | Status | Evidence |

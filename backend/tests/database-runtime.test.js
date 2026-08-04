@@ -104,17 +104,27 @@ test('database URL selects PostgreSQL as the primary repository and verifies run
 
 test('PostgreSQL pool factory validates the URL and keeps connection options bounded', async () => {
   let options = null
+  let poolErrorHandler = null
   class FakePool {
     constructor(value) {
       options = value
     }
+    on(eventName, handler) {
+      if (eventName === 'error') poolErrorHandler = handler
+    }
   }
+  let loggedError = null
   const pool = await createPostgresPool({
     connectionString: 'postgresql://user:password@example.test/db',
     max: 12,
     idleTimeoutMilliseconds: 1_000,
     connectionTimeoutMilliseconds: 2_000,
     ssl: true,
+    logger: {
+      error(message) {
+        loggedError = message
+      },
+    },
     loadPg: async () => ({ Pool: FakePool }),
   })
   assert.ok(pool instanceof FakePool)
@@ -125,6 +135,11 @@ test('PostgreSQL pool factory validates the URL and keeps connection options bou
     connectionTimeoutMillis: 2_000,
     ssl: true,
   })
+  assert.equal(typeof poolErrorHandler, 'function')
+  poolErrorHandler(Object.assign(new Error('connection reset'), {
+    code: 'ECONNRESET',
+  }))
+  assert.equal(loggedError, '[postgres-pool] ECONNRESET: connection reset')
   await assert.rejects(
     createPostgresPool({
       connectionString: 'not-a-database-url',
