@@ -678,7 +678,8 @@ Checklist:
 - [x] Database disconnect menghasilkan retry tanpa duplicate relation pada
   isolated PostgreSQL mutation probe; server restart/failover dan retry lintas
   instance masih pending.
-- [ ] Object storage unavailable menghasilkan error yang dapat ditindaklanjuti.
+- [x] Object storage unavailable menghasilkan error yang dapat ditindaklanjuti
+  pada adapter source storage saat ini.
 - [x] Dead-letter job dapat diperiksa dan di-retry.
 - [ ] Backup database berhasil di-restore ke environment bersih.
 - [ ] Graph revision sebelumnya dapat diaktifkan kembali.
