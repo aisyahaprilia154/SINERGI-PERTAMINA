@@ -274,6 +274,24 @@ test('topology generation timeout fails closed before returning partial artifact
   assert.deepEqual(bundle.geometries, sourceBefore)
 })
 
+test('running the same topology job twice produces the same artifact', () => {
+  const bundle = topologyBundle({
+    nodes: [node('CAM-01', 'cctv', 'CCTV Camera', [110, -7])],
+    paths: [pathObject('CBL-01', 'cctv', 'CCTV Cable', [
+      [110, -7],
+      [110.001, -7],
+    ])],
+  })
+  const options = {
+    generatedAt: '2026-08-04T00:00:00.000Z',
+  }
+
+  const first = generateRelationArtifacts(structuredClone(bundle), options)
+  const second = generateRelationArtifacts(structuredClone(bundle), options)
+
+  assert.deepEqual(second, first)
+})
+
 test('endpoint gap candidate requires same family, continuation angle, and no nearby device', () => {
   const result = generateRelationArtifacts(topologyBundle({
     paths: [

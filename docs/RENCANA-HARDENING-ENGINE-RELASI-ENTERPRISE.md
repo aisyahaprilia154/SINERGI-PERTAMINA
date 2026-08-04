@@ -593,7 +593,8 @@ test report, benchmark report, atau audit record.
 - [x] Explicit metadata dangling tidak menghasilkan dangling graph edge.
 - [x] Revoked relation tidak masuk operational graph.
 - [x] Property test: urutan input tidak mengubah output.
-- [ ] Property test: menjalankan job dua kali menghasilkan artifact yang sama.
+- [x] Property test: menjalankan job dua kali menghasilkan artifact yang sama
+  pada input/rule-set/generation time yang sama.
 - [ ] Fuzz test geometry ekstrem, sangat panjang, dan koordinat dekat batas dunia.
 - [ ] Rule-set compatibility matrix diuji untuk seluruh pasangan family.
 
