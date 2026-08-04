@@ -318,8 +318,11 @@ Checklist:
 - [x] Optimistic concurrency diterapkan pada candidate dan graph revision.
 - [x] Audit event berada dalam transaksi yang sama dengan perubahan state.
 - [x] Dua reviewer pada candidate yang sama menghasilkan satu pemenang.
-- [ ] Dua reviewer pada candidate berbeda tidak saling menghapus perubahan.
-- [ ] Retry setelah network timeout tidak menghasilkan relation ganda.
+- [x] Dua reviewer pada candidate berbeda tidak saling menghapus perubahan;
+  contract test JSON lulus.
+- [x] Retry setelah network timeout tidak menghasilkan relation ganda pada
+  contract JSON/HTTP untuk confirm, select-target, manual relation, revoke,
+  dan bulk review; PostgreSQL disconnect retry untuk single confirm juga lulus.
 
 ### 6.5 Gunakan durable job
 
@@ -628,9 +631,11 @@ test report, benchmark report, atau audit record.
 - [ ] Confirm dan revoke bersamaan menghasilkan state machine yang valid.
 - [ ] Full regeneration dan review bersamaan tidak menghapus keputusan review.
 - [x] Retry request dengan idempotency key tidak membuat audit/relation ganda
-  pada single-candidate JSON HTTP confirm, termasuk concurrent same-key, dan
-  PostgreSQL disconnect-before-commit retry; bulk/select-target/revoke,
-  PostgreSQL server failover, serta multi-instance production masih pending.
+  pada JSON/HTTP contract untuk single-candidate, bulk, select-target, manual
+  relation, dan revoke, termasuk concurrent same-key manual relation; PostgreSQL
+  disconnect-before-commit retry untuk single confirm juga lulus. PostgreSQL
+  server failover, retry lintas instance, serta multi-instance production masih
+  pending.
 - [ ] Dua worker tidak mengambil job yang sama.
 - [x] Worker lock yang expired dapat diambil alih dengan aman pada uji
   lintas-process durable JSON queue dan replacement process PostgreSQL live;
