@@ -635,7 +635,8 @@ test report, benchmark report, atau audit record.
 - [x] 20 reviewer mengubah candidate berbeda tanpa lost update pada JSON
   repository contract; HTTP/PostgreSQL load masih pending.
 - [x] Dua reviewer mengubah candidate sama: satu sukses, satu menerima 409.
-- [ ] Confirm dan revoke bersamaan menghasilkan state machine yang valid.
+- [x] Confirm dan revoke bersamaan menghasilkan state machine yang valid pada
+  JSON repository contract; HTTP/PostgreSQL load masih pending.
 - [ ] Full regeneration dan review bersamaan tidak menghapus keputusan review.
 - [x] Retry request dengan idempotency key tidak membuat audit/relation ganda
   pada JSON/HTTP contract untuk single-candidate, bulk, select-target, manual

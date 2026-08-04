@@ -687,11 +687,32 @@ Batas checkpoint: bukti ini hanya mencakup JSON repository pada satu host.
 HTTP load 20 reviewer, PostgreSQL multi-instance, confirm/revoke bersamaan,
 dan regeneration/review race masih pending.
 
+## Checkpoint 34 - Confirm/revoke concurrent state machine
+
+Status: `complete (JSON state-machine contract; HTTP/PostgreSQL load pending)`
+- 4 Agustus 2026.
+
+- Regression menjalankan revoke relation dan confirm candidate lain secara
+  bersamaan setelah satu path attachment confirmed.
+- Record lock mencegah lost update; konflik optimistic revision diterima
+  sebagai hasil yang dapat dipulihkan dan retry eksplisit dengan snapshot baru.
+- Hasil akhir tervalidasi: candidate lama `revoked`, candidate baru
+  `confirmed`, satu active path-attachment relation, dan tidak ada device edge
+  parsial. Lock JSON juga menangani `EPERM` transient Windows saat release.
+- Suite topology-review-hardening lulus tiga kali berturut-turut.
+- Full backend verification: `166/166` test, lint `89` file, build `37` source
+  file, dan `git diff --check` lulus.
+- Evidence detail:
+  `docs/migrations/CONFIRM-REVOKE-CONCURRENCY-2026-08-04.md`.
+
+Batas checkpoint: HTTP load, PostgreSQL multi-instance, dan regeneration/review
+race masih pending; automatic client retry policy juga belum ditetapkan.
+
 ## Status berikutnya
 
-Task berikutnya adalah menutup state-machine concurrency dan regeneration/review
-race secara lokal sebelum live PostgreSQL restart/failover dengan kredensial
-operator; concurrency/load/SLO dan enterprise approval gates tetap terpisah.
+Task berikutnya adalah menutup regeneration/review race secara lokal sebelum
+live PostgreSQL restart/failover dengan kredensial operator; concurrency/load/
+SLO dan enterprise approval gates tetap terpisah.
 Setiap checkpoint hanya boleh ditandai selesai
 setelah test, lint/build, dan regression evidence lulus; bukti live database
 harus dilaporkan terpisah dari test contract. Bukti lokal yang sudah lulus tidak
