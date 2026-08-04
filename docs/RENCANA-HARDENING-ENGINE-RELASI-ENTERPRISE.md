@@ -595,7 +595,8 @@ test report, benchmark report, atau audit record.
 - [x] Property test: urutan input tidak mengubah output.
 - [x] Property test: menjalankan job dua kali menghasilkan artifact yang sama
   pada input/rule-set/generation time yang sama.
-- [ ] Fuzz test geometry ekstrem, sangat panjang, dan koordinat dekat batas dunia.
+- [x] Fuzz test geometry ekstrem, sangat panjang, dan koordinat dekat batas
+  dunia pada deterministic corpus.
 - [ ] Rule-set compatibility matrix diuji untuk seluruh pasangan family.
 
 ### 10.2 Integration test
