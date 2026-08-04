@@ -209,6 +209,57 @@ test('confirm and revoke concurrently preserve a valid topology state machine', 
   }
 })
 
+test('full regeneration and review concurrently preserve the review decision', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-review-regeneration-race-'))
+  try {
+    const bundle = reviewBundle()
+    const initial = generateRelationArtifacts(bundle)
+    const repository = new JsonDatasetVersionRepository(path.join(root, 'dataset-versions'))
+    await repository.create(applyArtifacts(baseRecord(bundle), initial))
+    const auditLog = new MemoryAuditLog()
+    const regenerationService = new TopologyService({ repository, auditLog })
+    const reviewService = new TopologyService({ repository, auditLog })
+    const candidate = initial.candidates.find(({ sourceEndpointId }) => (
+      sourceEndpointId === 'endpoint:geometry:CBL-01:start'
+    ))
+
+    const operations = [
+      () => regenerationService.regenerate('dv-review-hardening', 'operator-1', {
+        reason: 'Regeneration bersamaan dengan review.',
+      }),
+      () => reviewService.confirmCandidate(candidate.candidateId, 'reviewer-1', {
+        reason: 'Review bersamaan dengan regeneration.',
+      }),
+    ]
+    const results = await Promise.allSettled(operations.map((operation) => operation()))
+    let retryCount = 0
+    for (const [index, result] of results.entries()) {
+      if (result.status === 'fulfilled') continue
+      assert.equal(result.reason.code, 'dataset_version_stale_revision')
+      retryCount += 1
+      await operations[index]()
+    }
+
+    const persisted = await repository.get(bundle.datasetVersion.id)
+    const reviewedCandidate = persisted.topologyCandidates.find(({ candidateId }) => (
+      candidateId === candidate.candidateId
+    ))
+    assert.equal(reviewedCandidate.candidateStatus, 'confirmed')
+    assert.equal(reviewedCandidate.review.action, 'confirm')
+    assert.equal(persisted.confirmedRelations.length, 1)
+    assert.equal(persisted.topologyRuns.length, 1)
+    assert.equal(persisted.recordRevision, 2 + retryCount)
+    assert.equal(auditLog.index, 2 + retryCount)
+  } finally {
+    await rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 50,
+    })
+  }
+})
+
 test('two reviewers on the same candidate produce one winner and a 409 conflict', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-review-conflict-'))
   try {
