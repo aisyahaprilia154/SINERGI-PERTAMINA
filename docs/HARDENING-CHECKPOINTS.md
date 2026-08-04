@@ -614,6 +614,23 @@ pending)` - 4 Agustus 2026.
 Batas checkpoint: belum membuktikan cross-process/instance durable retry,
 PostgreSQL persistence, atau stored-artifact deduplication.
 
+## Checkpoint 30 - Deterministic geometry fuzz corpus
+
+Status: `complete (deterministic geometry corpus; adversarial fuzz pending)` -
+4 Agustus 2026.
+
+- Corpus menguji antimeridian, koordinat dekat kutub, polyline 2.049 vertex,
+  dan empat koordinat out-of-range.
+- Valid geometry menghasilkan artifact tanpa validation error/non-finite
+  candidate dan tidak memutasi input; invalid bounds fail-closed sebagai
+  `path_geometry_ineligible` blocking issue tanpa mutasi input.
+- Full backend verification: `162/162` test, lint `87` file, build `37` source
+  file, dan `git diff --check` lulus.
+- Evidence detail: `docs/migrations/TOPOLOGY-GEOMETRY-FUZZ-2026-08-04.md`.
+
+Batas checkpoint: belum mencakup randomized fuzz campaign, dateline wrapping,
+50.000-object stress, atau production geometry distribution.
+
 ## Status berikutnya
 
 Task berikutnya adalah menjalankan live PostgreSQL restart/failover dengan
