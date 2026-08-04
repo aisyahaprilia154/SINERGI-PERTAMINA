@@ -26,6 +26,7 @@ import {
 import {
   appendTopologyMutationReceipt,
   assertTopologyMutationFingerprint,
+  canonicalizeJsonValue,
   createTopologyMutationFingerprint,
   findTopologyMutationReceipt,
   normalizeTopologyIdempotencyKey,
@@ -1281,7 +1282,7 @@ function reconcileCandidateHistory(record, artifacts, { eventId, generatedAt }) 
 }
 
 function candidateReviewResponse(record, candidateId) {
-  return {
+  return canonicalizeJsonValue({
     datasetVersionId: record.datasetVersion.id,
     candidate: structuredClone(
       record.topologyCandidates.find(({ candidateId: id }) => id === candidateId),
@@ -1290,7 +1291,7 @@ function candidateReviewResponse(record, candidateId) {
     graph: structuredClone(record.topologyGraph),
     readiness: structuredClone(record.topologyReadiness),
     ...reviewSnapshot(record),
-  }
+  })
 }
 
 function bulkReviewResponse(record, {

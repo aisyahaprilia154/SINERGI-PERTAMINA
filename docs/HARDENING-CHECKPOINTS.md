@@ -238,7 +238,7 @@ Status: `complete (pilot fixture)` - 4 Agustus 2026.
   satu `200` dan satu `409 stale_topology_review`.
 - PostgreSQL projection setelah winner: satu audit event, dua confirmed
   relation, satu graph revision `validated`, dan nol graph revision `active`.
-- Dataset evidence `live-http-review-b49c5c026da142bfb5d646dbe1d51c02`
+- Dataset evidence `live-http-review-1104b8d100444503a078847c3a646a45`
   dipertahankan karena audit log append-only; dataset tetap unpublished dan
   tidak menjadi graph aktif.
 - Evidence report:
@@ -380,15 +380,40 @@ Status: `complete (local PostgreSQL process-level lease recovery scope)` - 4 Agu
 - Evidence terpisah: `docs/migrations/LIVE-POSTGRES-PROCESS-RECOVERY-2026-08-04.md`.
 
 Batas checkpoint: bukti ini memakai satu database PostgreSQL lokal dan satu
-job probe; belum membuktikan database disconnect retry tanpa duplicate relation,
-PostgreSQL server restart/failover, multi-instance production load, object
-storage recovery, atau disaster recovery backup/restore.
+job probe; belum membuktikan PostgreSQL server restart/failover, multi-instance
+production load, object storage recovery, atau disaster recovery backup/restore.
+
+## Checkpoint 19 - PostgreSQL disconnect retry tanpa duplicate relation
+
+Status: `complete (isolated PostgreSQL mutation disconnect scope)` - 4 Agustus 2026.
+
+- Runner live: `backend/scripts/database-postgres-disconnect-retry.mjs`,
+  command `npm run db:postgres-disconnect-retry`.
+- Fault injection memutus stream client tepat sebelum `COMMIT`; request pertama
+  menerima `Connection terminated unexpectedly`, sehingga outcome commit menjadi
+  ambigu dari sisi client.
+- Retry mutation `confirm` dengan actor, input, dan idempotency key yang sama
+  berhasil; replay berikutnya identik (`replayMatchesRetry = true`).
+- Live evidence: PostgreSQL/PostGIS `3.6.2`, dataset
+  `live-db-disconnect-0caf3b43ee3849afb85ff014ae2bc42e`, satu relation baru,
+  `2` confirmed relation total, `2` unique relation, `1` audit event, dan `1`
+  validated graph revision.
+- Receipt response sekarang canonical terhadap JSONB/HTTP JSON; property
+  `undefined` tidak membuat response pertama berbeda dari replay PostgreSQL.
+- Regression evidence lokal: backend `142/142` test, lint `81` file, build
+  `36` source file, dan `git diff --check` lulus.
+- Evidence terpisah: `docs/migrations/LIVE-POSTGRES-DISCONNECT-RETRY-2026-08-04.md`.
+
+Batas checkpoint: bukti ini menguji satu mutation candidate pada satu database
+PostgreSQL lokal dengan disconnect sebelum commit. PostgreSQL server
+restart/failover, retry lintas instance, multi-worker production load, object
+storage recovery, dan disaster recovery backup/restore tetap pending.
 
 ## Status berikutnya
 
-Task berikutnya adalah database disconnect/failover recovery, mutation
-idempotency yang lebih luas, load/SLO, dan enterprise approval gates. Setiap
-checkpoint hanya boleh ditandai selesai setelah test, lint/build, dan regression
-evidence lulus; bukti live database harus dilaporkan terpisah dari test
-contract. Bukti lokal yang sudah lulus tidak mengubah status enterprise `NO-GO`
-sebelum production cutover, recovery, security, dan approval gates selesai.
+Task berikutnya adalah PostgreSQL server restart/failover, mutation idempotency
+yang lebih luas, load/SLO, dan enterprise approval gates. Setiap checkpoint
+hanya boleh ditandai selesai setelah test, lint/build, dan regression evidence
+lulus; bukti live database harus dilaporkan terpisah dari test contract. Bukti
+lokal yang sudah lulus tidak mengubah status enterprise `NO-GO` sebelum
+production cutover, recovery, security, dan approval gates selesai.

@@ -40,7 +40,12 @@ export function findTopologyMutationReceipt(record, key) {
     ? record.topologyMutationReceipts
     : []
   const receipt = receipts.find((item) => item?.key === key)
-  return receipt ? structuredClone(receipt) : null
+  return receipt
+    ? {
+      ...structuredClone(receipt),
+      response: canonicalizeJsonValue(receipt.response),
+    }
+    : null
 }
 
 export function assertTopologyMutationFingerprint(receipt, fingerprint) {
@@ -74,7 +79,7 @@ export function appendTopologyMutationReceipt(record, {
     resourceId,
     actorId,
     createdAt,
-    response: structuredClone(response),
+    response: canonicalizeJsonValue(response),
   }
   return {
     ...record,
@@ -83,6 +88,15 @@ export function appendTopologyMutationReceipt(record, {
       nextReceipt,
     ].slice(-MAX_RECEIPTS_PER_RECORD),
   }
+}
+
+/**
+ * Normalizes a mutation response to the same representation used by JSONB
+ * persistence and HTTP JSON serialization.
+ */
+export function canonicalizeJsonValue(value) {
+  const serialized = JSON.stringify(value)
+  return serialized === undefined ? null : JSON.parse(serialized)
 }
 
 function stableSerialize(value) {

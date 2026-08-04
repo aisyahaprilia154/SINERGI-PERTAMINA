@@ -274,6 +274,44 @@ test('HTTP review retry with the same idempotency key replays one committed resu
   }
 })
 
+test('direct review retry replays the canonical JSON response', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-review-canonical-response-'))
+  try {
+    const bundle = reviewBundle()
+    const initial = generateRelationArtifacts(bundle)
+    const repository = new JsonDatasetVersionRepository(path.join(root, 'dataset-versions'))
+    await repository.create(applyArtifacts(baseRecord(bundle), initial))
+    const auditLog = new MemoryAuditLog()
+    const topologyService = new TopologyService({ repository, auditLog })
+    const candidate = initial.candidates.find(({ sourceEndpointId }) => (
+      sourceEndpointId === 'endpoint:geometry:CBL-01:start'
+    ))
+    const request = {
+      reason: 'Direct canonical response contract test.',
+      expectedGraphRevision: initial.graph.graphRevision,
+      expectedCandidateRevision: initial.candidateRevision,
+      idempotencyKey: 'review-canonical-response-2026-08-04-001',
+    }
+
+    const firstResponse = await topologyService.confirmCandidate(
+      candidate.candidateId,
+      'admin-1',
+      request,
+    )
+    const replayResponse = await topologyService.confirmCandidate(
+      candidate.candidateId,
+      'admin-1',
+      request,
+    )
+
+    assert.deepEqual(firstResponse, JSON.parse(JSON.stringify(firstResponse)))
+    assert.deepEqual(replayResponse, firstResponse)
+    assert.equal(auditLog.index, 1)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('concurrent HTTP review retry with the same idempotency key commits once', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-review-concurrent-idempotency-'))
   try {
