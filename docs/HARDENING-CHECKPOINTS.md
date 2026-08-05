@@ -764,6 +764,25 @@ Status: `complete (JSON multi-repository claim contract; PostgreSQL multi-instan
 Batas checkpoint: PostgreSQL multi-instance dan production worker load masih
 pending.
 
+## Checkpoint 38 - Incremental review rebuild
+
+Status: `complete (in-process incremental rebuild contract; API/worker SLO pending)`
+- 5 Agustus 2026.
+
+- Review memakai candidate collection yang sudah ada melalui
+  `rebuildConfirmedRelationArtifacts`; candidate discovery tidak diulang.
+- Graph rebuild memakai `affectedAssetIds` dan mempertahankan komponen di luar
+  scope.
+- Regression dengan isolated node menyamakan incremental rebuild dan full
+  regeneration untuk graph, relation, validation, summary, dan readiness.
+- Full backend verification: `168/168` test, lint `89` file, build `37` source
+  file, dan `git diff --check` lulus.
+- Evidence detail:
+  `docs/migrations/INCREMENTAL-REVIEW-REBUILD-2026-08-05.md`.
+
+Batas checkpoint: API/worker p95, multi-instance database, dan
+production-sized affected-component profiling masih pending.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan

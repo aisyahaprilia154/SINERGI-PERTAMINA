@@ -87,8 +87,10 @@ Setelah hardening selesai, sistem harus:
 ### 4.2 Hal yang belum memenuhi enterprise
 
 - [x] Tidak ada perbandingan semua pasangan path pada jalur utama.
-- [ ] Review satu candidate tidak menghitung ulang seluruh dataset.
-- [ ] Review concurrent bebas lost update.
+- [x] Review satu candidate tidak menghitung ulang seluruh dataset pada
+  in-process incremental rebuild contract; API/worker SLO masih pending.
+- [x] Review concurrent bebas lost update pada JSON repository contract;
+  PostgreSQL/multi-instance production masih pending.
 - [ ] Job import dan inference bertahan setelah restart.
 - [ ] Candidate dan relation disimpan pada tabel terindeks.
 - [x] API candidate memakai pagination dan filter server-side.
@@ -279,7 +281,8 @@ request normal confirm/reject/revoke.
 
 Checklist:
 
-- [ ] Confirm candidate tidak menjalankan full candidate generation.
+- [x] Confirm candidate tidak menjalankan full candidate generation pada
+  in-process incremental rebuild contract; API/worker SLO masih pending.
 - [ ] Reject/skip tidak membangun ulang komponen yang tidak berubah.
 - [ ] Revoke hanya menghitung ulang affected component.
 - [ ] Full regeneration berjalan sebagai durable background job.
