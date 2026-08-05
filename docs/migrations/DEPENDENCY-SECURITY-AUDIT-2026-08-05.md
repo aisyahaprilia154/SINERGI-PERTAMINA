@@ -26,7 +26,8 @@ root:    found 0 vulnerabilities
 CI workflow `/.github/workflows/dependency-security-audit.yml` menjalankan
 `npm ci` dari lockfile dan `npm audit --audit-level=high` untuk root, backend,
 dan frontend pada setiap push dan pull request. Workflow memakai permission
-`contents: read`.
+`contents: read`. Run GitHub Actions `30984124086` pada commit `eab6174`
+selesai dengan status `success`.
 
 ## Boundary
 
