@@ -74,7 +74,7 @@ jobQueue.registerHandler(
   createFullTopologyRegenerationJobHandler(topologyService),
 )
 jobQueue.registerHandler('parse_source', (
-  { sourceStorageKey, extension, actorId },
+  { sourceStorageKey, extension, actorId, correlationId },
   { job, updateProgress },
 ) => (
   importPipeline.process({
@@ -82,6 +82,8 @@ jobQueue.registerHandler('parse_source', (
     sourcePath: fileStore.resolveOriginalPath(sourceStorageKey),
     extension,
     actorId,
+    correlationId,
+    jobId: job.jobId,
     progressReporter: updateProgress,
   })
 ))

@@ -594,7 +594,9 @@ Checklist:
 - [ ] Dashboard kualitas candidate tersedia.
 - [ ] Dashboard latency API/review tersedia.
 - [ ] Alert diuji dengan fault injection sederhana.
-- [ ] Log mempunyai correlation ID, dataset version, job ID, dan graph revision.
+- [x] Audit event HTTP/worker/service mempunyai correlation ID, dataset version,
+  job ID, dan graph revision bila context tersebut berlaku; centralized log
+  shipping dan retention production tetap pending.
 - [x] HTTP request correlation ID dipantulkan pada response dan disimpan pada
   audit event HTTP yang sudah berada di boundary app.
 - [ ] Log tidak menyimpan token, password, atau source data sensitif berlebihan.

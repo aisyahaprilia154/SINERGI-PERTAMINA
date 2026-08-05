@@ -69,6 +69,7 @@ test('atomic activation archives the previous version and publishes one shared p
 
     const result = await fixture.service.activate('version-new', 'admin-1', {
       expectedActiveVersionId: 'version-old',
+      correlationId: 'activation-correlation-test',
     })
     const active = await fixture.service.getActiveDataset({
       datasetId: 'dataset-semarang',
@@ -121,6 +122,7 @@ test('atomic activation archives the previous version and publishes one shared p
       && entry.details.previousVersionId === 'version-old'
       && entry.details.newVersionId === 'version-new'
       && entry.details.result === 'committed'
+      && entry.correlationId === 'activation-correlation-test'
     )))
   } finally {
     await fixture.close()

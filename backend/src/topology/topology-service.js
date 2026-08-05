@@ -73,6 +73,7 @@ export class TopologyService {
         details: {
           reason: normalizeReason(reason, false),
           ...(jobId ? { jobId } : {}),
+          graphRevision: artifacts.graph?.graphRevision ?? null,
           classificationRepair: {
             changed: repaired.changed,
             repairedCount: repaired.repairedCount,
@@ -201,8 +202,9 @@ export class TopologyService {
     }
   }
 
-  async trace(datasetVersionId, request = {}, actorId = null) {
+  async trace(datasetVersionId, request = {}, actorId = null, correlationId = null) {
     const normalized = normalizeTraceRequest(request)
+    normalized.correlationId = correlationId
     const record = await this.repository.get(datasetVersionId)
     const identityMap = buildAssetIdentityMapFromRecord(record)
     const resolver = createAssetIdentityResolver(identityMap)
@@ -430,6 +432,7 @@ export class TopologyService {
     expectedGraphRevision,
     expectedCandidateRevision,
     idempotencyKey,
+    correlationId,
   } = {}) {
     return this.#reviewCandidate(candidateId, actorId, {
       action: 'confirm',
@@ -437,6 +440,7 @@ export class TopologyService {
       expectedGraphRevision,
       expectedCandidateRevision,
       idempotencyKey,
+      correlationId,
     })
   }
 
@@ -445,6 +449,7 @@ export class TopologyService {
     expectedGraphRevision,
     expectedCandidateRevision,
     idempotencyKey,
+    correlationId,
   } = {}) {
     return this.#confirmCandidatesBulk(datasetVersionId, actorId, {
       reason,
@@ -454,6 +459,7 @@ export class TopologyService {
       expectedGraphRevision,
       expectedCandidateRevision,
       idempotencyKey,
+      correlationId,
     })
   }
 
@@ -462,6 +468,7 @@ export class TopologyService {
     expectedGraphRevision,
     expectedCandidateRevision,
     idempotencyKey,
+    correlationId,
   } = {}) {
     return this.#confirmCandidatesBulk(datasetVersionId, actorId, {
       reason,
@@ -471,6 +478,7 @@ export class TopologyService {
       expectedGraphRevision,
       expectedCandidateRevision,
       idempotencyKey,
+      correlationId,
     })
   }
 
@@ -482,6 +490,7 @@ export class TopologyService {
     expectedGraphRevision,
     expectedCandidateRevision,
     idempotencyKey,
+    correlationId,
   }) {
     const normalizedIdempotencyKey = normalizeTopologyIdempotencyKey(idempotencyKey)
     const normalizedReason = normalizeReason(reason, false)
@@ -549,8 +558,10 @@ export class TopologyService {
             actorId,
             datasetVersionId,
             branchId: record.datasetVersion.branchId,
+            correlationId,
             outcome: 'confirmed',
             details: {
+              graphRevision: record.topologyGraph?.graphRevision ?? null,
               candidateCount: candidateIds.length,
               candidateIds,
               reason: normalizedReason,
@@ -624,6 +635,7 @@ export class TopologyService {
     expectedGraphRevision,
     expectedCandidateRevision,
     idempotencyKey,
+    correlationId,
   } = {}) {
     return this.#reviewCandidate(candidateId, actorId, {
       action: 'reject',
@@ -631,6 +643,7 @@ export class TopologyService {
       expectedGraphRevision,
       expectedCandidateRevision,
       idempotencyKey,
+      correlationId,
     })
   }
 
@@ -639,6 +652,7 @@ export class TopologyService {
     expectedGraphRevision,
     expectedCandidateRevision,
     idempotencyKey,
+    correlationId,
   } = {}) {
     return this.#reviewCandidate(candidateId, actorId, {
       action: 'skip',
@@ -646,6 +660,7 @@ export class TopologyService {
       expectedGraphRevision,
       expectedCandidateRevision,
       idempotencyKey,
+      correlationId,
     })
   }
 
@@ -656,6 +671,7 @@ export class TopologyService {
     expectedGraphRevision,
     expectedCandidateRevision,
     idempotencyKey,
+    correlationId,
   } = {}) {
     const normalizedIdempotencyKey = normalizeTopologyIdempotencyKey(idempotencyKey)
     const normalizedReason = normalizeReason(reason, true)
@@ -716,8 +732,10 @@ export class TopologyService {
             actorId,
             datasetVersionId: located.datasetVersionId,
             branchId: record.datasetVersion.branchId,
+            correlationId,
             outcome: 'confirmed',
             details: {
+              graphRevision: record.topologyGraph?.graphRevision ?? null,
               before: candidateAuditSnapshot(currentOriginal),
               after: candidateAuditSnapshot(currentSelected, 'confirmed'),
               reason: normalizedReason,
@@ -799,6 +817,7 @@ export class TopologyService {
     expectedGraphRevision,
     expectedCandidateRevision,
     idempotencyKey,
+    correlationId,
   } = {}) {
     const normalizedSourceReference = normalizeTopologyAssetReference(
       sourceAssetId,
@@ -855,8 +874,10 @@ export class TopologyService {
         actorId,
         datasetVersionId,
         branchId: record.datasetVersion.branchId,
+        correlationId,
         outcome: 'confirmed',
         details: {
+          graphRevision: record.topologyGraph?.graphRevision ?? null,
           sourceAssetId: source.canonicalAssetId,
           targetAssetId: target.canonicalAssetId,
           sourceTopologyAssetId: source.topologyAssetId,
@@ -965,6 +986,7 @@ export class TopologyService {
     expectedGraphRevision,
     expectedCandidateRevision,
     idempotencyKey,
+    correlationId,
   } = {}) {
     const normalizedReason = normalizeReason(reason, true)
     const normalizedIdempotencyKey = normalizeTopologyIdempotencyKey(idempotencyKey)
@@ -1003,8 +1025,10 @@ export class TopologyService {
         actorId,
         datasetVersionId: located.datasetVersionId,
         branchId: record.datasetVersion.branchId,
+        correlationId,
         outcome: 'revoked',
         details: {
+          graphRevision: record.topologyGraph?.graphRevision ?? null,
           before: currentRelation,
           after: {
             relationId,
@@ -1111,6 +1135,7 @@ export class TopologyService {
     expectedGraphRevision,
     expectedCandidateRevision,
     idempotencyKey,
+    correlationId,
   } = {}) {
     const normalizedReason = normalizeReason(reason, true)
     const normalizedIdempotencyKey = normalizeTopologyIdempotencyKey(idempotencyKey)
@@ -1177,8 +1202,10 @@ export class TopologyService {
         actorId,
         datasetVersionId,
         branchId: record.datasetVersion.branchId,
+        correlationId,
         outcome: 'revoked',
         details: {
+          graphRevision: record.topologyGraph?.graphRevision ?? null,
           relationCount: relationIds.length,
           relationIds,
           candidateCount: candidateIds.size,
@@ -1279,6 +1306,7 @@ export class TopologyService {
     expectedGraphRevision,
     expectedCandidateRevision,
     idempotencyKey,
+    correlationId,
   }) {
     const normalizedIdempotencyKey = normalizeTopologyIdempotencyKey(idempotencyKey)
     const fingerprint = normalizedIdempotencyKey
@@ -1319,8 +1347,10 @@ export class TopologyService {
             actorId,
             datasetVersionId: located.datasetVersionId,
             branchId: record.datasetVersion.branchId,
+            correlationId,
             outcome: targetStatus,
             details: {
+              graphRevision: record.topologyGraph?.graphRevision ?? null,
               before: candidateAuditSnapshot(current),
               after: candidateAuditSnapshot(current, targetStatus),
               reason,
@@ -2447,6 +2477,7 @@ async function recordTraceAudit(auditLog, {
     await auditLog.record('topology.trace_requested', {
       actorId,
       datasetVersionId,
+      correlationId: request.correlationId ?? null,
       outcome: result.status,
       details: {
         sourceAssetId: request.sourceAssetId,
