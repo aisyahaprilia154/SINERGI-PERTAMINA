@@ -94,15 +94,18 @@ Setelah hardening selesai, sistem harus:
 - [x] Live PostgreSQL service restart/recovery probe lulus: readiness kembali,
   durable probe selesai, dan enqueue ulang ter-deduplicate; import/inference
   production replay masih pending.
-- [ ] Job import dan inference bertahan setelah restart.
-- [ ] Candidate dan relation disimpan pada tabel terindeks.
+- [x] Job import dan inference bertahan setelah restart pada durable JSON dan
+  local PostgreSQL process-recovery contract; production replay masih pending.
+- [x] Candidate dan relation disimpan pada tabel terindeks pada local PostgreSQL
+  pilot; production-sized query/SLO masih pending.
 - [x] API candidate memakai pagination dan filter server-side.
 - [x] Accuracy gate berasal dari evaluation artifact, bukan angka environment;
   runtime contract selesai, tetapi artifact/evaluator production masih pending.
 - [ ] Load test 10.000 objek lulus pada worker/API production target;
   sparse in-process guardrail lulus pada Checkpoint 46.
 - [ ] Load test 50.000 objek lulus atau mempunyai batas kapasitas resmi.
-- [ ] Recovery, retry, timeout, dan dead-letter job telah diuji.
+- [x] Recovery, retry, timeout, dan dead-letter job telah diuji pada local
+  durable/recovery contract; production failure drill masih pending.
 - [ ] Dashboard metrik dan alert produksi tersedia.
 
 ## 5. Alur sistem
@@ -218,11 +221,14 @@ BTREE(audit_events.dataset_version_id, occurred_at)
 
 Checklist:
 
-- [x] Schema migration dibuat dan dapat di-rollback melalui migration runner;
-  live PostgreSQL/PostGIS apply masih menjadi task verifikasi berikutnya.
+- [x] Schema migration dibuat, dapat di-rollback melalui migration runner, dan
+  sudah diterapkan pada local PostgreSQL/PostGIS target; production apply tetap
+  pending.
 - [ ] Foreign key dan unique constraint diuji.
-- [ ] Data JSON pilot berhasil dimigrasikan tanpa kehilangan candidate/relation.
-- [ ] Jumlah node, edge, candidate, dan audit event sebelum/sesudah sama.
+- [x] Data JSON pilot berhasil dimigrasikan tanpa kehilangan
+  candidate/relation pada local PostgreSQL pilot.
+- [x] Jumlah node, edge, candidate, dan audit event sebelum/sesudah sama pada
+  pilot parity; negative constraint test live masih pending.
 - [x] Backup dan restore database pilot lulus ke database sementara yang bersih;
   production disaster-recovery sign-off masih pending.
 
@@ -267,7 +273,8 @@ Checklist:
 - [x] Junction lookup memakai radius query terindeks pada engine in-process;
   query plan PostGIS pilot live lulus, sedangkan workload production-sized
   tetap pending.
-- [ ] Tidak ada nested loop global path × path.
+- [x] Tidak ada nested loop global path × path pada engine spatial-prefilter;
+  production-sized profiling tetap pending.
 - [x] Hasil candidate sama dengan engine lama pada regression fixture.
 - [x] Runtime bertambah mendekati linear pada dataset sparse benchmark; SLO
   enterprise tetap pending.
@@ -756,7 +763,8 @@ Exit criterion:
 
 ### Fase 1 — Database dan durable job
 
-- [ ] Buat schema PostgreSQL/PostGIS.
+- [x] Buat schema PostgreSQL/PostGIS; migration dan local live apply sudah
+  dibuktikan, production rollout tetap pending.
 - [x] Buat repository adapter baru dengan contract test; wiring PostgreSQL
   primary, migration, parity, dan shadow compare sudah lulus.
 - [x] Buat durable job worker dengan repository PostgreSQL pada mode primary.
@@ -771,7 +779,7 @@ dan `jsonPrimaryUsed: false`. Mode `shadow` tetap tersedia untuk compare.
 Catatan 5 Agustus 2026: shadow pilot membandingkan `list` pada scope fixture
 `dv-pilot-parity`, bukan seluruh database PostgreSQL yang dapat memuat dataset
 dan audit evidence lain. Mismatch nyata sekarang fail-closed dengan exit
-non-zero; live rerun setelah perubahan masih menjadi gate operator.
+non-zero; live rerun scoped setelah perubahan lulus dengan `equal=true`.
 
 Exit criterion:
 
@@ -781,8 +789,8 @@ Exit criterion:
 
 ### Fase 2 — Spatial dan performance hardening
 
-- [ ] Ganti path-pair scan dengan spatial prefilter.
-- [ ] Ganti global junction scan dengan indexed radius query.
+- [x] Ganti path-pair scan dengan spatial prefilter.
+- [x] Ganti global junction scan dengan indexed radius query.
 - [ ] Optimalkan degree, validation, dan component calculation.
 - [x] Tambahkan guardrail candidate explosion.
 - [ ] Jalankan load test 10.000 objek.

@@ -979,14 +979,35 @@ Batas checkpoint: gate ini mencakup full-regeneration runtime. Review mutation,
 active graph pointer PostgreSQL, concurrent publication lintas instance, dan
 production rollout masih pending.
 
+## Checkpoint 48 - Reconciliation status local pilot dan manual blocker
+
+Status: `complete (local pilot evidence reconciled; constraint-negative test
+manual blocker)` - 5 Agustus 2026.
+
+- Checklist pilot sekarang mencerminkan evidence migrasi `dv-pilot-parity`:
+  seluruh 12 projection count sama, primary memakai PostgreSQL, dan
+  `jsonPrimaryUsed=false`.
+- Shadow pilot scoped menghasilkan `comparisonCount=4`, `equal=true`; migration
+  lokal, index/query-plan pilot, backup/restore, dan recovery evidence sudah
+  tercatat pada checkpoint/evidence terpisah.
+- Preflight dari proses Codex tidak dapat melanjutkan live runner karena
+  `SINERGI_DATABASE_URL` dan operator authorization tidak tersedia; runner
+  berhenti pada prompt credential dan tidak menyentuh database.
+- Evidence detail:
+  `docs/migrations/LOCAL-PILOT-STATUS-RECONCILIATION-2026-08-05.md`.
+
+Batas checkpoint: foreign-key/unique negative write test live, production
+load/SLO, failover, DR retention/off-site, security, dan organizational approval
+masih memerlukan manual operator/enterprise gate.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
 regeneration/review, serta full regeneration durable pada queue lokal. Live
 PostgreSQL service recovery lokal sudah lulus;
 production failover/replica switchover, concurrency/load/SLO, backup retention/
-off-site DR, durable accuracy evaluation, production load/SLO, security, dan
-enterprise approval gates tetap terpisah.
+off-site DR, durable accuracy evaluation, production load/SLO, live constraint
+negative tests, security, dan enterprise approval gates tetap terpisah.
 Setiap checkpoint hanya boleh ditandai selesai
 setelah test, lint/build, dan regression evidence lulus; bukti live database
 harus dilaporkan terpisah dari test contract. Bukti lokal yang sudah lulus tidak
