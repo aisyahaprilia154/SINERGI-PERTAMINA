@@ -852,7 +852,9 @@ Exit criterion:
 - [ ] Backup/restore dan disaster recovery diuji.
 - [ ] Security review selesai.
 - [ ] Canary pada satu site selesai.
-- [ ] Runbook operator dan incident response tersedia.
+- [x] Draft-ready runbook operator, observability, dan incident response
+  tersedia; deployment dashboard, fault drill production, dan Operations
+  sign-off tetap pending.
 
 Exit criterion:
 

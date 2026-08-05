@@ -1172,6 +1172,23 @@ Batas checkpoint: source-data classification, centralized log shipping,
 retention/SIEM, secret scanning, dan enterprise security approval tetap
 pending.
 
+## Checkpoint 58 - Observability dan incident response runbook
+
+Status: `complete (draft-ready local handoff; production Operations gate
+pending)` - 5 Agustus 2026.
+
+- Runbook mencakup metrics scrape yang dilindungi, panel request/error/p95,
+  queue/dead-letter/worker/RSS, alert baseline, fault drill, containment, dan
+  recovery steps.
+- Threshold final sengaja tetap menjadi parameter SLO yang harus disetujui;
+  runbook melarang secret di dashboard/label dan melarang fault injection
+  production tanpa change window.
+- Evidence detail:
+  `docs/operations/OBSERVABILITY-INCIDENT-RUNBOOK-2026-08-05.md`.
+
+Batas checkpoint: dashboard deployment, centralized log shipping/retention,
+fault drill production, dan Operations/Security sign-off tetap pending.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
