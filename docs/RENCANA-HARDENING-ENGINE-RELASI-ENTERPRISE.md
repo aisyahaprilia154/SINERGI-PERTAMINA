@@ -91,6 +91,9 @@ Setelah hardening selesai, sistem harus:
   in-process incremental rebuild contract; API/worker SLO masih pending.
 - [x] Review concurrent bebas lost update pada JSON repository contract;
   PostgreSQL/multi-instance production masih pending.
+- [x] Live PostgreSQL service restart/recovery probe lulus: readiness kembali,
+  durable probe selesai, dan enqueue ulang ter-deduplicate; import/inference
+  production replay masih pending.
 - [ ] Job import dan inference bertahan setelah restart.
 - [ ] Candidate dan relation disimpan pada tabel terindeks.
 - [x] API candidate memakai pagination dan filter server-side.
@@ -691,8 +694,9 @@ Checklist:
   lintas-process durable JSON queue; replacement process PostgreSQL live juga
   memulihkan lease dan menyelesaikan job yang sama.
 - [x] Database disconnect menghasilkan retry tanpa duplicate relation pada
-  isolated PostgreSQL mutation probe; server restart/failover dan retry lintas
-  instance masih pending.
+  isolated PostgreSQL mutation probe; local PostgreSQL service recovery probe
+  juga lulus, sedangkan production failover dan retry lintas instance masih
+  pending.
 - [x] Object storage unavailable menghasilkan error yang dapat ditindaklanjuti
   pada adapter source storage saat ini.
 - [x] Dead-letter job dapat diperiksa dan di-retry.

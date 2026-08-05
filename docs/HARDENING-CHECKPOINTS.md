@@ -800,12 +800,30 @@ Status: `complete (in-process scope contract; production profiling pending)`
 Batas checkpoint: bukti ini belum mencakup profiling CPU/p95, HTTP load,
 PostgreSQL, atau worker SLO production-sized.
 
+## Checkpoint 40 - PostgreSQL live server recovery
+
+Status: `complete (local PostgreSQL service restart/recovery; production failover pending)`
+- 5 Agustus 2026.
+
+- Runner live `npm run db:postgres-server-recovery` melaporkan `result: passed`.
+- PostgreSQL service restart selesai dan readiness kembali:
+  `restartCompleted=true`, `readinessConfirmed=true`.
+- Durable probe job memiliki `finalStatus=succeeded`,
+  `finalAttemptCount=1`, dan enqueue ulang terdeteksi sebagai
+  `idempotencyDeduplicated=true`.
+- Evidence detail:
+  `docs/migrations/POSTGRES-LIVE-SERVER-RECOVERY-2026-08-05.md`.
+
+Batas checkpoint: bukti ini mencakup satu PostgreSQL service lokal, bukan
+production failover/replica switchover, retry lintas instance, production load
+atau SLO, backup/restore, dan enterprise approval.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
-regeneration/review. Live PostgreSQL restart/failover menunggu kredensial dan
-otorisasi operator; concurrency/load/SLO dan enterprise approval gates tetap
-terpisah.
+regeneration/review. Live PostgreSQL service recovery lokal sudah lulus;
+production failover/replica switchover, concurrency/load/SLO, backup/restore,
+security, dan enterprise approval gates tetap terpisah.
 Setiap checkpoint hanya boleh ditandai selesai
 setelah test, lint/build, dan regression evidence lulus; bukti live database
 harus dilaporkan terpisah dari test contract. Bukti lokal yang sudah lulus tidak
