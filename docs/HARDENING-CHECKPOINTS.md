@@ -1109,7 +1109,8 @@ Status: `complete (dependency scan; container image scan pending)` - 5 Agustus
 - Audit ulang root, backend, dan frontend masing-masing menghasilkan
   `found 0 vulnerabilities`.
 - Workflow GitHub menjalankan `npm ci` dan audit high pada setiap push/pull
-  request dengan permission read-only.
+  request dengan permission read-only; run `30984124086` pada commit
+  `eab6174` selesai `success`.
 - Evidence detail:
   `docs/migrations/DEPENDENCY-SECURITY-AUDIT-2026-08-05.md`.
 
