@@ -1154,6 +1154,24 @@ Status: `complete (local dense fail-closed guardrail; production SLO pending)` -
 Batas checkpoint: dense API/worker SLO, PostgreSQL I/O, multi-instance,
 concurrency, p95, dan production capacity tetap pending.
 
+## Checkpoint 57 - Recursive audit sanitization
+
+Status: `complete (local audit sink sanitization; production retention/shipping
+pending)` - 5 Agustus 2026.
+
+- JSON Lines dan PostgreSQL audit sink sekarang menyaring key sensitif secara
+  recursive pada nested object/array, bukan hanya top-level.
+- Circular details diberi marker bounded dan deep details dibatasi agar audit
+  tidak masuk rekursi tak berujung.
+- Targeted audit/security suite `4/4`, full backend test `184/184`, lint `98`
+  file, build `39` source file, dan `git diff --check` lulus.
+- Evidence detail:
+  `docs/migrations/AUDIT-SANITIZATION-2026-08-05.md`.
+
+Batas checkpoint: source-data classification, centralized log shipping,
+retention/SIEM, secret scanning, dan enterprise security approval tetap
+pending.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan

@@ -1,5 +1,6 @@
 import { appendFile, mkdir } from 'node:fs/promises'
 import path from 'node:path'
+import { sanitizeAuditDetails } from './audit-sanitizer.js'
 
 export class JsonLinesAuditLog {
   constructor(filePath, { clock = () => new Date() } = {}) {
@@ -37,11 +38,4 @@ function normalizeCorrelationId(value) {
   const normalized = String(value).trim()
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(normalized)) return null
   return normalized
-}
-
-function sanitizeAuditDetails(details) {
-  const blockedKeys = /token|authorization|password|secret/i
-  return Object.fromEntries(
-    Object.entries(details).filter(([key]) => !blockedKeys.test(key)),
-  )
 }
