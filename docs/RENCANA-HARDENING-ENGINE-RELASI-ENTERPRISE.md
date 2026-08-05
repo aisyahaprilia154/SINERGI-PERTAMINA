@@ -389,9 +389,12 @@ Checklist:
 - [x] Job tetap tersedia setelah API/worker restart pada durable JSON queue dan
   replacement process PostgreSQL memulihkan lease live; database disconnect dan
   production recovery tetap pending.
-- [ ] Worker yang mati tidak meninggalkan job terkunci selamanya.
-- [ ] Retry memakai exponential backoff dan maksimum percobaan.
-- [ ] Poison job masuk dead-letter queue.
+- [x] Worker yang mati tidak meninggalkan job terkunci selamanya pada durable
+  queue contract; production worker fleet tetap pending.
+- [x] Retry memakai exponential backoff dan maksimum percobaan pada durable
+  queue contract; PostgreSQL production load/retry drill tetap pending.
+- [x] Poison job masuk dead-letter queue dan dapat diulang Administrator pada
+  durable queue/API contract; alerting dan production retention tetap pending.
 - [x] Job yang sama tidak membuat artifact ganda pada idempotent durable
   regeneration contract; production worker load masih pending.
 - [x] API dapat menampilkan progress job, termasuk job

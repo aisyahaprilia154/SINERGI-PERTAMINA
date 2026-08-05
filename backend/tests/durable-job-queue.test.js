@@ -177,6 +177,75 @@ test('poison job enters dead-letter and operator retry resets the attempt state'
   }
 })
 
+test('retryable job uses exponential backoff and dead-letters after maximum attempts', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-durable-backoff-'))
+  let nowMilliseconds = Date.parse('2026-08-05T00:00:00.000Z')
+  const repository = new JsonDurableJobRepository(root, {
+    clock: () => new Date(nowMilliseconds),
+  })
+
+  try {
+    const created = await repository.create({
+      jobType: 'flaky',
+      datasetVersionId: 'dv-backoff-test',
+      inputFingerprint: 'sha256:backoff',
+      payload: {},
+      maxAttempts: 3,
+    })
+
+    const firstClaim = await repository.claimNext({
+      workerId: 'worker-flaky',
+      leaseMilliseconds: 60000,
+    })
+    assert.equal(firstClaim.attemptCount, 1)
+    const firstFailure = await repository.fail(created.jobId, 'worker-flaky', {
+      errorCode: 'temporary_failure',
+      retryable: true,
+    })
+    assert.equal(firstFailure.status, 'retry_wait')
+    assert.equal(
+      Date.parse(firstFailure.availableAt) - nowMilliseconds,
+      1000,
+    )
+    assert.equal(await repository.claimNext({ workerId: 'worker-flaky' }), null)
+
+    nowMilliseconds += 1000
+    const secondClaim = await repository.claimNext({
+      workerId: 'worker-flaky',
+      leaseMilliseconds: 60000,
+    })
+    assert.equal(secondClaim.attemptCount, 2)
+    const secondFailure = await repository.fail(created.jobId, 'worker-flaky', {
+      errorCode: 'temporary_failure',
+      retryable: true,
+    })
+    assert.equal(secondFailure.status, 'retry_wait')
+    assert.equal(
+      Date.parse(secondFailure.availableAt) - nowMilliseconds,
+      2000,
+    )
+    nowMilliseconds += 1999
+    assert.equal(await repository.claimNext({ workerId: 'worker-flaky' }), null)
+
+    nowMilliseconds += 1
+    const thirdClaim = await repository.claimNext({
+      workerId: 'worker-flaky',
+      leaseMilliseconds: 60000,
+    })
+    assert.equal(thirdClaim.attemptCount, 3)
+    const deadLetter = await repository.fail(created.jobId, 'worker-flaky', {
+      errorCode: 'temporary_failure',
+      retryable: true,
+    })
+    assert.equal(deadLetter.status, 'dead_letter')
+    assert.equal(deadLetter.attemptCount, 3)
+    assert.equal(deadLetter.errorCode, 'temporary_failure')
+    assert.equal(deadLetter.completedAt, new Date(nowMilliseconds).toISOString())
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('queued job can be cancelled before a worker claims it', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-durable-cancel-'))
   const repository = new JsonDurableJobRepository(root)
