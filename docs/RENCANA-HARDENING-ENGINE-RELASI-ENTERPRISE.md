@@ -99,7 +99,8 @@ Setelah hardening selesai, sistem harus:
 - [x] API candidate memakai pagination dan filter server-side.
 - [x] Accuracy gate berasal dari evaluation artifact, bukan angka environment;
   runtime contract selesai, tetapi artifact/evaluator production masih pending.
-- [ ] Load test 10.000 objek lulus.
+- [ ] Load test 10.000 objek lulus pada worker/API production target;
+  sparse in-process guardrail lulus pada Checkpoint 46.
 - [ ] Load test 50.000 objek lulus atau mempunyai batas kapasitas resmi.
 - [ ] Recovery, retry, timeout, dan dead-letter job telah diuji.
 - [ ] Dashboard metrik dan alert produksi tersedia.

@@ -941,14 +941,31 @@ worker fleet production, alerting/retention, dan SLO belum tertutup. Recovery
 PostgreSQL lokal tetap dirujuk pada Checkpoint 40 dan tidak diulang sebagai
 bukti baru di sini.
 
+## Checkpoint 46 - Guarded sparse benchmark 10.000 path
+
+Status: `complete (local sparse guardrail; production load/SLO pending)` -
+5 Agustus 2026.
+
+- `npm run benchmark:topology:guarded` lulus dengan exit code `0` pada Node
+  `v24.15.0`, Windows x64, 16 CPU.
+- Fixture 10.000 path selesai dalam `998,556 ms`, peak RSS `253,73 MiB`,
+  `0` candidate, `0` confirmed relation, `20.000` unresolved, dan `0`
+  validation error.
+- Budget runner `60.000 ms / 512 MiB` menghasilkan `budgetViolations: []`.
+- Evidence detail: `docs/benchmarks/TOPOLOGY-BASELINE-2026-08-05.md`.
+
+Batas checkpoint: ini hanya sparse in-process benchmark. Dense/intersection-heavy
+workload, 50.000-object stress, PostgreSQL I/O, worker/API concurrency, p95,
+dan SLO production belum selesai.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
 regeneration/review, serta full regeneration durable pada queue lokal. Live
 PostgreSQL service recovery lokal sudah lulus;
 production failover/replica switchover, concurrency/load/SLO, backup retention/
-off-site DR, durable accuracy evaluation, security, dan enterprise approval
-gates tetap terpisah.
+off-site DR, durable accuracy evaluation, production load/SLO, security, dan
+enterprise approval gates tetap terpisah.
 Setiap checkpoint hanya boleh ditandai selesai
 setelah test, lint/build, dan regression evidence lulus; bukti live database
 harus dilaporkan terpisah dari test contract. Bukti lokal yang sudah lulus tidak
