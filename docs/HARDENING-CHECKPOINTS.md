@@ -1041,6 +1041,25 @@ Batas checkpoint: dashboard, queue depth lintas worker/multi-instance, job
 duration/retry metrics, database I/O, fault-injection alert test, log shipping,
 dan production SLO tetap pending.
 
+## Checkpoint 51 - Durable job observability
+
+Status: `complete (local durable queue metrics; multi-instance production
+aggregation pending)` - 5 Agustus 2026.
+
+- Durable queue mencatat accepted job, idempotency deduplication, state
+  transition, duration, dead-letter, worker aktif, dan queue depth per job type
+  untuk status aktif.
+- Kegagalan metrics tidak menggagalkan claim, completion, retry, atau
+  dead-letter transition.
+- Regression targeted `3/3`, full backend test `182/182`, lint `96` file, build
+  `38` source file, dan `git diff --check` lulus.
+- Evidence detail:
+  `docs/migrations/DURABLE-JOB-OBSERVABILITY-2026-08-05.md`.
+
+Batas checkpoint: queue depth ini adalah snapshot repository lokal. Aggregation
+lintas worker/multi-instance, dashboard, alert routing/fault injection,
+database I/O, log shipping, dan production SLO tetap pending.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
@@ -1048,7 +1067,8 @@ regeneration/review, serta full regeneration durable pada queue lokal. Live
 PostgreSQL service recovery lokal sudah lulus;
 production failover/replica switchover, concurrency/load/SLO, backup retention/
 off-site DR, durable accuracy evaluation, production load/SLO, dashboard/alert,
-security, dan enterprise approval gates tetap terpisah.
+queue metrics multi-instance, security, dan enterprise approval gates tetap
+terpisah.
 Setiap checkpoint hanya boleh ditandai selesai
 setelah test, lint/build, dan regression evidence lulus; bukti live database
 harus dilaporkan terpisah dari test contract. Bukti lokal yang sudah lulus tidak

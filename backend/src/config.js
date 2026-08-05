@@ -281,6 +281,8 @@ export function createConfig(env = process.env, overrides = {}) {
         ?? numberFrom(env.SINERGI_JOB_LOCK_STALE_MS, 5 * 60 * 1000),
       pollMilliseconds: overrides.jobs?.pollMilliseconds
         ?? numberFrom(env.SINERGI_JOB_POLL_MS, 100),
+      metricsRefreshMilliseconds: overrides.jobs?.metricsRefreshMilliseconds
+        ?? numberFrom(env.SINERGI_JOB_METRICS_REFRESH_MS, 5000),
     },
     observability: {
       // Metrics stay disabled unless an operator explicitly enables the

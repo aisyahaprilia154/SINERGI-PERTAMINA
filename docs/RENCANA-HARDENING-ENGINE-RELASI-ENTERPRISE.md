@@ -587,6 +587,9 @@ Checklist:
 - [x] Protected `/metrics` menyediakan local HTTP request count/latency/error,
   in-flight, dan process resource metrics; endpoint fail-closed ketika tidak
   diaktifkan dan membutuhkan Administrator ketika aktif.
+- [x] Durable queue melaporkan local job transition, duration,
+  deduplication/dead-letter, worker active, dan queue depth; aggregation
+  multi-instance production tetap pending.
 - [ ] Dashboard import dan topology job tersedia.
 - [ ] Dashboard kualitas candidate tersedia.
 - [ ] Dashboard latency API/review tersedia.
