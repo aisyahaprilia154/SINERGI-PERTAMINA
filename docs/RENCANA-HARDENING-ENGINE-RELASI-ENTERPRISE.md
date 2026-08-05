@@ -712,7 +712,8 @@ Checklist:
 - [x] Benchmark mempunyai fixture dan command yang tersimpan di repository.
 - [ ] 10.000 objek sparse memenuhi SLO.
 - [ ] 10.000 objek dense memenuhi SLO atau mempunyai guardrail resmi.
-- [ ] 50.000 objek stress test tidak menyebabkan out-of-memory.
+- [x] 50.000 objek pada guarded sparse in-process stress test tidak menyebabkan
+  out-of-memory; dense dan production capacity/SLO tetap pending.
 - [ ] Candidate API p95 memenuhi target pada concurrent traffic.
 - [ ] Review API p95 memenuhi target saat worker sedang sibuk.
 - [ ] Query plan membuktikan spatial/BTREE index digunakan.

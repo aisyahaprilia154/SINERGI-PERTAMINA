@@ -1079,6 +1079,25 @@ Status: `complete (application audit context; external log shipping pending)` -
 Batas checkpoint: centralized log shipping, retention/SIEM, production SLO,
 dashboard, alert routing, dan security approval tetap pending.
 
+## Checkpoint 53 - Guarded sparse stress 50.000 path
+
+Status: `complete (local stress guardrail; dense/production capacity pending)` -
+5 Agustus 2026.
+
+- Command `npm run benchmark:topology -- --sizes=50000
+  --max-duration-ms=120000 --max-rss-mib=768` selesai dengan exit code `0`.
+- Node `v24.15.0`, Windows x64, 16 CPU; runtime `6.480,388 ms`, peak RSS
+  `548,28 MiB`, `0` validation error, dan `budgetViolations: []`.
+- Evidence menunjukkan proses menyelesaikan 50.000 path tanpa out-of-memory;
+  fixture menghasilkan `97.002` unresolved dan tidak menghasilkan candidate
+  atau confirmed relation.
+- Evidence detail:
+  `docs/benchmarks/TOPOLOGY-STRESS-50000-2026-08-05.md`.
+
+Batas checkpoint: fixture sparse in-process. Dense/intersection-heavy workload,
+API/worker concurrency, PostgreSQL I/O, multi-instance behavior, p95, dan
+production capacity/SLO tetap pending.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
