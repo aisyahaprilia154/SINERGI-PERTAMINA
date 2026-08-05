@@ -13,7 +13,10 @@ import { TokenAuthenticator } from './security/authorization.js'
 import { JsonLinesAuditLog } from './storage/audit-log.js'
 import { ImportFileStore } from './storage/file-store.js'
 import { PostgresAuditLog } from './storage/postgres-audit-log.js'
-import { TopologyService } from './topology/topology-service.js'
+import {
+  createFullTopologyRegenerationJobHandler,
+  TopologyService,
+} from './topology/topology-service.js'
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url))
 const config = createConfig(process.env, {
@@ -62,6 +65,10 @@ const jobQueue = new DurableJobQueue({
   leaseMilliseconds: config.jobs?.leaseMilliseconds,
   pollMilliseconds: config.jobs?.pollMilliseconds,
 })
+jobQueue.registerHandler(
+  'regenerate_full_topology',
+  createFullTopologyRegenerationJobHandler(topologyService),
+)
 jobQueue.registerHandler('parse_source', (
   { sourceStorageKey, extension, actorId },
   { job, updateProgress },

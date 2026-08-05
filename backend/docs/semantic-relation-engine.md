@@ -80,6 +80,12 @@ Mutasi review hanya tersedia bagi administrator. Reject, select-target, dan
 revoke mewajibkan alasan. Audit event menyimpan aktor, waktu, state sebelum dan
 sesudah, alasan, evidence, serta rule-set version.
 
+Full regeneration pada endpoint admin dikirim ke durable job
+`regenerate_full_topology` dan dipantau melalui `/api/admin/jobs/:jobId`.
+Idempotency key mencegah request duplikat membuat job atau topology run ganda;
+worker mendaftarkan handler saat startup agar job dapat dipulihkan setelah
+restart.
+
 ## Readiness dan evaluasi
 
 Dataset tetap `not_ready` bila stable ID belum valid, terdapat dangling

@@ -291,8 +291,10 @@ Checklist:
   in-process scope contract; production profiling masih pending.
 - [x] Revoke hanya menghitung ulang affected component pada in-process scope
   contract; production profiling masih pending.
-- [ ] Full regeneration berjalan sebagai durable background job.
-- [ ] Graph revision berubah tepat satu kali untuk satu transaksi sukses.
+- [x] Full regeneration berjalan sebagai durable background job pada durable
+  JSON queue; PostgreSQL multi-instance production masih pending.
+- [x] Graph revision berubah tepat satu kali untuk satu transaksi sukses pada
+  durable JSON regeneration contract; PostgreSQL multi-instance masih pending.
 - [ ] Graph lama tetap aktif sampai revision baru tervalidasi.
 
 ### 6.4 Cegah lost update
@@ -389,9 +391,12 @@ Checklist:
 - [ ] Worker yang mati tidak meninggalkan job terkunci selamanya.
 - [ ] Retry memakai exponential backoff dan maksimum percobaan.
 - [ ] Poison job masuk dead-letter queue.
-- [ ] Job yang sama tidak membuat artifact ganda.
-- [ ] API dapat menampilkan progress job.
-- [ ] Operator dapat retry atau cancel sesuai policy.
+- [x] Job yang sama tidak membuat artifact ganda pada idempotent durable
+  regeneration contract; production worker load masih pending.
+- [x] API dapat menampilkan progress job, termasuk job
+  `regenerate_full_topology`; p95 production masih pending.
+- [x] Operator dapat retry atau cancel melalui durable job API contract; policy
+  dan drill production masih pending.
 
 ### 6.6 Ikat accuracy gate pada artifact yang sah
 
@@ -774,7 +779,8 @@ Exit criterion:
 - [x] Tambahkan optimistic revision.
 - [x] Satukan state change dan audit dalam transaksi; live HTTP replay pilot
   lulus, sedangkan multi-reviewer load masih pending.
-- [ ] Implement incremental component rebuild.
+- [x] Implement incremental component rebuild; API/worker SLO dan production
+  profiling masih pending.
 - [x] Tambahkan pagination candidate.
 - [x] Jalankan repository concurrency test; API-level multi-reviewer load masih
   pending.

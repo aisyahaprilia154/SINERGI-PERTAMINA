@@ -46,7 +46,11 @@ export class TopologyService {
     this.candidateQueryIndexes = new Map()
   }
 
-  async regenerate(datasetVersionId, actorId, { reason } = {}) {
+  async regenerate(datasetVersionId, actorId, {
+    reason,
+    correlationId = null,
+    jobId = null,
+  } = {}) {
     return this.#withMutationTransaction(async ({ repository, auditLog }) => {
       const current = await repository.get(datasetVersionId)
       assertTopologyBundle(current)
@@ -63,9 +67,11 @@ export class TopologyService {
         actorId,
         datasetVersionId,
         branchId: current.datasetVersion.branchId,
+        correlationId,
         outcome: 'regenerated',
         details: {
           reason: normalizeReason(reason, false),
+          ...(jobId ? { jobId } : {}),
           classificationRepair: {
             changed: repaired.changed,
             repairedCount: repaired.repairedCount,
@@ -1438,6 +1444,53 @@ export class TopologyService {
     }
     return matches[0]
   }
+}
+
+export function createFullTopologyRegenerationJobHandler(topologyService) {
+  if (!topologyService || typeof topologyService.regenerate !== 'function') {
+    throw new TypeError('Topology service untuk durable regeneration tidak valid.')
+  }
+  return async (
+    { actorId, reason, correlationId } = {},
+    { job, updateProgress } = {},
+  ) => {
+    const datasetVersionId = String(job?.datasetVersionId ?? '').trim()
+    if (!datasetVersionId) {
+      throw new Error('Durable regeneration tidak memiliki dataset version ID.')
+    }
+    await updateProgress?.(10, 'topology_loading')
+    const regenerated = await topologyService.regenerate(datasetVersionId, actorId, {
+      reason: normalizeTopologyRegenerationReason(reason),
+      correlationId,
+      jobId: job?.jobId ?? null,
+    })
+    await updateProgress?.(90, 'topology_persisting')
+    return summarizeTopologyRegeneration(regenerated)
+  }
+}
+
+export function summarizeTopologyRegeneration(record) {
+  const runs = record?.topologyRuns ?? []
+  return {
+    datasetVersionId: record?.datasetVersion?.id ?? null,
+    topologyRuleSetVersion: record?.topologyRuleSetVersion ?? null,
+    graphRevision: record?.topologyGraph?.graphRevision ?? null,
+    topologyRunId: runs.at(-1)?.runId ?? null,
+    recordRevision: recordRevision(record),
+    summary: structuredClone(record?.topologySummary ?? null),
+    readiness: structuredClone(record?.topologyReadiness ?? null),
+  }
+}
+
+export function normalizeTopologyRegenerationReason(value) {
+  const reason = String(value ?? '').trim()
+  if (reason.length > 1000 || /[\u0000-\u001f\u007f]/.test(reason)) {
+    throw new AppError('Alasan regenerasi topology tidak valid.', {
+      code: 'invalid_topology_regeneration_reason',
+      statusCode: 400,
+    })
+  }
+  return reason || null
 }
 
 export function applyArtifacts(record, artifacts, {
