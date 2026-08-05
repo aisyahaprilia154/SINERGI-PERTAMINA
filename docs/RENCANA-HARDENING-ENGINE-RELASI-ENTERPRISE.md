@@ -97,7 +97,8 @@ Setelah hardening selesai, sistem harus:
 - [ ] Job import dan inference bertahan setelah restart.
 - [ ] Candidate dan relation disimpan pada tabel terindeks.
 - [x] API candidate memakai pagination dan filter server-side.
-- [ ] Accuracy gate berasal dari evaluation artifact, bukan angka environment.
+- [x] Accuracy gate berasal dari evaluation artifact, bukan angka environment;
+  runtime contract selesai, tetapi artifact/evaluator production masih pending.
 - [ ] Load test 10.000 objek lulus.
 - [ ] Load test 50.000 objek lulus atau mempunyai batas kapasitas resmi.
 - [ ] Recovery, retry, timeout, dan dead-letter job telah diuji.
@@ -451,10 +452,17 @@ Checklist:
 - [ ] Minimal 20 path end-to-end diverifikasi.
 - [ ] Calibration dan held-out benar-benar terpisah.
 - [ ] Gold set mempunyai checksum dan version.
-- [ ] Evaluasi terikat pada rule set dan build SHA.
-- [ ] Auto-confirm gagal tertutup jika artifact hilang, stale, atau tidak cocok.
+- [x] Evaluasi terikat pada rule set dan build SHA pada runtime gate; durable
+  evaluation artifact production masih pending.
+- [x] Auto-confirm gagal tertutup jika artifact hilang, stale, atau tidak cocok;
+  regression evidence tersimpan pada Checkpoint 44.
 - [ ] Akurasi dilaporkan per site dan network family.
 - [ ] False-positive dan false-negative dapat ditelusuri ke candidate evidence.
+
+Checkpoint 44 mengimplementasikan enforcement contract di atas. Checklist gold
+set production, durable evaluation, persistence/signature artifact, dan approval
+organisasi tetap harus selesai sebelum status enterprise atau GO auto-confirm
+diubah.
 
 ### 6.7 Pagination dan kontrak API
 
@@ -802,7 +810,8 @@ Exit criterion:
 - [ ] Integrasikan accuracy evaluator ke durable job.
 - [ ] Simpan dan approve accuracy artifact.
 - [ ] Ikat artifact ke rule set, site, family, dan build SHA.
-- [ ] Uji fail-closed untuk artifact stale/missing.
+- [x] Uji fail-closed untuk artifact stale/missing pada runtime contract;
+  production evaluation approval masih pending.
 
 Exit criterion:
 

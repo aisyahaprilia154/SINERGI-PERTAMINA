@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto'
 import { AppError } from '../errors.js'
+import {
+  evaluateAccuracyGate,
+  MINIMUM_HELD_OUT_SAMPLE_SIZE,
+} from './topology-accuracy.js'
 
 const EARTH_RADIUS_METERS = 6371008.8
 
@@ -18,6 +22,9 @@ export const DEFAULT_RELATION_ENGINE_CONFIG = Object.freeze({
   autoConfirmExplicitMetadata: true,
   requiredHeldOutPrecision: 0.99,
   requiredPathAccuracy: 0.95,
+  requiredHeldOutSampleSize: MINIMUM_HELD_OUT_SAMPLE_SIZE,
+  accuracyArtifact: null,
+  engineBuildSha: null,
   heldOutPrecision: null,
   pathAccuracy: null,
   maxCandidateCount: 50000,
@@ -55,6 +62,7 @@ export function generateRelationArtifacts(topologyInputBundle, {
   assertGenerationBudget(candidateBudget, 'linework_validation')
   const spatialIndexes = buildSpatialIndexes(nodes, paths, settings)
   assertGenerationBudget(candidateBudget, 'spatial_index')
+  const accuracyGate = evaluateTopologyAccuracyGate(bundle, nodes, paths, settings, generatedAt)
 
   const rawCandidates = [
     ...generateEndpointDeviceCandidates(paths, spatialIndexes, settings, candidateBudget),
@@ -75,7 +83,7 @@ export function generateRelationArtifacts(topologyInputBundle, {
     candidate.datasetVersionId = bundle.datasetVersion.id
   })
   reconcilePreviousDecisions(candidates, previousCandidates)
-  applyCapacityConstraints(candidates, nodes, settings, eligibilityIssues)
+  applyCapacityConstraints(candidates, nodes, settings, eligibilityIssues, accuracyGate)
 
   const confirmedRelations = buildConfirmedRelations({
     bundle,
@@ -114,6 +122,7 @@ export function generateRelationArtifacts(topologyInputBundle, {
     validation,
     settings,
     unresolved,
+    accuracyGate,
   })
 
   return {
@@ -192,6 +201,7 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
     lineworkIssues: nextLineworkIssues,
   })
   const unresolved = buildUnresolvedEndpoints(paths, normalizedCandidates)
+  const accuracyGate = evaluateTopologyAccuracyGate(bundle, nodes, paths, settings, generatedAt)
   const summary = buildSummary({
     candidates: normalizedCandidates,
     confirmedRelations,
@@ -206,6 +216,7 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
     validation,
     settings,
     unresolved,
+    accuracyGate,
   })
 
   return {
@@ -1498,7 +1509,7 @@ function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, dataset
   return candidates.sort(compareCandidate)
 }
 
-function applyCapacityConstraints(candidates, nodes, settings, issues) {
+function applyCapacityConstraints(candidates, nodes, settings, issues, accuracyGate) {
   const nodeById = new Map(nodes.map((node) => [node.id, node]))
   const recommended = candidates
     .filter((candidate) => (
@@ -1533,23 +1544,17 @@ function applyCapacityConstraints(candidates, nodes, settings, issues) {
     }
     targetCounts.set(node.id, count + 1)
   })
-  if (settings.autoConfirmSpatialInference) {
-    // The setting is intentionally ignored until accuracy gates pass.
-    const accuracyApproved = Number.isFinite(settings.heldOutPrecision)
-      && settings.heldOutPrecision >= settings.requiredHeldOutPrecision
-      && Number.isFinite(settings.pathAccuracy)
-      && settings.pathAccuracy >= settings.requiredPathAccuracy
-    if (accuracyApproved) {
-      recommended.filter(({ proposalStatus }) => proposalStatus === 'recommended')
-        .forEach((candidate) => {
-          candidate.candidateStatus = 'confirmed'
-          candidate.review = {
-            actorId: 'publication-policy',
-            reviewedAt: candidate.generatedAt,
-            reason: 'Accuracy gate dan auto-confirm policy terpenuhi.',
-          }
-        })
-    }
+  if (settings.autoConfirmSpatialInference && accuracyGate.approved) {
+    recommended.filter(({ proposalStatus }) => proposalStatus === 'recommended')
+      .forEach((candidate) => {
+        candidate.candidateStatus = 'confirmed'
+        candidate.review = {
+          actorId: 'publication-policy',
+          reviewedAt: candidate.generatedAt,
+          reason: 'Accuracy artifact approved dan auto-confirm policy terpenuhi.',
+          accuracyEvaluationId: accuracyGate.evaluationId,
+        }
+      })
   }
 }
 
@@ -2014,6 +2019,7 @@ function evaluateTopologyReadiness({
   validation,
   settings,
   unresolved,
+  accuracyGate,
 }) {
   const identities = [
     ...bundle.classifiedNodes,
@@ -2026,10 +2032,7 @@ function evaluateTopologyReadiness({
         || (identityStatus === undefined && Boolean(assetId))
     )).length / identities.length
     : 0
-  const accuracyReady = Number.isFinite(settings.heldOutPrecision)
-    && settings.heldOutPrecision >= settings.requiredHeldOutPrecision
-    && Number.isFinite(settings.pathAccuracy)
-    && settings.pathAccuracy >= settings.requiredPathAccuracy
+  const accuracyReady = accuracyGate.approved
   const blockingReasons = []
   if (stableIdentityCoverage < 1) blockingReasons.push('stable_identity_coverage')
   if (validation.summary.errors > 0) blockingReasons.push('confirmed_graph_invalid')
@@ -2040,15 +2043,51 @@ function evaluateTopologyReadiness({
   return {
     topologyReadiness: blockingReasons.length ? 'not_ready' : 'ready',
     stableIdentityCoverage,
-    heldOutPrecision: settings.heldOutPrecision,
+    heldOutPrecision: accuracyGate.metrics.heldOutPrecision,
     requiredHeldOutPrecision: settings.requiredHeldOutPrecision,
-    pathAccuracy: settings.pathAccuracy,
+    pathAccuracy: accuracyGate.metrics.pathAccuracy,
     requiredPathAccuracy: settings.requiredPathAccuracy,
+    heldOutSampleSize: accuracyGate.metrics.sampleSize,
+    requiredHeldOutSampleSize: settings.requiredHeldOutSampleSize,
+    accuracyGate: {
+      approved: accuracyGate.approved,
+      evaluationId: accuracyGate.evaluationId,
+      status: accuracyGate.status,
+      blockingReasons: accuracyGate.blockingReasons,
+    },
     unresolvedCount: unresolved.length,
     ambiguousCount: candidates.filter(({ candidateStatus }) => candidateStatus === 'ambiguous').length,
     blockingReasons,
     topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
   }
+}
+
+function topologyAccuracyScope(bundle, nodes, paths) {
+  const siteIds = [...new Set([
+    bundle.site,
+    ...nodes.map(({ siteId }) => siteId),
+    ...paths.map(({ siteId }) => siteId),
+  ].filter((value) => typeof value === 'string' && value.trim()))]
+  const networkFamilies = [...new Set([
+    ...paths.map(({ networkFamily }) => networkFamily),
+  ].filter((value) => typeof value === 'string' && value.trim()))]
+  return {
+    siteId: siteIds.length === 1 ? siteIds[0] : null,
+    networkFamilies,
+  }
+}
+
+function evaluateTopologyAccuracyGate(bundle, nodes, paths, settings, generatedAt) {
+  return evaluateAccuracyGate({
+    artifact: settings.accuracyArtifact,
+    requiredRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+    requiredEngineBuildSha: settings.engineBuildSha,
+    requiredHeldOutPrecision: settings.requiredHeldOutPrecision,
+    requiredPathAccuracy: settings.requiredPathAccuracy,
+    requiredHeldOutSampleSize: settings.requiredHeldOutSampleSize,
+    scope: topologyAccuracyScope(bundle, nodes, paths),
+    now: new Date(generatedAt),
+  })
 }
 
 function lineEndpoints(path) {
@@ -2572,6 +2611,12 @@ function normalizeConfig(config) {
       value.requiredPathAccuracy,
       DEFAULT_RELATION_ENGINE_CONFIG.requiredPathAccuracy,
     ),
+    requiredHeldOutSampleSize: positiveInteger(
+      value.requiredHeldOutSampleSize,
+      DEFAULT_RELATION_ENGINE_CONFIG.requiredHeldOutSampleSize,
+    ),
+    accuracyArtifact: normalizeAccuracyArtifact(value.accuracyArtifact),
+    engineBuildSha: readString(value.engineBuildSha) ?? null,
     heldOutPrecision: optionalUnitNumber(value.heldOutPrecision),
     pathAccuracy: optionalUnitNumber(value.pathAccuracy),
     maxCandidateCount: positiveInteger(
@@ -2583,6 +2628,12 @@ function normalizeConfig(config) {
       DEFAULT_RELATION_ENGINE_CONFIG.maxGenerationMilliseconds,
     ),
   }
+}
+
+function normalizeAccuracyArtifact(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? structuredClone(value)
+    : null
 }
 
 function linesHaveCollinearOverlap(left, right) {
