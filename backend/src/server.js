@@ -13,6 +13,7 @@ import { TokenAuthenticator } from './security/authorization.js'
 import { JsonLinesAuditLog } from './storage/audit-log.js'
 import { ImportFileStore } from './storage/file-store.js'
 import { PostgresAuditLog } from './storage/postgres-audit-log.js'
+import { MetricsRegistry } from './observability/metrics.js'
 import {
   createFullTopologyRegenerationJobHandler,
   TopologyService,
@@ -35,6 +36,7 @@ const jobRepository = repositoryRuntime.mode === 'postgres'
   : new JsonDurableJobRepository(path.join(config.dataRoot, 'jobs'), {
     staleLockMilliseconds: config.jobs?.lockStaleMilliseconds,
   })
+const metrics = new MetricsRegistry()
 const lifecycleService = new DatasetVersionLifecycleService({
   repository,
   auditLog,
@@ -94,6 +96,7 @@ const app = createApp({
   importPipeline,
   lifecycleService,
   topologyService,
+  metrics,
 })
 
 const httpServer = app.listen(config.port, config.host, () => {

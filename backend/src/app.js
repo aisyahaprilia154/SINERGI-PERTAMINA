@@ -21,6 +21,7 @@ import {
   normalizeTopologyRegenerationReason,
 } from './topology/topology-service.js'
 import { MAX_CANDIDATE_RESPONSE_BYTES } from './topology/topology-candidate-pagination.js'
+import { MetricsRegistry, normalizeHttpRoute } from './observability/metrics.js'
 
 export function createApp({
   config,
@@ -34,15 +35,57 @@ export function createApp({
   topologyService,
   basemapFetch = globalThis.fetch,
   clock = () => new Date(),
+  metrics,
 }) {
   const openFreeMapProxy = createOpenFreeMapProxy({ fetchImpl: basemapFetch })
+  const metricsRegistry = metrics ?? new MetricsRegistry({ clock })
   return http.createServer(async (request, response) => {
     setSecurityHeaders(response)
     const correlationId = resolveCorrelationId(request)
     response.setHeader('x-correlation-id', correlationId)
     const url = new URL(request.url, 'http://localhost')
+    const metricRoute = normalizeHttpRoute(url.pathname)
+    const requestStartedAt = process.hrtime.bigint()
+    let requestMetricRecorded = false
+    metricsRegistry.incrementGauge(
+      'topology_api_inflight_requests',
+      {},
+      1,
+      'Number of HTTP requests currently being handled.',
+    )
+    const recordRequestMetric = () => {
+      if (requestMetricRecorded) return
+      requestMetricRecorded = true
+      metricsRegistry.incrementGauge(
+        'topology_api_inflight_requests',
+        {},
+        -1,
+        'Number of HTTP requests currently being handled.',
+      )
+      const durationSeconds = Number(process.hrtime.bigint() - requestStartedAt) / 1e9
+      metricsRegistry.recordHttpRequest({
+        method: request.method,
+        route: metricRoute,
+        statusCode: response.writableEnded ? response.statusCode : 499,
+        durationSeconds,
+      })
+    }
+    response.once('finish', recordRequestMetric)
+    response.once('close', recordRequestMetric)
 
     try {
+      if (request.method === 'GET' && url.pathname === '/metrics') {
+        if (config?.observability?.metricsEnabled !== true) {
+          throw new AppError('Endpoint metrics belum diaktifkan.', {
+            code: 'not_found',
+            statusCode: 404,
+          })
+        }
+        requireAdministrator(request, authenticator)
+        return sendText(response, 200, await metricsRegistry.renderPrometheus(), {
+          contentType: 'text/plain; version=0.0.4; charset=utf-8',
+        })
+      }
       if (request.method === 'GET' && url.pathname === '/health') {
         return sendJson(response, 200, { status: 'ok' })
       }
@@ -1026,6 +1069,20 @@ function sendJson(response, statusCode, body, {
     'cache-control': cacheControl,
     'content-length': String(contentLength),
     ...headers,
+  })
+  response.end(serialized)
+}
+
+function sendText(response, statusCode, body, {
+  contentType = 'text/plain; charset=utf-8',
+  cacheControl = 'no-store',
+} = {}) {
+  if (response.headersSent) return
+  const serialized = String(body ?? '')
+  response.writeHead(statusCode, {
+    'content-type': contentType,
+    'cache-control': cacheControl,
+    'content-length': String(Buffer.byteLength(serialized)),
   })
   response.end(serialized)
 }

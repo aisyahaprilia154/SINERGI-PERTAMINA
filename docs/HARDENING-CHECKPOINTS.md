@@ -1021,14 +1021,34 @@ pending)` - 5 Agustus 2026.
 Batas checkpoint: ini membuktikan local live schema, bukan production migration
 rollout, multi-instance write load, atau enterprise sign-off.
 
+## Checkpoint 50 - Fail-closed HTTP observability metrics
+
+Status: `complete (local runtime metrics; production dashboard/alert gates
+pending)` - 5 Agustus 2026.
+
+- `MetricsRegistry` mengekspos HTTP request counter, duration histogram,
+  server-error counter, in-flight gauge, dan process CPU/RSS/heap/uptime.
+- `GET /metrics` default `404`; endpoint hanya aktif setelah
+  `SINERGI_METRICS_ENABLED=true` dan tetap membutuhkan Administrator.
+- Route label memakai template bounded; dataset ID, candidate ID, token, dan
+  raw request path tidak masuk ke metrics output.
+- Targeted test `2/2`, full backend test `181/181`, lint `95` file, build `38`
+  source file, dan `git diff --check` lulus.
+- Evidence detail:
+  `docs/migrations/OBSERVABILITY-METRICS-2026-08-05.md`.
+
+Batas checkpoint: dashboard, queue depth lintas worker/multi-instance, job
+duration/retry metrics, database I/O, fault-injection alert test, log shipping,
+dan production SLO tetap pending.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
 regeneration/review, serta full regeneration durable pada queue lokal. Live
 PostgreSQL service recovery lokal sudah lulus;
 production failover/replica switchover, concurrency/load/SLO, backup retention/
-off-site DR, durable accuracy evaluation, production load/SLO, security, dan
-enterprise approval gates tetap terpisah.
+off-site DR, durable accuracy evaluation, production load/SLO, dashboard/alert,
+security, dan enterprise approval gates tetap terpisah.
 Setiap checkpoint hanya boleh ditandai selesai
 setelah test, lint/build, dan regression evidence lulus; bukti live database
 harus dilaporkan terpisah dari test contract. Bukti lokal yang sudah lulus tidak
