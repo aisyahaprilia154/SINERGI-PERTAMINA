@@ -90,7 +90,7 @@ test('Administrator upload is queued, persisted as a non-active version, and exp
       versionName: 'Import UI Juli 2026',
       versionNote: 'Fixture halaman admin dataset.',
       officialSourceConfirmed: 'true',
-    })
+    }, { correlationId: 'import-worker-test' })
     assert.equal(accepted.response.status, 202)
     assert.equal(accepted.body.datasetVersion.status, 'processing')
     assert.equal(accepted.body.datasetVersion.importedBy, 'admin-1')
@@ -291,6 +291,13 @@ test('Administrator upload is queued, persisted as a non-active version, and exp
     assert.match(auditText, /dataset_version\.source_file_downloaded/)
     assert.match(auditText, /dataset_version\.source_file_download_failed/)
     assert.match(auditText, /"result":"committed"/)
+    const auditEntries = auditText.trim().split('\n').map((line) => JSON.parse(line))
+    const processingCompleted = auditEntries.find((entry) => (
+      entry.event === 'dataset_import.processing_completed'
+    ))
+    assert.equal(processingCompleted?.correlationId, 'import-worker-test')
+    assert.ok(processingCompleted?.details?.jobId)
+    assert.ok(processingCompleted?.details?.graphRevision)
   } finally {
     await fixture.close()
   }
@@ -580,24 +587,30 @@ async function createFixture() {
   }
 }
 
-async function uploadKml(origin, source, filename, fields = {}) {
+async function uploadKml(origin, source, filename, fields = {}, options = {}) {
   return uploadFile(
     origin,
     source,
     filename,
     'application/vnd.google-earth.kml+xml',
     fields,
+    options,
   )
 }
 
-async function uploadFile(origin, source, filename, mimeType, fields = {}) {
+async function uploadFile(origin, source, filename, mimeType, fields = {}, {
+  correlationId = null,
+} = {}) {
   const form = new FormData()
   form.append('branchId', 'semarang')
   Object.entries(fields).forEach(([key, value]) => form.append(key, value))
   form.append('file', new Blob([source], { type: mimeType }), filename)
   const response = await fetch(`${origin}/api/admin/imports`, {
     method: 'POST',
-    headers: { authorization: 'Bearer admin-token' },
+    headers: {
+      authorization: 'Bearer admin-token',
+      ...(correlationId ? { 'x-correlation-id': correlationId } : {}),
+    },
     body: form,
   })
   return {

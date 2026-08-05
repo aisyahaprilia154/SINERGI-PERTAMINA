@@ -62,6 +62,7 @@ test('Administrator rollback route passes branch and expected active version saf
         headers: {
           authorization: 'Bearer admin-token',
           'content-type': 'application/json',
+          'x-correlation-id': 'rollback-api-test',
         },
         body,
       },
@@ -73,7 +74,10 @@ test('Administrator rollback route passes branch and expected active version saf
       'dataset-semarang',
       'semarang',
       'admin-rollback',
-      { expectedActiveVersionId: 'version-new' },
+      {
+        expectedActiveVersionId: 'version-new',
+        correlationId: 'rollback-api-test',
+      },
     ]])
   } finally {
     if (listening) {

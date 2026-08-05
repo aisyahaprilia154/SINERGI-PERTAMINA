@@ -264,7 +264,7 @@ export function createApp({
         return sendJson(
           response,
           200,
-          await topologyService.trace(topologyTraceMatch[1], body, user.id),
+          await topologyService.trace(topologyTraceMatch[1], body, user.id, correlationId),
         )
       }
       const regenerateTopologyMatch = request.method === 'POST'
@@ -325,6 +325,7 @@ export function createApp({
             jobType: queuedJob.jobType,
             inputFingerprint,
             reason,
+            graphRevision: current.topologyGraph?.graphRevision ?? null,
           },
         })
         return sendJson(response, queuedJob.deduplicated ? 200 : 202, {
@@ -347,6 +348,7 @@ export function createApp({
         const body = await readJsonBody(request)
         const mutationInput = {
           ...body,
+          correlationId,
           ...(request.headers['idempotency-key'] !== undefined
             ? { idempotencyKey: request.headers['idempotency-key'] }
             : {}),
@@ -373,6 +375,7 @@ export function createApp({
         const body = await readJsonBody(request)
         const mutationInput = {
           ...body,
+          correlationId,
           ...(request.headers['idempotency-key'] !== undefined
             ? { idempotencyKey: request.headers['idempotency-key'] }
             : {}),
@@ -400,6 +403,7 @@ export function createApp({
         const action = candidateActionMatch[2]
         const mutationInput = {
           ...body,
+          correlationId,
           ...(request.headers['idempotency-key'] !== undefined
             ? { idempotencyKey: request.headers['idempotency-key'] }
             : {}),
@@ -422,6 +426,7 @@ export function createApp({
         const body = await readJsonBody(request)
         const mutationInput = {
           ...body,
+          correlationId,
           ...(request.headers['idempotency-key'] !== undefined
             ? { idempotencyKey: request.headers['idempotency-key'] }
             : {}),
@@ -481,6 +486,7 @@ export function createApp({
           200,
           await lifecycleService.activate(activationMatch[1], user.id, {
             expectedActiveVersionId,
+            correlationId,
           }),
         )
       }
@@ -499,7 +505,10 @@ export function createApp({
             rollbackMatch[1],
             rollbackMatch[2],
             user.id,
-            { expectedActiveVersionId: body.expectedActiveVersionId },
+            {
+              expectedActiveVersionId: body.expectedActiveVersionId,
+              correlationId,
+            },
           ),
         )
       }
@@ -511,7 +520,7 @@ export function createApp({
         return sendJson(
           response,
           200,
-          await lifecycleService.reject(rejectionMatch[1], user.id),
+          await lifecycleService.reject(rejectionMatch[1], user.id, { correlationId }),
         )
       }
       const jobMatch = request.method === 'GET'
@@ -807,12 +816,18 @@ async function handleCreateImport({
           sourceStorageKey: storedSource.storageKey,
           extension: validated.extension,
           actorId: user.id,
+          correlationId,
         },
-        handler: ({ sourceStorageKey, extension, actorId }, { updateProgress }) => importPipeline.process({
+        handler: ({ sourceStorageKey, extension, actorId, correlationId: jobCorrelationId }, {
+          job,
+          updateProgress,
+        }) => importPipeline.process({
           datasetVersionId,
           sourcePath: fileStore.resolveOriginalPath(sourceStorageKey),
           extension,
           actorId,
+          correlationId: jobCorrelationId,
+          jobId: job.jobId,
           progressReporter: updateProgress,
         }),
       })

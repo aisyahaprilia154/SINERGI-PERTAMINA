@@ -1060,6 +1060,25 @@ Batas checkpoint: queue depth ini adalah snapshot repository lokal. Aggregation
 lintas worker/multi-instance, dashboard, alert routing/fault injection,
 database I/O, log shipping, dan production SLO tetap pending.
 
+## Checkpoint 52 - Worker and service audit context
+
+Status: `complete (application audit context; external log shipping pending)` -
+5 Agustus 2026.
+
+- Correlation ID diteruskan dari HTTP ke lifecycle, topology trace/review,
+  durable import, dan durable topology regeneration.
+- Background descriptor lokal menerima `jobId`, sehingga audit worker membawa
+  dataset version, job ID, correlation ID, dan graph revision bila tersedia.
+- Topology mutation dan activation audit detail mencatat graph revision yang
+  relevan; sanitasi token/password/secret tetap aktif.
+- Full backend test `182/182`, targeted context suite `22/22`, lint `96` file,
+  build `38` source file, dan `git diff --check` lulus.
+- Evidence detail:
+  `docs/migrations/WORKER-AUDIT-CONTEXT-2026-08-05.md`.
+
+Batas checkpoint: centralized log shipping, retention/SIEM, production SLO,
+dashboard, alert routing, dan security approval tetap pending.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
@@ -1067,8 +1086,8 @@ regeneration/review, serta full regeneration durable pada queue lokal. Live
 PostgreSQL service recovery lokal sudah lulus;
 production failover/replica switchover, concurrency/load/SLO, backup retention/
 off-site DR, durable accuracy evaluation, production load/SLO, dashboard/alert,
-queue metrics multi-instance, security, dan enterprise approval gates tetap
-terpisah.
+queue metrics multi-instance, centralized log shipping, security, dan enterprise
+approval gates tetap terpisah.
 Setiap checkpoint hanya boleh ditandai selesai
 setelah test, lint/build, dan regression evidence lulus; bukti live database
 harus dilaporkan terpisah dari test contract. Bukti lokal yang sudah lulus tidak

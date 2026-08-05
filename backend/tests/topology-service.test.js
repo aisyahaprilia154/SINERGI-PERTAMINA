@@ -33,11 +33,13 @@ test('candidate review is audited, materializes confirmed graph, and can be revo
 
   const firstConfirmation = await service.confirmCandidate(candidate.candidateId, 'admin-1', {
     reason: 'Endpoint telah diverifikasi pada peta sumber.',
+    correlationId: 'topology-review-correlation',
   })
   assert.equal(firstConfirmation.candidate.candidateStatus, 'confirmed')
   assert.equal(firstConfirmation.confirmedRelations.length, 1)
   assert.equal(firstConfirmation.graph.edges.length, 0)
   assert.equal(firstConfirmation.confirmedRelations[0].relationKind, 'path_attachment')
+  assert.equal(auditLog.entries[0].correlationId, 'topology-review-correlation')
   const confirmed = await service.confirmCandidate(endCandidate.candidateId, 'admin-1', {
     reason: 'Endpoint kedua telah diverifikasi pada peta sumber.',
   })
