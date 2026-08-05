@@ -7,6 +7,7 @@ import {
   loadActiveAssetDetail,
   loadActiveDataset,
   loadDatasetProjection,
+  loadTopologyProjection,
   traceTopology,
 } from '../../services/active-dataset-service.js'
 import { renderAssetDetailDrawer } from './asset-detail-drawer.js'
@@ -163,10 +164,6 @@ export async function renderMapPage(container) {
     assetIds: validIds.assetIds,
     topologyGraph,
   })
-  const traceableAssetIds = new Set((topologyGraph.edges ?? []).flatMap((edge) => [
-    edge.sourceAssetId ?? edge.sourceNodeId,
-    edge.targetAssetId ?? edge.targetNodeId,
-  ]))
   const assetDetailCache = new Map()
   let assetDetailRequest = 0
   const state = {
@@ -616,16 +613,6 @@ export async function renderMapPage(container) {
       syncMap()
       return
     }
-    if (!traceableAssetIds.has(startId)) {
-      state.traceStatus = 'error'
-      state.traceError = 'Belum ada koneksi terkonfirmasi dari aset ini.'
-      updateUrl(historyMode)
-      updateTraceBanner()
-      renderDrawer()
-      syncMap()
-      return
-    }
-
     state.traceFromId = startId
     state.tracePath = [startId]
     state.traceStatus = 'loading'
@@ -637,6 +624,16 @@ export async function renderMapPage(container) {
     syncMap()
 
     try {
+      // The active dataset can be regenerated while this page remains open.
+      // Refresh the authoritative graph revision before tracing so a stale
+      // local projection cannot falsely report that an asset has no links.
+      const latestGraph = await loadTopologyProjection({
+        datasetVersionId: activeContext.datasetVersionId,
+        projection: 'graph',
+      })
+      state.traceGraphRevision = latestGraph.graph?.graphRevision
+        ?? latestGraph.graphRevision
+        ?? state.traceGraphRevision
       const result = await traceTopology({
         datasetVersionId: activeContext.datasetVersionId,
         sourceAssetId: startId,

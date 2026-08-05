@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import http from 'node:http'
 import path from 'node:path'
 import { AppError, asAppError } from './errors.js'
@@ -15,6 +16,8 @@ import {
   validateBranchId,
   validateUploadedFile,
 } from './import/upload-validation.js'
+import { TOPOLOGY_RULE_SET_VERSION } from './topology/semantic-relation-engine.js'
+import { MAX_CANDIDATE_RESPONSE_BYTES } from './topology/topology-candidate-pagination.js'
 
 export function createApp({
   config,
@@ -173,7 +176,8 @@ export function createApp({
         )
         : null
       if (topologyProjectionMatch) {
-        if (topologyProjectionMatch[2] === 'candidates') {
+        const isCandidateProjection = topologyProjectionMatch[2] === 'candidates'
+        if (isCandidateProjection) {
           requireAdministrator(request, authenticator)
         } else {
           authenticator.authenticate(request)
@@ -184,11 +188,29 @@ export function createApp({
           candidates: 'getCandidates',
           graph: 'getGraph',
         }[topologyProjectionMatch[2]]
-        return sendJson(
-          response,
-          200,
-          await topologyService[method](topologyProjectionMatch[1]),
+        const projection = await topologyService[method](
+          topologyProjectionMatch[1],
+          isCandidateProjection ? candidateQueryFromUrl(url.searchParams) : undefined,
         )
+        if (!isCandidateProjection) return sendJson(response, 200, projection)
+        const etag = entityTagForJson(projection)
+        if (ifNoneMatchMatches(request.headers['if-none-match'], etag)) {
+          response.writeHead(304, {
+            ETag: etag,
+            Vary: 'Authorization',
+            'cache-control': 'private, no-cache',
+          })
+          response.end()
+          return
+        }
+        return sendJson(response, 200, projection, {
+          maxBytes: MAX_CANDIDATE_RESPONSE_BYTES,
+          cacheControl: 'private, no-cache',
+          headers: {
+            ETag: etag,
+            Vary: 'Authorization',
+          },
+        })
       }
       const topologyTraceMatch = request.method === 'POST'
         ? url.pathname.match(
@@ -360,6 +382,35 @@ export function createApp({
           await lifecycleService.reject(rejectionMatch[1], user.id),
         )
       }
+      const jobMatch = request.method === 'GET'
+        ? url.pathname.match(/^\/api\/admin\/jobs\/([a-zA-Z0-9_-]+)$/)
+        : null
+      if (jobMatch) {
+        requireAdministrator(request, authenticator)
+        assertDurableJobQueue(jobQueue)
+        return sendJson(response, 200, {
+          job: await jobQueue.getPublic(jobMatch[1]),
+        })
+      }
+      const jobActionMatch = request.method === 'POST'
+        ? url.pathname.match(/^\/api\/admin\/jobs\/([a-zA-Z0-9_-]+)\/(retry|cancel)$/)
+        : null
+      if (jobActionMatch) {
+        const user = requireAdministrator(request, authenticator)
+        assertDurableJobQueue(jobQueue)
+        const job = jobActionMatch[2] === 'retry'
+          ? await jobQueue.retry(jobActionMatch[1])
+          : await jobQueue.cancel(jobActionMatch[1])
+        await auditLog.record(`durable_job.${jobActionMatch[2]}`, {
+          actorId: user.id,
+          datasetVersionId: job.datasetVersionId,
+          outcome: job.status,
+          details: { jobId: job.jobId, jobType: job.jobType },
+        })
+        return sendJson(response, 200, {
+          job: jobQueue.getPublic ? await jobQueue.getPublic(job.jobId) : job,
+        })
+      }
       const statusMatch = request.method === 'GET'
         ? url.pathname.match(/^\/api\/admin\/imports\/([a-zA-Z0-9_-]+)$/)
         : null
@@ -400,6 +451,15 @@ function assertTopologyService(topologyService) {
   if (!topologyService) {
     throw new AppError('Topology service belum dikonfigurasi.', {
       code: 'topology_service_unavailable',
+      statusCode: 503,
+    })
+  }
+}
+
+function assertDurableJobQueue(jobQueue) {
+  if (!jobQueue || typeof jobQueue.getPublic !== 'function') {
+    throw new AppError('Durable job queue belum dikonfigurasi.', {
+      code: 'durable_job_queue_unavailable',
       statusCode: 503,
     })
   }
@@ -598,12 +658,57 @@ async function handleCreateImport({
       },
     })
 
-    jobQueue.enqueue(() => importPipeline.process({
-      datasetVersionId,
-      sourcePath: storedSource.absolutePath,
-      extension: validated.extension,
-      actorId: user.id,
-    }))
+    let queuedJob
+    try {
+      queuedJob = await jobQueue.enqueue({
+        jobType: 'parse_source',
+        datasetVersionId,
+        inputFingerprint: `${upload.checksum}:${upload.size}`,
+        ruleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+        payload: {
+          sourceStorageKey: storedSource.storageKey,
+          extension: validated.extension,
+          actorId: user.id,
+        },
+        handler: ({ sourceStorageKey, extension, actorId }, { updateProgress }) => importPipeline.process({
+          datasetVersionId,
+          sourcePath: fileStore.resolveOriginalPath(sourceStorageKey),
+          extension,
+          actorId,
+          progressReporter: updateProgress,
+        }),
+      })
+    } catch (error) {
+      await repository.update(datasetVersionId, (record) => ({
+        ...record,
+        datasetVersion: {
+          ...record.datasetVersion,
+          validationStatus: 'invalid',
+          status: 'invalid',
+        },
+        processing: {
+          ...record.processing,
+          progress: 100,
+          stage: 'invalid',
+          completedAt: clock().toISOString(),
+          errorCode: error.code ?? 'durable_job_enqueue_failed',
+        },
+      })).catch(() => {})
+      throw error
+    }
+
+    if (queuedJob?.jobId) {
+      await repository.update(datasetVersionId, (record) => ({
+        ...record,
+        processing: {
+          ...record.processing,
+          jobId: queuedJob.jobId,
+          jobStatus: queuedJob.status,
+        },
+      }))
+      processingRecord.processing.jobId = queuedJob.jobId
+      processingRecord.processing.jobStatus = queuedJob.status
+    }
 
     return sendJson(response, 202, {
       datasetVersion: withoutInternalStorage(datasetVersion),
@@ -799,13 +904,55 @@ function withoutInternalStorage(datasetVersion) {
   return publicVersion
 }
 
-function sendJson(response, statusCode, body) {
+function sendJson(response, statusCode, body, {
+  cacheControl = 'no-store',
+  headers = {},
+  maxBytes,
+} = {}) {
   if (response.headersSent) return
+  const serialized = JSON.stringify(body)
+  const contentLength = Buffer.byteLength(serialized)
+  if (maxBytes !== undefined && contentLength > maxBytes) {
+    throw new AppError('Response candidate terlalu besar; kurangi limit halaman.', {
+      code: 'topology_candidate_response_too_large',
+      statusCode: 413,
+      details: {
+        maxBytes,
+        requestedBytes: contentLength,
+      },
+    })
+  }
   response.writeHead(statusCode, {
     'content-type': 'application/json; charset=utf-8',
-    'cache-control': 'no-store',
+    'cache-control': cacheControl,
+    'content-length': String(contentLength),
+    ...headers,
   })
-  response.end(JSON.stringify(body))
+  response.end(serialized)
+}
+
+function candidateQueryFromUrl(searchParams) {
+  return {
+    status: searchParams.get('status'),
+    site: searchParams.get('site'),
+    networkFamily: searchParams.get('networkFamily'),
+    minScore: searchParams.get('minScore'),
+    cursor: searchParams.get('cursor'),
+    limit: searchParams.get('limit'),
+  }
+}
+
+function entityTagForJson(body) {
+  return `"${createHash('sha256')
+    .update(JSON.stringify(body))
+    .digest('hex')
+    .slice(0, 32)}"`
+}
+
+function ifNoneMatchMatches(header, etag) {
+  const value = String(header ?? '').trim()
+  return value === '*'
+    || value.split(',').map((item) => item.trim()).includes(etag)
 }
 
 async function readJsonBody(request) {

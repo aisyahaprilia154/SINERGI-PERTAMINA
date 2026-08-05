@@ -136,6 +136,64 @@ test('classified junction enables a reviewable intersection candidate', () => {
   assert.deepEqual(intersection.sourceGeometryIds.sort(), ['geometry:FO-A', 'geometry:FO-B'])
 })
 
+test('multiple junction evidences for one path endpoint materialize as one relation', () => {
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [node('OTB-01', 'infrastructure', 'OTB Junction', [110, -7])],
+    paths: [
+      pathObject('FO-A', 'fiber_optic', 'Fiber Optic', [
+        [110, -7.001],
+        [110, -6.999],
+      ]),
+      pathObject('FO-B', 'fiber_optic', 'Fiber Optic', [
+        [109.999, -7],
+        [110.001, -7],
+      ]),
+      pathObject('FO-C', 'fiber_optic', 'Fiber Optic', [
+        [109.999, -7.001],
+        [110.001, -6.999],
+      ]),
+    ],
+  }), {
+    config: {
+      autoConfirmSpatialInference: true,
+      heldOutPrecision: 0.99,
+      pathAccuracy: 0.95,
+    },
+  })
+
+  const junctionRelations = result.confirmedRelations.filter(({ relationType }) => (
+    relationType === 'path-junction'
+  ))
+  assert.equal(junctionRelations.length, 3)
+  assert.equal(result.validation.summary.errors, 0)
+})
+
+test('tiang can be reviewed as an inline anchor on every nearby compatible path', () => {
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [node('T-021', 'infrastructure', 'Tiang', [110.00005, -7])],
+    paths: [
+      pathObject('FO-A', 'fiber_optic', 'Fiber Optic', [
+        [110, -7],
+        [110.00005, -7],
+        [110.001, -7],
+      ]),
+      pathObject('FO-B', 'fiber_optic', 'Fiber Optic', [
+        [110.00005, -7.001],
+        [110.00005, -7],
+        [110.00005, -6.999],
+      ]),
+    ],
+  }))
+
+  const inlineCandidates = result.candidates.filter(({ candidateType }) => (
+    candidateType === 'inline_device'
+  ))
+  assert.equal(inlineCandidates.length, 2)
+  assert.ok(inlineCandidates.every(({ candidateStatus, proposalStatus }) => (
+    candidateStatus === 'candidate' && proposalStatus === 'recommended'
+  )))
+})
+
 test('nearly equal endpoint-device scores become ambiguous', () => {
   const result = generateRelationArtifacts(topologyBundle({
     nodes: [
@@ -284,6 +342,50 @@ test('line endpoint labels resolve exported design-variant suffixes', () => {
   assert.equal(connection.proposalStatus, 'recommended')
 })
 
+test('line labels resolve decorated JB names and shorthand endpoint identifiers', () => {
+  const first = node('JB-001-exp', 'cctv', 'cctv', [110, -7])
+  const second = node('JB-002-exp', 'cctv', 'cctv', [110.001, -7])
+  const shorthandFirst = node('JB-004', 'cctv', 'cctv', [110.01, -7])
+  const shorthandSecond = node('JB-005', 'cctv', 'cctv', [110.011, -7])
+  ;[first, second, shorthandFirst, shorthandSecond].forEach(({ object }) => {
+    object.sourceFolderPath = '/site/JUNCTION BOX/JB Rekomendasi'
+  })
+  first.object.sourceName = 'JB-001-exp'
+  second.object.sourceName = 'JB-002-exp'
+  shorthandFirst.object.sourceName = 'JB-004'
+  shorthandSecond.object.sourceName = 'JB-005'
+
+  const decoratedPath = pathObject('FO-DECORATED', 'fiber_optic', 'Fiber Optic', [
+    [110, -7],
+    [110.001, -7],
+  ])
+  decoratedPath.object.sourceName = 'FO-JB-001_JB-002-'
+  decoratedPath.object.sourceFolderPath = '/site/KABEL/FIBER OPTIC/FO Rekomendasi'
+  const shorthandPath = pathObject('FO-SHORTHAND', 'fiber_optic', 'Fiber Optic', [
+    [110.01, -7],
+    [110.011, -7],
+  ])
+  shorthandPath.object.sourceName = 'FO-JB-004_005'
+  shorthandPath.object.sourceFolderPath = '/site/KABEL/FIBER OPTIC/FO Rekomendasi'
+
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [first, second, shorthandFirst, shorthandSecond],
+    paths: [decoratedPath, shorthandPath],
+  }))
+
+  assert.equal(result.unresolved.length, 0)
+  assert.ok(result.candidates.some(({ candidateType, targetAssetId }) => (
+    candidateType === 'line_label_connection' && targetAssetId === 'JB-002-exp'
+  )))
+  assert.ok(result.candidates.some(({ candidateType, targetAssetId }) => (
+    candidateType === 'line_label_connection' && targetAssetId === 'JB-005'
+  )))
+  assert.equal(
+    result.candidates.filter(({ candidateType }) => candidateType === 'line_label_attachment').length,
+    4,
+  )
+})
+
 test('manual explicit device relation is confirmed and can override family compatibility', () => {
   const result = generateRelationArtifacts(topologyBundle({
     nodes: [
@@ -354,6 +456,19 @@ test('duplicate and zero-length linework are diagnosed without modifying source'
   const result = generateRelationArtifacts(bundle)
   assert.ok(result.lineworkIssues.some(({ issueCode }) => issueCode === 'duplicate_linework'))
   assert.equal(result.graph.edges.length, 0)
+})
+
+test('partially overlapping linework is detected through spatially filtered path pairs', () => {
+  const left = pathObject('FO-A', 'fiber_optic', 'Fiber Optic', [
+    [110, -7],
+    [110.002, -7],
+  ])
+  const right = pathObject('FO-B', 'fiber_optic', 'Fiber Optic', [
+    [110.001, -7],
+    [110.003, -7],
+  ])
+  const result = generateRelationArtifacts(topologyBundle({ paths: [left, right] }))
+  assert.ok(result.lineworkIssues.some(({ issueCode }) => issueCode === 'overlapping_linework'))
 })
 
 function topologyBundle({

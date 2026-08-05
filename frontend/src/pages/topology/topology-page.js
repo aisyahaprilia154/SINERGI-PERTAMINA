@@ -6,6 +6,7 @@ import {
 import {
   loadActiveDataset,
   loadDatasetProjection,
+  loadAllTopologyCandidates,
   loadTopologyProjection,
   reviewTopologyCandidate,
 } from '../../services/active-dataset-service.js'
@@ -41,7 +42,7 @@ export async function renderTopologyPage(container) {
     ] = await Promise.all([
       loadTopologyProjection({ datasetVersionId, projection: 'graph' }),
       loadTopologyProjection({ datasetVersionId, projection: 'summary' }),
-      loadTopologyProjection({ datasetVersionId, projection: 'candidates' })
+      loadAllTopologyCandidates({ datasetVersionId })
         .catch(() => ({ items: [], unresolved: [], restricted: true })),
       loadDatasetProjection({ datasetVersionId, projection: 'source-features' })
         .catch(() => ({ items: [] })),

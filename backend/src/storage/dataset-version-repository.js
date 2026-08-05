@@ -284,16 +284,60 @@ export class JsonDatasetVersionRepository {
     })
   }
 
-  async update(id, updater) {
-    const current = await this.get(id)
-    const next = typeof updater === 'function'
-      ? await updater(structuredClone(current))
-      : { ...current, ...updater }
-    const target = this.#pathFor(id)
-    const temporary = `${target}.${crypto.randomUUID()}.tmp`
-    await writeFile(temporary, JSON.stringify(next, null, 2), 'utf8')
-    await rename(temporary, target)
-    return structuredClone(next)
+  async update(id, updater, { expectedRevision } = {}) {
+    assertSafeId(id)
+    return this.#withRecordLock(id, async () => {
+      const current = await this.get(id)
+      const currentRevision = normalizeRecordRevision(current.recordRevision)
+      if (expectedRevision !== undefined && currentRevision !== expectedRevision) {
+        throw staleRecordRevision(id, expectedRevision, currentRevision)
+      }
+      const next = typeof updater === 'function'
+        ? await updater(structuredClone(current))
+        : { ...current, ...updater }
+      const normalized = {
+        ...next,
+        recordRevision: currentRevision + 1,
+      }
+      const target = this.#pathFor(id)
+      const temporary = `${target}.${crypto.randomUUID()}.tmp`
+      await writeFile(temporary, JSON.stringify(normalized, null, 2), 'utf8')
+      await rename(temporary, target)
+      return structuredClone(normalized)
+    })
+  }
+
+  async #withRecordLock(id, operation) {
+    await mkdir(this.activationLockDirectory, { recursive: true })
+    const lockPath = this.#recordLockPath(id)
+    const token = crypto.randomUUID()
+    while (true) {
+      try {
+        await writeFile(lockPath, JSON.stringify({
+          token,
+          datasetVersionId: id,
+          acquiredAt: new Date().toISOString(),
+        }), {
+          encoding: 'utf8',
+          flag: 'wx',
+        })
+        break
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error
+        if (await this.#isStaleLock(lockPath)) {
+          await unlink(lockPath).catch(() => {})
+          continue
+        }
+        await delay(5)
+      }
+    }
+
+    try {
+      return await operation()
+    } finally {
+      const lock = await readJsonFile(lockPath).catch(() => null)
+      if (lock?.token === token) await unlink(lockPath).catch(() => {})
+    }
   }
 
   async #withActivationLock(datasetId, operation, staleLockRetried = false) {
@@ -374,6 +418,13 @@ export class JsonDatasetVersionRepository {
     return path.join(this.activationLockDirectory, `${datasetKey(datasetId)}.lock`)
   }
 
+  #recordLockPath(datasetVersionId) {
+    return path.join(
+      this.activationLockDirectory,
+      `record-${datasetKey(datasetVersionId)}.lock`,
+    )
+  }
+
   #pathFor(id) {
     assertSafeId(id)
     return path.join(this.rootDirectory, `${id}.json`)
@@ -423,4 +474,28 @@ function assertSafeId(id) {
       statusCode: 400,
     })
   }
+}
+
+function normalizeRecordRevision(value) {
+  const revision = Number(value)
+  return Number.isInteger(revision) && revision >= 0 ? revision : 0
+}
+
+function staleRecordRevision(datasetVersionId, expectedRevision, currentRevision) {
+  return new AppError('Dataset version berubah sejak dibaca.', {
+    code: 'dataset_version_stale_revision',
+    statusCode: 409,
+    details: {
+      datasetVersionId,
+      expectedRevision,
+      currentRevision,
+    },
+  })
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, milliseconds)
+    timer.unref?.()
+  })
 }
