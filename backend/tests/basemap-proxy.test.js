@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createApp } from '../src/app.js'
 
-test('OpenFreeMap proxy rewrites TileJSON and serves tiles and fonts from same origin', async (t) => {
+test('OpenFreeMap proxy rewrites TileJSON and serves tiles and fonts from same origin', {
+  timeout: 30_000,
+}, async (t) => {
   const calls = []
   const versionedTile = 'https://tiles.openfreemap.org/planet/'
     + '20260621_080001_pt/{z}/{x}/{y}.pbf'
@@ -75,7 +77,9 @@ test('OpenFreeMap proxy rewrites TileJSON and serves tiles and fonts from same o
   )
 })
 
-test('OpenFreeMap proxy rejects invalid tile coordinates without contacting upstream', async (t) => {
+test('OpenFreeMap proxy rejects invalid tile coordinates without contacting upstream', {
+  timeout: 30_000,
+}, async (t) => {
   let fetchCount = 0
   const app = createApp({
     basemapFetch: async () => {
@@ -96,7 +100,9 @@ test('OpenFreeMap proxy rejects invalid tile coordinates without contacting upst
   assert.equal(fetchCount, 0)
 })
 
-test('OpenFreeMap proxy retries a transient upstream response', async (t) => {
+test('OpenFreeMap proxy retries a transient upstream response', {
+  timeout: 30_000,
+}, async (t) => {
   let attempts = 0
   const app = createApp({
     basemapFetch: async (url) => {

@@ -783,6 +783,23 @@ Status: `complete (in-process incremental rebuild contract; API/worker SLO pendi
 Batas checkpoint: API/worker p95, multi-instance database, dan
 production-sized affected-component profiling masih pending.
 
+## Checkpoint 39 - Review affected-component scope
+
+Status: `complete (in-process scope contract; production profiling pending)`
+- 5 Agustus 2026.
+
+- Fixture 20 path/node terpisah menguji reject dan skip tanpa menghilangkan
+  confirmed relation di path lain.
+- Dua confirmed relation diuji; revoke relation pertama hanya menghapus
+  relation tersebut dan relation kedua tetap `confirmed`.
+- Full backend default runner: `170/170` test, lint `89` file, build `37`
+  source file, dan `git diff --check` lulus.
+- Evidence detail:
+  `docs/migrations/REVIEW-AFFECTED-COMPONENT-2026-08-05.md`.
+
+Batas checkpoint: bukti ini belum mencakup profiling CPU/p95, HTTP load,
+PostgreSQL, atau worker SLO production-sized.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
