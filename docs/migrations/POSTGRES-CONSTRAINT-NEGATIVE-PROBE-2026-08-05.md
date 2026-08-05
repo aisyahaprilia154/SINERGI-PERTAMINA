@@ -2,7 +2,7 @@
 
 ## Status
 
-`runner ready; live execution pending operator credential`.
+`passed (local PostgreSQL live constraint contract)`.
 
 ## Command
 
@@ -31,9 +31,11 @@ session. It does not print or request a password itself.
 - Lint: `93` JavaScript files pass.
 - Build: `37` source files pass.
 
-## Pending live evidence
+## Live evidence
 
-The live runner must return `result: "passed"`, both probes with
-`passed: true`, `transactionRolledBack: true`, and
-`persistentRowsCreated: 0`. Until that output exists, the plan item
-“Foreign key dan unique constraint diuji” remains unchecked.
+Credentialed terminal returned `result: "passed"` against PostgreSQL/PostGIS
+`3.6.2` with all 13 operational tables present. The runner's pass condition
+requires both probes to return the expected PostgreSQL SQLSTATE, the outer
+transaction to be rolled back, and the residue query to return
+`persistentRowsCreated: 0`. The plan item “Foreign key dan unique constraint
+diuji” is now closed for the local live schema.

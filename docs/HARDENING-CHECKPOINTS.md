@@ -1002,8 +1002,8 @@ masih memerlukan manual operator/enterprise gate.
 
 ## Checkpoint 49 - Safe live FK/unique negative probe
 
-Status: `in progress (probe implemented; live execution pending operator
-credential)` - 5 Agustus 2026.
+Status: `complete (local PostgreSQL live constraint contract; production gates
+pending)` - 5 Agustus 2026.
 
 - Runner `npm run db:constraint-negative` memeriksa schema lalu menguji
   foreign-key violation `23503` dan duplicate candidate key `23505`.
@@ -1011,11 +1011,15 @@ credential)` - 5 Agustus 2026.
   query wajib menghasilkan `persistentRowsCreated=0`.
 - Contract test `2/2`, full backend test `179/179`, lint `93` file, dan build
   `37` source file lulus.
+- Credentialed live runner mengembalikan `result: "passed"` pada PostgreSQL /
+  PostGIS `3.6.2`; seluruh 13 operational table tersedia. Pass condition
+  runner mencakup FK `23503`, unique `23505`, outer rollback, dan
+  `persistentRowsCreated=0`.
 - Evidence detail:
   `docs/migrations/POSTGRES-CONSTRAINT-NEGATIVE-PROBE-2026-08-05.md`.
 
-Batas checkpoint: output live dari terminal dengan `SINERGI_DATABASE_URL` belum
-diterima, jadi FK/unique checklist belum ditandai selesai.
+Batas checkpoint: ini membuktikan local live schema, bukan production migration
+rollout, multi-instance write load, atau enterprise sign-off.
 
 ## Status berikutnya
 
@@ -1023,8 +1027,8 @@ Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
 regeneration/review, serta full regeneration durable pada queue lokal. Live
 PostgreSQL service recovery lokal sudah lulus;
 production failover/replica switchover, concurrency/load/SLO, backup retention/
-off-site DR, durable accuracy evaluation, production load/SLO, live constraint
-negative tests, security, dan enterprise approval gates tetap terpisah.
+off-site DR, durable accuracy evaluation, production load/SLO, security, dan
+enterprise approval gates tetap terpisah.
 Setiap checkpoint hanya boleh ditandai selesai
 setelah test, lint/build, dan regression evidence lulus; bukti live database
 harus dilaporkan terpisah dari test contract. Bukti lokal yang sudah lulus tidak
