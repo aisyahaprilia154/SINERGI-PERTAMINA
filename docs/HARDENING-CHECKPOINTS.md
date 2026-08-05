@@ -1098,6 +1098,24 @@ Batas checkpoint: fixture sparse in-process. Dense/intersection-heavy workload,
 API/worker concurrency, PostgreSQL I/O, multi-instance behavior, p95, dan
 production capacity/SLO tetap pending.
 
+## Checkpoint 54 - Dependency security audit dan CI gate
+
+Status: `complete (dependency scan; container image scan pending)` - 5 Agustus
+2026.
+
+- Full `npm audit --audit-level=high` menemukan dan memperbaiki satu high
+  vulnerability frontend pada `postcss 8.5.16`; lockfile sekarang memakai
+  `postcss 8.5.25` dan `nanoid 3.3.17`.
+- Audit ulang root, backend, dan frontend masing-masing menghasilkan
+  `found 0 vulnerabilities`.
+- Workflow GitHub menjalankan `npm ci` dan audit high pada setiap push/pull
+  request dengan permission read-only.
+- Evidence detail:
+  `docs/migrations/DEPENDENCY-SECURITY-AUDIT-2026-08-05.md`.
+
+Batas checkpoint: container image scan, secret scanning, runtime security,
+SSO/RBAC, dan enterprise security approval masih pending.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan

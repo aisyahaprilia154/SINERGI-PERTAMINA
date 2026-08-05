@@ -754,7 +754,9 @@ Checklist:
 - [ ] Audit log bersifat append-only dan mempunyai retention policy.
 - [ ] Dataset/site isolation diuji.
 - [ ] Rate limit upload, review, tracing, dan regeneration diuji.
-- [ ] Dependency dan container security scan menjadi bagian CI.
+- [x] Dependency scan `npm audit --audit-level=high` menjadi bagian CI untuk
+  root, backend, dan frontend; container image scan menunggu Dockerfile/image
+  build contract yang belum tersedia.
 
 ## 11. Tahapan implementasi
 
