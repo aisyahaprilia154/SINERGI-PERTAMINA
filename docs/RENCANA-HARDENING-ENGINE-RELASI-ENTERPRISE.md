@@ -755,6 +755,11 @@ Catatan checkpoint runtime (4 Agustus 2026): mode `postgres` memilih
 `PostgresAuditLog`; live primary pilot membuktikan create/update, claim/complete,
 dan `jsonPrimaryUsed: false`. Mode `shadow` tetap tersedia untuk compare.
 
+Catatan 5 Agustus 2026: shadow pilot membandingkan `list` pada scope fixture
+`dv-pilot-parity`, bukan seluruh database PostgreSQL yang dapat memuat dataset
+dan audit evidence lain. Mismatch nyata sekarang fail-closed dengan exit
+non-zero; live rerun setelah perubahan masih menjadi gate operator.
+
 Exit criterion:
 
 - restart tidak menghilangkan job;
