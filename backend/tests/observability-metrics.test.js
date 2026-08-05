@@ -95,6 +95,52 @@ test('metrics endpoint is disabled by default and protected by Administrator aut
   }
 })
 
+test('fault-injected HTTP 500 is captured by bounded error metrics', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-metrics-fault-'))
+  const metrics = new MetricsRegistry()
+  const auditLog = new JsonLinesAuditLog(path.join(root, 'audit.jsonl'))
+  const authenticator = new TokenAuthenticator({
+    'admin-token': { id: 'admin-1', role: 'Administrator' },
+  })
+  const app = createApp({
+    config: { observability: { metricsEnabled: true } },
+    authenticator,
+    repository: {},
+    fileStore: {},
+    auditLog,
+    jobQueue: null,
+    importPipeline: {},
+    topologyService: {},
+    lifecycleService: {
+      async getActiveDataset() {
+        throw new Error('injected_metrics_fault')
+      },
+    },
+    metrics,
+  })
+  let listening = false
+
+  try {
+    await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve))
+    listening = true
+    const address = app.address()
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/api/datasets/dv-fault/active`,
+      { headers: { authorization: 'Bearer admin-token' } },
+    )
+    assert.equal(response.status, 500)
+    const output = await metrics.renderPrometheus()
+    assert.match(
+      output,
+      /topology_api_request_errors_total\{method="GET",route="\/api\/datasets\/:id\/active",status="500"\} 1/,
+    )
+    assert.match(output, /topology_api_inflight_requests 0/)
+  } finally {
+    await closeServer(app, listening)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 async function closeServer(server, listening) {
   if (!listening) return
   await new Promise((resolve, reject) => {

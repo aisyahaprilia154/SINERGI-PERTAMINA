@@ -1180,6 +1180,11 @@ pending)` - 5 Agustus 2026.
 - Runbook mencakup metrics scrape yang dilindungi, panel request/error/p95,
   queue/dead-letter/worker/RSS, alert baseline, fault drill, containment, dan
   recovery steps.
+- Regression fault injection HTTP menghasilkan status `500`, menaikkan
+  `topology_api_request_errors_total`, dan mengembalikan
+  `topology_api_inflight_requests` ke `0`; metrics suite `3/3`.
+- Full backend test `185/185`, lint `98` file, build `39` source file, dan
+  `git diff --check` lulus setelah penambahan fault drill.
 - Threshold final sengaja tetap menjadi parameter SLO yang harus disetujui;
   runbook melarang secret di dashboard/label dan melarang fault injection
   production tanpa change window.
