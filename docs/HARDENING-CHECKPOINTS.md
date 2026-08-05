@@ -837,10 +837,31 @@ Batas checkpoint: ini hanya parity backup/restore lokal dengan database restore
 sementara. Retention, off-site copy, encryption/key rotation, point-in-time
 recovery, production RTO/RPO, dan Operations/Security sign-off masih pending.
 
+## Checkpoint 42 - Durable full topology regeneration
+
+Status: `complete (durable JSON regeneration and replacement worker; PostgreSQL multi-instance pending)`
+- 5 Agustus 2026.
+
+- Endpoint regenerasi mengantrekan job durable `regenerate_full_topology` dan
+  tidak lagi menjalankan full regeneration di request normal.
+- Dua request dengan idempotency key yang sama menghasilkan satu job; worker
+  pengganti memproses job yang sudah dipersistenkan sampai `succeeded`.
+- Persisted record memiliki tepat satu `topologyRun`, satu graph revision baru,
+  dan `recordRevision=1`; audit menyimpan job ID.
+- Full backend verification: `171/171` test, lint `90` file, build `37` source
+  file, dan `git diff --check` lulus.
+- Evidence detail:
+  `docs/migrations/TOPOLOGY-FULL-REGENERATION-DURABLE-2026-08-05.md`.
+
+Batas checkpoint: bukti ini memakai durable JSON queue lokal. PostgreSQL
+multi-instance regeneration, production worker load, API p95, dan capacity/SLO
+tetap pending.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
-regeneration/review. Live PostgreSQL service recovery lokal sudah lulus;
+regeneration/review, serta full regeneration durable pada queue lokal. Live
+PostgreSQL service recovery lokal sudah lulus;
 production failover/replica switchover, concurrency/load/SLO, backup retention/
 off-site DR, security, dan enterprise approval gates tetap terpisah.
 Setiap checkpoint hanya boleh ditandai selesai

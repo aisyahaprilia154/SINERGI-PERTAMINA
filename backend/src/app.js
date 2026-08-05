@@ -16,6 +16,10 @@ import {
   validateUploadedFile,
 } from './import/upload-validation.js'
 import { TOPOLOGY_RULE_SET_VERSION } from './topology/semantic-relation-engine.js'
+import {
+  createFullTopologyRegenerationJobHandler,
+  normalizeTopologyRegenerationReason,
+} from './topology/topology-service.js'
 import { MAX_CANDIDATE_RESPONSE_BYTES } from './topology/topology-candidate-pagination.js'
 
 export function createApp({
@@ -228,17 +232,65 @@ export function createApp({
       if (regenerateTopologyMatch) {
         const user = requireAdministrator(request, authenticator)
         assertTopologyService(topologyService)
+        assertDurableJobQueue(jobQueue)
         const body = await readJsonBody(request)
-        const record = await topologyService.regenerate(
-          regenerateTopologyMatch[1],
-          user.id,
-          body,
+        const datasetVersionId = regenerateTopologyMatch[1]
+        const current = await repository.get(datasetVersionId)
+        const reason = normalizeTopologyRegenerationReason(body.reason)
+        const fingerprintInput = JSON.stringify({
+          datasetVersionId,
+          recordRevision: Number.isInteger(current.recordRevision)
+            ? current.recordRevision
+            : 0,
+          topologyGeneratedAt: current.topologyGeneratedAt ?? null,
+          reason,
+        })
+        const inputFingerprint = `sha256:${createHash('sha256')
+          .update(fingerprintInput)
+          .digest('hex')}`
+        const requestedIdempotencyKey = normalizeOptionalText(
+          request.headers['idempotency-key'],
+          256,
+          'Idempotency-Key',
         )
-        return sendJson(response, 200, {
-          datasetVersionId: record.datasetVersion.id,
-          summary: record.topologySummary,
-          readiness: record.topologyReadiness,
-          topologyRuleSetVersion: record.topologyRuleSetVersion,
+        const idempotencyKey = requestedIdempotencyKey
+          ? `regenerate:${createHash('sha256')
+            .update(`${requestedIdempotencyKey}|${inputFingerprint}`)
+            .digest('hex')}`
+          : undefined
+        const queuedJob = await jobQueue.enqueue({
+          jobType: 'regenerate_full_topology',
+          datasetVersionId,
+          inputFingerprint,
+          ruleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+          ...(idempotencyKey ? { idempotencyKey } : {}),
+          payload: {
+            actorId: user.id,
+            reason,
+            correlationId,
+          },
+          handler: createFullTopologyRegenerationJobHandler(topologyService),
+        })
+        await auditLog.record('topology.regeneration_queued', {
+          actorId: user.id,
+          datasetVersionId,
+          branchId: current.datasetVersion?.branchId ?? null,
+          correlationId,
+          outcome: queuedJob.deduplicated ? 'deduplicated' : 'queued',
+          details: {
+            jobId: queuedJob.jobId,
+            jobType: queuedJob.jobType,
+            inputFingerprint,
+            reason,
+          },
+        })
+        return sendJson(response, queuedJob.deduplicated ? 200 : 202, {
+          datasetVersionId,
+          job: await jobQueue.getPublic(queuedJob.jobId),
+          statusUrl: `/api/admin/jobs/${queuedJob.jobId}`,
+          message: queuedJob.deduplicated
+            ? 'Permintaan regenerasi yang sama sudah ada di durable queue.'
+            : 'Regenerasi topology diterima dan diproses di background.',
         })
       }
       const bulkTopologyActionMatch = request.method === 'POST'
@@ -496,7 +548,9 @@ function assertTopologyService(topologyService) {
 }
 
 function assertDurableJobQueue(jobQueue) {
-  if (!jobQueue || typeof jobQueue.getPublic !== 'function') {
+  if (!jobQueue
+    || typeof jobQueue.getPublic !== 'function'
+    || typeof jobQueue.enqueue !== 'function') {
     throw new AppError('Durable job queue belum dikonfigurasi.', {
       code: 'durable_job_queue_unavailable',
       statusCode: 503,
