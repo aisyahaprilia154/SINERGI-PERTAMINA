@@ -63,6 +63,7 @@ export class TopologyService {
         previousRelations: current.confirmedRelations,
         generatedAt,
       })
+      assertPublishableTopologyArtifacts(artifacts, datasetVersionId)
       const event = await auditLog.record('topology.candidates_regenerated', {
         actorId,
         datasetVersionId,
@@ -1556,6 +1557,34 @@ export function applyArtifacts(record, artifacts, {
       },
     },
   }
+}
+
+function assertPublishableTopologyArtifacts(artifacts, datasetVersionId) {
+  const validationIssues = [
+    ...(artifacts?.validation?.issues ?? []),
+    ...(artifacts?.eligibilityIssues ?? []),
+  ]
+  const errorIssues = validationIssues.filter(({ severity }) => severity === 'error')
+  const validationErrors = Number(artifacts?.validation?.summary?.errors ?? 0)
+  if (!errorIssues.length && validationErrors === 0 && artifacts?.validation?.status !== 'invalid') {
+    return
+  }
+  const error = new AppError(
+    'Artifact topology tidak tervalidasi; graph revision aktif dipertahankan.',
+    {
+      code: 'topology_artifact_validation_failed',
+      statusCode: 422,
+      details: {
+        datasetVersionId,
+        validationErrors,
+        issueCodes: [...new Set(errorIssues.map(({ issueCode }) => issueCode).filter(Boolean))]
+          .slice(0, 50),
+        issueCount: errorIssues.length,
+      },
+    },
+  )
+  error.retryable = false
+  throw error
 }
 
 function rebuildFromReviewedCandidates(
