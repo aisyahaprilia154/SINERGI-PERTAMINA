@@ -593,7 +593,9 @@ Checklist:
 - [ ] Dashboard import dan topology job tersedia.
 - [ ] Dashboard kualitas candidate tersedia.
 - [ ] Dashboard latency API/review tersedia.
-- [ ] Alert diuji dengan fault injection sederhana.
+- [x] Local HTTP 500 fault injection menaikkan error metric dan mengembalikan
+  in-flight gauge ke nol; alert routing dan fault injection production tetap
+  pending.
 - [x] Audit event HTTP/worker/service mempunyai correlation ID, dataset version,
   job ID, dan graph revision bila context tersebut berlaku; centralized log
   shipping dan retention production tetap pending.
