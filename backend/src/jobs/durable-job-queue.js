@@ -12,6 +12,8 @@ export class DurableJobQueue {
     leaseMilliseconds = 5 * 60 * 1000,
     pollMilliseconds = 100,
     clock = () => new Date(),
+    metrics = null,
+    metricsRefreshMilliseconds = 5000,
   } = {}) {
     if (!isDurableJobRepository(repository)) {
       throw new TypeError('DurableJobQueue membutuhkan repository durable yang lengkap.')
@@ -21,11 +23,17 @@ export class DurableJobQueue {
     this.workerId = String(workerId)
     this.leaseMilliseconds = Math.max(1000, Number(leaseMilliseconds) || 1000)
     this.pollMilliseconds = Math.max(10, Number(pollMilliseconds) || 10)
+    this.metrics = metrics
+    this.metricsRefreshMilliseconds = Math.max(
+      1000,
+      Number(metricsRefreshMilliseconds) || 5000,
+    )
     this.clock = clock
     this.handlers = new Map()
     this.running = 0
     this.started = false
     this.pumpPromise = null
+    this.metricsTimer = null
   }
 
   registerHandler(jobType, handler) {
@@ -42,12 +50,22 @@ export class DurableJobQueue {
       retryAvailableAt: this.clock().toISOString(),
     })
     this.started = true
+    await this.#refreshMetrics()
+    if (this.metrics) {
+      this.metricsTimer = setInterval(() => {
+        void this.#refreshMetrics()
+      }, this.metricsRefreshMilliseconds)
+      this.metricsTimer.unref?.()
+    }
     this.#drain()
   }
 
   async stop() {
     this.started = false
+    if (this.metricsTimer) clearInterval(this.metricsTimer)
+    this.metricsTimer = null
     if (this.pumpPromise) await this.pumpPromise
+    await this.#refreshMetrics()
   }
 
   async enqueue({
@@ -76,6 +94,11 @@ export class DurableJobQueue {
       maxAttempts,
       availableAt,
     })
+    this.#recordMetric('recordJobEnqueued', {
+      jobType,
+      deduplicated: job.deduplicated === true,
+    })
+    void this.#refreshMetrics()
     this.#drain()
     return job
   }
@@ -90,17 +113,25 @@ export class DurableJobQueue {
 
   async retry(jobId) {
     const job = await this.repository.retry(jobId)
+    this.#recordMetric('recordJobTransition', job)
+    void this.#refreshMetrics()
     this.#drain()
     return job
   }
 
   async cancel(jobId) {
-    return this.repository.requestCancel(jobId)
+    const job = await this.repository.requestCancel(jobId)
+    this.#recordMetric('recordJobTransition', job)
+    void this.#refreshMetrics()
+    return job
   }
 
   async onIdle() {
     while (true) {
-      if (this.running === 0 && !(await this.repository.hasActiveJobs())) return
+      if (this.running === 0 && !(await this.repository.hasActiveJobs())) {
+        await this.#refreshMetrics()
+        return
+      }
       await waitFor(this.pollMilliseconds)
     }
   }
@@ -121,26 +152,29 @@ export class DurableJobQueue {
         })
         if (!job) break
         this.running += 1
+        this.#recordMetric('recordJobTransition', job)
         this.#execute(job).finally(() => {
           this.running -= 1
         })
       }
 
       await waitFor(this.pollMilliseconds)
-      await this.repository.recoverExpiredLeases({
+      const recovered = await this.repository.recoverExpiredLeases({
         retryAvailableAt: this.clock().toISOString(),
       })
+      for (const job of recovered) this.#recordMetric('recordJobTransition', job)
     }
   }
 
   async #execute(job) {
     const handler = this.handlers.get(job.jobType)
     if (!handler) {
-      await this.repository.fail(job.jobId, this.workerId, {
+      const failed = await this.repository.fail(job.jobId, this.workerId, {
         errorCode: 'durable_job_handler_missing',
         errorSummary: `Handler untuk job type ${job.jobType} tidak tersedia.`,
         retryable: false,
       })
+      this.#recordMetric('recordJobTransition', failed)
       return
     }
 
@@ -156,14 +190,16 @@ export class DurableJobQueue {
         updateProgress: (progress, stage) => this.#updateProgress(job, progress, stage),
         isCancellationRequested: () => this.repository.isCancelRequested(job.jobId),
       })
-      await this.repository.complete(job.jobId, this.workerId, result)
+      const completed = await this.repository.complete(job.jobId, this.workerId, result)
+      this.#recordMetric('recordJobTransition', completed)
     } catch (error) {
       const appError = asAppError(error)
-      await this.repository.fail(job.jobId, this.workerId, {
+      const failed = await this.repository.fail(job.jobId, this.workerId, {
         errorCode: appError.code ?? 'durable_job_failed',
         errorSummary: appError.expose ? appError.message : 'Durable job gagal.',
         retryable: isRetryable(error),
       }).catch(() => {})
+      if (failed) this.#recordMetric('recordJobTransition', failed)
     } finally {
       clearInterval(renewTimer)
     }
@@ -179,6 +215,56 @@ export class DurableJobQueue {
         stage: String(stage ?? current.stage).slice(0, 128),
       }
     })
+  }
+
+  #recordMetric(method, value) {
+    if (typeof this.metrics?.[method] !== 'function') return
+    try {
+      this.metrics[method](value)
+    } catch {
+      // Observability must never change durable job correctness.
+    }
+  }
+
+  async #refreshMetrics() {
+    if (!this.metrics) return
+    try {
+      if (typeof this.metrics.setGauge === 'function') {
+        this.metrics.setGauge(
+          'topology_job_worker_active',
+          {},
+          this.running,
+          'Number of durable jobs actively handled by this worker runtime.',
+        )
+      }
+      if (typeof this.repository.list !== 'function'
+        || typeof this.metrics.replaceGaugeFamily !== 'function') return
+      const jobs = await this.repository.list()
+      const activeStatuses = ['queued', 'running', 'retry_wait']
+      const jobTypes = new Set(jobs.map((job) => String(job.jobType)))
+      const counts = new Map()
+      for (const job of jobs) {
+        if (!activeStatuses.includes(job.status)) continue
+        const key = `${job.jobType}\u001f${job.status}`
+        counts.set(key, (counts.get(key) ?? 0) + 1)
+      }
+      const samples = []
+      for (const jobType of [...jobTypes].sort()) {
+        for (const status of activeStatuses) {
+          samples.push({
+            labels: { job_type: jobType, status },
+            value: counts.get(`${jobType}\u001f${status}`) ?? 0,
+          })
+        }
+      }
+      this.metrics.replaceGaugeFamily(
+        'topology_job_queue_depth',
+        samples,
+        'Durable job queue depth by type and status in this runtime view.',
+      )
+    } catch {
+      // A metrics scrape failure must not stop the worker.
+    }
   }
 }
 

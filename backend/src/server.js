@@ -66,6 +66,8 @@ const jobQueue = new DurableJobQueue({
   concurrency: config.jobs?.concurrency ?? 1,
   leaseMilliseconds: config.jobs?.leaseMilliseconds,
   pollMilliseconds: config.jobs?.pollMilliseconds,
+  metrics,
+  metricsRefreshMilliseconds: config.jobs?.metricsRefreshMilliseconds,
 })
 jobQueue.registerHandler(
   'regenerate_full_topology',
