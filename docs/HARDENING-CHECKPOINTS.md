@@ -1117,6 +1117,24 @@ Status: `complete (dependency scan; container image scan pending)` - 5 Agustus
 Batas checkpoint: container image scan, secret scanning, runtime security,
 SSO/RBAC, dan enterprise security approval masih pending.
 
+## Checkpoint 55 - Credentialed live HTTP review replay rerun
+
+Status: `complete (local PostgreSQL HTTP concurrency evidence; production
+gates pending)` - 5 Agustus 2026.
+
+- `npm run db:http-review-replay` selesai dengan `result: passed` pada
+  PostgreSQL primary; `jsonPrimaryUsed: false`.
+- Dua review concurrent dengan snapshot yang sama menghasilkan tepat satu
+  `200` winner dan satu `409` stale conflict, satu audit event, dan satu
+  validated graph revision.
+- Fixture tetap unpublished, sehingga `activeGraphRevisionCount: 0` adalah
+  hasil fail-safe yang diharapkan, bukan kegagalan publikasi.
+- Evidence detail:
+  `docs/migrations/LIVE-HTTP-REVIEW-REPLAY-2026-08-05.md`.
+
+Batas checkpoint: multi-instance production, reviewer fleet, API p95,
+failover, dan enterprise SLO/approval tetap pending.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
