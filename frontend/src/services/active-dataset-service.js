@@ -71,6 +71,12 @@ export async function loadActiveAssetDetail({
 export async function loadTopologyProjection({
   datasetVersionId,
   projection,
+  status = null,
+  site = null,
+  networkFamily = null,
+  minScore = null,
+  cursor = null,
+  limit = null,
   token = getDefaultMapToken(),
   signal,
   apiBase = '',
@@ -79,11 +85,76 @@ export async function loadTopologyProjection({
   if (!['summary', 'graph', 'candidates'].includes(projection)) {
     throw new TypeError('Projection topology tidak valid.')
   }
+  const query = new URLSearchParams()
+  if (projection === 'candidates') {
+    setTopologyQueryValue(query, 'status', status)
+    setTopologyQueryValue(query, 'site', site)
+    setTopologyQueryValue(query, 'networkFamily', networkFamily)
+    setTopologyQueryValue(query, 'minScore', minScore)
+    setTopologyQueryValue(query, 'cursor', cursor)
+    setTopologyQueryValue(query, 'limit', limit)
+  }
+  const queryString = query.toString()
   return topologyRequest(
     `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
-      + `/topology/${projection}`,
+      + `/topology/${projection}${queryString ? `?${queryString}` : ''}`,
     { token, signal },
   )
+}
+
+export async function loadAllTopologyCandidates({
+  datasetVersionId,
+  status = null,
+  site = null,
+  networkFamily = null,
+  minScore = null,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+  limit = 500,
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
+  let cursor = null
+  let firstPage = null
+  const items = []
+  let pageCount = 0
+  do {
+    const page = await loadTopologyProjection({
+      datasetVersionId,
+      projection: 'candidates',
+      status,
+      site,
+      networkFamily,
+      minScore,
+      cursor,
+      limit,
+      token,
+      signal,
+      apiBase,
+    })
+    if (!firstPage) {
+      firstPage = page
+    } else if (page.graphRevision !== firstPage.graphRevision
+      || page.candidateRevision !== firstPage.candidateRevision) {
+      throw topologyCandidateSnapshotChanged()
+    }
+    items.push(...(page.items ?? []))
+    cursor = page.nextCursor ?? null
+    pageCount += 1
+    if (pageCount > 10000) throw new Error('Pagination candidate melebihi batas aman.')
+  } while (cursor)
+
+  return {
+    ...firstPage,
+    items,
+    nextCursor: null,
+    pageInfo: {
+      ...(firstPage?.pageInfo ?? {}),
+      limit,
+      hasNextPage: false,
+      total: items.length,
+    },
+  }
 }
 
 export async function traceTopology({
@@ -158,6 +229,8 @@ export async function reviewTopologyBulk({
   datasetVersionId,
   action,
   reason,
+  expectedGraphRevision,
+  expectedCandidateRevision,
   token = getDefaultMapToken(),
   signal,
   apiBase = '',
@@ -173,7 +246,11 @@ export async function reviewTopologyBulk({
       token,
       signal,
       method: 'POST',
-      body: { reason: String(reason ?? '').trim() || undefined },
+       body: {
+         reason: String(reason ?? '').trim() || undefined,
+         ...(expectedGraphRevision !== undefined ? { expectedGraphRevision } : {}),
+         ...(expectedCandidateRevision !== undefined ? { expectedCandidateRevision } : {}),
+       },
     },
   )
 }
@@ -185,6 +262,8 @@ export async function createTopologyRelation({
   relationType = 'connected-to',
   direction = 'undirected',
   reason,
+  expectedGraphRevision,
+  expectedCandidateRevision,
   token = getDefaultMapToken(),
   signal,
   apiBase = '',
@@ -205,6 +284,8 @@ export async function createTopologyRelation({
         relationType,
         direction,
         reason: String(reason ?? '').trim() || undefined,
+        ...(expectedGraphRevision !== undefined ? { expectedGraphRevision } : {}),
+        ...(expectedCandidateRevision !== undefined ? { expectedCandidateRevision } : {}),
       },
     },
   )
@@ -213,6 +294,8 @@ export async function createTopologyRelation({
 export async function revokeTopologyRelation({
   relationId,
   reason,
+  expectedGraphRevision,
+  expectedCandidateRevision,
   token = getDefaultMapToken(),
   signal,
   apiBase = '',
@@ -220,7 +303,16 @@ export async function revokeTopologyRelation({
   if (!relationId) throw new TypeError('relationId wajib tersedia.')
   return topologyRequest(
     `${apiBase}/api/topology/relations/${encodeURIComponent(relationId)}/revoke`,
-    { token, signal, method: 'POST', body: { reason } },
+    {
+      token,
+      signal,
+      method: 'POST',
+      body: {
+        reason,
+        ...(expectedGraphRevision !== undefined ? { expectedGraphRevision } : {}),
+        ...(expectedCandidateRevision !== undefined ? { expectedCandidateRevision } : {}),
+      },
+    },
   )
 }
 
@@ -251,4 +343,18 @@ async function topologyRequest(url, {
     throw error
   }
   return payload
+}
+
+function setTopologyQueryValue(query, key, value) {
+  if (value === undefined || value === null || value === '') return
+  query.set(key, String(value))
+}
+
+function topologyCandidateSnapshotChanged() {
+  const error = new Error(
+    'Daftar candidate berubah saat dimuat. Ulangi pemuatan agar halaman konsisten.',
+  )
+  error.code = 'topology_candidate_snapshot_changed'
+  error.status = 409
+  return error
 }

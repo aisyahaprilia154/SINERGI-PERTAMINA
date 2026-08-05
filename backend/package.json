@@ -8,11 +8,21 @@
     "start": "node src/server.js",
     "lint": "node scripts/lint.mjs",
     "test": "node --test",
-    "build": "node scripts/build.mjs"
+    "build": "node scripts/build.mjs",
+    "benchmark:topology": "node benchmarks/topology-baseline.mjs",
+    "db:migrate": "node scripts/database-migrate.mjs",
+    "db:pilot": "node scripts/database-pilot.mjs",
+    "db:shadow-pilot": "node scripts/database-shadow-pilot.mjs",
+    "db:primary-pilot": "node scripts/database-primary-pilot.mjs",
+    "db:concurrency": "node scripts/database-concurrency.mjs",
+    "db:query-plan": "node scripts/database-query-plan.mjs",
+    "db:live-verify": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-live-verification.ps1",
+    "db:backup-restore": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-backup-restore.ps1"
   },
   "dependencies": {
     "busboy": "^1.6.0",
     "fast-xml-parser": "^5.3.5",
+    "pg": "^8.16.3",
     "yauzl": "^3.2.0"
   }
 }

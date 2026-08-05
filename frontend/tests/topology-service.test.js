@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   createTopologyRelation,
+  loadAllTopologyCandidates,
   loadTopologyProjection,
   reviewTopologyBulk,
   reviewTopologyCandidate,
@@ -26,6 +27,84 @@ test('topology projection uses the versioned backend endpoint', async () => {
     })
     assert.equal(request.url, '/api/dataset-versions/dv-1/topology/graph')
     assert.equal(request.options.headers.Authorization, 'Bearer viewer')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('candidate projection serializes server-side filters and cursor parameters', async () => {
+  const originalFetch = globalThis.fetch
+  let request
+  globalThis.fetch = async (url, options) => {
+    request = { url, options }
+    return new Response(JSON.stringify({ items: [] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    await loadTopologyProjection({
+      datasetVersionId: 'dv-1',
+      projection: 'candidates',
+      status: 'ambiguous',
+      site: 'site-a',
+      networkFamily: 'fiber_optic',
+      minScore: 0.55,
+      cursor: 'opaque-cursor',
+      limit: 100,
+      token: 'admin',
+    })
+    assert.equal(
+      request.url,
+      '/api/dataset-versions/dv-1/topology/candidates'
+        + '?status=ambiguous&site=site-a&networkFamily=fiber_optic'
+        + '&minScore=0.55&cursor=opaque-cursor&limit=100',
+    )
+    assert.equal(request.options.headers.Authorization, 'Bearer admin')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('all candidate pages are combined only when their revisions remain stable', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options })
+    const page = requests.length === 1
+      ? {
+        items: [{ candidateId: 'candidate-a' }, { candidateId: 'candidate-b' }],
+        nextCursor: 'next-page',
+        graphRevision: 'topology-graph:one',
+        candidateRevision: 'topology-candidates:one',
+        pageInfo: { total: 3 },
+      }
+      : {
+        items: [{ candidateId: 'candidate-c' }],
+        nextCursor: null,
+        graphRevision: 'topology-graph:one',
+        candidateRevision: 'topology-candidates:one',
+        pageInfo: { total: 3 },
+      }
+    return new Response(JSON.stringify(page), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    const result = await loadAllTopologyCandidates({
+      datasetVersionId: 'dv-1',
+      token: 'admin',
+    })
+    assert.deepEqual(result.items.map(({ candidateId }) => candidateId), [
+      'candidate-a',
+      'candidate-b',
+      'candidate-c',
+    ])
+    assert.equal(result.pageInfo.hasNextPage, false)
+    assert.equal(result.pageInfo.total, 3)
+    assert.match(requests[0].url, /[?]limit=500$/)
+    assert.match(requests[1].url, /[?]cursor=next-page&limit=500$/)
   } finally {
     globalThis.fetch = originalFetch
   }

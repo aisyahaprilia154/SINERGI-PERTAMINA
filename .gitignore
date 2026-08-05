@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Local database dumps and generated runtime artifacts
+backend/artifacts/database-backup/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

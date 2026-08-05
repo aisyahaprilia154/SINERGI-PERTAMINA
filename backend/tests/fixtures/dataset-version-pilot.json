@@ -1,0 +1,520 @@
+{
+  "contractVersion": "1.0.0",
+  "datasetVersionId": "dv-pilot-parity",
+  "sourceChecksum": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "datasetVersion": {
+    "id": "dv-pilot-parity",
+    "datasetId": "dataset-pilot",
+    "branchId": "pilot",
+    "versionName": "pilot-parity-v1",
+    "sourceFilename": "pilot-parity.kml",
+    "sourceStorageKey": "source-files/dv-pilot-parity/source-pilot.kml",
+    "sourceSize": 1234,
+    "checksum": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "validationStatus": "valid",
+    "publicationStatus": "unpublished",
+    "status": "valid",
+    "summary": {
+      "totalAssets": 3,
+      "totalPoints": 2,
+      "totalLines": 1,
+      "totalRelations": 1,
+      "errors": 0,
+      "warnings": 0
+    }
+  },
+  "layers": [
+    {
+      "id": "layer-pilot",
+      "datasetVersionId": "dv-pilot-parity",
+      "name": "Pilot Network",
+      "category": "Infrastructure",
+      "displayOrder": 0,
+      "defaultVisible": true
+    }
+  ],
+  "assets": [
+    {
+      "id": "asset-node-a",
+      "datasetVersionId": "dv-pilot-parity",
+      "layerId": "layer-pilot",
+      "assetId": "SW-PILOT-A",
+      "canonicalAssetId": "SW-PILOT-A",
+      "name": "Pilot Switch A",
+      "category": "Infrastructure",
+      "type": "Switch",
+      "branchId": "pilot",
+      "properties": {
+        "sourceFeatureId": "feature-sw-a"
+      }
+    },
+    {
+      "id": "asset-node-b",
+      "datasetVersionId": "dv-pilot-parity",
+      "layerId": "layer-pilot",
+      "assetId": "SW-PILOT-B",
+      "canonicalAssetId": "SW-PILOT-B",
+      "name": "Pilot Switch B",
+      "category": "Infrastructure",
+      "type": "Switch",
+      "branchId": "pilot",
+      "properties": {
+        "sourceFeatureId": "feature-sw-b"
+      }
+    },
+    {
+      "id": "asset-cable",
+      "datasetVersionId": "dv-pilot-parity",
+      "layerId": "layer-pilot",
+      "assetId": "CABLE-PILOT",
+      "canonicalAssetId": "CABLE-PILOT",
+      "name": "Pilot LAN Cable",
+      "category": "LAN Cable",
+      "type": "LAN Cable",
+      "branchId": "pilot",
+      "properties": {
+        "sourceFeatureId": "feature-cable"
+      }
+    }
+  ],
+  "geometries": [
+    {
+      "id": "geometry-sw-a",
+      "assetNodeId": "asset-node-a",
+      "sourceGeometryId": "geometry-sw-a",
+      "sourceFeatureId": "feature-sw-a",
+      "geometryType": "point",
+      "coordinates": [110, -7]
+    },
+    {
+      "id": "geometry-sw-b",
+      "assetNodeId": "asset-node-b",
+      "sourceGeometryId": "geometry-sw-b",
+      "sourceFeatureId": "feature-sw-b",
+      "geometryType": "point",
+      "coordinates": [110.001, -7]
+    },
+    {
+      "id": "geometry-cable",
+      "assetNodeId": "asset-cable",
+      "sourceGeometryId": "geometry-cable",
+      "sourceFeatureId": "feature-cable",
+      "geometryType": "line_string",
+      "coordinates": [[110, -7], [110.001, -7]]
+    }
+  ],
+  "relations": [
+    {
+      "id": "relation-pilot-1",
+      "datasetVersionId": "dv-pilot-parity",
+      "sourceAssetId": "SW-PILOT-A",
+      "targetAssetId": "SW-PILOT-B",
+      "relationType": "connected-to",
+      "relationStatus": "confirmed",
+      "verificationStatus": "confirmed",
+      "relationSource": "explicit_kml_metadata"
+    }
+  ],
+  "issues": [],
+  "validation": {
+    "schemaVersion": "1.0.0",
+    "status": "valid",
+    "canActivate": true,
+    "summary": {
+      "total": 0,
+      "errors": 0,
+      "warnings": 0,
+      "information": 0,
+      "blocking": 0
+    },
+    "integrity": {
+      "datasetVersionId": "dv-pilot-parity",
+      "branchId": "pilot",
+      "activeVersionUnchanged": true,
+      "userVisible": false,
+      "publicationStatus": "unpublished"
+    }
+  },
+  "processing": {
+    "progress": 100,
+    "stage": "valid",
+    "completedAt": "2026-08-04T03:00:00.000Z"
+  },
+  "sourceFeatures": [
+    {
+      "sourceFeatureId": "feature-sw-a",
+      "datasetVersionId": "dv-pilot-parity",
+      "sourceFeatureKey": "pilot|switch-a",
+      "sourceElementType": "Placemark",
+      "sourceFolderPath": "/Pilot/Switches",
+      "sourceName": "Pilot Switch A",
+      "visibility": true,
+      "sourceFingerprint": "fingerprint-feature-sw-a",
+      "rawProperties": {}
+    },
+    {
+      "sourceFeatureId": "feature-sw-b",
+      "datasetVersionId": "dv-pilot-parity",
+      "sourceFeatureKey": "pilot|switch-b",
+      "sourceElementType": "Placemark",
+      "sourceFolderPath": "/Pilot/Switches",
+      "sourceName": "Pilot Switch B",
+      "visibility": true,
+      "sourceFingerprint": "fingerprint-feature-sw-b",
+      "rawProperties": {}
+    },
+    {
+      "sourceFeatureId": "feature-cable",
+      "datasetVersionId": "dv-pilot-parity",
+      "sourceFeatureKey": "pilot|cable",
+      "sourceElementType": "Placemark",
+      "sourceFolderPath": "/Pilot/LAN",
+      "sourceName": "Pilot LAN Cable",
+      "visibility": true,
+      "sourceFingerprint": "fingerprint-feature-cable",
+      "rawProperties": {}
+    }
+  ],
+  "sourceGeometries": [
+    {
+      "geometryId": "geometry-sw-a",
+      "datasetVersionId": "dv-pilot-parity",
+      "sourceFeatureId": "feature-sw-a",
+      "geometryPartIdentity": "root",
+      "geometryType": "Point",
+      "coordinates": [110, -7],
+      "sourceCoordinateText": "110,-7",
+      "sourceVertexOrderPreserved": true,
+      "valid": true,
+      "geometryFingerprint": "fingerprint-geometry-sw-a"
+    },
+    {
+      "geometryId": "geometry-sw-b",
+      "datasetVersionId": "dv-pilot-parity",
+      "sourceFeatureId": "feature-sw-b",
+      "geometryPartIdentity": "root",
+      "geometryType": "Point",
+      "coordinates": [110.001, -7],
+      "sourceCoordinateText": "110.001,-7",
+      "sourceVertexOrderPreserved": true,
+      "valid": true,
+      "geometryFingerprint": "fingerprint-geometry-sw-b"
+    },
+    {
+      "geometryId": "geometry-cable",
+      "datasetVersionId": "dv-pilot-parity",
+      "sourceFeatureId": "feature-cable",
+      "geometryPartIdentity": "root",
+      "geometryType": "LineString",
+      "coordinates": [[110, -7], [110.001, -7]],
+      "sourceCoordinateText": "110,-7 110.001,-7",
+      "sourceVertexOrderPreserved": true,
+      "valid": true,
+      "geometryFingerprint": "fingerprint-geometry-cable"
+    }
+  ],
+  "sourceMetadataEntries": [
+    {
+      "metadataEntryId": "metadata-pilot-1",
+      "datasetVersionId": "dv-pilot-parity",
+      "sourceFeatureId": "feature-sw-a",
+      "sourceKey": "connected_to",
+      "sourceValue": "SW-PILOT-B",
+      "sourceElement": "Data",
+      "semanticField": "connectedTo",
+      "normalizedValue": "SW-PILOT-B"
+    }
+  ],
+  "sourceStyles": {
+    "styles": [],
+    "styleMaps": []
+  },
+  "sourceOverlays": [],
+  "sourceResources": [],
+  "classifiedObjects": [
+    {
+      "classifiedObjectId": "classified-sw-a",
+      "datasetVersionId": "dv-pilot-parity",
+      "sourceFeatureId": "feature-sw-a",
+      "assetId": "SW-PILOT-A",
+      "canonicalAssetId": "SW-PILOT-A",
+      "stableAssetId": "SW-PILOT-A",
+      "siteId": "site-pilot",
+      "objectRole": "device_node",
+      "networkFamily": "infrastructure",
+      "assetType": "Switch",
+      "category": "Infrastructure",
+      "classificationStatus": "classified",
+      "classificationScore": 1,
+      "classificationEvidence": [],
+      "geometryIds": ["geometry-sw-a"]
+    },
+    {
+      "classifiedObjectId": "classified-sw-b",
+      "datasetVersionId": "dv-pilot-parity",
+      "sourceFeatureId": "feature-sw-b",
+      "assetId": "SW-PILOT-B",
+      "canonicalAssetId": "SW-PILOT-B",
+      "stableAssetId": "SW-PILOT-B",
+      "siteId": "site-pilot",
+      "objectRole": "device_node",
+      "networkFamily": "infrastructure",
+      "assetType": "Switch",
+      "category": "Infrastructure",
+      "classificationStatus": "classified",
+      "classificationScore": 1,
+      "classificationEvidence": [],
+      "geometryIds": ["geometry-sw-b"]
+    },
+    {
+      "classifiedObjectId": "classified-cable",
+      "datasetVersionId": "dv-pilot-parity",
+      "sourceFeatureId": "feature-cable",
+      "assetId": "CABLE-PILOT",
+      "canonicalAssetId": "CABLE-PILOT",
+      "stableAssetId": "CABLE-PILOT",
+      "siteId": "site-pilot",
+      "objectRole": "cable_path",
+      "networkFamily": "lan",
+      "assetType": "LAN Cable",
+      "category": "LAN Cable",
+      "classificationStatus": "classified",
+      "classificationScore": 1,
+      "classificationEvidence": [],
+      "geometryIds": ["geometry-cable"]
+    }
+  ],
+  "assetIdentityMap": {
+    "version": "canonical-asset-identity/1.0.0",
+    "items": [
+      {
+        "sourceFeatureId": "feature-sw-a",
+        "canonicalAssetId": "SW-PILOT-A",
+        "stableAssetId": "SW-PILOT-A",
+        "onboardingId": "pilot:sw-a",
+        "legacyId": "SW-PILOT-A",
+        "identityStatus": "stable",
+        "aliases": {}
+      },
+      {
+        "sourceFeatureId": "feature-sw-b",
+        "canonicalAssetId": "SW-PILOT-B",
+        "stableAssetId": "SW-PILOT-B",
+        "onboardingId": "pilot:sw-b",
+        "legacyId": "SW-PILOT-B",
+        "identityStatus": "stable",
+        "aliases": {}
+      },
+      {
+        "sourceFeatureId": "feature-cable",
+        "canonicalAssetId": "CABLE-PILOT",
+        "stableAssetId": "CABLE-PILOT",
+        "onboardingId": "pilot:cable",
+        "legacyId": "CABLE-PILOT",
+        "identityStatus": "stable",
+        "aliases": {}
+      }
+    ]
+  },
+  "topologyInputBundle": {
+    "datasetVersion": {
+      "id": "dv-pilot-parity",
+      "sourceChecksum": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "site": "site-pilot",
+    "classifiedNodes": [
+      {
+        "assetId": "SW-PILOT-A",
+        "sourceFeatureId": "feature-sw-a",
+        "siteId": "site-pilot",
+        "objectRole": "device_node",
+        "networkFamily": "infrastructure",
+        "geometryIds": ["geometry-sw-a"]
+      },
+      {
+        "assetId": "SW-PILOT-B",
+        "sourceFeatureId": "feature-sw-b",
+        "siteId": "site-pilot",
+        "objectRole": "device_node",
+        "networkFamily": "infrastructure",
+        "geometryIds": ["geometry-sw-b"]
+      }
+    ],
+    "classifiedPaths": [
+      {
+        "assetId": "CABLE-PILOT",
+        "sourceFeatureId": "feature-cable",
+        "siteId": "site-pilot",
+        "objectRole": "cable_path",
+        "networkFamily": "lan",
+        "geometryIds": ["geometry-cable"]
+      }
+    ],
+    "geometries": [
+      {
+        "geometryId": "geometry-sw-a",
+        "datasetVersionId": "dv-pilot-parity",
+        "sourceFeatureId": "feature-sw-a",
+        "geometryType": "Point",
+        "coordinates": [110, -7],
+        "valid": true
+      },
+      {
+        "geometryId": "geometry-sw-b",
+        "datasetVersionId": "dv-pilot-parity",
+        "sourceFeatureId": "feature-sw-b",
+        "geometryType": "Point",
+        "coordinates": [110.001, -7],
+        "valid": true
+      },
+      {
+        "geometryId": "geometry-cable",
+        "datasetVersionId": "dv-pilot-parity",
+        "sourceFeatureId": "feature-cable",
+        "geometryType": "LineString",
+        "coordinates": [[110, -7], [110.001, -7]],
+        "valid": true
+      }
+    ],
+    "explicitRelations": [
+      {
+        "explicitRelationEvidenceId": "explicit-pilot-1",
+        "datasetVersionId": "dv-pilot-parity",
+        "sourceReference": "SW-PILOT-A",
+        "targetReference": "SW-PILOT-B",
+        "relationType": "connected-to",
+        "direction": "undirected"
+      }
+    ],
+    "semanticRuleSetVersion": "semantic-classifier/1.0.0",
+    "topologyRuleSetVersion": "semantic-relation-engine/1.0.0"
+  },
+  "topologyCandidates": [
+    {
+      "candidateId": "candidate:pilot-explicit-1",
+      "datasetVersionId": "dv-pilot-parity",
+      "candidateType": "explicit_metadata",
+      "sourceEndpointId": "explicit:pilot-1",
+      "targetAssetId": "SW-PILOT-B",
+      "siteId": "site-pilot",
+      "networkFamily": "infrastructure",
+      "candidateStatus": "confirmed",
+      "proposalStatus": "confirmed_by_explicit_policy",
+      "score": 1,
+      "scoreMargin": 1,
+      "evidence": [],
+      "revision": 0
+    }
+  ],
+  "confirmedRelations": [
+    {
+      "relationId": "relation-pilot-1",
+      "datasetVersionId": "dv-pilot-parity",
+      "candidateId": "candidate:pilot-explicit-1",
+      "sourceAssetId": "SW-PILOT-A",
+      "targetAssetId": "SW-PILOT-B",
+      "relationType": "connected-to",
+      "relationKind": "device_edge",
+      "direction": "undirected",
+      "provenance": "explicit_kml_metadata",
+      "verificationStatus": "confirmed",
+      "verifiedBy": "explicit-metadata-policy",
+      "verifiedAt": "2026-08-04T03:00:00.000Z",
+      "evidence": []
+    }
+  ],
+  "topologyGraph": {
+    "datasetVersionId": "dv-pilot-parity",
+    "graphRevision": "topology-graph:pilot-parity-v1",
+    "nodes": [
+      {
+        "id": "SW-PILOT-A",
+        "assetId": "SW-PILOT-A",
+        "siteId": "site-pilot",
+        "networkFamily": "infrastructure",
+        "sourceGeometryId": "geometry-sw-a"
+      },
+      {
+        "id": "SW-PILOT-B",
+        "assetId": "SW-PILOT-B",
+        "siteId": "site-pilot",
+        "networkFamily": "infrastructure",
+        "sourceGeometryId": "geometry-sw-b"
+      }
+    ],
+    "edges": [
+      {
+        "id": "topology-edge:pilot-1",
+        "relationId": "relation-pilot-1",
+        "sourceAssetId": "SW-PILOT-A",
+        "targetAssetId": "SW-PILOT-B",
+        "sourceNodeId": "SW-PILOT-A",
+        "targetNodeId": "SW-PILOT-B",
+        "verificationStatus": "confirmed",
+        "relationStatus": "confirmed",
+        "sourceGeometryIds": ["geometry-cable"],
+        "sourceRelationIds": ["relation-pilot-1"]
+      }
+    ],
+    "components": [
+      {
+        "componentId": "component:1",
+        "nodeIds": ["SW-PILOT-A", "SW-PILOT-B"],
+        "edgeIds": ["topology-edge:pilot-1"]
+      }
+    ],
+    "degreeByNode": {
+      "SW-PILOT-A": 1,
+      "SW-PILOT-B": 1
+    },
+    "isolatedNodeIds": []
+  },
+  "topologyValidation": {
+    "status": "valid",
+    "summary": {
+      "errors": 0,
+      "warnings": 0
+    },
+    "issues": []
+  },
+  "topologyUnresolved": [],
+  "topologyEligibilityIssues": [],
+  "topologyLineworkIssues": [],
+  "topologySummary": {
+    "candidateCount": 0,
+    "confirmedEdgeCount": 1,
+    "confirmedRelationCount": 1,
+    "ambiguousCount": 0,
+    "rejectedCount": 0,
+    "revokedCount": 0,
+    "unresolvedCount": 0,
+    "componentCount": 1,
+    "isolatedNodeCount": 0
+  },
+  "topologyReadiness": {
+    "topologyReadiness": "not_ready",
+    "blockingReasons": ["held_out_accuracy_not_proven"]
+  },
+  "topologyRuleSetVersion": "semantic-relation-engine/1.0.0",
+  "topologyGeneratedAt": "2026-08-04T03:00:00.000Z",
+  "topologyCandidateHistory": [],
+  "topologyRelationHistory": [],
+  "topologyRuns": [],
+  "parserCoverage": {
+    "sourceFeatureCount": 3,
+    "sourceGeometryCount": 3,
+    "classifiedObjectCount": 3
+  },
+  "readiness": {
+    "mapReadiness": "ready",
+    "inventoryReadiness": "ready",
+    "topologyReadiness": "not_ready",
+    "publicationStatus": "unpublished"
+  },
+  "parserVersions": {
+    "sourceChecksum": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "parserVersion": "evidence-preserving-parser/1.0.0",
+    "normalizerVersion": "canonical-normalizer/1.0.0",
+    "classificationRuleSetVersion": "semantic-classifier/1.0.0"
+  }
+}

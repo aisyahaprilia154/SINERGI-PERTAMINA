@@ -139,6 +139,14 @@ export const DEFAULT_RELATION_MAPPINGS = Object.freeze([
 
 export function createConfig(env = process.env, overrides = {}) {
   const dataRoot = path.resolve(overrides.dataRoot ?? env.SINERGI_DATA_ROOT ?? '.data')
+  const databaseUrl = overrides.database?.databaseUrl
+    ?? env.SINERGI_DATABASE_URL
+    ?? null
+  const storageMode = normalizeStorageMode(
+    overrides.storageMode
+      ?? env.SINERGI_STORAGE_MODE
+      ?? (databaseUrl ? 'postgres' : 'json'),
+  )
   const allowedBranchIds = overrides.allowedBranchIds
     ?? splitList(env.SINERGI_BRANCH_IDS)
   const datasetIdsByBranch = overrides.datasetIdsByBranch
@@ -150,6 +158,23 @@ export function createConfig(env = process.env, overrides = {}) {
     port: numberFrom(env.SINERGI_PORT, overrides.port ?? 5000),
     host: overrides.host ?? env.SINERGI_HOST ?? '127.0.0.1',
     dataRoot,
+    storageMode,
+    database: {
+      databaseUrl,
+      shadowDatabaseUrl: overrides.database?.shadowDatabaseUrl
+        ?? env.SINERGI_SHADOW_DATABASE_URL
+        ?? null,
+      poolMax: overrides.database?.poolMax
+        ?? numberFrom(env.SINERGI_DATABASE_POOL_MAX, 10),
+      idleTimeoutMilliseconds: overrides.database?.idleTimeoutMilliseconds
+        ?? numberFrom(env.SINERGI_DATABASE_IDLE_TIMEOUT_MS, 30_000),
+      connectionTimeoutMilliseconds: overrides.database?.connectionTimeoutMilliseconds
+        ?? numberFrom(env.SINERGI_DATABASE_CONNECTION_TIMEOUT_MS, 5_000),
+      ssl: overrides.database?.ssl
+        ?? booleanFrom(env.SINERGI_DATABASE_SSL, false),
+      shadowAwaitComparison: overrides.database?.shadowAwaitComparison
+        ?? booleanFrom(env.SINERGI_SHADOW_AWAIT_COMPARISON, false),
+    },
     allowedBranchIds,
     datasetIdsByBranch,
     authTokens,
@@ -232,6 +257,14 @@ export function createConfig(env = process.env, overrides = {}) {
       requiredMetadataFields: overrides.validation?.requiredMetadataFields
         ?? splitList(env.SINERGI_REQUIRED_METADATA_FIELDS),
     },
+    jobs: {
+      concurrency: overrides.jobs?.concurrency
+        ?? numberFrom(env.SINERGI_JOB_CONCURRENCY, 1),
+      leaseMilliseconds: overrides.jobs?.leaseMilliseconds
+        ?? numberFrom(env.SINERGI_JOB_LEASE_MS, 5 * 60 * 1000),
+      pollMilliseconds: overrides.jobs?.pollMilliseconds
+        ?? numberFrom(env.SINERGI_JOB_POLL_MS, 100),
+    },
   }
 }
 
@@ -239,6 +272,14 @@ function normalizeSourceIdentityFallback(value) {
   return String(value ?? 'folder-path-name').trim().toLowerCase() === 'folder-path-name'
     ? 'folder-path-name'
     : 'none'
+}
+
+function normalizeStorageMode(value) {
+  const normalized = String(value ?? 'json').trim().toLowerCase()
+  if (normalized === 'json' || normalized === 'shadow' || normalized === 'postgres') {
+    return normalized
+  }
+  throw new TypeError('SINERGI_STORAGE_MODE harus berupa json, shadow, atau postgres.')
 }
 
 function splitList(value) {
