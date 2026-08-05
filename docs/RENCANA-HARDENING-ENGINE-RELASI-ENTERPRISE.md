@@ -657,9 +657,12 @@ test report, benchmark report, atau audit record.
 - [x] Trace hanya memakai confirmed graph.
 - [x] PostgreSQL transaction mencakup review, relation, revision, dan audit;
   live production-sized HTTP replay masih pending.
-- [ ] Object storage, database, API, dan worker diuji end-to-end.
+- [x] Local object-storage adapter, database, API, dan worker diuji end-to-end;
+  provider object storage production dan multi-instance tetap pending.
 - [x] Pagination candidate diuji melintasi beberapa halaman.
-- [ ] Aktivasi dataset tidak menampilkan graph setengah jadi.
+- [x] Lifecycle contract membuktikan active pointer lama tetap terlihat selama
+  transaksi dan rollback sebelum pointer commit tidak menerbitkan graph
+  setengah jadi; concurrent PostgreSQL publication production tetap pending.
 - [x] Rollback rule set mengaktifkan kembali graph revision/pointer dataset
   yang benar pada lifecycle contract.
 
@@ -721,7 +724,8 @@ Checklist:
   out-of-memory; dense dan production capacity/SLO tetap pending.
 - [ ] Candidate API p95 memenuhi target pada concurrent traffic.
 - [ ] Review API p95 memenuhi target saat worker sedang sibuk.
-- [ ] Query plan membuktikan spatial/BTREE index digunakan.
+- [x] Live PostgreSQL pilot query-plan membuktikan index contract digunakan;
+  production-sized plan/load verification tetap pending.
 - [x] Candidate explosion mempunyai hard limit dan diagnostic yang jelas.
 - [x] Timeout tidak meninggalkan partial artifact pada engine generation.
 - [ ] Memory, CPU, database I/O, dan queue depth dilaporkan.
@@ -946,12 +950,15 @@ Deployment harus dihentikan atau kembali ke map-only jika:
 Engine baru dianggap enterprise-ready hanya jika:
 
 - [ ] Seluruh checklist critical pada database, job, concurrency, dan recovery lulus.
-- [ ] Tidak ada full regeneration pada request review normal.
-- [ ] Tidak ada global path-pair dan intersection-node scan.
+- [x] Tidak ada full regeneration pada request review normal pada local API/
+  durable-job contract; production worker SLO tetap pending.
+- [x] Engine memakai spatial-prefiltered path-pair/intersection lookup tanpa
+  global scan; production profiling tetap pending.
 - [ ] Load test representatif memenuhi SLO yang disetujui.
 - [ ] Accuracy gate memakai approved versioned artifact.
 - [x] Candidate API terindeks dan terpaginasikan.
-- [ ] Setiap perubahan menghasilkan audit dan graph revision yang konsisten.
+- [x] Local mutation/lifecycle/import contract menghasilkan audit dan graph
+  revision yang konsisten; multi-instance transaction evidence tetap pending.
 - [ ] Multi-instance API dan worker diuji.
 - [ ] Backup, restore, rollout, dan rollback diuji.
 - [ ] Runbook serta dashboard tersedia.
