@@ -296,6 +296,43 @@ test('regeneration reconciles decisions and records topology runs without deleti
   assert.ok(auditLog.entries.some(({ event }) => event === 'topology.candidates_regenerated'))
 })
 
+test('regeneration keeps the previous graph active when the new artifact is invalid', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const record = applyArtifacts(baseRecord(bundle), initial)
+  const duplicatePath = structuredClone(bundle.classifiedPaths[0])
+  const duplicateGeometry = structuredClone(bundle.geometries.find(({ geometryId }) => (
+    geometryId === duplicatePath.geometryIds[0]
+  )))
+  duplicatePath.assetId = 'CBL-DUPLICATE'
+  duplicatePath.sourceFeatureId = 'feature:CBL-DUPLICATE'
+  duplicatePath.geometryIds = ['geometry:CBL-DUPLICATE']
+  duplicateGeometry.geometryId = 'geometry:CBL-DUPLICATE'
+  duplicateGeometry.sourceFeatureId = 'feature:CBL-DUPLICATE'
+  record.topologyInputBundle.classifiedPaths.push(duplicatePath)
+  record.topologyInputBundle.geometries.push(duplicateGeometry)
+
+  const repository = new MemoryRepository([record])
+  const auditLog = new MemoryAuditLog()
+  const service = new TopologyService({ repository, auditLog })
+  const before = await repository.get('dv-review')
+
+  await assert.rejects(
+    service.regenerate('dv-review', 'admin-1', {
+      reason: 'Invalid artifact must not replace the active graph.',
+    }),
+    (error) => error.code === 'topology_artifact_validation_failed'
+      && error.retryable === false
+      && error.details.issueCodes.includes('duplicate_linework'),
+  )
+
+  const after = await repository.get('dv-review')
+  assert.deepEqual(after.topologyGraph, before.topologyGraph)
+  assert.deepEqual(after.topologyCandidates, before.topologyCandidates)
+  assert.deepEqual(after.topologyRuns, before.topologyRuns)
+  assert.equal(auditLog.entries.length, 0)
+})
+
 test('manual device relation is audited, materialized, and retained across regeneration', async () => {
   const bundle = reviewBundle()
   const initial = generateRelationArtifacts(bundle, {

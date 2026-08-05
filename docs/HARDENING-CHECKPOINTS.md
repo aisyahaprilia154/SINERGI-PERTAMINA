@@ -958,6 +958,27 @@ Batas checkpoint: ini hanya sparse in-process benchmark. Dense/intersection-heav
 workload, 50.000-object stress, PostgreSQL I/O, worker/API concurrency, p95,
 dan SLO production belum selesai.
 
+## Checkpoint 47 - Graph publication validation gate
+
+Status: `complete (full-regeneration runtime gate; review/PG publication
+pending)` - 5 Agustus 2026.
+
+- Full regeneration memvalidasi validation dan eligibility error sebelum audit
+  regeneration atau repository update. Artifact invalid menghasilkan
+  `topology_artifact_validation_failed` dengan `retryable=false`.
+- Regression duplicate linework membuktikan graph revision lama, candidate
+  collection, topology run, dan audit trail tetap tidak berubah ketika artifact
+  baru invalid.
+- Targeted topology-service suite lulus `17/17`; full backend verification:
+  `177/177` test, lint `91` file, build `37` source file, dan
+  `git diff --check` lulus.
+- Evidence detail:
+  `docs/migrations/TOPOLOGY-PUBLICATION-VALIDATION-GATE-2026-08-05.md`.
+
+Batas checkpoint: gate ini mencakup full-regeneration runtime. Review mutation,
+active graph pointer PostgreSQL, concurrent publication lintas instance, dan
+production rollout masih pending.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan

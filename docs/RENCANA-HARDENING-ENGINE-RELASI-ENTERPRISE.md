@@ -297,7 +297,8 @@ Checklist:
   JSON queue; PostgreSQL multi-instance production masih pending.
 - [x] Graph revision berubah tepat satu kali untuk satu transaksi sukses pada
   durable JSON regeneration contract; PostgreSQL multi-instance masih pending.
-- [ ] Graph lama tetap aktif sampai revision baru tervalidasi.
+- [x] Graph lama tetap aktif sampai artifact full-regeneration tervalidasi;
+  review mutation dan PostgreSQL multi-instance publication masih pending.
 
 ### 6.4 Cegah lost update
 
