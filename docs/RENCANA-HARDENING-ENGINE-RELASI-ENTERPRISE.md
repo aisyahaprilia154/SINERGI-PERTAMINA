@@ -599,7 +599,9 @@ Checklist:
   shipping dan retention production tetap pending.
 - [x] HTTP request correlation ID dipantulkan pada response dan disimpan pada
   audit event HTTP yang sudah berada di boundary app.
-- [ ] Log tidak menyimpan token, password, atau source data sensitif berlebihan.
+- [x] Audit sink lokal membuang token/password/authorization/secret secara
+  recursive dan membatasi circular/deep details; source-data classification,
+  centralized shipping, dan retention production tetap pending.
 
 ## 9. Target nonfungsional yang harus disetujui
 
