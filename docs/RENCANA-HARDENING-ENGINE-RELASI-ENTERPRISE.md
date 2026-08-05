@@ -645,7 +645,8 @@ test report, benchmark report, atau audit record.
   disconnect-before-commit retry untuk single confirm juga lulus. PostgreSQL
   server failover, retry lintas instance, serta multi-instance production masih
   pending.
-- [ ] Dua worker tidak mengambil job yang sama.
+- [x] Dua worker tidak mengambil job yang sama pada JSON multi-repository
+  claim contract; PostgreSQL multi-instance masih pending.
 - [x] Worker lock yang expired dapat diambil alih dengan aman pada uji
   lintas-process durable JSON queue dan replacement process PostgreSQL live;
   multi-worker production masih pending.

@@ -746,6 +746,24 @@ Batas checkpoint: ini bukan bukti live schema, auth, restart, failover,
 durability, atau backup/restore. Live drill menunggu kredensial dan otorisasi
 operator yang tepat.
 
+## Checkpoint 37 - Durable job double-claim guard
+
+Status: `complete (JSON multi-repository claim contract; PostgreSQL multi-instance pending)`
+- 5 Agustus 2026.
+
+- Dua `JsonDurableJobRepository` pada root yang sama memanggil `claimNext`
+  bersamaan untuk satu queued job.
+- Tepat satu worker berhasil claim; job menjadi `running` dengan
+  `attemptCount=1` dan tidak ada double-claim.
+- Suite durable-job-queue lulus lima kali berturut-turut.
+- Full backend verification: `168/168` test, lint `89` file, build `37` source
+  file, dan `git diff --check` lulus.
+- Evidence detail:
+  `docs/migrations/DURABLE-JOB-DOUBLE-CLAIM-2026-08-05.md`.
+
+Batas checkpoint: PostgreSQL multi-instance dan production worker load masih
+pending.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan

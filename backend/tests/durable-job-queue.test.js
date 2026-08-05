@@ -55,6 +55,40 @@ test('durable job survives queue lifecycle, reports progress, and deduplicates i
   }
 })
 
+test('two repository workers cannot claim the same durable job', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-durable-double-claim-'))
+  const firstRepository = new JsonDurableJobRepository(root)
+  const secondRepository = new JsonDurableJobRepository(root)
+
+  try {
+    const created = await firstRepository.create({
+      jobType: 'double_claim_guard',
+      datasetVersionId: 'dv-double-claim',
+      inputFingerprint: 'sha256:double-claim',
+      payload: { fixture: true },
+    })
+    const claims = await Promise.all([
+      firstRepository.claimNext({ workerId: 'worker-a', leaseMilliseconds: 60_000 }),
+      secondRepository.claimNext({ workerId: 'worker-b', leaseMilliseconds: 60_000 }),
+    ])
+    const successfulClaims = claims.filter(Boolean)
+
+    assert.equal(successfulClaims.length, 1)
+    assert.equal(successfulClaims[0].jobId, created.jobId)
+    assert.ok(['worker-a', 'worker-b'].includes(successfulClaims[0].lockedBy))
+    const persisted = await firstRepository.get(created.jobId)
+    assert.equal(persisted.status, 'running')
+    assert.equal(persisted.attemptCount, 1)
+  } finally {
+    await rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 50,
+    })
+  }
+})
+
 test('expired worker lease is recovered and executed by the next worker', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-durable-recovery-'))
   const repository = new JsonDurableJobRepository(root)
