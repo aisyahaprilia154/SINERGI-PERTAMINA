@@ -283,8 +283,10 @@ Checklist:
 
 - [x] Confirm candidate tidak menjalankan full candidate generation pada
   in-process incremental rebuild contract; API/worker SLO masih pending.
-- [ ] Reject/skip tidak membangun ulang komponen yang tidak berubah.
-- [ ] Revoke hanya menghitung ulang affected component.
+- [x] Reject/skip tidak membangun ulang komponen yang tidak berubah pada
+  in-process scope contract; production profiling masih pending.
+- [x] Revoke hanya menghitung ulang affected component pada in-process scope
+  contract; production profiling masih pending.
 - [ ] Full regeneration berjalan sebagai durable background job.
 - [ ] Graph revision berubah tepat satu kali untuk satu transaksi sukses.
 - [ ] Graph lama tetap aktif sampai revision baru tervalidasi.

@@ -260,6 +260,109 @@ test('full regeneration and review concurrently preserve the review decision', a
   }
 })
 
+test('reject and skip preserve confirmed candidates outside the affected component', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-review-reject-skip-scope-'))
+  try {
+    const bundle = twentyReviewerBundle()
+    const initial = generateRelationArtifacts(bundle)
+    const repository = new JsonDatasetVersionRepository(path.join(root, 'dataset-versions'))
+    await repository.create(applyArtifacts(baseRecord(bundle), initial))
+    const service = new TopologyService({ repository, auditLog: new MemoryAuditLog() })
+    const candidates = initial.candidates
+    const confirmed = await service.confirmCandidate(candidates[0].candidateId, 'admin-1', {
+      reason: 'Komponen pertama dikonfirmasi sebelum reject/skip scope test.',
+    })
+    await service.rejectCandidate(candidates[1].candidateId, 'admin-2', {
+      reason: 'Candidate kedua ditolak pada scope test.',
+    })
+    await service.skipCandidate(candidates[2].candidateId, 'admin-3', {
+      reason: 'Candidate ketiga ditunda pada scope test.',
+    })
+
+    const persisted = await repository.get(bundle.datasetVersion.id)
+    assert.equal(persisted.confirmedRelations.length, 1)
+    assert.equal(persisted.confirmedRelations[0].candidateId, candidates[0].candidateId)
+    assert.equal(
+      persisted.topologyCandidates.find(({ candidateId }) => (
+        candidateId === candidates[0].candidateId
+      )).candidateStatus,
+      'confirmed',
+    )
+    assert.equal(
+      persisted.topologyCandidates.find(({ candidateId }) => (
+        candidateId === candidates[1].candidateId
+      )).candidateStatus,
+      'rejected',
+    )
+    assert.equal(
+      persisted.topologyCandidates.find(({ candidateId }) => (
+        candidateId === candidates[2].candidateId
+      )).candidateStatus,
+      'ambiguous',
+    )
+    assert.equal(confirmed.confirmedRelations.length, 1)
+  } finally {
+    await rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 50,
+    })
+  }
+})
+
+test('revoke removes only the affected component relation', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-review-revoke-scope-'))
+  try {
+    const bundle = twentyReviewerBundle()
+    const initial = generateRelationArtifacts(bundle)
+    const repository = new JsonDatasetVersionRepository(path.join(root, 'dataset-versions'))
+    await repository.create(applyArtifacts(baseRecord(bundle), initial))
+    const service = new TopologyService({ repository, auditLog: new MemoryAuditLog() })
+    const first = initial.candidates[0]
+    const second = initial.candidates[1]
+    await service.confirmCandidate(first.candidateId, 'admin-1', {
+      reason: 'Komponen pertama dikonfirmasi sebelum revoke scope test.',
+    })
+    const secondConfirmation = await service.confirmCandidate(second.candidateId, 'admin-1', {
+      reason: 'Komponen kedua dikonfirmasi sebelum revoke scope test.',
+    })
+    const firstRelation = secondConfirmation.confirmedRelations.find(({ candidateId }) => (
+      candidateId === first.candidateId
+    ))
+    assert.ok(firstRelation)
+    await service.revokeRelation(firstRelation.relationId, 'admin-2', {
+      reason: 'Hanya komponen pertama dicabut pada scope test.',
+    })
+
+    const persisted = await repository.get(bundle.datasetVersion.id)
+    const activeRelations = persisted.confirmedRelations.filter(({ verificationStatus }) => (
+      verificationStatus === 'confirmed'
+    ))
+    assert.equal(activeRelations.length, 1)
+    assert.equal(activeRelations[0].candidateId, second.candidateId)
+    assert.equal(
+      persisted.topologyCandidates.find(({ candidateId }) => (
+        candidateId === first.candidateId
+      )).candidateStatus,
+      'revoked',
+    )
+    assert.equal(
+      persisted.topologyCandidates.find(({ candidateId }) => (
+        candidateId === second.candidateId
+      )).candidateStatus,
+      'confirmed',
+    )
+  } finally {
+    await rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 50,
+    })
+  }
+})
+
 test('two reviewers on the same candidate produce one winner and a 409 conflict', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-review-conflict-'))
   try {
