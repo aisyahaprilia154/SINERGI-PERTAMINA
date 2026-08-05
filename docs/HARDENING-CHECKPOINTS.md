@@ -859,7 +859,7 @@ tetap pending.
 
 ## Checkpoint 43 - Shadow pilot scope dan fail-closed live verification
 
-Status: `complete (runner contract; live database rerun pending operator)`
+Status: `complete (local live PostgreSQL pilot; enterprise gates pending)`
 - 5 Agustus 2026.
 
 - Rerun live menemukan bahwa `list` membandingkan temporary JSON primary yang
@@ -875,11 +875,19 @@ Status: `complete (runner contract; live database rerun pending operator)`
 - Contract test baru memverifikasi scoping dan fail-closed assertion.
 - Full backend verification: `173/173` test, lint `91` file, build `37` source
   file, dan `git diff --check` lulus.
+- Rerun operator pada PostgreSQL 18/PostGIS `3.6.2` lulus: shadow
+  `comparisonCount=4`, `equal=true`, primary durable job `succeeded`,
+  concurrency `1` success + `1` stale conflict + `0` unexpected failure, dan
+  seluruh 7 required indexes hadir.
+- Output wrapper mencapai `Live verification selesai.`; candidate query tetap
+  memiliki caveat sequential scan pada tabel pilot kecil, sehingga bukti
+  production-sized EXPLAIN/SLO belum tertutup.
 - Evidence detail: `docs/migrations/LIVE-POSTGRES-SHADOW-PILOT-SCOPE-2026-08-05.md`.
 
-Batas checkpoint: live rerun setelah perubahan dan operator confirmation masih
-pending. Tidak ada penghapusan row atau audit event dilakukan oleh perubahan
-ini.
+Batas checkpoint: bukti ini hanya mencakup PostgreSQL lokal dan tidak
+menggantikan failover production, load/SLO production-sized, backup DR
+retention/off-site, security, atau enterprise approval. Tidak ada penghapusan
+row atau audit event dilakukan oleh perubahan ini.
 
 ## Status berikutnya
 

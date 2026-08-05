@@ -1,6 +1,6 @@
 # Live PostgreSQL shadow pilot scope dan fail-closed runner - 5 Agustus 2026
 
-Status: `code complete; live rerun pending operator execution`.
+Status: `passed (local PostgreSQL live pilot; enterprise gates pending)`.
 
 ## Temuan dari rerun
 
@@ -36,17 +36,26 @@ untuk memaksa parity.
 Contract test untuk scoping dan fail-closed assertion ditambahkan pada
 `backend/tests/database-shadow-pilot.test.js`. Setelah perubahan, backend
 `173/173` test, lint `91` file, build `37` source file, dan `git diff --check`
-lulus. Rerun live tetap harus dijalankan setelah operator mengulangi command
-pada database target.
+lulus.
 
-## Gate berikutnya
+Rerun live pada 5 Agustus 2026 pukul 04:33 UTC lulus:
 
-Operator menjalankan ulang dari `backend`:
+- PostgreSQL 18/PostGIS `3.6.2`; seluruh 13 tabel operasional tersedia.
+- Shadow `comparisonCount=4`, `equal=true`; `get`, scoped `list`,
+  `findActive`, dan `resolveActiveVersion` semuanya equal, tanpa shadow write
+  atau publication.
+- Primary pilot memakai `PostgresDatasetVersionRepository`, durable job
+  `succeeded`, `jobRevision=2`, dan `jsonPrimaryUsed=false`.
+- Concurrency menghasilkan tepat satu success dan satu stale conflict, nol
+  unexpected failure, serta `finalRecordRevision=1`.
+- Tujuh required indexes hadir. Geometry bbox dan graph location memakai
+  index scan; candidate query pada tabel pilot kecil masih boleh memakai
+  sequential scan. Production-sized EXPLAIN/SLO tetap pending.
+- Wrapper mencapai `Live verification selesai.`
 
-```powershell
-npm run db:live-verify
-```
+## Gate berikutnya untuk enterprise
 
-Checkpoint live baru dapat ditutup bila `db:shadow-pilot` menghasilkan
-`equal: true`, seluruh pemeriksaan berikutnya lulus, dan output berakhir pada
-`Live verification selesai.`.
+Tidak ada tindakan manual tambahan untuk checkpoint live lokal ini. Failover
+production, load/concurrency production-sized, SLO, DR retention/off-site,
+security review, dan organizational sign-off tetap merupakan gate enterprise
+terpisah.
