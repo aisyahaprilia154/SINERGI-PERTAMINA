@@ -44,7 +44,7 @@ test('spatial endpoint inference remains a candidate and never leaks into confir
   })
 })
 
-test('spatial auto-confirm requires both explicit policy approval and accuracy gates', () => {
+test('spatial auto-confirm requires explicit policy and an approved accuracy artifact', () => {
   const bundle = topologyBundle({
     nodes: [node('CAM-01', 'cctv', 'CCTV Camera', [110, -7])],
     paths: [pathObject('CBL-01', 'cctv', 'CCTV Cable', [
@@ -55,15 +55,22 @@ test('spatial auto-confirm requires both explicit policy approval and accuracy g
   const missingAccuracy = generateRelationArtifacts(bundle, {
     config: {
       autoConfirmSpatialInference: true,
+      heldOutPrecision: 1,
+      pathAccuracy: 1,
     },
   })
   assert.equal(missingAccuracy.confirmedRelations.length, 0)
+  assert.ok(missingAccuracy.readiness.accuracyGate.blockingReasons.includes(
+    'accuracy_artifact_missing',
+  ))
 
   const approved = generateRelationArtifacts(bundle, {
     config: {
       autoConfirmSpatialInference: true,
-      heldOutPrecision: 0.99,
-      pathAccuracy: 0.95,
+      heldOutPrecision: 1,
+      pathAccuracy: 1,
+      accuracyArtifact: approvedAccuracyArtifact('cctv'),
+      engineBuildSha: 'build-test',
     },
   })
   assert.equal(approved.confirmedRelations.length, 1)
@@ -81,8 +88,8 @@ test('redundant confirmed attachments to the same path endpoint are materialized
   }), {
     config: {
       autoConfirmSpatialInference: true,
-      heldOutPrecision: 0.99,
-      pathAccuracy: 0.95,
+      accuracyArtifact: approvedAccuracyArtifact('cctv'),
+      engineBuildSha: 'build-test',
     },
   })
 
@@ -156,8 +163,8 @@ test('multiple junction evidences for one path endpoint materialize as one relat
   }), {
     config: {
       autoConfirmSpatialInference: true,
-      heldOutPrecision: 0.99,
-      pathAccuracy: 0.95,
+      accuracyArtifact: approvedAccuracyArtifact('fiber_optic'),
+      engineBuildSha: 'build-test',
     },
   })
 
@@ -516,6 +523,30 @@ test('partially overlapping linework is detected through spatially filtered path
   const result = generateRelationArtifacts(topologyBundle({ paths: [left, right] }))
   assert.ok(result.lineworkIssues.some(({ issueCode }) => issueCode === 'overlapping_linework'))
 })
+
+function approvedAccuracyArtifact(networkFamily) {
+  return {
+    schemaVersion: '1.0.0',
+    evaluationId: `evaluation-${networkFamily}`,
+    siteId: 'site-1',
+    networkFamily,
+    goldSetVersion: 'gold-set/1.0.0',
+    goldSetChecksum: `sha256:${'b'.repeat(64)}`,
+    ruleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+    engineBuildSha: 'build-test',
+    sampleSize: 200,
+    heldOutPrecision: 0.99,
+    heldOutRecall: 0.98,
+    pathAccuracy: 0.95,
+    componentAccuracy: 1,
+    falseComponentMergeCount: 0,
+    evaluatedAt: '2026-07-29T00:00:00.000Z',
+    approvedBy: 'risk-owner-test',
+    approvedAt: '2026-07-30T00:00:00.000Z',
+    expiresAt: '2026-12-31T00:00:00.000Z',
+    status: 'approved',
+  }
+}
 
 function topologyBundle({
   nodes = [],

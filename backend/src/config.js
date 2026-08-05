@@ -242,10 +242,19 @@ export function createConfig(env = process.env, overrides = {}) {
         ?? booleanFrom(env.SINERGI_TOPOLOGY_AUTO_CONFIRM_SPATIAL, false),
       autoConfirmExplicitMetadata: overrides.topology?.autoConfirmExplicitMetadata
         ?? booleanFrom(env.SINERGI_TOPOLOGY_AUTO_CONFIRM_EXPLICIT, true),
+      // Accuracy approval is loaded from an explicit versioned artifact by the
+      // runtime; raw metric environment variables are never an approval source.
+      accuracyArtifact: overrides.topology?.accuracyArtifact ?? null,
+      engineBuildSha: overrides.topology?.engineBuildSha
+        ?? env.SINERGI_BUILD_SHA
+        ?? null,
+      requiredHeldOutSampleSize: overrides.topology?.requiredHeldOutSampleSize
+        ?? numberFrom(env.SINERGI_TOPOLOGY_MIN_HELD_OUT_SAMPLE, 200),
+      // Retained only as non-authoritative compatibility fields for diagnostics.
       heldOutPrecision: overrides.topology?.heldOutPrecision
-        ?? optionalUnitNumberFrom(env.SINERGI_TOPOLOGY_HELD_OUT_PRECISION),
+        ?? null,
       pathAccuracy: overrides.topology?.pathAccuracy
-        ?? optionalUnitNumberFrom(env.SINERGI_TOPOLOGY_PATH_ACCURACY),
+        ?? null,
       maxCandidateCount: overrides.topology?.maxCandidateCount
         ?? numberFrom(
           env.SINERGI_TOPOLOGY_MAX_CANDIDATES,
@@ -305,12 +314,6 @@ function numberFrom(value, fallback) {
 function unitNumberFrom(value, fallback) {
   const parsed = Number(value)
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : fallback
-}
-
-function optionalUnitNumberFrom(value) {
-  if (value === undefined || value === null || value === '') return null
-  const parsed = Number(value)
-  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : null
 }
 
 function parseJsonObject(value, fallback) {

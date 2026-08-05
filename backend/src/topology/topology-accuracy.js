@@ -2,6 +2,121 @@
  * Evaluates a versioned calibration/held-out gold set without mutating candidates.
  * Labels are intentionally external to source KML and review decisions.
  */
+export const ACCURACY_ARTIFACT_SCHEMA_VERSION = '1.0.0'
+export const MINIMUM_HELD_OUT_SAMPLE_SIZE = 200
+
+/**
+ * Validates the immutable approval boundary consumed by spatial auto-confirm.
+ * Raw metrics are deliberately not sufficient; the artifact must be approved,
+ * current, scoped, and bound to the active rule set and build.
+ */
+export function evaluateAccuracyGate({
+  artifact,
+  requiredRuleSetVersion,
+  requiredEngineBuildSha,
+  requiredHeldOutPrecision = 0.99,
+  requiredPathAccuracy = 0.95,
+  requiredHeldOutSampleSize = MINIMUM_HELD_OUT_SAMPLE_SIZE,
+  scope = {},
+  now = new Date(),
+} = {}) {
+  const blockingReasons = []
+  const candidate = artifact && typeof artifact === 'object' && !Array.isArray(artifact)
+    ? artifact
+    : null
+  const metrics = {
+    heldOutPrecision: unitMetric(candidate?.heldOutPrecision),
+    heldOutRecall: unitMetric(candidate?.heldOutRecall),
+    pathAccuracy: unitMetric(candidate?.pathAccuracy),
+    componentAccuracy: unitMetric(candidate?.componentAccuracy),
+    falseComponentMergeCount: integerMetric(candidate?.falseComponentMergeCount),
+    sampleSize: integerMetric(candidate?.sampleSize),
+  }
+
+  if (!candidate) {
+    blockingReasons.push('accuracy_artifact_missing')
+  } else {
+    if (candidate.schemaVersion !== ACCURACY_ARTIFACT_SCHEMA_VERSION) {
+      blockingReasons.push('accuracy_artifact_schema_mismatch')
+    }
+    if (candidate.status !== 'approved') {
+      blockingReasons.push('accuracy_artifact_not_approved')
+    }
+    for (const [field, reason] of [
+      ['evaluationId', 'accuracy_evaluation_id_missing'],
+      ['goldSetVersion', 'accuracy_gold_set_version_missing'],
+      ['goldSetChecksum', 'accuracy_gold_set_checksum_missing'],
+      ['ruleSetVersion', 'accuracy_rule_set_version_missing'],
+      ['engineBuildSha', 'accuracy_engine_build_sha_missing'],
+      ['approvedBy', 'accuracy_approved_by_missing'],
+      ['approvedAt', 'accuracy_approved_at_missing'],
+      ['evaluatedAt', 'accuracy_evaluated_at_missing'],
+      ['expiresAt', 'accuracy_expires_at_missing'],
+    ]) {
+      if (!nonEmpty(candidate[field])) blockingReasons.push(reason)
+    }
+    if (!requiredRuleSetVersion || candidate.ruleSetVersion !== requiredRuleSetVersion) {
+      blockingReasons.push('accuracy_rule_set_mismatch')
+    }
+    if (!requiredEngineBuildSha) {
+      blockingReasons.push('accuracy_engine_build_context_missing')
+    } else if (candidate.engineBuildSha !== requiredEngineBuildSha) {
+      blockingReasons.push('accuracy_engine_build_mismatch')
+    }
+
+    if (!candidate.siteId || !scope.siteId || candidate.siteId !== scope.siteId) {
+      blockingReasons.push('accuracy_site_scope_mismatch')
+    }
+    const networkFamilies = [...new Set(
+      (scope.networkFamilies ?? []).filter((value) => nonEmpty(value)),
+    )]
+    if (!candidate.networkFamily
+      || networkFamilies.length !== 1
+      || candidate.networkFamily !== networkFamilies[0]) {
+      blockingReasons.push('accuracy_network_family_scope_mismatch')
+    }
+
+    const currentTime = dateValue(now)
+    const evaluatedAt = dateValue(candidate.evaluatedAt)
+    const approvedAt = dateValue(candidate.approvedAt)
+    const expiresAt = dateValue(candidate.expiresAt)
+    if (currentTime === null || evaluatedAt === null || approvedAt === null || expiresAt === null) {
+      blockingReasons.push('accuracy_artifact_timestamp_invalid')
+    } else {
+      if (evaluatedAt > currentTime || approvedAt > currentTime) {
+        blockingReasons.push('accuracy_artifact_timestamp_in_future')
+      }
+      if (expiresAt <= currentTime) blockingReasons.push('accuracy_artifact_expired')
+    }
+
+    if (metrics.sampleSize === null) {
+      blockingReasons.push('accuracy_sample_size_missing')
+    } else if (metrics.sampleSize < requiredHeldOutSampleSize) {
+      blockingReasons.push('accuracy_sample_size_below_minimum')
+    }
+    if (metrics.heldOutPrecision === null
+      || metrics.heldOutPrecision < requiredHeldOutPrecision) {
+      blockingReasons.push('held_out_precision_below_threshold')
+    }
+    if (metrics.pathAccuracy === null || metrics.pathAccuracy < requiredPathAccuracy) {
+      blockingReasons.push('path_accuracy_below_threshold')
+    }
+    if (metrics.falseComponentMergeCount === null) {
+      blockingReasons.push('accuracy_false_merge_count_missing')
+    } else if (metrics.falseComponentMergeCount !== 0) {
+      blockingReasons.push('false_component_merge_detected')
+    }
+  }
+
+  return {
+    approved: blockingReasons.length === 0,
+    blockingReasons: [...new Set(blockingReasons)],
+    evaluationId: candidate?.evaluationId ?? null,
+    status: candidate?.status ?? null,
+    metrics,
+  }
+}
+
 export function evaluateTopologyAccuracy({
   candidates = [],
   graph = { nodes: [], edges: [], components: [] },
@@ -120,6 +235,27 @@ function validateGoldSet(goldSet) {
     }
     ids.add(label.labelId)
   })
+}
+
+function nonEmpty(value) {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function unitMetric(value) {
+  if (value === null || value === undefined || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) && number >= 0 && number <= 1 ? number : null
+}
+
+function integerMetric(value) {
+  if (value === null || value === undefined || value === '') return null
+  const number = Number(value)
+  return Number.isInteger(number) && number >= 0 ? number : null
+}
+
+function dateValue(value) {
+  const parsed = Date.parse(String(value ?? ''))
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 function graphHasPath(graph, source, target) {

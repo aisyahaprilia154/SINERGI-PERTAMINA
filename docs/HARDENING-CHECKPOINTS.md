@@ -889,13 +889,43 @@ menggantikan failover production, load/SLO production-sized, backup DR
 retention/off-site, security, atau enterprise approval. Tidak ada penghapusan
 row atau audit event dilakukan oleh perubahan ini.
 
+## Checkpoint 44 - Accuracy artifact gate fail-closed
+
+Status: `complete (runtime artifact contract; production evaluation approval
+pending)` - 5 Agustus 2026.
+
+- Spatial auto-confirm sekarang hanya dapat berjalan jika menerima artifact
+  evaluasi versioned schema `1.0.0` dengan status `approved`, evaluation ID,
+  gold-set version/checksum, rule-set version aktif, engine build SHA, scope
+  site/network family yang tepat, timestamp valid dan belum kedaluwarsa.
+- Artifact juga wajib memenuhi minimum held-out sample `200`, held-out
+  precision minimal `0.99`, path accuracy minimal `0.95`, dan
+  `falseComponentMergeCount = 0`.
+- `SINERGI_TOPOLOGY_HELD_OUT_PRECISION` dan
+  `SINERGI_TOPOLOGY_PATH_ACCURACY` tidak lagi menjadi sumber approval. Artifact
+  hilang, stale, scope/build/rule-set mismatch, atau metrik tidak memenuhi
+  threshold tetap fail-closed; readiness mengekspos evaluation ID dan alasan
+  blocking yang terstruktur.
+- Regression mencakup env metric bypass, artifact missing/approved/expired,
+  build mismatch, status draft, sample di bawah minimum, scope family, dan
+  spatial auto-confirm. Full backend verification: `175/175` test, lint `91`
+  file, build `37` source file, dan `git diff --check` lulus.
+- Evidence detail:
+  `docs/migrations/ACCURACY-ARTIFACT-GATE-2026-08-05.md`.
+
+Batas checkpoint: gold set production 200--300 endpoint, pemisahan calibration
+dan held-out, durable evaluation job, persistence/signature artifact, dan
+approval Product/GIS/Data/Risk Owner belum selesai. Karena itu checkpoint ini
+menutup bypass runtime, bukan memberi izin auto-confirm production.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
 regeneration/review, serta full regeneration durable pada queue lokal. Live
 PostgreSQL service recovery lokal sudah lulus;
 production failover/replica switchover, concurrency/load/SLO, backup retention/
-off-site DR, security, dan enterprise approval gates tetap terpisah.
+off-site DR, durable accuracy evaluation, security, dan enterprise approval
+gates tetap terpisah.
 Setiap checkpoint hanya boleh ditandai selesai
 setelah test, lint/build, dan regression evidence lulus; bukti live database
 harus dilaporkan terpisah dari test contract. Bukti lokal yang sudah lulus tidak
