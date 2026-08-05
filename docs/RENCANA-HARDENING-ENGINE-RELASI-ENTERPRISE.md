@@ -711,7 +711,8 @@ Checklist:
   3 Agustus 2026.
 - [x] Benchmark mempunyai fixture dan command yang tersimpan di repository.
 - [ ] 10.000 objek sparse memenuhi SLO.
-- [ ] 10.000 objek dense memenuhi SLO atau mempunyai guardrail resmi.
+- [x] 10.000 objek dense mempunyai guardrail resmi: hard candidate limit
+  `50.000` memicu fail-closed tanpa OOM; dense production SLO tetap pending.
 - [x] 50.000 objek pada guarded sparse in-process stress test tidak menyebabkan
   out-of-memory; dense dan production capacity/SLO tetap pending.
 - [ ] Candidate API p95 memenuhi target pada concurrent traffic.
