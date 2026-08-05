@@ -1135,6 +1135,25 @@ gates pending)` - 5 Agustus 2026.
 Batas checkpoint: multi-instance production, reviewer fleet, API p95,
 failover, dan enterprise SLO/approval tetap pending.
 
+## Checkpoint 56 - Dense topology guardrail 10.000 object
+
+Status: `complete (local dense fail-closed guardrail; production SLO pending)` -
+5 Agustus 2026.
+
+- Command `npm run benchmark:topology:dense-guarded` memakai 10.000 node rapat
+  dan 10 path probe.
+- Candidate hard limit `50.000` memicu error terdiagnosis
+  `topology_candidate_limit_exceeded` pada percobaan `50.001`; proses selesai
+  dalam `1.153,649 ms`, peak RSS `184,13 MiB`, tanpa OOM dan tanpa budget
+  violation.
+- Runner tidak menerbitkan artifact parsial setelah guardrail; hasil
+  `pass: true` hanya menyatakan guardrail bekerja.
+- Evidence detail:
+  `docs/benchmarks/TOPOLOGY-DENSE-GUARDED-2026-08-05.md`.
+
+Batas checkpoint: dense API/worker SLO, PostgreSQL I/O, multi-instance,
+concurrency, p95, dan production capacity tetap pending.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
