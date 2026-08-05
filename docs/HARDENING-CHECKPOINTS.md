@@ -918,6 +918,29 @@ dan held-out, durable evaluation job, persistence/signature artifact, dan
 approval Product/GIS/Data/Risk Owner belum selesai. Karena itu checkpoint ini
 menutup bypass runtime, bukan memberi izin auto-confirm production.
 
+## Checkpoint 45 - Durable job retry backoff dan dead-letter
+
+Status: `complete (durable JSON queue contract; PostgreSQL retry/load pending)`
+- 5 Agustus 2026.
+
+- Lease worker yang mati dipulihkan ke `retry_wait` dan dapat diambil worker
+  pengganti; attempt count tetap meningkat dan job tidak terkunci selamanya.
+- Retryable failure memakai exponential backoff deterministik: `1.000 ms` pada
+  attempt pertama dan `2.000 ms` pada attempt kedua. Setelah maksimum tiga
+  attempt, job masuk `dead_letter`.
+- Poison job non-retryable masuk `dead_letter`; retry Administrator mereset job
+  ke `queued` dengan attempt dan error state bersih.
+- Regression targeted durable queue lulus `6/6`; full backend verification:
+  `176/176` test, lint `91` file, build `37` source file, dan
+  `git diff --check` lulus.
+- Evidence detail:
+  `docs/migrations/DURABLE-JOB-RETRY-BACKOFF-2026-08-05.md`.
+
+Batas checkpoint: PostgreSQL multi-instance retry/backoff dan poison-job drill,
+worker fleet production, alerting/retention, dan SLO belum tertutup. Recovery
+PostgreSQL lokal tetap dirujuk pada Checkpoint 40 dan tidak diulang sebagai
+bukti baru di sini.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
