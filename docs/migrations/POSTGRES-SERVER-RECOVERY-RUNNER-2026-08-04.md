@@ -1,6 +1,6 @@
 # PostgreSQL server recovery runner — 4 Agustus 2026
 
-Status: `runner contract complete; live restart evidence pending`.
+Status: `runner contract complete; local live restart evidence passed; production failover pending`.
 
 ## Runner
 
@@ -30,11 +30,15 @@ Probe sequence:
   `84` file, build `37` source file, dan `git diff --check` lulus.
 - Command live tanpa `SINERGI_DATABASE_URL` berhenti dengan
   `database_url_required` sebelum restart service.
+- Local live execution pada 5 Agustus 2026 lulus dengan restart selesai,
+  readiness terkonfirmasi, durable probe succeeded, dan idempotency deduplication
+  terkonfirmasi. Evidence detail:
+  `docs/migrations/POSTGRES-LIVE-SERVER-RECOVERY-2026-08-05.md`.
 
 ## Batas dan checkpoint
 
-Runner ini belum menjadi bukti PostgreSQL server restart/failover live. Live
-execution memerlukan `SINERGI_DATABASE_URL` dengan kredensial yang diberikan
-di environment eksekusi dan hak restart service. Password tidak boleh ditulis
-ke repository, log, atau evidence. PostgreSQL failover/replica switchover,
-multi-instance retry, dan disaster recovery tetap pending.
+Runner ini sekarang memiliki bukti restart/recovery live pada satu PostgreSQL
+service lokal. Ini belum menjadi bukti production failover atau replica
+switchover. Password tidak boleh ditulis ke repository, log, atau evidence.
+PostgreSQL multi-instance retry, production load/SLO, dan disaster recovery
+tetap pending.
