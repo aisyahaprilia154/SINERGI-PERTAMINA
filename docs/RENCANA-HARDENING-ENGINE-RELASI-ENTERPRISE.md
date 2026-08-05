@@ -221,7 +221,8 @@ Checklist:
 - [ ] Foreign key dan unique constraint diuji.
 - [ ] Data JSON pilot berhasil dimigrasikan tanpa kehilangan candidate/relation.
 - [ ] Jumlah node, edge, candidate, dan audit event sebelum/sesudah sama.
-- [ ] Backup dan restore database diuji.
+- [x] Backup dan restore database pilot lulus ke database sementara yang bersih;
+  production disaster-recovery sign-off masih pending.
 
 ### 6.2 Hilangkan perbandingan semua pasangan path
 
@@ -700,7 +701,8 @@ Checklist:
 - [x] Object storage unavailable menghasilkan error yang dapat ditindaklanjuti
   pada adapter source storage saat ini.
 - [x] Dead-letter job dapat diperiksa dan di-retry.
-- [ ] Backup database berhasil di-restore ke environment bersih.
+- [x] Backup database pilot berhasil di-restore ke environment bersih sementara
+  dan seluruh projection count sama; production DR masih pending.
 - [x] Graph revision sebelumnya dapat diaktifkan kembali pada lifecycle
   contract.
 - [x] Audit event tetap konsisten setelah disconnect-before-commit retry pada

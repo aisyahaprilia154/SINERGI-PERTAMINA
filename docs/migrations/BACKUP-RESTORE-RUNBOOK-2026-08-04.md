@@ -23,6 +23,16 @@ Shortcut `npm run db:backup-restore` tetap menjadi prosedur operator yang
 direkomendasikan; live evidence di atas dijalankan dengan urutan tool yang sama
 secara non-interaktif karena credential tidak tersedia di environment agent.
 
+## Latest rerun — 5 Agustus 2026
+
+Rerun operator dengan secure prompts melaporkan `result: passed` terhadap
+database lokal yang memiliki 8 dataset version, 19 candidate, 13 confirmed
+relation, 7 graph revision, 14 graph node, dan 7 graph edge. PostGIS source dan
+restore sama-sama `3.6.2`. Backup SHA-256:
+`DF655E6CEBFB8AF6F64985C2D2BDC08CB5E18CFADCC2ACAB6390EAC45B550F59`.
+Evidence detail:
+`POSTGRES-BACKUP-RESTORE-2026-08-05.md`.
+
 ## 1. Backup
 
 Jalankan dari PowerShell pada terminal yang dapat meminta password:

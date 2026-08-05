@@ -816,14 +816,33 @@ Status: `complete (local PostgreSQL service restart/recovery; production failove
 
 Batas checkpoint: bukti ini mencakup satu PostgreSQL service lokal, bukan
 production failover/replica switchover, retry lintas instance, production load
-atau SLO, backup/restore, dan enterprise approval.
+atau SLO, serta enterprise approval. Backup/restore dibuktikan terpisah pada
+Checkpoint 41.
+
+## Checkpoint 41 - PostgreSQL local backup/restore parity
+
+Status: `complete (local backup/restore parity; production DR sign-off pending)`
+- 5 Agustus 2026.
+
+- `npm run db:backup-restore` melaporkan `result: passed`.
+- PostGIS source dan restore sama-sama `3.6.2` pada PostgreSQL 18.
+- Semua projection count sama: `dataset_versions=8`, `source_features=3`,
+  `source_geometries=3`, `classified_objects=3`,
+  `topology_candidates=19`, `confirmed_relations=13`,
+  `graph_revisions=7`, `graph_nodes=14`, dan `graph_edges=7`.
+- Evidence detail:
+  `docs/migrations/POSTGRES-BACKUP-RESTORE-2026-08-05.md`.
+
+Batas checkpoint: ini hanya parity backup/restore lokal dengan database restore
+sementara. Retention, off-site copy, encryption/key rotation, point-in-time
+recovery, production RTO/RPO, dan Operations/Security sign-off masih pending.
 
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
 regeneration/review. Live PostgreSQL service recovery lokal sudah lulus;
-production failover/replica switchover, concurrency/load/SLO, backup/restore,
-security, dan enterprise approval gates tetap terpisah.
+production failover/replica switchover, concurrency/load/SLO, backup retention/
+off-site DR, security, dan enterprise approval gates tetap terpisah.
 Setiap checkpoint hanya boleh ditandai selesai
 setelah test, lint/build, dan regression evidence lulus; bukti live database
 harus dilaporkan terpisah dari test contract. Bukti lokal yang sudah lulus tidak
