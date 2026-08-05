@@ -42,9 +42,13 @@ export async function runShadowPilot({
 
     pool = await poolFactory({ connectionString })
     const schema = await verifyOperationalSchema(pool)
+    const shadowRepository = new PostgresDatasetVersionRepository(pool)
     const repository = new ShadowDatasetVersionRepository({
       primaryRepository,
-      shadowRepository: new PostgresDatasetVersionRepository(pool),
+      shadowRepository: createPilotScopedShadowRepository(
+        shadowRepository,
+        record.datasetVersion.id,
+      ),
       awaitComparison: true,
       clock,
     })
@@ -72,6 +76,49 @@ export async function runShadowPilot({
   }
 }
 
+/**
+ * The live database can contain other datasets and append-only audit evidence.
+ * The temporary JSON primary contains only the pilot fixture, so list parity
+ * must compare the same dataset-version scope instead of treating unrelated
+ * live records as a pilot mismatch.
+ */
+export function createPilotScopedShadowRepository(repository, datasetVersionId) {
+  if (!repository || typeof repository !== 'object') {
+    throw new TypeError('Shadow repository pilot harus berupa repository object.')
+  }
+  const scopedId = String(datasetVersionId ?? '').trim()
+  if (!scopedId) {
+    throw new TypeError('Dataset version ID pilot wajib tersedia.')
+  }
+  return {
+    get: (...args) => repository.get(...args),
+    list: async (...args) => {
+      const records = await repository.list(...args)
+      return (Array.isArray(records) ? records : []).filter((candidate) => (
+        candidate?.datasetVersion?.id === scopedId
+      ))
+    },
+    findActive: (...args) => repository.findActive(...args),
+    resolveActiveVersion: (...args) => repository.resolveActiveVersion(...args),
+  }
+}
+
+export function assertShadowPilotEqual(result) {
+  if (result?.equal === true) return result
+  const error = new Error(
+    'Shadow pilot parity mismatch; live verification dihentikan fail-closed.',
+  )
+  error.code = 'shadow_pilot_parity_mismatch'
+  error.details = {
+    comparisonCount: result?.comparisonCount ?? null,
+    mismatches: (result?.reports ?? [])
+      .filter((report) => report?.equal !== true)
+      .flatMap((report) => report?.mismatches ?? [])
+      .slice(0, 100),
+  }
+  throw error
+}
+
 async function main() {
   const config = createConfig(process.env)
   const connectionString = config.database.shadowDatabaseUrl
@@ -81,6 +128,7 @@ async function main() {
     clock: () => new Date(),
   })
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
+  assertShadowPilotEqual(result)
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

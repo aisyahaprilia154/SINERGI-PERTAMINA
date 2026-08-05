@@ -857,6 +857,30 @@ Batas checkpoint: bukti ini memakai durable JSON queue lokal. PostgreSQL
 multi-instance regeneration, production worker load, API p95, dan capacity/SLO
 tetap pending.
 
+## Checkpoint 43 - Shadow pilot scope dan fail-closed live verification
+
+Status: `complete (runner contract; live database rerun pending operator)`
+- 5 Agustus 2026.
+
+- Rerun live menemukan bahwa `list` membandingkan temporary JSON primary yang
+  hanya memuat `dv-pilot-parity` dengan seluruh row PostgreSQL. Tujuh row probe
+  historis muncul sebagai `record_extra_in_shadow`; row dengan audit event
+  memang dipertahankan oleh boundary append-only dan tidak boleh dihapus.
+- Shadow pilot sekarang membatasi operasi `list` ke dataset-version fixture
+  yang sedang diuji. `get`, active lookup, dan resolved active pointer tetap
+  memakai PostgreSQL shadow secara langsung.
+- Report mismatch sekarang mengakhiri command dengan exit non-zero melalui
+  `shadow_pilot_parity_mismatch`; wrapper tidak dapat mencetak verifikasi
+  sukses bila parity gagal.
+- Contract test baru memverifikasi scoping dan fail-closed assertion.
+- Full backend verification: `173/173` test, lint `91` file, build `37` source
+  file, dan `git diff --check` lulus.
+- Evidence detail: `docs/migrations/LIVE-POSTGRES-SHADOW-PILOT-SCOPE-2026-08-05.md`.
+
+Batas checkpoint: live rerun setelah perubahan dan operator confirmation masih
+pending. Tidak ada penghapusan row atau audit event dilakukan oleh perubahan
+ini.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
