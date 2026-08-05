@@ -224,7 +224,8 @@ Checklist:
 - [x] Schema migration dibuat, dapat di-rollback melalui migration runner, dan
   sudah diterapkan pada local PostgreSQL/PostGIS target; production apply tetap
   pending.
-- [ ] Foreign key dan unique constraint diuji.
+- [ ] Foreign key dan unique constraint diuji; safe live probe sudah tersedia
+  melalui `npm run db:constraint-negative`, menunggu output credentialed.
 - [x] Data JSON pilot berhasil dimigrasikan tanpa kehilangan
   candidate/relation pada local PostgreSQL pilot.
 - [x] Jumlah node, edge, candidate, dan audit event sebelum/sesudah sama pada

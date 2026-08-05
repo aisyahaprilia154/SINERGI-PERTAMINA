@@ -1000,6 +1000,23 @@ Batas checkpoint: foreign-key/unique negative write test live, production
 load/SLO, failover, DR retention/off-site, security, dan organizational approval
 masih memerlukan manual operator/enterprise gate.
 
+## Checkpoint 49 - Safe live FK/unique negative probe
+
+Status: `in progress (probe implemented; live execution pending operator
+credential)` - 5 Agustus 2026.
+
+- Runner `npm run db:constraint-negative` memeriksa schema lalu menguji
+  foreign-key violation `23503` dan duplicate candidate key `23505`.
+- Semua insert berada dalam savepoint dan outer transaction rollback; residue
+  query wajib menghasilkan `persistentRowsCreated=0`.
+- Contract test `2/2`, full backend test `179/179`, lint `93` file, dan build
+  `37` source file lulus.
+- Evidence detail:
+  `docs/migrations/POSTGRES-CONSTRAINT-NEGATIVE-PROBE-2026-08-05.md`.
+
+Batas checkpoint: output live dari terminal dengan `SINERGI_DATABASE_URL` belum
+diterima, jadi FK/unique checklist belum ditandai selesai.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
