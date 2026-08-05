@@ -282,6 +282,12 @@ export function createConfig(env = process.env, overrides = {}) {
       pollMilliseconds: overrides.jobs?.pollMilliseconds
         ?? numberFrom(env.SINERGI_JOB_POLL_MS, 100),
     },
+    observability: {
+      // Metrics stay disabled unless an operator explicitly enables the
+      // protected endpoint in the deployment environment.
+      metricsEnabled: overrides.observability?.metricsEnabled
+        ?? booleanFrom(env.SINERGI_METRICS_ENABLED, false),
+    },
   }
 }
 

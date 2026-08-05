@@ -584,6 +584,9 @@ Alert minimum:
 
 Checklist:
 
+- [x] Protected `/metrics` menyediakan local HTTP request count/latency/error,
+  in-flight, dan process resource metrics; endpoint fail-closed ketika tidak
+  diaktifkan dan membutuhkan Administrator ketika aktif.
 - [ ] Dashboard import dan topology job tersedia.
 - [ ] Dashboard kualitas candidate tersedia.
 - [ ] Dashboard latency API/review tersedia.
