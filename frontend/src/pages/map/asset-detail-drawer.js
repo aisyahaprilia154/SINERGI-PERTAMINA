@@ -10,6 +10,8 @@ export function renderAssetDetailDrawer({
   topologyReady = true,
   traceAvailable = topologyReady,
   diagramAvailable = topologyReady,
+  topologySummary = {},
+  reviewUrl = null,
   topologyMessage = 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.',
 }) {
   if (status === 'loading') return renderLoadingState()
@@ -18,6 +20,9 @@ export function renderAssetDetailDrawer({
 
   const category = getAssetCategory(asset, assetNetworks)
   const hasIpAddress = asset.ip && !['—', 'â€”', '-'].includes(asset.ip)
+  const hasDirectRelations = connectedAssets.length > 0
+  const canTraceAsset = traceAvailable && hasDirectRelations
+  const operationalStatus = resolveOperationalStatus(asset)
 
   return `
     <header class="drawer-header">
@@ -27,7 +32,7 @@ export function renderAssetDetailDrawer({
         </span>
         <span>
           <small>Detail aset</small>
-          <strong>${escapeHtml(asset.id)}</strong>
+          <strong>${escapeHtml(asset.name || asset.id)}</strong>
         </span>
       </div>
       <button class="icon-button close-drawer" type="button" aria-label="Tutup detail aset">
@@ -39,12 +44,14 @@ export function renderAssetDetailDrawer({
       <section class="drawer-title">
         <div class="asset-badge-row">
           <span class="category-badge category-${category.token}">${escapeHtml(category.label)}</span>
-          <span class="asset-status ${asset.status === 'Online' ? 'online' : 'warning'}">
-            <span class="material-symbols-outlined" aria-hidden="true">
-              ${asset.status === 'Online' ? 'check_circle' : 'error'}
+          ${operationalStatus.value ? `
+            <span class="asset-status ${operationalStatusTone(operationalStatus.value)}">
+              <span class="material-symbols-outlined" aria-hidden="true">
+                ${operationalStatusIcon(operationalStatus.value)}
+              </span>
+              ${escapeHtml(operationalStatus.value)}
             </span>
-            ${escapeHtml(asset.status)}
-          </span>
+          ` : ''}
         </div>
         <h2>${escapeHtml(asset.name)}</h2>
         <p>${escapeHtml(asset.type)}</p>
@@ -54,23 +61,47 @@ export function renderAssetDetailDrawer({
 
       ${!traceAvailable ? `
         <section class="drawer-topology-readiness" role="status">
-          <strong>Topology-ready: No</strong>
+          <strong>Topologi perlu diperiksa</strong>
           <span>${escapeHtml(topologyMessage)}</span>
         </section>
       ` : ''}
 
+      <section class="drawer-section drawer-topology-summary" aria-labelledby="asset-topology-title">
+        <div class="drawer-section-heading">
+          <h3 id="asset-topology-title">Kesiapan topologi</h3>
+          <span class="count-badge">${connectedAssets.length}</span>
+        </div>
+        <p>${hasDirectRelations
+          ? `${connectedAssets.length} relasi langsung terkonfirmasi untuk aset ini.`
+          : 'Relasi aset belum tersedia.'}</p>
+        <small>${Number(topologySummary.confirmedConnectionCount) || 0} koneksi terkonfirmasi pada area aktif.</small>
+        ${reviewUrl ? `
+          <a class="drawer-review-link" href="${escapeAttribute(reviewUrl)}">
+            Periksa kandidat relasi
+            <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
+          </a>
+        ` : ''}
+      </section>
+
       <section class="drawer-section" aria-labelledby="asset-information-title">
         <h3 id="asset-information-title">Informasi aset</h3>
         <dl class="asset-properties">
-          <div><dt>Asset ID</dt><dd>${escapeHtml(asset.id)}</dd></div>
+          <div><dt>Asset ID</dt><dd class="asset-id-value">${renderAssetId(asset.id)}</dd></div>
           <div><dt>Nama aset</dt><dd>${escapeHtml(asset.name)}</dd></div>
           <div><dt>Kategori</dt><dd>${escapeHtml(category.label)}</dd></div>
           <div><dt>Jenis aset</dt><dd>${escapeHtml(asset.type)}</dd></div>
           <div><dt>Lokasi</dt><dd>${escapeHtml(asset.location || 'Lokasi belum tersedia')}</dd></div>
+          ${operationalStatus.present && !operationalStatus.value ? `
+            <div class="asset-operational-status-empty">
+              <dt>Status operasional</dt><dd>Belum dicatat</dd>
+            </div>
+          ` : ''}
           ${hasIpAddress ? `<div><dt>IP address</dt><dd>${escapeHtml(asset.ip)}</dd></div>` : ''}
           <div>
             <dt>Dataset aktif</dt>
-            <dd>${escapeHtml(activeContext.datasetName)} · ${escapeHtml(activeContext.version)}</dd>
+            <dd>${escapeHtml(activeContext.datasetName === activeContext.version
+              ? activeContext.datasetName
+              : `${activeContext.datasetName} · ${activeContext.version}`)}</dd>
           </div>
         </dl>
       </section>
@@ -114,7 +145,7 @@ export function renderAssetDetailDrawer({
               </li>
             `).join('')}
           </ul>
-        ` : renderInlineEmpty('Tidak ada relasi topologi terkonfirmasi untuk aset ini. Aset tetap ditampilkan di peta.')}
+        ` : renderInlineEmpty('Relasi aset belum tersedia.')}
       </section>
 
       <section class="drawer-section additional-metadata ${showAdditionalMetadata ? 'expanded' : ''}"
@@ -124,7 +155,6 @@ export function renderAssetDetailDrawer({
         </div>
         ${showAdditionalMetadata ? `
           <dl class="asset-properties compact">
-            <div><dt>Status operasional</dt><dd>${escapeHtml(asset.status)}</dd></div>
             <div><dt>Penanggung jawab</dt><dd>${escapeHtml(asset.owner || 'Belum tersedia')}</dd></div>
             <div><dt>Kantor cabang</dt><dd>${escapeHtml(activeContext.branchName)}</dd></div>
             <div><dt>Versi dataset</dt><dd>${escapeHtml(activeContext.version)}</dd></div>
@@ -147,13 +177,13 @@ export function renderAssetDetailDrawer({
           <span class="material-symbols-outlined" aria-hidden="true">stop_circle</span>
           Hentikan tracing
         </button>
-      ` : `
+      ` : canTraceAsset ? `
         <button class="button primary trace-from" type="button"
-          ${traceAvailable ? '' : `title="${escapeAttribute(topologyMessage)}"`}>
+          title="Telusuri koneksi terkonfirmasi dari aset ini">
           <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>
-          Telusuri jaringan
+          Telusuri koneksi
         </button>
-      `}
+      ` : ''}
       <div class="drawer-secondary-actions">
         <button class="button secondary open-asset-detail" type="button"
           aria-expanded="${String(showAdditionalMetadata)}">
@@ -225,8 +255,12 @@ function renderTraceSection(trace) {
   }
 
   if (trace.status === 'active') {
-    const sourceLabel = trace.sourceAssetId || trace.pathAssets?.[0]?.id || 'Belum tersedia'
-    const targetLabel = trace.targetAssetId
+    const sourceLabel = trace.pathAssets?.[0]?.name
+      || trace.sourceAssetId
+      || trace.pathAssets?.[0]?.id
+      || 'Belum tersedia'
+    const targetLabel = trace.pathAssets?.at(-1)?.name
+      || trace.targetAssetId
       || trace.pathAssets?.at(-1)?.id
       || 'Belum tersedia'
     const hopLabel = Number.isFinite(Number(trace.hopCount))
@@ -235,7 +269,7 @@ function renderTraceSection(trace) {
     const lengthLabel = Number.isFinite(Number(trace.totalLengthMeters))
       ? `${Number(trace.totalLengthMeters).toLocaleString('id-ID')} m`
       : 'Belum tersedia'
-    const verifiedLabel = trace.verifiedAt || 'Belum tersedia'
+    const verifiedLabel = formatDateTime(trace.verifiedAt)
     return `
       <section class="drawer-section trace-panel" aria-labelledby="trace-path-title">
         <div class="trace-panel-heading success">
@@ -250,8 +284,8 @@ function renderTraceSection(trace) {
           <div><dt>Ke</dt><dd>${escapeHtml(targetLabel)}</dd></div>
           <div><dt>Hop</dt><dd>${escapeHtml(hopLabel)}</dd></div>
           <div><dt>Total panjang</dt><dd>${escapeHtml(lengthLabel)}</dd></div>
-          <div><dt>Network family</dt><dd>${escapeHtml(trace.networkFamily || 'Belum tersedia')}</dd></div>
-          <div><dt>Status</dt><dd>Confirmed</dd></div>
+          <div><dt>Network family</dt><dd>${escapeHtml(String(trace.networkFamily || 'Belum tersedia').toUpperCase())}</dd></div>
+          <div><dt>Status</dt><dd>Terkonfirmasi</dd></div>
           <div><dt>Graph revision</dt><dd>${escapeHtml(trace.graphRevision || 'Belum tersedia')}</dd></div>
           <div><dt>Verified at</dt><dd>${escapeHtml(verifiedLabel)}</dd></div>
         </dl>
@@ -337,6 +371,51 @@ function renderInlineEmpty(message) {
   return `<p class="drawer-inline-empty">${escapeHtml(message)}</p>`
 }
 
+const OPERATIONAL_STATUS_KEYS = [
+  'operationalStatus',
+  'assetStatus',
+  'status',
+  'condition',
+]
+
+function resolveOperationalStatus(asset) {
+  if (typeof asset?.hasOperationalStatusField === 'boolean') {
+    return {
+      present: asset.hasOperationalStatusField,
+      value: normalizeOperationalStatus(asset.operationalStatus ?? asset.status),
+    }
+  }
+  const key = OPERATIONAL_STATUS_KEYS.find((candidate) => (
+    Object.prototype.hasOwnProperty.call(asset ?? {}, candidate)
+  ))
+  return key
+    ? { present: true, value: normalizeOperationalStatus(asset[key]) }
+    : { present: false, value: null }
+}
+
+function normalizeOperationalStatus(value) {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim()
+  if (!normalized || normalized.toLocaleLowerCase('id') === 'status tidak tersedia') return null
+  return normalized
+}
+
+function operationalStatusTone(value) {
+  const normalized = value.toLocaleLowerCase('id')
+  if (['aktif', 'active', 'online', 'operasional', 'operational'].includes(normalized)) {
+    return 'success'
+  }
+  if (['dalam perbaikan', 'perbaikan', 'maintenance'].includes(normalized)) return 'warning'
+  return 'neutral'
+}
+
+function operationalStatusIcon(value) {
+  const tone = operationalStatusTone(value)
+  if (tone === 'success') return 'check_circle'
+  if (tone === 'warning') return 'build_circle'
+  return 'info'
+}
+
 function getAssetCategory(asset, assetNetworks) {
   const assetSource = `${asset.category || ''} ${asset.type || ''}`.toLowerCase()
   if (assetSource.includes('cctv') || assetSource.includes('nvr') || assetSource.includes('junction')) {
@@ -370,6 +449,20 @@ function assetIcon(type = '') {
   if (normalizedType === 'access point') return 'wifi'
   if (normalizedType === 'printer') return 'print'
   return 'device_hub'
+}
+
+function formatDateTime(value) {
+  if (!value) return 'Belum tersedia'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return new Intl.DateTimeFormat('id-ID', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
+}
+
+function renderAssetId(value) {
+  return escapeHtml(value).replaceAll(':', ':<wbr>')
 }
 
 function escapeHtml(value) {
