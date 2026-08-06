@@ -144,6 +144,7 @@ test('active map layers preserve normalized line and polygon coordinates separat
     polygonCount: 1,
     geometryCount: 2,
     hiddenPlacemarkCount: 0,
+    hiddenPointAssetCount: 0,
   })
 })
 
@@ -359,7 +360,7 @@ test('unmapped objects are preserved in a dedicated semantic network without war
   assert.equal(result.assets[0].sourceStatus, 'visible')
 })
 
-test('hidden Placemark is preserved for export but excluded from map nodes and networks', () => {
+test('hidden point Placemark remains discoverable while preserving source visibility status', () => {
   const payload = activePayload({
     layers: [layer('layer-cctv', 'CCTV', 'CCTV')],
     assets: [{
@@ -373,10 +374,12 @@ test('hidden Placemark is preserved for export but excluded from map nodes and n
 
   assert.equal(result.exportAssets.length, 1)
   assert.equal(result.exportAssets[0].sourceStatus, 'hidden')
-  assert.equal(result.assets.length, 0)
+  assert.equal(result.assets.length, 1)
+  assert.equal(result.assets[0].sourceStatus, 'hidden')
   assert.equal(result.geometries.length, 0)
-  assert.equal(result.networks.length, 0)
+  assert.equal(result.networks.length, 1)
   assert.equal(result.counts.hiddenPlacemarkCount, 1)
+  assert.equal(result.counts.hiddenPointAssetCount, 1)
 })
 
 test('hidden parent layer makes descendant Placemarks hidden in existing active versions', () => {
@@ -399,9 +402,10 @@ test('hidden parent layer makes descendant Placemarks hidden in existing active 
   const result = adaptActiveDatasetForMap(payload)
 
   assert.equal(result.exportAssets[0].sourceStatus, 'hidden')
-  assert.equal(result.assets.length, 0)
+  assert.equal(result.assets.length, 1)
   assert.equal(result.geometries.length, 0)
   assert.equal(result.counts.hiddenPlacemarkCount, 1)
+  assert.equal(result.counts.hiddenPointAssetCount, 1)
 })
 
 test('asset detail adapter adds metadata only after the detail request', () => {
