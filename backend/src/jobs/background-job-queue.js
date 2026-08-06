@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 export class BackgroundJobQueue {
   constructor({ concurrency = 1 } = {}) {
     this.concurrency = Math.max(1, concurrency)
@@ -7,11 +9,17 @@ export class BackgroundJobQueue {
   }
 
   enqueue(job) {
+    const descriptor = typeof job === 'object' && job?.handler
+      ? {
+        ...job,
+        jobId: job.jobId ?? `job-${randomUUID()}`,
+      }
+      : job
     const task = typeof job === 'function'
       ? job
-      : typeof job?.handler === 'function'
-        ? () => job.handler(job.payload ?? {}, {
-          job: descriptorWithoutHandler(job),
+      : typeof descriptor?.handler === 'function'
+        ? () => descriptor.handler(descriptor.payload ?? {}, {
+          job: descriptorWithoutHandler(descriptor),
           updateProgress: async () => {},
           isCancellationRequested: async () => false,
         })

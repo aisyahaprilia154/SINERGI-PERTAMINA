@@ -166,6 +166,7 @@ export class DatasetVersionLifecycleService {
     expectedActiveVersionId,
     allowArchived = false,
     operation = 'activate',
+    correlationId = null,
   } = {}) {
     let target = null
     const activatedAt = this.clock().toISOString()
@@ -202,6 +203,7 @@ export class DatasetVersionLifecycleService {
             actorId,
             datasetVersionId,
             branchId: transaction.pointer.branchId,
+            correlationId,
             outcome: 'failed',
             details: {
               datasetId: transaction.pointer.datasetId,
@@ -219,11 +221,13 @@ export class DatasetVersionLifecycleService {
         actorId,
         datasetVersionId,
         branchId: transaction.pointer.branchId,
+        correlationId,
         outcome: 'active',
         details: {
           datasetId: transaction.pointer.datasetId,
           previousVersionId: transaction.pointer.previousVersionId,
           newVersionId: datasetVersionId,
+          graphRevision: transaction.activated.topologyGraph?.graphRevision ?? null,
           activatedBy: actorId,
           activatedAt,
           validationSummary: transaction.activated.validation?.summary ?? {},
@@ -253,11 +257,13 @@ export class DatasetVersionLifecycleService {
           actorId,
           datasetVersionId,
           branchId: context.branchId ?? target?.datasetVersion.branchId ?? null,
+          correlationId,
           outcome: 'failed',
           details: {
             datasetId: context.datasetId ?? target?.datasetVersion.datasetId ?? null,
             previousVersionId: context.previousVersionId ?? null,
             newVersionId: datasetVersionId,
+            graphRevision: target?.topologyGraph?.graphRevision ?? null,
             activatedBy: actorId,
             activatedAt,
             validationSummary: target?.validation?.summary ?? {},
@@ -273,6 +279,7 @@ export class DatasetVersionLifecycleService {
 
   async rollbackToPrevious(datasetId, branchId, actorId, {
     expectedActiveVersionId,
+    correlationId = null,
   } = {}) {
     const resolved = await this.#resolveActive(datasetId, branchId)
     const previousVersionId = resolved.pointer.previousVersionId
@@ -292,10 +299,11 @@ export class DatasetVersionLifecycleService {
         ?? resolved.record.datasetVersion.id,
       allowArchived: true,
       operation: 'rollback',
+      correlationId,
     })
   }
 
-  async reject(datasetVersionId, actorId) {
+  async reject(datasetVersionId, actorId, { correlationId = null } = {}) {
     const current = await this.repository.get(datasetVersionId)
     if (current.datasetVersion.status === 'active') {
       throw new AppError('Dataset version aktif tidak dapat ditolak.', {
@@ -318,6 +326,7 @@ export class DatasetVersionLifecycleService {
       actorId,
       datasetVersionId,
       branchId: rejected.datasetVersion.branchId,
+      correlationId,
       outcome: 'archived',
     })
     return { datasetVersion: withoutInternalStorage(rejected.datasetVersion) }
