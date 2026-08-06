@@ -18,7 +18,7 @@ export function calculateSchematicLayout(graph, options = {}) {
   }
 
   const settings = { ...DEFAULT_OPTIONS, ...options }
-  if (graph.mode === 'full-map') {
+  if (graph.mode === 'full-map' || graph.mode === 'all-assets') {
     return calculateCategorySectionLayout(graph, settings)
   }
   if (options.preserveMapOrientation && canUseSourcePositions(graph)) {

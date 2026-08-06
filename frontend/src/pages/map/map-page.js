@@ -130,7 +130,7 @@ export async function renderMapPage(container) {
     topologyGraph: operationalTopologyGraph,
   })
   const traceAvailable = globalTraceAvailable && topologyGraph.edges.length > 0
-  const diagramAvailable = globalDiagramAvailable && topologyGraph.edges.length > 0
+  const diagramAvailable = globalDiagramAvailable && assets.length > 0
   const topologySummary = summarizeMapTopology({
     assets,
     topologyGraph,
@@ -770,6 +770,13 @@ export async function renderMapPage(container) {
       renderDrawer()
       return
     }
+    const allAssetsGraph = buildSchematicGraph({
+      assets: diagramAssets,
+      networks,
+      topologyGraph,
+      scope: 'all-assets',
+      topologyReady: topologyReadiness.ready,
+    })
     const fullMapGraph = buildSchematicGraph({
       assets: diagramAssets,
       networks,
@@ -788,6 +795,10 @@ export async function renderMapPage(container) {
     })
     openSchematicDialog({
       diagrams: {
+        'all-assets': {
+          graph: allAssetsGraph,
+          layout: calculateSchematicLayout(allAssetsGraph, { preserveMapOrientation: true }),
+        },
         'full-map': {
           graph: fullMapGraph,
           layout: calculateSchematicLayout(fullMapGraph, { preserveMapOrientation: true }),
