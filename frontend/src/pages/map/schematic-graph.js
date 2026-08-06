@@ -52,6 +52,22 @@ export function buildSchematicGraph({
     anchorAssetId = tracePath[0]
     nodeIds = tracePath.filter((assetId) => assetById.has(assetId))
     sourceEdges = buildTraceEdges(tracePath, traceRelations, networks)
+  } else if (scope === 'all-assets') {
+    mode = 'all-assets'
+    nodeIds = uniqueIds(assets.map(({ id }) => id))
+    sourceEdges = hasTopology
+      ? topologyEdges
+      : networks.flatMap((network) =>
+        (network.edges || []).map(([sourceId, targetId], index) => ({
+          sourceId,
+          targetId,
+          networkId: network.id,
+          relationType: 'explicit-network-edge',
+          relationSource: 'explicit',
+          order: index,
+        })),
+      )
+    anchorAssetId = chooseCoreAnchor(nodeIds, sourceEdges, assetById)
   } else if (scope === 'full-map') {
     mode = 'full-map'
     nodeIds = hasTopology
@@ -292,6 +308,7 @@ function isConnectorType(type = '') {
 
 function getDiagramTitle(mode, nodes, networkById, selectedIds) {
   if (mode === 'trace') return 'Jalur koneksi terpilih'
+  if (mode === 'all-assets') return 'Seluruh aset'
   if (mode === 'full-map') return 'Peta jaringan lengkap'
   if (mode === 'focus') return `Relasi langsung ${nodes.find((node) => node.isAnchor)?.name || 'aset fokus'}`
   const selectedNames = [...selectedIds]
