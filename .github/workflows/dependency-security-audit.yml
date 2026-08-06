@@ -1,0 +1,41 @@
+name: Dependency security audit
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  npm-audit:
+    name: npm audit (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: root
+            directory: .
+            lockfile: package-lock.json
+          - name: backend
+            directory: backend
+            lockfile: backend/package-lock.json
+          - name: frontend
+            directory: frontend
+            lockfile: frontend/package-lock.json
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ${{ matrix.lockfile }}
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --fetch-retries=5 --fetch-retry-factor=2 --fetch-retry-mintimeout=1000 --fetch-retry-maxtimeout=60000
+        working-directory: ${{ matrix.directory }}
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+        working-directory: ${{ matrix.directory }}
