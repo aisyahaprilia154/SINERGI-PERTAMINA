@@ -23,6 +23,7 @@ export function renderAssetDetailDrawer({
   const hasDirectRelations = connectedAssets.length > 0
   const canTraceAsset = traceAvailable && hasDirectRelations
   const operationalStatus = resolveOperationalStatus(asset)
+  const assetName = displayAssetName(asset)
 
   return `
     <header class="drawer-header">
@@ -32,7 +33,7 @@ export function renderAssetDetailDrawer({
         </span>
         <span>
           <small>Detail aset</small>
-          <strong>${escapeHtml(asset.name || asset.id)}</strong>
+          <strong>${escapeHtml(assetName)}</strong>
         </span>
       </div>
       <button class="icon-button close-drawer" type="button" aria-label="Tutup detail aset">
@@ -53,8 +54,8 @@ export function renderAssetDetailDrawer({
             </span>
           ` : ''}
         </div>
-        <h2>${escapeHtml(asset.name)}</h2>
-        <p>${escapeHtml(asset.type)}</p>
+        <h2>${escapeHtml(assetName)}</h2>
+        <p>${escapeHtml(asset.type || 'Jenis aset belum tersedia')}</p>
       </section>
 
       ${renderTraceSection(trace)}
@@ -86,10 +87,9 @@ export function renderAssetDetailDrawer({
       <section class="drawer-section" aria-labelledby="asset-information-title">
         <h3 id="asset-information-title">Informasi aset</h3>
         <dl class="asset-properties">
-          <div><dt>Asset ID</dt><dd class="asset-id-value">${renderAssetId(asset.id)}</dd></div>
-          <div><dt>Nama aset</dt><dd>${escapeHtml(asset.name)}</dd></div>
+          <div><dt>Nama aset</dt><dd>${escapeHtml(assetName)}</dd></div>
           <div><dt>Kategori</dt><dd>${escapeHtml(category.label)}</dd></div>
-          <div><dt>Jenis aset</dt><dd>${escapeHtml(asset.type)}</dd></div>
+          <div><dt>Jenis aset</dt><dd>${escapeHtml(asset.type || 'Jenis aset belum tersedia')}</dd></div>
           <div><dt>Lokasi</dt><dd>${escapeHtml(asset.location || 'Lokasi belum tersedia')}</dd></div>
           ${operationalStatus.present && !operationalStatus.value ? `
             <div class="asset-operational-status-empty">
@@ -104,6 +104,15 @@ export function renderAssetDetailDrawer({
               : `${activeContext.datasetName} · ${activeContext.version}`)}</dd>
           </div>
         </dl>
+        <details class="asset-technical-metadata">
+          <summary>
+            <span>Informasi teknis</span>
+            <span class="material-symbols-outlined" aria-hidden="true">expand_more</span>
+          </summary>
+          <dl class="asset-properties compact">
+            <div><dt>ID internal</dt><dd class="asset-id-value">${renderAssetId(asset.id)}</dd></div>
+          </dl>
+        </details>
       </section>
 
       <section class="drawer-section connected-networks" aria-labelledby="asset-networks-title">
@@ -137,7 +146,7 @@ export function renderAssetDetailDrawer({
                     ${assetIcon(connectedAsset.type)}
                   </span>
                   <span>
-                    <strong>${escapeHtml(connectedAsset.name)}</strong>
+                    <strong>${escapeHtml(displayAssetName(connectedAsset))}</strong>
                     <small>${escapeHtml(connectedAsset.id)} · ${escapeHtml(network?.shortName || network?.name || 'Topologi terkonfirmasi')}</small>
                   </span>
                   <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
@@ -229,7 +238,7 @@ function renderTraceSection(trace) {
           ${(trace.candidates || []).map(({ asset, distance }) => `
             <button type="button" data-trace-target="${escapeAttribute(asset.id)}">
               <span>
-                <strong>${escapeHtml(asset.name)}</strong>
+                <strong>${escapeHtml(displayAssetName(asset))}</strong>
                 <small>${escapeHtml(asset.id)} · ${distance} hubungan</small>
               </span>
               <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
@@ -302,7 +311,7 @@ function renderTraceSection(trace) {
               <li>
                 <span class="trace-order">${index + 1}</span>
                 <span>
-                  <strong>${escapeHtml(pathAsset.name)}</strong>
+                  <strong>${escapeHtml(displayAssetName(pathAsset))}</strong>
                   <small>${escapeHtml(pathAsset.id)}</small>
                   ${relation?.networkName ? `<em>${escapeHtml(relation.networkName)}</em>` : ''}
                   ${pathEvidence ? `<small>${escapeHtml(pathEvidence)}</small>` : ''}
@@ -463,6 +472,10 @@ function formatDateTime(value) {
 
 function renderAssetId(value) {
   return escapeHtml(value).replaceAll(':', ':<wbr>')
+}
+
+function displayAssetName(asset) {
+  return String(asset?.name || '').trim() || 'Aset tanpa nama'
 }
 
 function escapeHtml(value) {

@@ -1085,3 +1085,71 @@
     width: 100%;
   }
 }
+
+/* Shared SINERGI shell language: admin remains data-dense, but uses the same
+   rhythm, surface treatment, badge sizing, and action hierarchy as the map. */
+.admin-import-body {
+  --admin-space-1: 4px;
+  --admin-space-2: 8px;
+  --admin-space-3: 12px;
+  --admin-space-4: 16px;
+  --admin-space-5: 20px;
+  --admin-space-6: 24px;
+  --admin-card-radius: 12px;
+  --admin-card-shadow: 0 2px 8px rgba(15, 23, 42, .06);
+}
+
+.admin-app-header {
+  height: 60px;
+  padding-inline: 20px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .05);
+}
+
+.admin-import-main {
+  width: min(1120px, calc(100% - 32px));
+  padding: 24px 0 40px;
+}
+
+.admin-page-heading {
+  margin-bottom: 20px;
+  gap: 20px;
+}
+
+.admin-page-heading nav {
+  color: var(--admin-text-secondary);
+  font-weight: 600;
+}
+
+.import-form-card,
+.import-progress-card,
+.import-summary-card,
+.validation-report-panel,
+.import-preview-panel,
+.admin-loading-state,
+.admin-error-state {
+  border-radius: var(--admin-card-radius);
+  box-shadow: var(--admin-card-shadow);
+}
+
+.read-only-badge,
+.import-status-badge {
+  min-height: 28px;
+  border-radius: 999px;
+}
+
+.admin-import-body .button {
+  min-height: 40px;
+  border-radius: 9px;
+}
+
+.admin-import-body .button.primary {
+  color: #fff;
+  background: var(--admin-primary);
+  border-color: var(--admin-primary);
+}
+
+.admin-import-body .button.secondary {
+  color: var(--admin-text);
+  background: var(--admin-surface);
+  border-color: var(--admin-border-strong);
+}
