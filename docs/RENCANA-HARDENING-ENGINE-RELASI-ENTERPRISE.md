@@ -587,14 +587,23 @@ Checklist:
 - [x] Protected `/metrics` menyediakan local HTTP request count/latency/error,
   in-flight, dan process resource metrics; endpoint fail-closed ketika tidak
   diaktifkan dan membutuhkan Administrator ketika aktif.
+- [x] Durable queue melaporkan local job transition, duration,
+  deduplication/dead-letter, worker active, dan queue depth; aggregation
+  multi-instance production tetap pending.
 - [ ] Dashboard import dan topology job tersedia.
 - [ ] Dashboard kualitas candidate tersedia.
 - [ ] Dashboard latency API/review tersedia.
-- [ ] Alert diuji dengan fault injection sederhana.
-- [ ] Log mempunyai correlation ID, dataset version, job ID, dan graph revision.
+- [x] Local HTTP 500 fault injection menaikkan error metric dan mengembalikan
+  in-flight gauge ke nol; alert routing dan fault injection production tetap
+  pending.
+- [x] Audit event HTTP/worker/service mempunyai correlation ID, dataset version,
+  job ID, dan graph revision bila context tersebut berlaku; centralized log
+  shipping dan retention production tetap pending.
 - [x] HTTP request correlation ID dipantulkan pada response dan disimpan pada
   audit event HTTP yang sudah berada di boundary app.
-- [ ] Log tidak menyimpan token, password, atau source data sensitif berlebihan.
+- [x] Audit sink lokal membuang token/password/authorization/secret secara
+  recursive dan membatasi circular/deep details; source-data classification,
+  centralized shipping, dan retention production tetap pending.
 
 ## 9. Target nonfungsional yang harus disetujui
 
@@ -648,9 +657,12 @@ test report, benchmark report, atau audit record.
 - [x] Trace hanya memakai confirmed graph.
 - [x] PostgreSQL transaction mencakup review, relation, revision, dan audit;
   live production-sized HTTP replay masih pending.
-- [ ] Object storage, database, API, dan worker diuji end-to-end.
+- [x] Local object-storage adapter, database, API, dan worker diuji end-to-end;
+  provider object storage production dan multi-instance tetap pending.
 - [x] Pagination candidate diuji melintasi beberapa halaman.
-- [ ] Aktivasi dataset tidak menampilkan graph setengah jadi.
+- [x] Lifecycle contract membuktikan active pointer lama tetap terlihat selama
+  transaksi dan rollback sebelum pointer commit tidak menerbitkan graph
+  setengah jadi; concurrent PostgreSQL publication production tetap pending.
 - [x] Rollback rule set mengaktifkan kembali graph revision/pointer dataset
   yang benar pada lifecycle contract.
 
@@ -706,11 +718,14 @@ Checklist:
   3 Agustus 2026.
 - [x] Benchmark mempunyai fixture dan command yang tersimpan di repository.
 - [ ] 10.000 objek sparse memenuhi SLO.
-- [ ] 10.000 objek dense memenuhi SLO atau mempunyai guardrail resmi.
-- [ ] 50.000 objek stress test tidak menyebabkan out-of-memory.
+- [x] 10.000 objek dense mempunyai guardrail resmi: hard candidate limit
+  `50.000` memicu fail-closed tanpa OOM; dense production SLO tetap pending.
+- [x] 50.000 objek pada guarded sparse in-process stress test tidak menyebabkan
+  out-of-memory; dense dan production capacity/SLO tetap pending.
 - [ ] Candidate API p95 memenuhi target pada concurrent traffic.
 - [ ] Review API p95 memenuhi target saat worker sedang sibuk.
-- [ ] Query plan membuktikan spatial/BTREE index digunakan.
+- [x] Live PostgreSQL pilot query-plan membuktikan index contract digunakan;
+  production-sized plan/load verification tetap pending.
 - [x] Candidate explosion mempunyai hard limit dan diagnostic yang jelas.
 - [x] Timeout tidak meninggalkan partial artifact pada engine generation.
 - [ ] Memory, CPU, database I/O, dan queue depth dilaporkan.
@@ -748,7 +763,9 @@ Checklist:
 - [ ] Audit log bersifat append-only dan mempunyai retention policy.
 - [ ] Dataset/site isolation diuji.
 - [ ] Rate limit upload, review, tracing, dan regeneration diuji.
-- [ ] Dependency dan container security scan menjadi bagian CI.
+- [x] Dependency scan `npm audit --audit-level=high` menjadi bagian CI untuk
+  root, backend, dan frontend; container image scan menunggu Dockerfile/image
+  build contract yang belum tersedia.
 
 ## 11. Tahapan implementasi
 
@@ -841,7 +858,9 @@ Exit criterion:
 - [ ] Backup/restore dan disaster recovery diuji.
 - [ ] Security review selesai.
 - [ ] Canary pada satu site selesai.
-- [ ] Runbook operator dan incident response tersedia.
+- [x] Draft-ready runbook operator, observability, dan incident response
+  tersedia; deployment dashboard, fault drill production, dan Operations
+  sign-off tetap pending.
 
 Exit criterion:
 
@@ -931,12 +950,15 @@ Deployment harus dihentikan atau kembali ke map-only jika:
 Engine baru dianggap enterprise-ready hanya jika:
 
 - [ ] Seluruh checklist critical pada database, job, concurrency, dan recovery lulus.
-- [ ] Tidak ada full regeneration pada request review normal.
-- [ ] Tidak ada global path-pair dan intersection-node scan.
+- [x] Tidak ada full regeneration pada request review normal pada local API/
+  durable-job contract; production worker SLO tetap pending.
+- [x] Engine memakai spatial-prefiltered path-pair/intersection lookup tanpa
+  global scan; production profiling tetap pending.
 - [ ] Load test representatif memenuhi SLO yang disetujui.
 - [ ] Accuracy gate memakai approved versioned artifact.
 - [x] Candidate API terindeks dan terpaginasikan.
-- [ ] Setiap perubahan menghasilkan audit dan graph revision yang konsisten.
+- [x] Local mutation/lifecycle/import contract menghasilkan audit dan graph
+  revision yang konsisten; multi-instance transaction evidence tetap pending.
 - [ ] Multi-instance API dan worker diuji.
 - [ ] Backup, restore, rollout, dan rollback diuji.
 - [ ] Runbook serta dashboard tersedia.

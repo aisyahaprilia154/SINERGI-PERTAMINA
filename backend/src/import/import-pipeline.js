@@ -40,6 +40,8 @@ export class ImportPipeline {
     sourcePath,
     extension,
     actorId,
+    correlationId = null,
+    jobId = null,
     progressReporter = null,
   }) {
     let workspace = null
@@ -50,7 +52,12 @@ export class ImportPipeline {
     await this.auditLog.record('dataset_import.processing_started', {
       actorId,
       datasetVersionId,
+      correlationId,
       outcome: 'processing',
+      details: {
+        jobId,
+        graphRevision: null,
+      },
     })
 
     try {
@@ -184,8 +191,11 @@ export class ImportPipeline {
         actorId,
         datasetVersionId,
         branchId: result.datasetVersion.branchId,
+        correlationId,
         outcome: result.datasetVersion.status,
         details: {
+          jobId,
+          graphRevision: result.topologyGraph?.graphRevision ?? null,
           validationStatus: result.datasetVersion.validationStatus,
           sourceFilename: result.datasetVersion.sourceFilename,
           summary: result.datasetVersion.summary,
@@ -200,8 +210,11 @@ export class ImportPipeline {
         actorId,
         datasetVersionId,
         branchId: failed.datasetVersion.branchId,
+        correlationId,
         outcome: 'invalid',
         details: {
+          jobId,
+          graphRevision: failed.topologyGraph?.graphRevision ?? null,
           errorCode: appError.code,
           message: appError.expose ? appError.message : 'Internal processing error',
         },

@@ -66,13 +66,15 @@ const jobQueue = new DurableJobQueue({
   concurrency: config.jobs?.concurrency ?? 1,
   leaseMilliseconds: config.jobs?.leaseMilliseconds,
   pollMilliseconds: config.jobs?.pollMilliseconds,
+  metrics,
+  metricsRefreshMilliseconds: config.jobs?.metricsRefreshMilliseconds,
 })
 jobQueue.registerHandler(
   'regenerate_full_topology',
   createFullTopologyRegenerationJobHandler(topologyService),
 )
 jobQueue.registerHandler('parse_source', (
-  { sourceStorageKey, extension, actorId },
+  { sourceStorageKey, extension, actorId, correlationId },
   { job, updateProgress },
 ) => (
   importPipeline.process({
@@ -80,6 +82,8 @@ jobQueue.registerHandler('parse_source', (
     sourcePath: fileStore.resolveOriginalPath(sourceStorageKey),
     extension,
     actorId,
+    correlationId,
+    jobId: job.jobId,
     progressReporter: updateProgress,
   })
 ))
