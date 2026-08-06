@@ -184,15 +184,20 @@ export function renderMapFloatingControls(
 
     <div class="map-floating-top">
       <div class="map-action-group" aria-label="Aksi peta">
-        <button class="tool-button trace-toggle map-action-primary" type="button" ${traceActionAttributes}>
+        <button class="tool-button trace-toggle map-action-primary" type="button"
+          aria-label="Tracing" ${traceActionAttributes || 'title="Telusuri hubungan antar aset"'}>
           <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>
           <span>Tracing</span>
         </button>
-        <button class="tool-button diagram-toggle map-action-secondary" type="button" ${diagramActionAttributes}>
+        <button class="tool-button diagram-toggle map-action-secondary" type="button"
+          aria-label="Diagram 2D" ${diagramAvailable
+            ? 'title="Lihat jaringan dalam diagram 2D"'
+            : diagramActionAttributes}>
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
           <span>Diagram 2D</span>
         </button>
-        <button class="tool-button export-toggle map-action-ghost" type="button">
+        <button class="tool-button export-toggle map-action-ghost" type="button"
+          aria-label="Export" title="Export data peta">
           <span class="material-symbols-outlined" aria-hidden="true">download</span>
           <span>Export</span>
         </button>
@@ -203,6 +208,10 @@ export function renderMapFloatingControls(
             <span>Lainnya</span>
           </summary>
           <div class="map-more-popover">
+            <button class="export-toggle" type="button" title="Export data peta">
+              <span class="material-symbols-outlined" aria-hidden="true">download</span>
+              <span><strong>Export</strong><small>Unduh data sesuai konteks peta</small></span>
+            </button>
             <button class="manage-dataset-toggle" type="button">
               <span class="material-symbols-outlined" aria-hidden="true">database</span>
               <span><strong>Kelola Dataset</strong><small>Import KML/KMZ dan versi dataset</small></span>
@@ -216,6 +225,21 @@ export function renderMapFloatingControls(
         </details>
       </div>
     </div>
+
+    <nav class="mobile-map-tabs" aria-label="Navigasi peta mobile">
+      <button class="mobile-map-tab active" type="button" data-mobile-map-tab="map" aria-current="page">
+        <span class="material-symbols-outlined" aria-hidden="true">map</span>
+        <span>Peta</span>
+      </button>
+      <button class="mobile-map-tab" type="button" data-mobile-map-tab="layers">
+        <span class="material-symbols-outlined" aria-hidden="true">layers</span>
+        <span>Layer</span>
+      </button>
+      <button class="mobile-map-tab" type="button" data-mobile-map-tab="assets">
+        <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
+        <span>Aset</span>
+      </button>
+    </nav>
 
     <div class="map-floating-bottom">
       <button class="icon-button basemap-toggle" type="button" aria-label="Pilih tampilan peta dasar"

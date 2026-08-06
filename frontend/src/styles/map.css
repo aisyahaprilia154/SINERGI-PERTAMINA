@@ -561,6 +561,10 @@
   background: var(--color-map-canvas);
   --map-control-gap: var(--space-4);
   --map-compact-toolbar-width: 196px;
+  --map-safe-left: var(--space-4);
+  --map-safe-right: var(--space-4);
+  --map-context-row-height: 84px;
+  --panel-transition-duration: 200ms;
 }
 
 .map-topology-readiness {
@@ -2265,7 +2269,7 @@
   position: absolute;
   top: var(--space-4);
   right: var(--space-4);
-  z-index: 450;
+  z-index: 410;
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);
@@ -2329,7 +2333,7 @@
   position: absolute;
   right: var(--space-4);
   bottom: var(--space-8);
-  z-index: 450;
+  z-index: 410;
   display: flex;
   align-items: flex-end;
   gap: var(--space-2);
@@ -2397,7 +2401,7 @@
   top: var(--space-4);
   right: var(--space-4);
   bottom: var(--space-4);
-  z-index: 600;
+  z-index: 500;
   transition: transform 200ms ease, opacity 150ms ease;
 }
 
@@ -4907,7 +4911,7 @@
   border-color: #e2e8f0;
   border-radius: 12px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, .12);
-  z-index: 500;
+  z-index: 600;
 }
 
 .map-body .map-stage .basemap-status {
@@ -5086,5 +5090,299 @@
       )
     );
     max-width: none;
+  }
+}
+
+/* Tracing overlay safe area. The drawer state is applied before its loading
+   content is rendered, so every tracing state reserves the same right space. */
+.map-workspace.drawer-open .map-stage {
+  --map-safe-right: calc(var(--map-drawer-width) + var(--space-4) + var(--map-control-gap));
+}
+
+.map-workspace.sidebar-collapsed .map-stage {
+  --map-safe-left: 74px;
+}
+
+.map-stage .trace-banner {
+  width: fit-content;
+  max-width: min(640px, calc(100% - var(--map-safe-left) - var(--map-safe-right)));
+  top: calc(var(--map-context-row-height) + var(--space-4) + var(--space-3));
+  right: var(--map-safe-right);
+  left: var(--map-safe-left);
+  z-index: 420;
+  transform: none;
+  pointer-events: auto;
+  transition: right var(--panel-transition-duration) ease,
+    top var(--panel-transition-duration) ease,
+    width var(--panel-transition-duration) ease,
+    max-width var(--panel-transition-duration) ease;
+}
+
+.map-workspace.drawer-open .map-stage .trace-banner {
+  left: var(--map-safe-left);
+  right: var(--map-safe-right);
+  width: fit-content;
+  max-width: min(640px, calc(100% - var(--map-safe-left) - var(--map-safe-right)));
+  transform: none;
+}
+
+.map-stage .trace-banner > div {
+  min-width: 0;
+}
+
+.map-stage .trace-banner strong,
+.map-stage .trace-banner div span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-stage .trace-banner strong {
+  white-space: nowrap;
+}
+
+.map-stage .trace-banner div span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.35;
+}
+
+@media (min-width: 961px) and (max-width: 1450px) {
+  .map-workspace.drawer-open .map-stage {
+    --map-context-row-height: 136px;
+  }
+}
+
+@media (max-width: 960px) {
+  .map-stage {
+    --map-safe-left: var(--space-3);
+    --map-safe-right: var(--space-3);
+  }
+
+  .map-workspace.drawer-open .map-stage {
+    --map-safe-right: var(--space-3);
+  }
+
+  .map-stage .trace-banner {
+    top: calc(var(--map-context-row-height) + 76px + var(--space-3));
+    max-width: calc(100% - var(--space-6));
+  }
+}
+
+@media (max-width: 620px) {
+  .map-stage {
+    --map-context-row-height: 48px;
+  }
+
+  .map-stage .trace-banner {
+    top: calc(66px + var(--map-context-row-height) + var(--space-3));
+  }
+}
+
+.asset-technical-metadata {
+  margin-top: var(--space-3);
+  border-top: 1px solid var(--color-divider);
+}
+
+.asset-technical-metadata summary {
+  min-height: 40px;
+  padding-top: var(--space-3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+
+.asset-technical-metadata summary::-webkit-details-marker {
+  display: none;
+}
+
+.asset-technical-metadata summary .material-symbols-outlined {
+  font-size: 18px;
+  transition: transform 160ms ease;
+}
+
+.asset-technical-metadata[open] summary .material-symbols-outlined {
+  transform: rotate(180deg);
+}
+
+.asset-technical-metadata .asset-id-value {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.mobile-map-tabs {
+  display: none;
+}
+
+@media (max-width: 960px) {
+  .network-sidebar {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    height: min(52dvh, 440px);
+    min-height: 0;
+    max-height: 86dvh;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    overflow: hidden;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    transform: translateY(102%);
+  }
+
+  .map-workspace.sidebar-open .network-sidebar {
+    transform: translateY(0);
+  }
+
+  .map-workspace[data-mobile-panel="assets"] .area-selector,
+  .map-workspace[data-mobile-panel="assets"] .map-category-presets,
+  .map-workspace[data-mobile-panel="assets"] .sidebar-list-header,
+  .map-workspace[data-mobile-panel="assets"] .network-list,
+  .map-workspace[data-mobile-panel="assets"] .sidebar-secondary-context,
+  .map-workspace[data-mobile-panel="assets"] .sidebar-footer {
+    display: none;
+  }
+
+  .map-workspace[data-mobile-panel="assets"] .sidebar-heading h1::after {
+    content: ' · Aset';
+  }
+}
+
+@media (max-width: 620px) {
+  .map-action-group {
+    width: auto;
+    max-width: calc(100vw - 24px);
+    position: static;
+  }
+
+  .map-action-group > .trace-toggle,
+  .map-action-group > .diagram-toggle {
+    width: auto;
+    min-width: 44px;
+    padding-inline: 10px;
+  }
+
+  .map-action-group > .trace-toggle span:not(.material-symbols-outlined),
+  .map-action-group > .diagram-toggle span:not(.material-symbols-outlined) {
+    display: inline;
+  }
+
+  .map-action-group > .export-toggle {
+    display: none;
+  }
+
+  .map-action-group > .trace-toggle,
+  .map-action-group > .diagram-toggle,
+  .map-more-menu > summary {
+    min-height: 44px;
+  }
+
+  .map-context-pill {
+    min-height: 48px;
+    max-height: 60px;
+    overflow: hidden;
+  }
+
+  .map-context-pill .context-main-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .map-context-pill .context-branch,
+  .map-context-pill .context-separator,
+  .map-context-pill .context-statuses,
+  .map-context-pill .context-area small,
+  .map-context-pill .context-dataset small {
+    display: none;
+  }
+
+  .map-context-pill .context-area,
+  .map-context-pill .context-dataset {
+    min-width: 0;
+    max-width: none;
+    grid-column: auto;
+  }
+
+  .map-context-pill .context-area strong,
+  .map-context-pill .context-dataset strong {
+    max-width: 100%;
+    margin-top: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .map-context-pill .context-area::before {
+    content: 'Area · ';
+    color: var(--color-text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .map-context-pill .context-area strong,
+  .map-context-pill .context-area::before {
+    display: inline;
+  }
+
+  .mobile-map-tabs {
+    min-height: 52px;
+    padding: 4px;
+    position: absolute;
+    right: 50%;
+    bottom: calc(48px + env(safe-area-inset-bottom));
+    z-index: 460;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(72px, 1fr));
+    gap: 2px;
+    transform: translateX(50%);
+    background: rgba(255, 255, 255, .96);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-floating);
+  }
+
+  .mobile-map-tab {
+    min-width: 72px;
+    min-height: 44px;
+    padding: 3px 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-md);
+    font-size: 11px;
+    font-weight: 650;
+  }
+
+  .mobile-map-tab .material-symbols-outlined {
+    font-size: 17px;
+  }
+
+  .mobile-map-tab.active {
+    color: var(--color-text-inverse);
+    background: var(--color-primary);
+  }
+
+  .mobile-map-tab:focus-visible {
+    outline: 2px solid var(--color-focus, #2563eb);
+    outline-offset: -2px;
+  }
+
+  .map-workspace.sidebar-open .mobile-map-tabs {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
   }
 }

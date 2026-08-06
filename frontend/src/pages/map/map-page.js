@@ -225,6 +225,7 @@ export async function renderMapPage(container) {
   const drawer = container.querySelector('.asset-drawer')
   const sidebarToggle = container.querySelector('.sidebar-collapse')
   const sidebarReopen = container.querySelector('.open-sidebar')
+  const mobileMapTabs = [...container.querySelectorAll('[data-mobile-map-tab]')]
   const areaSelect = container.querySelector('.area-selector select')
   const legendToggle = container.querySelector('.legend-toggle')
   const legend = container.querySelector('.legend-popover')
@@ -843,14 +844,28 @@ export async function renderMapPage(container) {
     handleAssetSelect(assetId)
   }
 
-  function openMobileSidebar() {
+  function setMobileMapTab(tab) {
+    mobileMapTabs.forEach((button) => {
+      const active = button.dataset.mobileMapTab === tab
+      button.classList.toggle('active', active)
+      if (active) button.setAttribute('aria-current', 'page')
+      else button.removeAttribute('aria-current')
+    })
+  }
+
+  function openMobileSidebar(mode = 'layers') {
     workspace.classList.add('sidebar-open')
+    workspace.dataset.mobilePanel = mode
+    setMobileMapTab(mode === 'assets' ? 'assets' : 'layers')
     sidebarReopen.setAttribute('aria-expanded', 'true')
     invalidateMapAfterPanelChange(sidebar)
+    if (mode === 'assets') window.requestAnimationFrame(() => assetSearch.focus())
   }
 
   function closeMobileSidebar() {
     workspace.classList.remove('sidebar-open')
+    delete workspace.dataset.mobilePanel
+    setMobileMapTab('map')
     sidebarReopen.setAttribute('aria-expanded', 'false')
     invalidateMapAfterPanelChange(sidebar)
   }
@@ -945,9 +960,9 @@ export async function renderMapPage(container) {
           <button type="button" role="option" data-map-asset-id="${escapePageHtml(asset.id)}">
             <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
             <span>
-              <strong title="${escapePageHtml(asset.name || asset.id)}">${escapePageHtml(asset.name || asset.id)}</strong>
+              <strong title="${escapePageHtml(displayAssetName(asset))}">${escapePageHtml(displayAssetName(asset))}</strong>
               <small title="${escapePageHtml(asset.location || 'Lokasi tidak tersedia')}">
-                ${escapePageHtml(asset.type || 'Aset')} &middot; ${escapePageHtml(asset.location || 'Lokasi tidak tersedia')}
+                ${escapePageHtml(asset.type || 'Jenis aset belum tersedia')} &middot; ${escapePageHtml(asset.location || 'Lokasi belum tersedia')}
               </small>
             </span>
             <span class="material-symbols-outlined" aria-hidden="true">center_focus_strong</span>
@@ -965,7 +980,7 @@ export async function renderMapPage(container) {
 
   function selectAssetResult(assetId) {
     if (!assetById[assetId]) return
-    assetSearch.value = assetById[assetId].name || assetId
+    assetSearch.value = displayAssetName(assetById[assetId])
     state.search = assetSearch.value
     closeAssetResults()
     renderNetworkList()
@@ -1135,9 +1150,10 @@ export async function renderMapPage(container) {
     renderNetworkList()
     syncMap()
   })
-  container.querySelector('.export-toggle').addEventListener('click', () => {
+  container.querySelectorAll('.export-toggle').forEach((button) => button.addEventListener('click', () => {
     openDataTransfer('export')
-  })
+    container.querySelector('.map-more-menu')?.removeAttribute('open')
+  }))
   container.querySelector('.manage-dataset-toggle').addEventListener('click', () => {
     openDataTransfer('import')
     container.querySelector('.map-more-menu')?.removeAttribute('open')
@@ -1156,6 +1172,11 @@ export async function renderMapPage(container) {
     if (option && !option.disabled) selectBasemapMode(option.dataset.basemapMode)
   })
   sidebarReopen.addEventListener('click', openSidebar)
+  mobileMapTabs.forEach((button) => button.addEventListener('click', () => {
+    const tab = button.dataset.mobileMapTab
+    if (tab === 'map') closeMobileSidebar()
+    else openMobileSidebar(tab)
+  }))
   container.querySelector('.close-sidebar').addEventListener('click', closeMobileSidebar)
   sidebarToggle.addEventListener('click', closeDesktopSidebar)
   container.querySelector('.legend-toggle').addEventListener('click', toggleLegend)
@@ -1288,6 +1309,10 @@ function formatContextName(value) {
 export function selectLocationGroup(search, locationGroups = []) {
   const requested = new URLSearchParams(search).get('area')
   return locationGroups.find(({ key }) => key === requested) ?? locationGroups[0] ?? null
+}
+
+export function displayAssetName(asset) {
+  return String(asset?.name || '').trim() || 'Aset tanpa nama'
 }
 
 export function summarizeMapTopology({
