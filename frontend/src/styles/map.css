@@ -559,6 +559,8 @@
   flex: 1;
   overflow: hidden;
   background: var(--color-map-canvas);
+  --map-control-gap: var(--space-4);
+  --map-compact-toolbar-width: 196px;
 }
 
 .map-topology-readiness {
@@ -2263,11 +2265,11 @@
   position: absolute;
   top: var(--space-4);
   right: var(--space-4);
-  z-index: 5;
+  z-index: 450;
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);
-  transition: right 180ms ease;
+  transition: right 200ms ease, transform 200ms ease, opacity 150ms ease;
 }
 
 .sidebar-collapse,
@@ -2327,7 +2329,7 @@
   position: absolute;
   right: var(--space-4);
   bottom: var(--space-8);
-  z-index: 5;
+  z-index: 450;
   display: flex;
   align-items: flex-end;
   gap: var(--space-2);
@@ -2395,12 +2397,13 @@
   top: var(--space-4);
   right: var(--space-4);
   bottom: var(--space-4);
-  z-index: 12;
+  z-index: 600;
+  transition: transform 200ms ease, opacity 150ms ease;
 }
 
 .map-workspace.drawer-open .map-floating-top,
 .map-workspace.drawer-open .map-floating-bottom {
-  right: calc(var(--map-drawer-width) + var(--space-8));
+  right: calc(var(--map-drawer-width) + var(--space-4) + var(--map-control-gap));
 }
 
 .map-workspace.drawer-open .map-action-group .tool-button span:not(.material-symbols-outlined) {
@@ -4747,6 +4750,7 @@
   border-color: #e2e8f0;
   border-radius: 13px;
   box-shadow: 0 2px 8px rgba(15, 23, 42, .06);
+  z-index: 400;
 }
 
 .context-main-row {
@@ -4903,6 +4907,7 @@
   border-color: #e2e8f0;
   border-radius: 12px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, .12);
+  z-index: 500;
 }
 
 .map-body .map-stage .basemap-status {
@@ -5065,6 +5070,21 @@
 
   .map-body .map-stage .basemap-status {
     width: min(280px, calc(100% - 96px));
+    max-width: none;
+  }
+}
+
+/* Keep the context bar and compact action toolbar in separate safe areas
+   while the detail drawer consumes the right side of the map stage. */
+@media (min-width: 961px) {
+  .map-workspace.drawer-open .map-context-pill {
+    width: min(
+      640px,
+      calc(
+        100% - var(--map-drawer-width) - var(--space-8) -
+        var(--map-compact-toolbar-width) - var(--space-8)
+      )
+    );
     max-width: none;
   }
 }
