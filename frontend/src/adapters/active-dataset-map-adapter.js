@@ -61,12 +61,17 @@ export function adaptActiveDatasetForMap(payload) {
   }))
   const featureByAssetId = new Map(exportAssets.map((asset) => [asset.id, asset]))
 
+  // KML visibility is presentation state, not proof that an inventory point
+  // does not exist. Keep hidden point assets discoverable on the map so a
+  // camera/device checked in the source cannot silently disappear from the
+  // operational inventory. Lines and polygons still honor source visibility
+  // to avoid changing the map surface significantly.
   const assets = exportAssets
-    .filter((asset) => asset.sourceStatus === 'visible')
+    .filter(isDiscoverableMapAsset)
     .map((asset) => createMapNode(asset))
     .filter(Boolean)
   const diagramAssets = exportAssets
-    .filter((asset) => asset.sourceStatus === 'visible' && asset.geometry.length)
+    .filter((asset) => isDiscoverableMapAsset(asset) && asset.geometry.length)
     .map(createDiagramAsset)
     .filter(Boolean)
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
@@ -131,6 +136,9 @@ export function adaptActiveDatasetForMap(payload) {
     polygonCount: geometries.filter(({ geometryType }) => geometryType === 'polygon').length,
     geometryCount: geometries.length,
     hiddenPlacemarkCount: exportAssets.filter(({ sourceStatus }) => sourceStatus === 'hidden').length,
+    hiddenPointAssetCount: exportAssets.filter((asset) => (
+      asset.sourceStatus === 'hidden' && hasPointGeometry(asset)
+    )).length,
   }
 
   return {
@@ -891,6 +899,16 @@ function readProperty(asset, key) {
     ?? asset?.properties?.semanticMetadata?.values?.[key]
     ?? asset?.properties?.extendedData?.[key]
     ?? asset?.properties?.[key]
+}
+
+function isDiscoverableMapAsset(asset) {
+  return asset?.sourceStatus === 'visible' || hasPointGeometry(asset)
+}
+
+function hasPointGeometry(asset) {
+  return asset?.geometry?.some(({ geometryType, coordinates }) => (
+    geometryType === 'point' && validPosition(coordinates)
+  )) === true
 }
 
 function readMapOperationalStatus(asset) {
