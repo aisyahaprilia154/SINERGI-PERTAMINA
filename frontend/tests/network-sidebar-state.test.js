@@ -5,7 +5,7 @@ import {
   parseMapUrlState,
   serializeMapUrlState,
 } from '../src/pages/map/network-sidebar-state.js'
-import { renderNetworkList } from '../src/pages/map/network-sidebar.js'
+import { renderNetworkList, renderNetworkSidebar } from '../src/pages/map/network-sidebar.js'
 
 const validIds = {
   networkIds: ['cctv', 'fiber-optic', 'lan'],
@@ -130,6 +130,81 @@ test('sidebar search matches asset ID, asset name, and location within a network
 
   assert.match(html, /LAN Kantor/)
   assert.match(html, /data-network-select="lan"/)
+})
+
+test('sidebar prioritizes area, search, filters, and networks before compact context', () => {
+  const html = renderNetworkSidebar({
+    branchId: 'semarang',
+    datasetId: 'dataset-semarang',
+    datasetName: 'doc · 29 Jul 2026',
+  }, 4, {
+    networkCount: 4,
+    assetNodeCount: 46,
+    lineCount: 44,
+  }, {
+    locationGroups: [{ key: 'booster-kutawinangun', name: 'Booster Kutawinangun' }],
+    selectedArea: { key: 'booster-kutawinangun', name: 'Booster Kutawinangun' },
+    topologyReadiness: { ready: true, traceAvailable: true },
+    topologySummary: {
+      confirmedConnectionCount: 34,
+      pendingConnectionCount: 1148,
+      isolatedAssetCount: 16,
+    },
+  })
+
+  const areaIndex = html.indexOf('class="area-selector"')
+  const searchIndex = html.indexOf('class="search-control"')
+  const filterIndex = html.indexOf('class="map-category-presets"')
+  const networkIndex = html.indexOf('class="network-list"')
+  const contextIndex = html.indexOf('class="sidebar-secondary-context"')
+
+  assert.ok(areaIndex < searchIndex)
+  assert.ok(searchIndex < filterIndex)
+  assert.ok(filterIndex < networkIndex)
+  assert.ok(networkIndex < contextIndex)
+  assert.match(html, /title="Tutup panel" aria-label="Tutup panel jaringan"/)
+  assert.match(html, /aria-controls="network-sidebar" aria-expanded="true"/)
+  assert.match(html, /class="area-selector-control"/)
+  assert.match(html, /aria-label="Area fasilitas" aria-haspopup="listbox" aria-expanded="false"/)
+  assert.match(html, /area-selector-icon material-symbols-outlined[^>]*[\s\S]*?expand_more/)
+  assert.match(html, /placeholder="Cari ID, nama, atau lokasi aset"/)
+  assert.match(html, /class="asset-search-combobox"/)
+  assert.match(html, /role="combobox" aria-autocomplete="list" aria-haspopup="listbox"/)
+  assert.match(html, /role="listbox" aria-label="Hasil pencarian aset"/)
+  assert.match(html, /<details class="sidebar-topology-readiness ready">/)
+  assert.doesNotMatch(html, /<details class="sidebar-topology-readiness ready" open>/)
+  assert.match(html, /Status topologi/)
+  assert.match(html, /34 terkonfirmasi · 16 tanpa relasi/)
+  assert.match(html, /1\.148<\/b> perlu diperiksa/)
+  assert.match(html, /Tracing menggunakan graph koneksi terkonfirmasi\./)
+})
+
+test('network cards expose compact metadata and clear action tooltips', () => {
+  const html = renderNetworkList({
+    status: 'ready',
+    networks: [{
+      id: 'cctv',
+      name: 'Jaringan CCTV',
+      type: 'CCTV',
+      description: 'Jaringan kamera',
+      health: 'Aktif',
+      color: '#64748b',
+      assetCount: 36,
+      confirmedConnectionCount: 34,
+      isolatedAssetCount: 6,
+      nodeIds: [],
+      edges: [],
+    }],
+    assets: [],
+    selectedNetworkIds: new Set(['cctv']),
+    expandedNetworkIds: new Set(),
+    search: '',
+  })
+
+  assert.match(html, /34 koneksi/)
+  assert.match(html, /network-relation-warning/)
+  assert.match(html, /title="Fokuskan peta ke Jaringan CCTV"/)
+  assert.match(html, /title="Buka detail Jaringan CCTV"/)
 })
 
 test('sidebar exposes loading, error, and empty states', () => {

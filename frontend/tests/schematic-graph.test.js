@@ -155,6 +155,28 @@ test('full-map scope includes every active network and preserves map display pos
   assert.equal('diagram' in positionedAssets[0], false)
 })
 
+test('all-assets scope includes isolated assets outside the confirmed topology graph', () => {
+  const graph = buildSchematicGraph({
+    assets,
+    networks,
+    topologyGraph: {
+      nodes: [{ id: 'core' }, { id: 'jb' }, { id: 'cam' }],
+      edges: [{
+        id: 'topology-core-jb',
+        sourceNodeId: 'core',
+        targetNodeId: 'jb',
+        networkId: 'cctv',
+      }],
+    },
+    scope: 'all-assets',
+  })
+
+  assert.equal(graph.mode, 'all-assets')
+  assert.deepEqual(new Set(graph.nodes.map((node) => node.id)), new Set(assets.map(({ id }) => id)))
+  assert.deepEqual(graph.edges.map(({ sourceId, targetId }) => [sourceId, targetId]), [['core', 'jb']])
+  assert.equal(graph.title, 'Seluruh aset')
+})
+
 test('trace scope returns a clear empty state before tracing exists', () => {
   const graph = buildSchematicGraph({
     assets,
