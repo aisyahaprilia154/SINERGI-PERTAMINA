@@ -6,7 +6,6 @@ import {
 } from '../src/pages/map/active-dataset-kml-export.js'
 import { renderMapDataTransferDialog } from '../src/pages/map/map-data-transfer-dialog.js'
 import {
-  renderMapAssetFinder,
   renderMapContextPill,
   renderMapFloatingControls,
 } from '../src/pages/map/map-surface.js'
@@ -99,23 +98,34 @@ test('map data transfer dialog exposes direct import and complete export choices
   assert.match(html, /Diagram skematik 2D/)
 })
 
-test('map context and toolbar present a compact branch name and admin data action', () => {
-  const context = renderMapContextPill(activeContext)
+test('map context and toolbar present compact professional map actions', () => {
+  const context = renderMapContextPill(activeContext, null, { name: 'Booster Kutawinangun' })
   const controls = renderMapFloatingControls()
-  const finder = renderMapAssetFinder()
 
   assert.match(context, />Semarang</)
   assert.doesNotMatch(context, />Kantor Cabang Semarang</)
-  assert.match(controls, /Import \/ Export/)
-  assert.match(controls, /data-transfer-toggle/)
-  assert.match(controls, /Tata aset adaptif/)
+  assert.match(context, />Area</)
+  assert.match(context, />Booster Kutawinangun</)
+  assert.match(controls, />Export</)
+  assert.match(controls, />Tracing</)
+  assert.match(controls, />Diagram 2D</)
+  assert.match(controls, />Lainnya</)
+  assert.match(controls, /class="open-sidebar sidebar-reopen"/)
+  assert.match(controls, /title="Buka panel"/)
+  assert.match(controls, /aria-label="Buka panel jaringan"[^>]*aria-expanded="false"/)
+  assert.match(controls, /Kelola Dataset/)
+  assert.match(controls, /Klik lalu pilih aset awal pada peta\./)
+  assert.doesNotMatch(controls, /class="tool-button trace-toggle"[^>]*\bdisabled\b/)
+  assert.doesNotMatch(controls, /Import \/ Export/)
   assert.match(controls, /declutter-toggle/)
   assert.match(controls, /basemap-toggle/)
-  assert.match(finder, /Cari nama, ID, atau lokasi aset/)
-  assert.match(finder, /aria-controls="map-asset-results"/)
+  assert.doesNotMatch(controls, /map-asset-results/)
+  assert.ok(controls.indexOf('trace-toggle') < controls.indexOf('diagram-toggle'))
+  assert.ok(controls.indexOf('diagram-toggle') < controls.indexOf('export-toggle'))
+  assert.ok(controls.indexOf('export-toggle') < controls.indexOf('map-more-menu'))
 })
 
-test('map keeps tracing clickable and displays the exact readiness message', () => {
+test('map disables unavailable tracing and displays an Indonesian readiness status', () => {
   const topologyReadiness = {
     ready: false,
     message: 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.',
@@ -123,10 +133,10 @@ test('map keeps tracing clickable and displays the exact readiness message', () 
   const context = renderMapContextPill(activeContext, topologyReadiness)
   const controls = renderMapFloatingControls(activeContext, topologyReadiness)
 
-  assert.match(context, /Topology-ready: No/)
-  assert.match(controls, /class="tool-button trace-toggle"[^>]*title="Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\."/)
-  assert.doesNotMatch(controls, /class="tool-button trace-toggle"[^>]*\bdisabled\b/)
-  assert.match(controls, /class="tool-button diagram-toggle"[^>]*disabled aria-disabled="true"/)
+  assert.match(context, /Topologi perlu diperiksa/)
+  assert.match(controls, /class="tool-button trace-toggle map-action-primary"[^>]*title="Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\."/)
+  assert.match(controls, /class="tool-button trace-toggle map-action-primary"[^>]*disabled aria-disabled="true"/)
+  assert.match(controls, /class="tool-button diagram-toggle map-action-secondary"[^>]*disabled aria-disabled="true"/)
   assert.match(controls, /Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\./)
 })
 
