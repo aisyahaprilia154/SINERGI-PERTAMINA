@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
-
-const BLOCKED_AUDIT_KEYS = /token|authorization|password|secret/i
+import { sanitizeAuditDetails } from './audit-sanitizer.js'
 
 /**
  * Append-only audit sink for PostgreSQL-primary runtime mode.
@@ -59,23 +58,6 @@ export class PostgresAuditLog {
       ],
     )
     return entry
-  }
-}
-
-function sanitizeAuditDetails(details) {
-  if (!details || typeof details !== 'object' || Array.isArray(details)) return {}
-  return Object.fromEntries(
-    Object.entries(details)
-      .filter(([key]) => !BLOCKED_AUDIT_KEYS.test(key))
-      .map(([key, value]) => [key, cloneJsonValue(value)]),
-  )
-}
-
-function cloneJsonValue(value) {
-  try {
-    return JSON.parse(JSON.stringify(value))
-  } catch {
-    return '[unserializable]'
   }
 }
 

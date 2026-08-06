@@ -42,6 +42,7 @@ test('topology trace API authenticates a viewer and forwards the graph revision 
       headers: {
         authorization: 'Bearer viewer',
         'content-type': 'application/json',
+        'x-correlation-id': 'trace-api-test',
       },
       body: JSON.stringify(requestBody),
     },
@@ -54,7 +55,7 @@ test('topology trace API authenticates a viewer and forwards the graph revision 
     graphRevision: 'topology-graph:abc',
     sourceAssetId: 'asset-a',
   })
-  assert.deepEqual(calls, [['dv-1', requestBody, 'viewer-1']])
+  assert.deepEqual(calls, [['dv-1', requestBody, 'viewer-1', 'trace-api-test']])
 })
 
 test('manual topology relation API is administrator-only and forwards device references', async (t) => {
@@ -102,6 +103,7 @@ test('manual topology relation API is administrator-only and forwards device ref
         authorization: 'Bearer admin',
         'content-type': 'application/json',
         'idempotency-key': 'manual-relation-api-2026-08-04-001',
+        'x-correlation-id': 'manual-relation-api-test',
       },
       body: JSON.stringify(requestBody),
     },
@@ -123,6 +125,7 @@ test('manual topology relation API is administrator-only and forwards device ref
     {
       ...requestBody,
       idempotencyKey: 'manual-relation-api-2026-08-04-001',
+      correlationId: 'manual-relation-api-test',
     },
   ]])
 })
@@ -163,6 +166,7 @@ test('line label bulk topology API forwards the dedicated confirmation action', 
         authorization: 'Bearer admin',
         'content-type': 'application/json',
         'idempotency-key': 'bulk-review-api-2026-08-04-001',
+        'x-correlation-id': 'bulk-review-api-test',
       },
       body: JSON.stringify(requestBody),
     },
@@ -179,6 +183,7 @@ test('line label bulk topology API forwards the dedicated confirmation action', 
     {
       ...requestBody,
       idempotencyKey: 'bulk-review-api-2026-08-04-001',
+      correlationId: 'bulk-review-api-test',
     },
   ]])
 })

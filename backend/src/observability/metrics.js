@@ -39,6 +39,19 @@ export class MetricsRegistry {
     addSample(this.gauges, metricName, labels, finiteNumber(value, 0))
   }
 
+  replaceGaugeFamily(name, samples = [], help = `${name} gauge.`) {
+    const metricName = this.#ensureDefinition(name, 'gauge', help)
+    const family = new Map()
+    for (const sample of Array.isArray(samples) ? samples : []) {
+      const labels = normalizeLabels(sample?.labels)
+      family.set(sampleKey(labels), {
+        labels,
+        value: finiteNumber(sample?.value, 0),
+      })
+    }
+    this.gauges.set(metricName, family)
+  }
+
   observe(name, labels = {}, value = 0, help = `${name} histogram.`) {
     const observation = Math.max(0, finiteNumber(value, 0))
     const metricName = this.#ensureDefinition(name, 'histogram', help)
@@ -79,6 +92,51 @@ export class MetricsRegistry {
         labels,
         1,
         'Total HTTP requests ending with a server error.',
+      )
+    }
+  }
+
+  recordJobEnqueued({ jobType, deduplicated = false }) {
+    const labels = { job_type: normalizeLabelValue(jobType, 'unknown') }
+    this.increment(
+      deduplicated
+        ? 'topology_job_deduplicated_total'
+        : 'topology_jobs_total',
+      labels,
+      1,
+      deduplicated
+        ? 'Total durable jobs deduplicated by idempotency.'
+        : 'Total durable jobs accepted into the queue.',
+    )
+  }
+
+  recordJobTransition(job) {
+    const labels = {
+      job_type: normalizeLabelValue(job?.jobType, 'unknown'),
+      status: normalizeLabelValue(job?.status, 'unknown'),
+    }
+    this.increment(
+      'topology_job_transitions_total',
+      labels,
+      1,
+      'Total durable job state transitions observed by this runtime.',
+    )
+    const startedAt = Date.parse(String(job?.startedAt ?? ''))
+    const endedAt = Date.parse(String(job?.completedAt ?? job?.failedAt ?? ''))
+    if (Number.isFinite(startedAt) && Number.isFinite(endedAt)) {
+      this.observe(
+        'topology_job_duration_seconds',
+        labels,
+        Math.max(0, (endedAt - startedAt) / 1000),
+        'Durable job execution duration in seconds.',
+      )
+    }
+    if (job?.status === 'dead_letter') {
+      this.increment(
+        'topology_job_dead_letter_total',
+        { job_type: labels.job_type },
+        1,
+        'Total durable jobs moved to dead-letter in this runtime.',
       )
     }
   }
@@ -196,11 +254,15 @@ function getOrCreateSample(store, name, labels, create) {
   if (!store.has(name)) store.set(name, new Map())
   const family = store.get(name)
   const normalized = normalizeLabels(labels)
-  const key = Object.entries(normalized)
-    .map(([label, value]) => `${label}=${value}`)
-    .join('\u001f')
+  const key = sampleKey(normalized)
   if (!family.has(key)) family.set(key, create())
   return family.get(key)
+}
+
+function sampleKey(labels) {
+  return Object.entries(labels)
+    .map(([label, value]) => `${label}=${value}`)
+    .join('\u001f')
 }
 
 function normalizeMetricName(value) {

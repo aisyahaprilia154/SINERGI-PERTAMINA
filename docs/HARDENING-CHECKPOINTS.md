@@ -1041,6 +1041,159 @@ Batas checkpoint: dashboard, queue depth lintas worker/multi-instance, job
 duration/retry metrics, database I/O, fault-injection alert test, log shipping,
 dan production SLO tetap pending.
 
+## Checkpoint 51 - Durable job observability
+
+Status: `complete (local durable queue metrics; multi-instance production
+aggregation pending)` - 5 Agustus 2026.
+
+- Durable queue mencatat accepted job, idempotency deduplication, state
+  transition, duration, dead-letter, worker aktif, dan queue depth per job type
+  untuk status aktif.
+- Kegagalan metrics tidak menggagalkan claim, completion, retry, atau
+  dead-letter transition.
+- Regression targeted `3/3`, full backend test `182/182`, lint `96` file, build
+  `38` source file, dan `git diff --check` lulus.
+- Evidence detail:
+  `docs/migrations/DURABLE-JOB-OBSERVABILITY-2026-08-05.md`.
+
+Batas checkpoint: queue depth ini adalah snapshot repository lokal. Aggregation
+lintas worker/multi-instance, dashboard, alert routing/fault injection,
+database I/O, log shipping, dan production SLO tetap pending.
+
+## Checkpoint 52 - Worker and service audit context
+
+Status: `complete (application audit context; external log shipping pending)` -
+5 Agustus 2026.
+
+- Correlation ID diteruskan dari HTTP ke lifecycle, topology trace/review,
+  durable import, dan durable topology regeneration.
+- Background descriptor lokal menerima `jobId`, sehingga audit worker membawa
+  dataset version, job ID, correlation ID, dan graph revision bila tersedia.
+- Topology mutation dan activation audit detail mencatat graph revision yang
+  relevan; sanitasi token/password/secret tetap aktif.
+- Full backend test `182/182`, targeted context suite `22/22`, lint `96` file,
+  build `38` source file, dan `git diff --check` lulus.
+- Evidence detail:
+  `docs/migrations/WORKER-AUDIT-CONTEXT-2026-08-05.md`.
+
+Batas checkpoint: centralized log shipping, retention/SIEM, production SLO,
+dashboard, alert routing, dan security approval tetap pending.
+
+## Checkpoint 53 - Guarded sparse stress 50.000 path
+
+Status: `complete (local stress guardrail; dense/production capacity pending)` -
+5 Agustus 2026.
+
+- Command `npm run benchmark:topology -- --sizes=50000
+  --max-duration-ms=120000 --max-rss-mib=768` selesai dengan exit code `0`.
+- Node `v24.15.0`, Windows x64, 16 CPU; runtime `6.480,388 ms`, peak RSS
+  `548,28 MiB`, `0` validation error, dan `budgetViolations: []`.
+- Evidence menunjukkan proses menyelesaikan 50.000 path tanpa out-of-memory;
+  fixture menghasilkan `97.002` unresolved dan tidak menghasilkan candidate
+  atau confirmed relation.
+- Evidence detail:
+  `docs/benchmarks/TOPOLOGY-STRESS-50000-2026-08-05.md`.
+
+Batas checkpoint: fixture sparse in-process. Dense/intersection-heavy workload,
+API/worker concurrency, PostgreSQL I/O, multi-instance behavior, p95, dan
+production capacity/SLO tetap pending.
+
+## Checkpoint 54 - Dependency security audit dan CI gate
+
+Status: `complete (dependency scan; container image scan pending)` - 5 Agustus
+2026.
+
+- Full `npm audit --audit-level=high` menemukan dan memperbaiki satu high
+  vulnerability frontend pada `postcss 8.5.16`; lockfile sekarang memakai
+  `postcss 8.5.25` dan `nanoid 3.3.17`.
+- Audit ulang root, backend, dan frontend masing-masing menghasilkan
+  `found 0 vulnerabilities`.
+- Workflow GitHub menjalankan `npm ci` dan audit high pada setiap push/pull
+  request dengan permission read-only; run `30984124086` pada commit
+  `eab6174` selesai `success`.
+- Evidence detail:
+  `docs/migrations/DEPENDENCY-SECURITY-AUDIT-2026-08-05.md`.
+
+Batas checkpoint: container image scan, secret scanning, runtime security,
+SSO/RBAC, dan enterprise security approval masih pending.
+
+## Checkpoint 55 - Credentialed live HTTP review replay rerun
+
+Status: `complete (local PostgreSQL HTTP concurrency evidence; production
+gates pending)` - 5 Agustus 2026.
+
+- `npm run db:http-review-replay` selesai dengan `result: passed` pada
+  PostgreSQL primary; `jsonPrimaryUsed: false`.
+- Dua review concurrent dengan snapshot yang sama menghasilkan tepat satu
+  `200` winner dan satu `409` stale conflict, satu audit event, dan satu
+  validated graph revision.
+- Fixture tetap unpublished, sehingga `activeGraphRevisionCount: 0` adalah
+  hasil fail-safe yang diharapkan, bukan kegagalan publikasi.
+- Evidence detail:
+  `docs/migrations/LIVE-HTTP-REVIEW-REPLAY-2026-08-05.md`.
+
+Batas checkpoint: multi-instance production, reviewer fleet, API p95,
+failover, dan enterprise SLO/approval tetap pending.
+
+## Checkpoint 56 - Dense topology guardrail 10.000 object
+
+Status: `complete (local dense fail-closed guardrail; production SLO pending)` -
+5 Agustus 2026.
+
+- Command `npm run benchmark:topology:dense-guarded` memakai 10.000 node rapat
+  dan 10 path probe.
+- Candidate hard limit `50.000` memicu error terdiagnosis
+  `topology_candidate_limit_exceeded` pada percobaan `50.001`; proses selesai
+  dalam `1.153,649 ms`, peak RSS `184,13 MiB`, tanpa OOM dan tanpa budget
+  violation.
+- Runner tidak menerbitkan artifact parsial setelah guardrail; hasil
+  `pass: true` hanya menyatakan guardrail bekerja.
+- Evidence detail:
+  `docs/benchmarks/TOPOLOGY-DENSE-GUARDED-2026-08-05.md`.
+
+Batas checkpoint: dense API/worker SLO, PostgreSQL I/O, multi-instance,
+concurrency, p95, dan production capacity tetap pending.
+
+## Checkpoint 57 - Recursive audit sanitization
+
+Status: `complete (local audit sink sanitization; production retention/shipping
+pending)` - 5 Agustus 2026.
+
+- JSON Lines dan PostgreSQL audit sink sekarang menyaring key sensitif secara
+  recursive pada nested object/array, bukan hanya top-level.
+- Circular details diberi marker bounded dan deep details dibatasi agar audit
+  tidak masuk rekursi tak berujung.
+- Targeted audit/security suite `4/4`, full backend test `184/184`, lint `98`
+  file, build `39` source file, dan `git diff --check` lulus.
+- Evidence detail:
+  `docs/migrations/AUDIT-SANITIZATION-2026-08-05.md`.
+
+Batas checkpoint: source-data classification, centralized log shipping,
+retention/SIEM, secret scanning, dan enterprise security approval tetap
+pending.
+
+## Checkpoint 58 - Observability dan incident response runbook
+
+Status: `complete (draft-ready local handoff; production Operations gate
+pending)` - 5 Agustus 2026.
+
+- Runbook mencakup metrics scrape yang dilindungi, panel request/error/p95,
+  queue/dead-letter/worker/RSS, alert baseline, fault drill, containment, dan
+  recovery steps.
+- Regression fault injection HTTP menghasilkan status `500`, menaikkan
+  `topology_api_request_errors_total`, dan mengembalikan
+  `topology_api_inflight_requests` ke `0`; metrics suite `3/3`.
+- Full backend test `185/185`, lint `98` file, build `39` source file, dan
+  `git diff --check` lulus setelah penambahan fault drill.
+- Threshold final sengaja tetap menjadi parameter SLO yang harus disetujui;
+  runbook melarang secret di dashboard/label dan melarang fault injection
+  production tanpa change window.
+- Evidence detail:
+  `docs/operations/OBSERVABILITY-INCIDENT-RUNBOOK-2026-08-05.md`.
+
+Batas checkpoint: dashboard deployment, centralized log shipping/retention,
+fault drill production, dan Operations/Security sign-off tetap pending.
+
 ## Status berikutnya
 
 Task lokal utama sudah mencakup race reviewer, confirm/revoke, dan
@@ -1048,7 +1201,8 @@ regeneration/review, serta full regeneration durable pada queue lokal. Live
 PostgreSQL service recovery lokal sudah lulus;
 production failover/replica switchover, concurrency/load/SLO, backup retention/
 off-site DR, durable accuracy evaluation, production load/SLO, dashboard/alert,
-security, dan enterprise approval gates tetap terpisah.
+queue metrics multi-instance, centralized log shipping, security, dan enterprise
+approval gates tetap terpisah.
 Setiap checkpoint hanya boleh ditandai selesai
 setelah test, lint/build, dan regression evidence lulus; bukti live database
 harus dilaporkan terpisah dari test contract. Bukti lokal yang sudah lulus tidak
