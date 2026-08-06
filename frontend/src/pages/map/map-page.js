@@ -91,6 +91,7 @@ export async function renderMapPage(container) {
     exportAssets: allExportAssets,
     networks: allNetworks,
     topologyGraph: fullTopologyGraph,
+    topologySummary: datasetTopologySummary,
     locationGroups,
     renderingSummary,
   } = mapData
@@ -130,6 +131,11 @@ export async function renderMapPage(container) {
   })
   const traceAvailable = globalTraceAvailable && topologyGraph.edges.length > 0
   const diagramAvailable = globalDiagramAvailable && topologyGraph.edges.length > 0
+  const topologySummary = summarizeMapTopology({
+    assets,
+    topologyGraph,
+    datasetTopologySummary,
+  })
   const hasRenderableData = geometries.length > 0
   const resolvedOverlays = (overlayResult[0].status === 'fulfilled'
     ? overlayResult[0].value.items ?? []
@@ -179,7 +185,6 @@ export async function renderMapPage(container) {
     assetDetailError: null,
     showAdditionalMetadata: false,
     dimOthers: true,
-    declutterEnabled: true,
     search: '',
     expandedNetworkIds: new Set(),
     dataStatus: 'loading',
@@ -198,6 +203,7 @@ export async function renderMapPage(container) {
           locationGroups,
           selectedArea,
           topologyReadiness,
+          topologySummary,
         })}
         ${renderNetworkMapCanvas(activeContext, {
           empty: !hasRenderableData,
@@ -205,6 +211,8 @@ export async function renderMapPage(container) {
           selectedArea,
           counts,
           confirmedConnectionCount: traceAvailable ? topologyGraph.edges.length : 0,
+          topologySummary,
+          selectedAssetId: initialUrlState.selectedAssetId,
           topologyReadiness,
         })}
       </main>
@@ -216,14 +224,14 @@ export async function renderMapPage(container) {
   const networkList = container.querySelector('.network-list')
   const drawer = container.querySelector('.asset-drawer')
   const sidebarToggle = container.querySelector('.sidebar-collapse')
-  const mobileSidebarToggle = container.querySelector('.open-sidebar')
+  const sidebarReopen = container.querySelector('.open-sidebar')
+  const areaSelect = container.querySelector('.area-selector select')
   const legendToggle = container.querySelector('.legend-toggle')
   const legend = container.querySelector('.legend-popover')
   const basemapToggle = container.querySelector('.basemap-toggle')
   const basemapPicker = container.querySelector('.basemap-popover')
-  const assetFinder = container.querySelector('.map-asset-finder')
-  const assetSearch = assetFinder.querySelector('input')
-  const assetResults = assetFinder.querySelector('.map-asset-results')
+  const assetSearch = container.querySelector('.search-control input')
+  const assetResults = container.querySelector('.sidebar-asset-search-results')
   const canvasApi = createMapLibreSurface(container.querySelector('#network-map'), {
     assets,
     networks,
@@ -255,21 +263,11 @@ export async function renderMapPage(container) {
   }
 
   function updateLayoutStatus(status) {
-    const element = container.querySelector('.declutter-summary')
-    if (!element) return
-    if (!status.enabled) {
-      element.textContent = 'koordinat asli'
-      return
-    }
-    if (status.clusterCount) {
-      element.textContent = `${status.clusterCount} kelompok · klik untuk buka`
-      return
-    }
-    if (status.displacedAssetCount) {
-      element.textContent = `${status.displacedAssetCount} disebar · koordinat tetap`
-      return
-    }
-    element.textContent = 'adaptif · tidak bertumpuk'
+    const mapStage = container.querySelector('.map-stage')
+    if (!mapStage) return
+    mapStage.dataset.visibleLabels = String(status.visibleLabelCount || 0)
+    mapStage.dataset.displacedAssets = String(status.displacedAssetCount || 0)
+    mapStage.dataset.markerClusters = String(status.clusterCount || 0)
   }
 
   function updateUrl(mode = 'push') {
@@ -349,6 +347,26 @@ export async function renderMapPage(container) {
       connectedNodeIds,
       dimOthers: state.dimOthers,
     })
+    syncToolbarState(connectedNodeIds.length)
+  }
+
+  function syncToolbarState(connectedCount = 0) {
+    const traceButton = container.querySelector('.trace-toggle')
+    const selectedAsset = assetById[selection.selectedAssetId]
+    traceButton.disabled = !traceAvailable
+    traceButton.setAttribute('aria-disabled', String(!traceAvailable))
+    traceButton.title = !traceAvailable
+      ? topologyReadiness.traceMessage || topologyReadiness.message || TOPOLOGY_NOT_READY_MESSAGE
+      : selectedAsset && connectedCount > 0
+        ? `Telusuri koneksi dari ${selectedAsset.name || selectedAsset.id}`
+        : 'Klik lalu pilih aset awal pada peta.'
+
+    const diagramButton = container.querySelector('.diagram-toggle')
+    diagramButton.disabled = !diagramAvailable
+    diagramButton.setAttribute('aria-disabled', String(!diagramAvailable))
+    diagramButton.title = diagramAvailable
+      ? 'Buka Diagram Topologi 2D dari graph terkonfirmasi.'
+      : topologyReadiness.message || topologyReadiness.traceMessage || TOPOLOGY_NOT_READY_MESSAGE
   }
 
   function toggleNetwork(networkId) {
@@ -416,6 +434,12 @@ export async function renderMapPage(container) {
         network: networks.find((network) => network.id === relation.networkId),
       }))
       .filter((item) => item.asset)
+    const reviewQuery = new URLSearchParams({
+      datasetId: activeContext.datasetId,
+      branchId: activeContext.branchId,
+      selectedAssetId: asset.id,
+    })
+    if (selectedArea?.key) reviewQuery.set('area', selectedArea.key)
     drawer.innerHTML = renderAssetDetailDrawer({
       status: state.assetDetailStatus,
       errorMessage: state.assetDetailError,
@@ -428,6 +452,10 @@ export async function renderMapPage(container) {
       topologyReady: topologyReadiness.ready,
       traceAvailable,
       diagramAvailable,
+      topologySummary,
+      reviewUrl: topologyReadiness.capabilities?.reviewTopology
+        ? `/admin/topology-review?${reviewQuery}`
+        : null,
       topologyMessage: topologyReadiness.traceMessage
         || topologyReadiness.message
         || TOPOLOGY_NOT_READY_MESSAGE,
@@ -528,11 +556,9 @@ export async function renderMapPage(container) {
     const banner = container.querySelector('.trace-banner')
     if (state.traceStatus === 'idle') {
       banner.hidden = true
-      assetFinder.hidden = false
       return
     }
     closeAssetResults()
-    assetFinder.hidden = true
     banner.hidden = false
     const step = banner.querySelector('.trace-step')
     const title = banner.querySelector('strong')
@@ -819,23 +845,38 @@ export async function renderMapPage(container) {
 
   function openMobileSidebar() {
     workspace.classList.add('sidebar-open')
-    mobileSidebarToggle.setAttribute('aria-expanded', 'true')
+    sidebarReopen.setAttribute('aria-expanded', 'true')
     invalidateMapAfterPanelChange(sidebar)
   }
 
   function closeMobileSidebar() {
     workspace.classList.remove('sidebar-open')
-    mobileSidebarToggle.setAttribute('aria-expanded', 'false')
+    sidebarReopen.setAttribute('aria-expanded', 'false')
     invalidateMapAfterPanelChange(sidebar)
   }
 
-  function toggleDesktopSidebar() {
-    const isCollapsed = workspace.classList.toggle('sidebar-collapsed')
-    sidebarToggle.setAttribute('aria-expanded', String(!isCollapsed))
-    sidebarToggle.setAttribute('aria-label', isCollapsed ? 'Buka daftar jaringan' : 'Ciutkan daftar jaringan')
-    sidebarToggle.querySelector('.material-symbols-outlined').textContent =
-      isCollapsed ? 'left_panel_open' : 'left_panel_close'
+  function closeDesktopSidebar() {
+    workspace.classList.add('sidebar-collapsed')
+    sidebarToggle.setAttribute('aria-expanded', 'false')
+    sidebarReopen.setAttribute('aria-expanded', 'false')
     invalidateMapAfterPanelChange(sidebar)
+  }
+
+  function reopenDesktopSidebar() {
+    workspace.classList.remove('sidebar-collapsed')
+    sidebarToggle.setAttribute('aria-expanded', 'true')
+    sidebarReopen.setAttribute('aria-expanded', 'false')
+    invalidateMapAfterPanelChange(sidebar)
+  }
+
+  function openSidebar() {
+    if (window.matchMedia('(max-width: 960px)').matches) openMobileSidebar()
+    else reopenDesktopSidebar()
+  }
+
+  function setAreaSelectorExpanded(expanded) {
+    areaSelect?.setAttribute('aria-expanded', String(expanded))
+    areaSelect?.closest('.area-selector-control')?.classList.toggle('is-open', expanded)
   }
 
   function toggleLegend() {
@@ -904,8 +945,10 @@ export async function renderMapPage(container) {
           <button type="button" role="option" data-map-asset-id="${escapePageHtml(asset.id)}">
             <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
             <span>
-              <strong>${escapePageHtml(asset.name || asset.id)}</strong>
-              <small>${escapePageHtml(asset.id)} &middot; ${escapePageHtml(asset.location || asset.type || 'Lokasi pada peta')}</small>
+              <strong title="${escapePageHtml(asset.name || asset.id)}">${escapePageHtml(asset.name || asset.id)}</strong>
+              <small title="${escapePageHtml(asset.location || 'Lokasi tidak tersedia')}">
+                ${escapePageHtml(asset.type || 'Aset')} &middot; ${escapePageHtml(asset.location || 'Lokasi tidak tersedia')}
+              </small>
             </span>
             <span class="material-symbols-outlined" aria-hidden="true">center_focus_strong</span>
           </button>
@@ -923,31 +966,23 @@ export async function renderMapPage(container) {
   function selectAssetResult(assetId) {
     if (!assetById[assetId]) return
     assetSearch.value = assetById[assetId].name || assetId
+    state.search = assetSearch.value
     closeAssetResults()
+    renderNetworkList()
     handleAssetSelect(assetId)
   }
 
-  function syncInactiveModeControls() {
-    const dimInactive = !state.dimOthers
-    container.querySelectorAll('.dim-toggle, .inactive-mode-toggle').forEach((button) => {
-      button.setAttribute('aria-pressed', String(dimInactive))
-    })
+  function refreshDeclutter() {
+    canvasApi.setDeclutterEnabled(true)
+    canvasApi.invalidateSize?.()
+    container.querySelector('.map-more-menu')?.removeAttribute('open')
   }
 
-  function toggleInactiveMode() {
-    state.dimOthers = !state.dimOthers
-    syncInactiveModeControls()
-    syncMap()
-  }
-
-  function toggleDeclutter() {
-    state.declutterEnabled = !state.declutterEnabled
-    const button = container.querySelector('.declutter-toggle')
-    button.setAttribute('aria-pressed', String(state.declutterEnabled))
-    button.title = state.declutterEnabled
-      ? 'Sebarkan marker yang berdekatan tanpa mengubah koordinat KML'
-      : 'Tampilkan tata letak adaptif'
-    canvasApi.setDeclutterEnabled(state.declutterEnabled)
+  function beginToolbarTracing() {
+    const selectedAssetId = selection.selectedAssetId
+    const selectedHasRelations = selectedAssetId
+      && getConnectedAssets(relationGraph, selectedAssetId).length > 0
+    beginTracing(selectedHasRelations ? selectedAssetId : null)
   }
 
   async function restoreStateFromUrl() {
@@ -1010,6 +1045,8 @@ export async function renderMapPage(container) {
     canvasApi.setHighlightedNetworkId(null)
   })
   assetSearch.addEventListener('input', (event) => {
+    state.search = event.target.value
+    renderNetworkList()
     renderAssetResults(event.target.value)
   })
   assetSearch.addEventListener('focus', () => {
@@ -1043,11 +1080,16 @@ export async function renderMapPage(container) {
       assetSearch.focus()
     }
   })
-  container.querySelector('.search-control input').addEventListener('input', (event) => {
-    state.search = event.target.value
-    renderNetworkList()
+  areaSelect?.addEventListener('pointerdown', () => setAreaSelectorExpanded(true))
+  areaSelect?.addEventListener('blur', () => setAreaSelectorExpanded(false))
+  areaSelect?.addEventListener('keydown', (event) => {
+    if ((event.altKey && event.key === 'ArrowDown') || event.key === ' ') {
+      setAreaSelectorExpanded(true)
+    }
+    if (event.key === 'Escape' || event.key === 'Tab') setAreaSelectorExpanded(false)
   })
-  container.querySelector('.area-selector select')?.addEventListener('change', (event) => {
+  areaSelect?.addEventListener('change', (event) => {
+    setAreaSelectorExpanded(false)
     const nextArea = event.target.value
     if (!locationGroups.some(({ key }) => key === nextArea) || nextArea === selectedArea?.key) {
       return
@@ -1093,15 +1135,17 @@ export async function renderMapPage(container) {
     renderNetworkList()
     syncMap()
   })
-  container.querySelector('.inactive-mode-toggle').addEventListener('click', toggleInactiveMode)
-  container.querySelector('.data-transfer-toggle').addEventListener('click', () => {
-    openDataTransfer('import')
+  container.querySelector('.export-toggle').addEventListener('click', () => {
+    openDataTransfer('export')
   })
-  container.querySelector('.trace-toggle').addEventListener('click', () => beginTracing(selection.selectedAssetId))
+  container.querySelector('.manage-dataset-toggle').addEventListener('click', () => {
+    openDataTransfer('import')
+    container.querySelector('.map-more-menu')?.removeAttribute('open')
+  })
+  container.querySelector('.trace-toggle').addEventListener('click', beginToolbarTracing)
   container.querySelector('.diagram-toggle').addEventListener('click', openSchematic)
-  container.querySelector('.declutter-toggle').addEventListener('click', toggleDeclutter)
+  container.querySelector('.declutter-toggle').addEventListener('click', refreshDeclutter)
   container.querySelector('.cancel-trace').addEventListener('click', stopTracing)
-  container.querySelector('.dim-toggle').addEventListener('click', toggleInactiveMode)
   container.querySelector('.zoom-in').addEventListener('click', canvasApi.zoomIn)
   container.querySelector('.zoom-out').addEventListener('click', canvasApi.zoomOut)
   container.querySelector('.zoom-reset').addEventListener('click', canvasApi.reset)
@@ -1111,9 +1155,9 @@ export async function renderMapPage(container) {
     const option = event.target.closest('[data-basemap-mode]')
     if (option && !option.disabled) selectBasemapMode(option.dataset.basemapMode)
   })
-  container.querySelector('.open-sidebar').addEventListener('click', openMobileSidebar)
+  sidebarReopen.addEventListener('click', openSidebar)
   container.querySelector('.close-sidebar').addEventListener('click', closeMobileSidebar)
-  container.querySelector('.sidebar-collapse').addEventListener('click', toggleDesktopSidebar)
+  sidebarToggle.addEventListener('click', closeDesktopSidebar)
   container.querySelector('.legend-toggle').addEventListener('click', toggleLegend)
   container.querySelector('.mobile-panel-backdrop').addEventListener('click', () => {
     if (workspace.classList.contains('drawer-open')) closeAssetDrawer()
@@ -1137,7 +1181,6 @@ export async function renderMapPage(container) {
   configureBasemapPicker()
   void restoreStateFromUrl()
   updateUrl('replace')
-  syncInactiveModeControls()
   loadSidebarData()
   if (selection.selectedAssetId) loadAssetDetail(selection.selectedAssetId)
   else renderDrawer()
@@ -1200,6 +1243,7 @@ export function findAssetMatches(assets, query, limit = 8) {
         asset.id,
         asset.name,
         asset.location,
+        asset.hostname,
         asset.type,
         asset.category,
       ].map((value) => String(value ?? '').toLocaleLowerCase('id'))
@@ -1246,6 +1290,24 @@ export function selectLocationGroup(search, locationGroups = []) {
   return locationGroups.find(({ key }) => key === requested) ?? locationGroups[0] ?? null
 }
 
+export function summarizeMapTopology({
+  assets = [],
+  topologyGraph = {},
+  datasetTopologySummary = {},
+} = {}) {
+  const connectedAssetIds = new Set((topologyGraph.edges ?? []).flatMap((edge) => [
+    edge.sourceAssetId ?? edge.sourceNodeId,
+    edge.targetAssetId ?? edge.targetNodeId,
+  ].filter(Boolean)))
+  return {
+    confirmedConnectionCount: (topologyGraph.edges ?? []).length,
+    pendingConnectionCount: Number(datasetTopologySummary.candidateCount || 0)
+      + Number(datasetTopologySummary.ambiguousCount || 0),
+    isolatedAssetCount: assets.filter(({ id }) => !connectedAssetIds.has(id)).length,
+    pendingScope: 'dataset',
+  }
+}
+
 export function scopeMapData({
   selectedArea,
   assets,
@@ -1264,6 +1326,19 @@ export function scopeMapData({
     : [...geometries]
   const scopedAssetIds = new Set(scopedAssets.map(({ id }) => id))
   const scopedGeometryIds = new Set(scopedGeometries.map(({ id }) => id))
+  const edges = (topologyGraph.edges ?? []).filter((edge) => {
+    const sourceId = edge.sourceAssetId ?? edge.sourceNodeId
+    const targetId = edge.targetAssetId ?? edge.targetNodeId
+    return scopedAssetIds.has(sourceId) && scopedAssetIds.has(targetId)
+  })
+  const degreeByNode = Object.fromEntries([...scopedAssetIds].map((assetId) => [assetId, 0]))
+  edges.forEach((edge) => {
+    const sourceId = edge.sourceAssetId ?? edge.sourceNodeId
+    const targetId = edge.targetAssetId ?? edge.targetNodeId
+    degreeByNode[sourceId] = (degreeByNode[sourceId] ?? 0) + 1
+    degreeByNode[targetId] = (degreeByNode[targetId] ?? 0) + 1
+  })
+  const isolatedNodeIds = [...scopedAssetIds].filter((assetId) => !degreeByNode[assetId])
   const scopedNetworks = networks.map((network) => {
     const nodeIds = network.nodeIds.filter((id) => scopedAssetIds.has(id))
     const geometryIds = network.geometryIds.filter((id) => scopedGeometryIds.has(id))
@@ -1277,6 +1352,9 @@ export function scopeMapData({
       .filter(Boolean)
     const assetIds = [...new Set([...nodeIds, ...geometryAssetIds])]
     const networkGeometries = scopedGeometries.filter(({ id }) => geometryIds.includes(id))
+    const relationAssetIds = new Set(relations.flatMap(({ sourceAssetId, targetAssetId }) => (
+      [sourceAssetId, targetAssetId]
+    )))
     return {
       ...network,
       nodeIds,
@@ -1286,6 +1364,8 @@ export function scopeMapData({
       relations,
       relationIds: relations.map(({ id }) => id),
       edges: relations.map(({ sourceAssetId, targetAssetId }) => [sourceAssetId, targetAssetId]),
+      confirmedConnectionCount: relations.length,
+      isolatedAssetCount: nodeIds.filter((assetId) => !relationAssetIds.has(assetId)).length,
       assetCount: assetIds.length,
       nodeCount: nodeIds.length,
       lineCount: networkGeometries.filter(
@@ -1297,11 +1377,6 @@ export function scopeMapData({
       ...(selectedArea?.bounds ? { bounds: selectedArea.bounds } : {}),
     }
   }).filter((network) => network.nodeIds.length || network.geometryIds.length)
-  const edges = (topologyGraph.edges ?? []).filter((edge) => {
-    const sourceId = edge.sourceAssetId ?? edge.sourceNodeId
-    const targetId = edge.targetAssetId ?? edge.targetNodeId
-    return scopedAssetIds.has(sourceId) && scopedAssetIds.has(targetId)
-  })
   const nodes = (topologyGraph.nodes ?? []).filter((node) => (
     scopedAssetIds.has(node.id) || scopedAssetIds.has(node.assetId)
   ))
@@ -1318,7 +1393,13 @@ export function scopeMapData({
     geometries: scopedGeometries,
     exportAssets: exportAssets.filter(({ id }) => scopedExportAssetIds.has(id)),
     networks: scopedNetworks,
-    topologyGraph: { ...topologyGraph, nodes, edges },
+    topologyGraph: {
+      ...topologyGraph,
+      nodes,
+      edges,
+      degreeByNode,
+      isolatedNodeIds,
+    },
     counts: {
       networkCount: scopedNetworks.length,
       layerCount: new Set([
