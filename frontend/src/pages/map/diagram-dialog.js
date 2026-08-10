@@ -5,6 +5,7 @@ export function openSchematicDialog({
   diagrams,
   activeContext,
   selectedAssetId = null,
+  initialMode = 'all-assets',
   onSelectAsset,
 }) {
   const dialog = document.createElement('dialog')
@@ -31,14 +32,10 @@ export function openSchematicDialog({
             <span><strong>Seluruh aset</strong><small>Semua aset pada area aktif</small></span>
           </button>
           <button class="schematic-mode-option" type="button" role="tab"
-            data-schematic-mode="full-map" aria-selected="false">
-            <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
-            <span><strong>Topologi jaringan</strong><small>Relasi terkonfirmasi pada area aktif</small></span>
-          </button>
-          <button class="schematic-mode-option" type="button" role="tab"
-            data-schematic-mode="trace" aria-selected="false">
+            data-schematic-mode="selected" aria-selected="false"
+            ${selectedAssetId ? '' : 'disabled title="Pilih satu aset pada peta untuk melihat relasinya."'}>
             <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>
-            <span><strong>Jalur terpilih</strong><small>Hanya hasil tracing aktif</small></span>
+            <span><strong>Jalur terpilih</strong><small>Relasi langsung dari aset yang dipilih</small></span>
           </button>
         </div>
       </div>
@@ -67,7 +64,10 @@ export function openSchematicDialog({
         </span>
       </div>
 
-      <div class="schematic-board" aria-label="Preview diagram skematik" tabindex="0"></div>
+      <div class="schematic-content">
+        <div class="schematic-board" aria-label="Preview diagram skematik" tabindex="0"></div>
+        <aside class="schematic-summary" aria-label="Ringkasan aset"></aside>
+      </div>
 
       <footer class="schematic-footer">
         <p>Posisi relatif dan arah koneksi mengikuti peta. Diagram tidak mengubah koordinat sumber.</p>
@@ -94,6 +94,7 @@ export function openSchematicDialog({
     diagrams,
     activeContext,
     selectedAssetId,
+    initialMode,
     onSelectAsset,
   })
 }
@@ -103,6 +104,7 @@ function bindDialogEvents({
   diagrams,
   activeContext,
   selectedAssetId,
+  initialMode,
   onSelectAsset,
 }) {
   const board = dialog.querySelector('.schematic-board')
@@ -113,7 +115,9 @@ function bindDialogEvents({
   const viewControlButtons = dialog.querySelectorAll(
     '.diagram-zoom-out, .diagram-zoom-in, .diagram-zoom-level, .diagram-fit, .diagram-reset',
   )
-  let currentMode = 'all-assets'
+  let currentMode = initialMode === 'selected' && selectedAssetId && diagrams.selected
+    ? 'selected'
+    : 'all-assets'
   let currentSelectedAssetId = selectedAssetId
   let zoom = 1
 
@@ -124,18 +128,51 @@ function bindDialogEvents({
     return current?.graph.status === 'ready' && current?.layout.status === 'ready'
   }
 
+  const availableViewport = () => ({
+    width: Math.max(board.clientWidth - 32, 240),
+    height: Math.max(board.clientHeight - 32, 180),
+  })
+
+  const fitScale = () => {
+    const svg = getCurrentSvg()
+    if (!svg) return 1
+    const viewBox = svg.viewBox.baseVal
+    const available = availableViewport()
+    return Math.min(1, available.width / viewBox.width, available.height / viewBox.height)
+  }
+
   const applyZoom = () => {
     const svg = getCurrentSvg()
     if (!svg) return
-    svg.style.width = `${Math.round(zoom * 100)}%`
-    svg.style.height = 'auto'
-    zoomLabel.textContent = `${Math.round(zoom * 100)}%`
+    const viewBox = svg.viewBox.baseVal
+    const available = availableViewport()
+    const scale = Math.max(.1, zoom)
+    svg.style.width = `${Math.max(1, Math.round(viewBox.width * scale))}px`
+    svg.style.height = `${Math.max(1, Math.round(viewBox.height * scale))}px`
+    svg.style.margin = viewBox.width * scale <= available.width ? '0 auto' : '0'
+    zoomLabel.textContent = `${Math.round(scale * 100)}%`
   }
 
   const fitDiagram = () => {
-    zoom = 1
+    zoom = fitScale()
     applyZoom()
     board.scrollTo({ top: 0, left: 0 })
+  }
+
+  const positionAtFocus = () => {
+    const current = getCurrentDiagram()
+    const svg = getCurrentSvg()
+    if (!current || !svg) return
+    const focusId = current.layout.focusNodeId || current.graph.anchorAssetId
+    const focus = current.layout.nodes.find((node) => node.id === focusId)
+    if (!focus) return
+    const available = availableViewport()
+    const centerX = (focus.diagram.x + focus.diagram.width / 2) * zoom
+    const centerY = (focus.diagram.y + focus.diagram.height / 2) * zoom
+    board.scrollTo({
+      left: Math.max(0, centerX - available.width / 2),
+      top: Math.max(0, centerY - available.height / 2),
+    })
   }
 
   const selectDiagramAsset = (assetId) => {
@@ -164,6 +201,13 @@ function bindDialogEvents({
     dialog.querySelector('.schematic-current-meta').textContent = ready
       ? `${current.layout.nodes.length} aset · ${describeMode(graph.mode)} · dataset ${activeContext.version}`
       : 'Periksa cakupan data diagram.'
+    if (ready) {
+      dialog.querySelector('.schematic-current-meta').textContent = formatDiagramMeta(
+        graph,
+        current.layout,
+        activeContext,
+      )
+    }
 
     board.innerHTML = ready
       ? `<div class="schematic-viewport">
@@ -176,6 +220,10 @@ function bindDialogEvents({
         </div>`
       : renderDiagramState(graph)
 
+    dialog.querySelector('.schematic-summary').innerHTML = ready
+      ? renderDiagramSummary(graph, current.layout)
+      : ''
+
     dialog.querySelectorAll('[data-schematic-mode]').forEach((button) => {
       const selected = button.dataset.schematicMode === currentMode
       button.classList.toggle('active', selected)
@@ -187,14 +235,17 @@ function bindDialogEvents({
     exportSvgButton.disabled = !ready
     exportPngButton.disabled = !ready
     exportStatus.textContent = ''
-    zoom = 1
+    zoom = current.layout.defaultZoom ?? (graph.mode === 'selected' ? 1 : .62)
     applyZoom()
+    positionAtFocus()
+    requestAnimationFrame(positionAtFocus)
   }
 
   dialog.querySelectorAll('.close-schematic')
     .forEach((button) => button.addEventListener('click', () => dialog.close()))
   dialog.querySelectorAll('[data-schematic-mode]').forEach((button) => {
     button.addEventListener('click', () => {
+      if (button.disabled) return
       currentMode = button.dataset.schematicMode
       renderCurrentDiagram()
     })
@@ -210,7 +261,11 @@ function bindDialogEvents({
   dialog.querySelector('.diagram-zoom-level').addEventListener('click', fitDiagram)
   dialog.querySelector('.diagram-fit').addEventListener('click', fitDiagram)
   dialog.querySelector('.diagram-reset').addEventListener('click', () => {
-    fitDiagram()
+    const current = getCurrentDiagram()
+    const graph = current?.graph
+    zoom = current?.layout?.defaultZoom ?? (graph?.mode === 'selected' ? 1 : .62)
+    applyZoom()
+    positionAtFocus()
     selectDiagramAsset(currentSelectedAssetId)
   })
 
@@ -271,7 +326,42 @@ function renderDiagramState(graph) {
   `
 }
 
+function renderDiagramSummary(graph, layout) {
+  const counts = graph.categorySummary || layout.nodes.reduce((summary, node) => {
+    const label = node.type || 'Aset lainnya'
+    summary[label] = (summary[label] || 0) + 1
+    return summary
+  }, {})
+  const isolatedCount = graph.isolatedNodeIds?.length || 0
+  return `
+    <section class="schematic-summary-card">
+      <h3>Ringkasan aset</h3>
+      <ul>${Object.entries(counts).map(([label, count]) => `
+        <li><span>${escapeHtml(label)}</span><strong>${count}</strong></li>
+      `).join('')}</ul>
+      <div class="schematic-summary-total"><span>Total aset</span><strong>${layout.nodes.length}</strong></div>
+      <div class="schematic-summary-total"><span>Total koneksi</span><strong>${graph.relationCount ?? layout.edges.length}</strong></div>
+    </section>
+    ${graph.mode === 'all-assets' ? `
+      <section class="schematic-summary-card ${isolatedCount ? '' : 'is-clear'}">
+        <div class="schematic-summary-card-heading"><h3>Aset tanpa relasi</h3><strong>${isolatedCount}</strong></div>
+        <p>${isolatedCount ? `${isolatedCount} aset tidak memiliki koneksi terkonfirmasi.` : 'Tidak ada aset tanpa relasi.'}</p>
+      </section>
+    ` : ''}
+  `
+}
+
+function formatDiagramMeta(graph, layout, context) {
+  if (graph.mode === 'selected') {
+    return `${graph.neighborCount ?? Math.max(0, layout.nodes.length - 1)} aset terhubung langsung · `
+      + `${context.branchName} · Dataset ${context.version} · Read-only`
+  }
+  return `${layout.nodes.length} aset · ${graph.relationCount ?? layout.edges.length} `
+    + `koneksi terkonfirmasi · ${context.branchName} · Dataset ${context.version} · Read-only`
+}
+
 function describeMode(mode) {
+  if (mode === 'selected') return 'relasi aset terpilih'
   if (mode === 'trace') return 'jalur terpilih'
   if (mode === 'full-map') return 'peta jaringan lengkap'
   if (mode === 'focus') return 'aset fokus dan relasi langsung'

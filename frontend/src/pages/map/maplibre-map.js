@@ -141,12 +141,9 @@ export function createMapLibreSurface(element, {
   element.addEventListener('pointerdown', toggleCtrlPitchFromPointer)
 
   map.addControl(new NavigationControl({ showCompass: false }), 'bottom-right')
-  map.addControl(new AttributionControl({
-    compact: true,
-    customAttribution: vectorTiles
-      ? 'SINERGI · OpenFreeMap © OpenMapTiles · Data © OpenStreetMap'
-      : 'SINERGI · canonical longitude/latitude',
-  }))
+  // Keep attribution permanently readable in its own bottom-left safe area.
+  // The map stage reserves the opposite corner for the custom controls.
+  map.addControl(new AttributionControl({ compact: false }), 'bottom-left')
 
   let basemapSourceId = vectorTiles
     ? 'openfreemap'
@@ -821,6 +818,10 @@ function addOperationalLayers(map) {
     id: 'asset-selection-halo',
     type: 'circle',
     source: 'sinergi-points',
+    // Asset identity is rendered by the adaptive HTML marker layer below.
+    // Keeping this visual layer active produces a second dot underneath
+    // clusters and displaced markers while the hit layer remains available.
+    layout: { visibility: 'none' },
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 9, 17, 13, 20, 17],
       'circle-color': '#ffffff',
@@ -833,6 +834,9 @@ function addOperationalLayers(map) {
     id: 'asset-points',
     type: 'circle',
     source: 'sinergi-points',
+    // Prevent a native circle from showing through the adaptive marker.
+    // `asset-points-hit` below remains the interaction target.
+    layout: { visibility: 'none' },
     paint: {
       'circle-radius': [
         ...assetPointRadiusExpression(),

@@ -130,6 +130,89 @@ test('builder never writes diagram coordinates into source assets', () => {
   assert.equal('diagram' in assets[0], false)
 })
 
+test('selected relation mode contains the focus and every direct confirmed neighbor', () => {
+  const graph = buildSchematicGraph({
+    assets,
+    networks,
+    topologyGraph: {
+      nodes: assets.map(({ id }) => ({ id })),
+      edges: [
+        { id: 'jb-core', sourceNodeId: 'jb', targetNodeId: 'core', relationStatus: 'confirmed' },
+        { id: 'jb-cam', sourceNodeId: 'jb', targetNodeId: 'cam', relationStatus: 'confirmed' },
+        { id: 'core-printer', sourceNodeId: 'core', targetNodeId: 'printer', relationStatus: 'confirmed' },
+      ],
+    },
+    focusedAssetId: 'jb',
+    scope: 'selected',
+  })
+
+  assert.equal(graph.mode, 'selected')
+  assert.equal(graph.anchorAssetId, 'jb')
+  assert.deepEqual(new Set(graph.nodes.map((node) => node.id)), new Set(['jb', 'core', 'cam']))
+  assert.equal(graph.edges.length, 2)
+  assert.equal(graph.neighborCount, 2)
+})
+
+test('selected relation mode excludes neighbors of neighbors and pending edges', () => {
+  const graph = buildSchematicGraph({
+    assets,
+    networks,
+    topologyGraph: {
+      nodes: assets.map(({ id }) => ({ id })),
+      edges: [
+        { id: 'jb-core', sourceNodeId: 'jb', targetNodeId: 'core', relationStatus: 'confirmed' },
+        { id: 'core-printer', sourceNodeId: 'core', targetNodeId: 'printer', relationStatus: 'confirmed' },
+        { id: 'jb-pending', sourceNodeId: 'jb', targetNodeId: 'cam', relationStatus: 'inferred_pending' },
+      ],
+    },
+    focusedAssetId: 'jb',
+    scope: 'selected',
+  })
+
+  assert.deepEqual(graph.nodes.map((node) => node.id), ['jb', 'core'])
+  assert.deepEqual(graph.edges.map(({ sourceId, targetId }) => [sourceId, targetId]), [['jb', 'core']])
+})
+
+test('JB-010-exp selected relation graph contains all four direct relations', () => {
+  const sampleAssets = [
+    { id: 'jb-010', name: 'JB-010-exp', type: 'Junction Box' },
+    { id: 'jb-011-1', name: 'JB-011.1-exp', type: 'Junction Box' },
+    { id: 't-021', name: 'T-021', type: 'Tiang' },
+    { id: 'jb-011', name: 'JB-011-exp', type: 'Junction Box' },
+    { id: 'jb-012', name: 'JB-012', type: 'Junction Box' },
+    { id: 'cctv-20', name: 'CCTV-20', type: 'CCTV' },
+  ]
+  const graph = buildSchematicGraph({
+    assets: sampleAssets,
+    networks: [{ id: 'cctv', name: 'Jaringan CCTV', nodeIds: sampleAssets.map(({ id }) => id), edges: [] }],
+    topologyGraph: {
+      nodes: sampleAssets.map(({ id }) => ({ id })),
+      edges: [
+        { id: 'jb-010-jb-011-1', sourceNodeId: 'jb-010', targetNodeId: 'jb-011-1', relationStatus: 'confirmed' },
+        { id: 'jb-010-t-021', sourceNodeId: 'jb-010', targetNodeId: 't-021', relationStatus: 'confirmed' },
+        { id: 'jb-010-jb-011', sourceNodeId: 'jb-010', targetNodeId: 'jb-011', relationStatus: 'confirmed' },
+        { id: 'jb-010-jb-012', sourceNodeId: 'jb-010', targetNodeId: 'jb-012', relationStatus: 'confirmed' },
+        { id: 'jb-011-cctv-20', sourceNodeId: 'jb-011', targetNodeId: 'cctv-20', relationStatus: 'confirmed' },
+      ],
+    },
+    focusedAssetId: 'jb-010',
+    scope: 'selected',
+  })
+
+  assert.equal(graph.mode, 'selected')
+  assert.equal(graph.anchorAssetId, 'jb-010')
+  assert.equal(graph.nodes.length, 5)
+  assert.equal(graph.edges.length, 4)
+  assert.deepEqual(new Set(graph.nodes.map((node) => node.name)), new Set([
+    'JB-010-exp',
+    'JB-011.1-exp',
+    'T-021',
+    'JB-011-exp',
+    'JB-012',
+  ]))
+  assert.equal(graph.nodes.some((node) => node.name === 'CCTV-20'), false)
+})
+
 test('full-map scope includes every active network and preserves map display positions separately', () => {
   const positionedAssets = assets.map((asset, index) => ({
     ...asset,

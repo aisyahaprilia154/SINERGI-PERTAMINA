@@ -771,26 +771,18 @@ export async function renderMapPage(container) {
       return
     }
     const allAssetsGraph = buildSchematicGraph({
-      assets: diagramAssets,
+      assets,
       networks,
       topologyGraph,
       scope: 'all-assets',
       topologyReady: topologyReadiness.ready,
     })
-    const fullMapGraph = buildSchematicGraph({
-      assets: diagramAssets,
+    const selectedAssetGraph = buildSchematicGraph({
+      assets,
       networks,
       topologyGraph,
-      scope: 'full-map',
-      topologyReady: topologyReadiness.ready,
-    })
-    const traceGraph = buildSchematicGraph({
-      assets: diagramAssets,
-      networks,
-      topologyGraph,
-      scope: 'trace',
-      tracePath: state.traceStatus === 'active' ? state.tracePath : [],
-      traceRelations: state.traceStatus === 'active' ? state.traceRelations : [],
+      focusedAssetId: selection.selectedAssetId,
+      scope: 'selected',
       topologyReady: topologyReadiness.ready,
     })
     openSchematicDialog({
@@ -799,17 +791,14 @@ export async function renderMapPage(container) {
           graph: allAssetsGraph,
           layout: calculateSchematicLayout(allAssetsGraph, { preserveMapOrientation: true }),
         },
-        'full-map': {
-          graph: fullMapGraph,
-          layout: calculateSchematicLayout(fullMapGraph, { preserveMapOrientation: true }),
-        },
-        trace: {
-          graph: traceGraph,
-          layout: calculateSchematicLayout(traceGraph, { preserveMapOrientation: true }),
+        selected: {
+          graph: selectedAssetGraph,
+          layout: calculateSchematicLayout(selectedAssetGraph),
         },
       },
       activeContext,
       selectedAssetId: selection.selectedAssetId,
+      initialMode: selection.selectedAssetId ? 'selected' : 'all-assets',
       onSelectAsset: selectAssetFromDiagram,
     })
   }
@@ -1165,6 +1154,10 @@ export async function renderMapPage(container) {
     openDataTransfer('export')
     container.querySelector('.map-more-menu')?.removeAttribute('open')
   }))
+  container.querySelector('.import-toggle')?.addEventListener('click', () => {
+    openDataTransfer('import')
+    container.querySelector('.map-more-menu')?.removeAttribute('open')
+  })
   container.querySelector('.manage-dataset-toggle').addEventListener('click', () => {
     openDataTransfer('import')
     container.querySelector('.map-more-menu')?.removeAttribute('open')
@@ -1490,9 +1483,6 @@ export function renderTopNavigation(activeView = 'map', context = null) {
       <nav aria-label="Navigasi utama">
         <a href="/map${contextQuery}" class="${activeView === 'map' ? 'active' : ''}">
           <span class="material-symbols-outlined" aria-hidden="true">map</span>Peta Aset
-        </a>
-        <a href="/topology${contextQuery}" class="${activeView === 'topology' ? 'active' : ''}">
-          <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>Topologi Cabang
         </a>
         <a href="/admin/topology-review${contextQuery}"
           class="${activeView === 'review' ? 'active' : ''}">

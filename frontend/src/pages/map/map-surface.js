@@ -95,7 +95,6 @@ export function renderNetworkMapCanvas(activeContext, {
         </button>
       </div>
 
-      <div class="map-attribution">SINERGI Topology · Dataset ${escapeHtml(activeContext.version)}</div>
       <button class="mobile-panel-backdrop" type="button" tabindex="-1" aria-label="Tutup panel"></button>
       <aside class="asset-drawer" aria-live="polite" aria-label="Detail aset" aria-hidden="true"></aside>
     </section>
@@ -196,10 +195,10 @@ export function renderMapFloatingControls(
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
           <span>Diagram 2D</span>
         </button>
-        <button class="tool-button export-toggle map-action-ghost" type="button"
-          aria-label="Export" title="Export data peta">
-          <span class="material-symbols-outlined" aria-hidden="true">download</span>
-          <span>Export</span>
+        <button class="tool-button import-toggle map-action-ghost" type="button"
+          aria-label="Import" title="Import data peta">
+          <span class="material-symbols-outlined" aria-hidden="true">upload_file</span>
+          <span>Import</span>
         </button>
         <details class="map-more-menu">
           <summary class="tool-button map-action-more" aria-label="Buka menu lainnya"
@@ -241,26 +240,30 @@ export function renderMapFloatingControls(
       </button>
     </nav>
 
-    <div class="map-floating-bottom">
-      <button class="icon-button basemap-toggle" type="button" aria-label="Pilih tampilan peta dasar"
-        aria-controls="basemap-picker" aria-expanded="false">
-        <span class="material-symbols-outlined" aria-hidden="true">layers</span>
-      </button>
-      <button class="icon-button legend-toggle" type="button" aria-label="Tampilkan legenda"
-        aria-controls="map-legend" aria-expanded="false">
-        <span class="material-symbols-outlined" aria-hidden="true">info</span>
-      </button>
+    <div class="map-floating-bottom" aria-label="Kontrol peta">
+      <div class="map-primary-controls" role="group" aria-label="Kontrol utama peta">
+        <div class="zoom-controls" aria-label="Kontrol zoom peta">
+          <button type="button" aria-label="Perbesar peta" title="Perbesar peta" class="zoom-in">
+            <span class="material-symbols-outlined" aria-hidden="true">add</span>
+          </button>
+          <button type="button" aria-label="Perkecil peta" title="Perkecil peta" class="zoom-out">
+            <span class="material-symbols-outlined" aria-hidden="true">remove</span>
+          </button>
+          <button type="button" aria-label="Kembali ke seluruh area cabang"
+            title="Kembali ke seluruh area cabang" class="zoom-reset">
+            <span class="material-symbols-outlined" aria-hidden="true">my_location</span>
+          </button>
+        </div>
+      </div>
 
-      <div class="zoom-controls" aria-label="Kontrol zoom peta">
-        <button type="button" aria-label="Perbesar peta" title="Perbesar peta" class="zoom-in">
-          <span class="material-symbols-outlined" aria-hidden="true">add</span>
+      <div class="map-secondary-controls" role="group" aria-label="Kontrol layer dan informasi">
+        <button class="icon-button basemap-toggle" type="button" aria-label="Pilih tampilan peta dasar"
+          aria-controls="basemap-picker" aria-expanded="false">
+          <span class="material-symbols-outlined" aria-hidden="true">layers</span>
         </button>
-        <button type="button" aria-label="Perkecil peta" title="Perkecil peta" class="zoom-out">
-          <span class="material-symbols-outlined" aria-hidden="true">remove</span>
-        </button>
-        <button type="button" aria-label="Kembali ke seluruh area cabang"
-          title="Kembali ke seluruh area cabang" class="zoom-reset">
-          <span class="material-symbols-outlined" aria-hidden="true">my_location</span>
+        <button class="icon-button legend-toggle" type="button" aria-label="Tampilkan legenda"
+          aria-controls="map-legend" aria-expanded="false">
+          <span class="material-symbols-outlined" aria-hidden="true">info</span>
         </button>
       </div>
     </div>

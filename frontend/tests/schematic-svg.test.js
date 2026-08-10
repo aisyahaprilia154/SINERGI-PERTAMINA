@@ -73,3 +73,37 @@ test('SVG renderer includes context, asset identity, legend, and schematic discl
   assert.match(svg, />JALUR</)
   assert.match(svg, /Diagram skematik mengikuti posisi relatif tampilan peta dan tidak menunjukkan skala geografis\./)
 })
+
+test('SVG renderer draws every selected node and confirmed edge without clipping', () => {
+  const selectedGraph = {
+    status: 'ready',
+    mode: 'selected',
+    title: 'Relasi JB-008-exp',
+    anchorAssetId: 'focus',
+    nodes: [
+      { id: 'focus', name: 'JB-008-exp', type: 'Junction Box', category: 'cctv', isAnchor: true },
+      { id: 'neighbor', name: 'JB-00X-exp', type: 'Junction Box', category: 'cctv', isAnchor: false },
+    ],
+    edges: [{
+      id: 'focus-neighbor',
+      sourceId: 'focus',
+      targetId: 'neighbor',
+      networkName: 'Relasi terkonfirmasi',
+      networkColor: '#64748b',
+    }],
+  }
+  const layout = calculateSchematicLayout(selectedGraph)
+  const svg = renderSchematicSvg({
+    graph: selectedGraph,
+    layout,
+    context: { branchName: 'Semarang', version: 'doc · 29 Jul 2026' },
+    selectedAssetId: 'focus',
+  })
+
+  assert.equal((svg.match(/<g class="diagram-node(?: |\")/g) || []).length, 2)
+  assert.equal((svg.match(/data-edge-id="focus-neighbor"/g) || []).length, 1)
+  assert.match(svg, /JB-008-exp/)
+  assert.match(svg, /JB-00X-exp/)
+  assert.match(svg, />Junction Box</)
+  assert.doesNotMatch(svg, />CCTV</)
+})
