@@ -219,15 +219,6 @@ export function renderMapFloatingControls(
               <span class="material-symbols-outlined" aria-hidden="true">download</span>
               <span><strong>Export</strong><small>Unduh data sesuai konteks peta</small></span>
             </button>
-            <button class="manage-dataset-toggle" type="button">
-              <span class="material-symbols-outlined" aria-hidden="true">database</span>
-              <span><strong>Kelola Dataset</strong><small>Import KML/KMZ dan versi dataset</small></span>
-            </button>
-            <button class="declutter-toggle" type="button"
-              title="Jalankan ulang tata marker adaptif tanpa mengubah koordinat sumber">
-              <span class="material-symbols-outlined" aria-hidden="true">scatter_plot</span>
-              <span><strong>Rapikan tampilan</strong><small>Atur marker tanpa mengubah koordinat</small></span>
-            </button>
           </div>
         </details>
       </div>

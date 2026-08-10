@@ -545,6 +545,18 @@
   background: var(--color-surface-hover);
 }
 
+.selection-actions .text-button.active,
+.selection-actions .text-button[aria-pressed="true"] {
+  color: var(--color-text-inverse);
+  background: var(--color-primary);
+}
+
+.selection-actions .text-button.active:hover,
+.selection-actions .text-button[aria-pressed="true"]:hover {
+  color: var(--color-text-inverse);
+  background: var(--color-primary-hover);
+}
+
 .network-list {
   min-height: auto;
   padding: 0 var(--space-3) var(--space-3);
@@ -4749,6 +4761,18 @@
 .selection-actions .text-button {
   padding: 3px 6px;
   color: #52657a;
+}
+
+.selection-actions .text-button.active,
+.selection-actions .text-button[aria-pressed="true"] {
+  color: #fff;
+  background: var(--color-primary);
+}
+
+.selection-actions .text-button.active:hover,
+.selection-actions .text-button[aria-pressed="true"]:hover {
+  color: #fff;
+  background: var(--color-primary-hover);
 }
 
 .network-list {
