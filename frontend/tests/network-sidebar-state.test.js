@@ -173,6 +173,8 @@ test('sidebar prioritizes area, search, filters, and networks before compact con
   assert.match(html, /role="listbox" aria-label="Hasil pencarian aset"/)
   assert.match(html, /<details class="sidebar-topology-readiness ready">/)
   assert.doesNotMatch(html, /<details class="sidebar-topology-readiness ready" open>/)
+  assert.match(html, /class="text-button show-all-networks active" type="button"\s+aria-pressed="true"/)
+  assert.match(html, /class="text-button hide-all-networks" type="button"\s+aria-pressed="false"/)
   assert.match(html, /Status topologi/)
   assert.match(html, /34 terkonfirmasi · 16 tanpa relasi/)
   assert.match(html, /1\.148<\/b> perlu diperiksa/)
