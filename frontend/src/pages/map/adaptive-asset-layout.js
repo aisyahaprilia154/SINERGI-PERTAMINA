@@ -19,7 +19,9 @@ export function buildAdaptiveAssetLayout(items = [], {
 
   groups.forEach((group) => {
     const ranked = [...group].sort(compareItems)
-    const focused = ranked.filter(({ selected, trace }) => selected || trace).slice(0, 4)
+    const focused = ranked
+      .filter(({ selected, trace, networkFocused }) => selected || trace || networkFocused)
+      .slice(0, 4)
     if (enabled && ranked.length > 8) {
       const focusedIds = new Set(focused.map(({ id }) => id))
       const clustered = ranked.filter(({ id }) => !focusedIds.has(id))
@@ -63,7 +65,9 @@ export function buildAdaptiveAssetLayout(items = [], {
     }
 
     const mustExpand = zoom >= 17
-      || ranked.some(({ selected, trace }) => selected || trace)
+      || ranked.some(({ selected, trace, networkFocused }) => (
+        selected || trace || networkFocused
+      ))
 
     if (enabled && ranked.length > 1 && !mustExpand) {
       markers.push(createClusterMarker(ranked))
@@ -128,6 +132,8 @@ function createClusterMarker(items, point = centroid(items.map((item) => item.po
     memberIds: items.map(({ id }) => id),
     coordinates: items.map(({ coordinate }) => coordinate).filter(validCoordinate),
     label: clusterLabel(items),
+    networkFocused: items.some(({ networkFocused }) => networkFocused),
+    color: items.find(({ networkFocused }) => networkFocused)?.color,
   }
 }
 
@@ -226,9 +232,10 @@ function compareItems(left, right) {
 function itemPriority(item) {
   if (item.selected) return 0
   if (item.trace) return 1
-  if (item.isCoreNode) return 2
-  if (item.active !== false) return 3
-  return 4
+  if (item.networkFocused) return 2
+  if (item.isCoreNode) return 3
+  if (item.active !== false) return 4
+  return 5
 }
 
 function clusterLabel(items) {

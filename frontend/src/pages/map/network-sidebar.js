@@ -149,6 +149,7 @@ export function renderNetworkList({
   selectedNetworkIds,
   expandedNetworkIds,
   search,
+  focusedNetworkId = null,
 }) {
   if (status === 'loading') return renderLoadingSkeleton()
   if (status === 'error') return renderErrorState(errorMessage)
@@ -166,16 +167,18 @@ export function renderNetworkList({
     assetById,
     selected: selectedNetworkIds.has(network.id),
     expanded: expandedNetworkIds.has(network.id),
+    focused: focusedNetworkId === network.id,
   })).join('')
 }
 
-function renderNetworkItem({ network, assetById, selected, expanded }) {
+function renderNetworkItem({ network, assetById, selected, expanded, focused }) {
   const subcategories = getNetworkSubcategories(network, assetById)
   const networkId = escapeAttribute(network.id)
   const networkName = escapeHtml(network.name)
 
   return `
-    <article class="network-item ${selected ? 'selected' : ''}" data-network-id="${networkId}">
+    <article class="network-item ${selected ? 'selected' : ''} ${focused ? 'focused' : ''}"
+      data-network-id="${networkId}" style="--network-color:${escapeAttribute(network.color)}">
       <div class="network-row">
         <button class="network-main" type="button" data-network-select="${networkId}"
           aria-pressed="${selected}" aria-label="${selected ? 'Sembunyikan' : 'Tampilkan'} ${networkName}">
@@ -201,7 +204,8 @@ function renderNetworkItem({ network, assetById, selected, expanded }) {
         </button>
         <div class="network-row-actions">
           <button class="network-icon-action focus-network" type="button" data-network-focus="${networkId}"
-            aria-label="Fokuskan peta ke ${networkName}" title="Fokuskan peta ke ${networkName}"
+            aria-pressed="${focused}" aria-label="${focused ? 'Keluar dari fokus' : 'Fokuskan peta ke'} ${networkName}"
+            title="${focused ? 'Keluar dari fokus' : 'Fokuskan peta ke'} ${networkName}"
             ${network.assetCount ? '' : 'disabled'}>
             <span class="material-symbols-outlined" aria-hidden="true">center_focus_strong</span>
           </button>

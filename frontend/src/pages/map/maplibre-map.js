@@ -71,6 +71,7 @@ export function createMapLibreSurface(element, {
     dimOthers: true,
     isolateSelectedCandidate: false,
     highlightedNetworkId: null,
+    focusedNetworkId: null,
   }
   let loaded = false
   let destroyed = false
@@ -229,6 +230,7 @@ export function createMapLibreSurface(element, {
     map.addSource('sinergi-polygons', emptyGeoJsonSource())
     map.addSource('sinergi-overlays', emptyGeoJsonSource())
     map.addSource('sinergi-lines', emptyGeoJsonSource())
+    map.addSource('sinergi-focus-lines', emptyGeoJsonSource())
     map.addSource('sinergi-candidates', emptyGeoJsonSource())
     map.addSource('sinergi-points', emptyGeoJsonSource())
     addGroundOverlayImages(map, overlays)
@@ -301,6 +303,7 @@ export function createMapLibreSurface(element, {
     map.getSource('sinergi-polygons').setData(featureCollections.polygons)
     map.getSource('sinergi-overlays').setData(featureCollections.overlays)
     map.getSource('sinergi-lines').setData(featureCollections.lines)
+    map.getSource('sinergi-focus-lines').setData(featureCollections.focusLines)
     map.getSource('sinergi-candidates').setData(featureCollections.candidates)
     map.getSource('sinergi-points').setData(featureCollections.points)
   }
@@ -328,10 +331,16 @@ export function createMapLibreSurface(element, {
     const items = assets
       .filter(({ coordinate }) => validPosition(coordinate))
       .map((asset) => {
+        const networkFocused = Boolean(
+          state.focusedNetworkId && asset.networkIds?.includes(state.focusedNetworkId),
+        )
         const active = isolateCandidate
           ? focusedAssetIds.has(asset.id)
           : !asset.networkIds?.length
             || asset.networkIds.some((networkId) => state.selectedNetworkIds.has(networkId))
+        const focusContext = Boolean(
+          state.focusedNetworkId && asset.networkIds?.length && !networkFocused,
+        )
         const projected = map.project(asset.coordinate.slice(0, 2))
         return {
           id: asset.id,
@@ -340,15 +349,17 @@ export function createMapLibreSurface(element, {
           category: asset.category,
           coordinate: asset.coordinate.slice(0, 2),
           point: { x: projected.x, y: projected.y },
-          color: assetColor(asset, networks),
+          color: assetColor(asset, networks, state.focusedNetworkId),
           icon: iconForAsset(asset),
           active,
+          focusContext,
+          networkFocused,
           selected: asset.id === state.selectedAssetId,
           trace: traceIds.has(asset.id),
           isCoreNode: asset.isCoreNode,
         }
       })
-      .filter(({ active }) => active || (!isolateCandidate && state.dimOthers))
+      .filter(({ active }) => active)
 
     const layout = buildAdaptiveAssetLayout(items, {
       zoom: map.getZoom(),
@@ -533,28 +544,57 @@ export function createMapLibreSurface(element, {
       .map((geometry) => {
         const network = networkByGeometryId.get(geometry.id)
           ?? networkByGeometryId.get(geometry.sourceGeometryId)
-        const active = !network || state.selectedNetworkIds.has(network.id)
+        const networkIds = [...new Set([
+          network?.id,
+          ...(geometry.assetId ? assetNetworkIds.get(geometry.assetId) ?? [] : []),
+        ].filter(Boolean))]
+        const active = !networkIds.length
+          || networkIds.some((networkId) => state.selectedNetworkIds.has(networkId))
+        const focused = Boolean(
+          state.focusedNetworkId && networkIds.includes(state.focusedNetworkId),
+        )
+        const focusedNetwork = focused
+          ? networkById.get(state.focusedNetworkId)
+          : null
+        const focusContext = Boolean(
+          state.focusedNetworkId && networkIds.length && !focused,
+        )
         const selectedCandidateGeometry = selectedCandidateGeometryIds.has(geometry.id)
           || selectedCandidateGeometryIds.has(geometry.sourceGeometryId)
         return {
           geometry,
           network,
+          networkIds,
           active,
-          highlighted: network?.id === state.highlightedNetworkId,
+          focusColor: focusedNetwork?.color ?? network?.color
+            ?? operationalLineColor(network, geometry.category),
+          highlighted: networkIds.includes(state.highlightedNetworkId),
+          focused,
+          focusContext,
           candidateFocused: selectedCandidateFocus && !selectedCandidateGeometry,
           trace: selectedCandidateGeometry
             || traceGeometryIds.has(geometry.id)
             || traceGeometryIds.has(geometry.sourceGeometryId),
         }
       })
-      .filter(({ active }) => active || state.dimOthers)
+      .filter(({ active }) => active)
       .filter(({ trace }) => !isolateCandidate || trace)
-      .sort((left, right) => Number(left.active) - Number(right.active)
+      .sort((left, right) => Number(left.focused) - Number(right.focused)
+        || Number(left.active) - Number(right.active)
         || Number(left.trace) - Number(right.trace))
 
-    for (const pass of ['casing', 'color']) {
-      linework.forEach((entry) => drawProjectedLine(context, map, entry, pass))
-    }
+    linework
+      .filter(({ focused }) => !focused)
+      .forEach((entry) => {
+        drawProjectedLine(context, map, entry, 'casing')
+        drawProjectedLine(context, map, entry, 'color')
+      })
+    linework
+      .filter(({ focused }) => focused)
+      .forEach((entry) => {
+        drawProjectedLine(context, map, entry, 'focus-glow')
+        drawProjectedLine(context, map, entry, 'focus-main')
+      })
   }
 
   function showFeatureTooltip(event, kind) {
@@ -593,10 +633,13 @@ export function createMapLibreSurface(element, {
     if (tooltip) tooltip.hidden = true
   }
 
-  function fitBounds(bounds) {
+  function fitBounds(bounds, { duration = 0 } = {}) {
+    // Keep the route away from the left edge. On mobile the sidebar overlays
+    // the map, while on desktop this also leaves room for the map controls.
+    const leftPadding = window.matchMedia?.('(max-width: 960px)').matches ? 168 : 144
     map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], {
-      padding: 72,
-      duration: 0,
+      padding: { top: 84, right: 84, bottom: 72, left: leftPadding },
+      duration,
       maxZoom: 18,
     })
   }
@@ -687,12 +730,17 @@ export function createMapLibreSurface(element, {
       state.highlightedNetworkId = networkById.has(networkId) ? networkId : null
       syncSources()
     },
+    setFocusedNetworkId(networkId) {
+      state.focusedNetworkId = networkById.has(networkId) ? networkId : null
+      syncSources()
+      syncAdaptiveMarkers()
+    },
     focusNetworkBounds(networkId) {
       const network = networkById.get(networkId)
       const bounds = network?.bounds ?? boundsForGeometries(
         (network?.geometryIds ?? []).map((id) => geometryById.get(id)).filter(Boolean),
       )
-      if (bounds) fitBounds(bounds)
+      if (bounds) fitBounds(bounds, { duration: 420 })
     },
     focusAssetBounds(assetIds) {
       const positions = assetIds
@@ -869,6 +917,30 @@ function addOperationalLayers(map) {
       'line-dasharray': [2, 2],
     },
   })
+  // Focus is rendered from a dedicated source so the selected network is
+  // always composited after every regular network line. The two passes keep
+  // the emphasis visible over satellite imagery without turning it neon.
+  map.addLayer({
+    id: 'cable-lines-focus-glow',
+    type: 'line',
+    source: 'sinergi-focus-lines',
+    paint: {
+      'line-color': ['get', 'focusColor'],
+      'line-opacity': ['*', ['get', 'focusOpacity'], 0.34],
+      'line-width': ['interpolate', ['linear'], ['zoom'], 14, 9, 19, 12],
+      'line-blur': 1.2,
+    },
+  })
+  map.addLayer({
+    id: 'cable-lines-focus',
+    type: 'line',
+    source: 'sinergi-focus-lines',
+    paint: {
+      'line-color': ['get', 'focusColor'],
+      'line-opacity': ['get', 'focusOpacity'],
+      'line-width': ['interpolate', ['linear'], ['zoom'], 14, 4, 19, 5],
+    },
+  })
   map.addLayer({
     id: 'candidate-connectors-hit',
     type: 'line',
@@ -900,11 +972,29 @@ function drawProjectedLine(context, map, {
   network,
   active,
   highlighted,
+  focused,
+  focusContext,
+  focusColor: entryFocusColor,
   trace,
   candidateFocused,
 }, pass) {
-  const opacity = candidateFocused ? 0.16 : active || trace ? 0.94 : 0.13
-  const width = trace ? 5.5 : highlighted ? 4.8 : 3
+  const isFocusGlow = pass === 'focus-glow'
+  const isFocusMain = pass === 'focus-main'
+  const focusColor = safeColor(
+    entryFocusColor ?? network?.color ?? operationalLineColor(network, geometry.category),
+  )
+  const opacity = isFocusGlow
+    ? 0.34
+    : isFocusMain
+      ? 0.96
+      : candidateFocused
+        ? 0.16
+        : !active
+          ? 0
+          : focusContext
+            ? 0.32
+            : 0.94
+  const width = isFocusGlow ? 10 : isFocusMain ? 4.5 : trace ? 5.5 : highlighted ? 4.8 : 3
   context.beginPath()
   geometry.coordinates.forEach((coordinate, index) => {
     if (!validPosition(coordinate)) return
@@ -915,13 +1005,15 @@ function drawProjectedLine(context, map, {
   context.globalAlpha = opacity
   context.strokeStyle = pass === 'casing'
     ? 'rgba(2, 8, 16, .88)'
-    : trace
+    : isFocusGlow || isFocusMain
+      ? focusColor
+      : trace
       ? '#2f8dff'
       : operationalLineColor(network, geometry.category)
   context.lineWidth = pass === 'casing' ? width + 3.5 : width
-  context.shadowBlur = pass === 'color' && active ? 4 : 0
-  context.shadowColor = pass === 'color'
-    ? operationalLineColor(network, geometry.category)
+  context.shadowBlur = isFocusGlow ? 8 : pass === 'color' && active ? 4 : 0
+  context.shadowColor = isFocusGlow || isFocusMain
+    ? focusColor
     : 'transparent'
   context.stroke()
   context.shadowBlur = 0
@@ -955,6 +1047,8 @@ function renderAdaptiveAssetMarker(marker) {
     marker.selected ? 'selected' : '',
     marker.trace ? 'trace' : '',
     marker.displaced ? 'displaced' : '',
+    marker.networkFocused ? 'network-focused' : '',
+    marker.focusContext ? 'focus-context' : '',
     marker.active === false ? 'inactive' : '',
   ].filter(Boolean).join(' ')
   const label = shortAssetLabel(marker.label || marker.id)
@@ -973,12 +1067,17 @@ function renderAdaptiveAssetMarker(marker) {
 }
 
 function renderClusterMarker(marker, key) {
+  const classes = [
+    'map-adaptive-cluster',
+    marker.networkFocused ? 'network-focused' : '',
+  ].filter(Boolean).join(' ')
   const title = `${marker.count} aset berdekatan · klik untuk memperbesar`
   return `
-    <button class="map-adaptive-cluster" type="button"
+    <button class="${classes}" type="button"
       data-adaptive-cluster="${key}" aria-label="${escapeHtml(title)}"
       title="${escapeHtml(title)}"
-      style="left:${styleNumber(marker.point.x)}px;top:${styleNumber(marker.point.y)}px">
+      style="left:${styleNumber(marker.point.x)}px;top:${styleNumber(marker.point.y)}px;
+        --marker-color:${safeColor(marker.color)}">
       <strong>${marker.count}</strong>
     </button>
   `
@@ -1083,7 +1182,14 @@ function buildFeatureCollections({
   }))
   requestedTraceGeometryIds.forEach((id) => traceGeometryIds.add(id))
   const connectedIds = new Set(state.connectedNodeIds)
-  const collections = { points: [], lines: [], polygons: [], candidates: [], overlays: [] }
+  const collections = {
+    points: [],
+    lines: [],
+    focusLines: [],
+    polygons: [],
+    candidates: [],
+    overlays: [],
+  }
 
   geometries.forEach((geometry) => {
     const geoType = {
@@ -1093,13 +1199,28 @@ function buildFeatureCollections({
     }[geometry.geometryType]
     if (!geoType) return
     const network = networkByGeometry.get(geometry.id)
+      ?? networkByGeometry.get(geometry.sourceGeometryId)
       ?? networks.find(({ nodeIds }) => nodeIds.includes(geometry.assetId))
-    const networkIds = geometry.assetId
-      ? assetNetworkIds.get(geometry.assetId) ?? []
-      : network ? [network.id] : []
+    const networkIds = [...new Set([
+      network?.id,
+      ...(geometry.assetId ? assetNetworkIds.get(geometry.assetId) ?? [] : []),
+    ].filter(Boolean))]
     const active = !networkIds.length
       || networkIds.some((id) => state.selectedNetworkIds.has(id))
-    const highlighted = network?.id === state.highlightedNetworkId
+    const highlighted = networkIds.includes(state.highlightedNetworkId)
+    const focused = Boolean(
+      state.focusedNetworkId && networkIds.includes(state.focusedNetworkId),
+    )
+    const focusContext = Boolean(
+      state.focusedNetworkId && networkIds.length && !focused,
+    )
+    const focusedNetwork = focused
+      ? networks.find(({ id }) => id === state.focusedNetworkId)
+      : null
+    const lineColor = operationalLineColor(network, geometry.category)
+    const focusColor = safeColor(
+      focusedNetwork?.color ?? network?.color ?? lineColor,
+    )
     const selectedCandidateGeometry = selectedCandidateGeometryIds.has(geometry.id)
       || selectedCandidateGeometryIds.has(geometry.sourceGeometryId)
     const candidateContextDimmed = selectedCandidateFocus
@@ -1112,18 +1233,24 @@ function buildFeatureCollections({
       networkId: network?.id ?? '',
       networkName: network?.name ?? network?.shortName ?? '',
       color: geoType === 'LineString'
-        ? operationalLineColor(network, geometry.category)
+        ? lineColor
         : network?.color ?? CATEGORY_COLORS[geometry.category] ?? '#708196',
-      opacity: selectedCandidateGeometry
-        ? 1
-        : candidateContextDimmed
-          ? 0.16
-          : active ? 1 : state.dimOthers ? 0.16 : 0,
+      focusColor,
+      focusOpacity: focused && active ? 0.96 : 0,
+      opacity: !active
+        ? 0
+        : selectedCandidateGeometry
+          ? 1
+          : candidateContextDimmed
+            ? 0.16
+            : focusContext ? 0.32 : 1,
       selected: geometry.assetId === state.selectedAssetId,
       trace: traceIds.has(geometry.assetId) || traceGeometryIds.has(geometry.id)
         || traceGeometryIds.has(geometry.sourceGeometryId),
       connected: connectedIds.has(geometry.assetId),
       highlighted,
+      focused,
+      focusContext,
       assetType: assetById.get(geometry.assetId)?.type ?? geometry.category ?? '',
       cableType: geometry.category ?? network?.type ?? '',
       confirmed: confirmedGeometryIds.has(geometry.id)
@@ -1132,7 +1259,9 @@ function buildFeatureCollections({
         || candidateGeometryIds.has(geometry.sourceGeometryId),
       selectedCandidate: selectedCandidateGeometry,
     }
-    if (properties.highlighted && !candidateContextDimmed) properties.opacity = 1
+    if (properties.highlighted && active && !focusContext && !candidateContextDimmed) {
+      properties.opacity = 1
+    }
     const feature = {
       type: 'Feature',
       id: geometry.id,
@@ -1140,7 +1269,10 @@ function buildFeatureCollections({
       geometry: { type: geoType, coordinates: geometry.coordinates },
     }
     if (geoType === 'Point') collections.points.push(feature)
-    else if (geoType === 'LineString') collections.lines.push(feature)
+    else if (geoType === 'LineString') {
+      collections.lines.push(feature)
+      if (focused && active) collections.focusLines.push(feature)
+    }
     else collections.polygons.push(feature)
   })
   candidates.filter((candidate) => (
@@ -1189,6 +1321,7 @@ function buildFeatureCollections({
   return {
     points: featureCollection(collections.points),
     lines: featureCollection(collections.lines),
+    focusLines: featureCollection(collections.focusLines),
     polygons: featureCollection(collections.polygons),
     candidates: featureCollection(collections.candidates),
     overlays: featureCollection(collections.overlays),
@@ -1254,8 +1387,10 @@ function escapeHtml(value) {
     .replaceAll("'", '&#039;')
 }
 
-function assetColor(asset, networks) {
-  const network = networks.find(({ id }) => asset.networkIds?.includes(id))
+function assetColor(asset, networks, focusedNetworkId = null) {
+  const network = networks.find(({ id }) => id === focusedNetworkId
+    && asset.networkIds?.includes(id))
+    ?? networks.find(({ id }) => asset.networkIds?.includes(id))
   return network?.color ?? CATEGORY_COLORS[asset.category] ?? '#ffffff'
 }
 
