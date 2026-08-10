@@ -10,7 +10,7 @@ import {
   loadTopologyProjection,
   reviewTopologyCandidate,
 } from '../../services/active-dataset-service.js'
-import { renderTopNavigation } from '../map/map-page.js'
+import { bindUserAccountMenu, renderTopNavigation } from '../map/map-page.js'
 import { renderSpatialTopologySvg } from './topology-renderer.js'
 import { createSpatialTopologyLayout } from './topology-spatial-layout.js'
 
@@ -27,6 +27,7 @@ export async function renderTopologyPage(container) {
   document.title = 'Peta Topologi — SINERGI'
   document.body.className = 'map-body topology-body'
   container.innerHTML = renderLoadingState()
+  bindUserAccountMenu()
 
   const requested = readContext()
   try {
@@ -61,6 +62,7 @@ export async function renderTopologyPage(container) {
     })
   } catch (error) {
     container.innerHTML = renderErrorState(error.message)
+    bindUserAccountMenu()
     container.querySelector('.retry-topology')?.addEventListener('click', () => {
       renderTopologyPage(container)
     })
@@ -213,6 +215,7 @@ function initializeTopologyWorkspace(container, initial) {
     </div>
   `
 
+  bindUserAccountMenu()
   bindStaticControls()
   renderWorkspace()
   requestAnimationFrame(fitGraph)

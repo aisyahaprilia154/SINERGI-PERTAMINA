@@ -25,7 +25,7 @@ import {
   reviewTopologyCandidate,
   revokeTopologyRelation,
 } from '../../services/active-dataset-service.js'
-import { renderTopNavigation, scopeMapData } from '../map/map-page.js'
+import { bindUserAccountMenu, renderTopNavigation, scopeMapData } from '../map/map-page.js'
 import { createMapLibreSurface } from '../map/maplibre-map.js'
 
 export async function renderTopologyReviewPage(container) {
@@ -33,6 +33,7 @@ export async function renderTopologyReviewPage(container) {
   document.body.className = 'map-body topology-review-body'
   container.innerHTML = reviewState('progress_activity', 'Memuat konfirmasi koneksi',
     'Daftar koneksi sedang disiapkan.', true)
+  bindUserAccountMenu()
 
   const requested = readContext()
   try {
@@ -41,6 +42,7 @@ export async function renderTopologyReviewPage(container) {
     await initializeReview(container, mapData)
   } catch (error) {
     container.innerHTML = reviewState('error', 'Konfirmasi koneksi tidak dapat dimuat', error.message)
+    bindUserAccountMenu()
     container.querySelector('.retry-review')?.addEventListener('click', () => {
       renderTopologyReviewPage(container)
     })
@@ -213,6 +215,7 @@ async function initializeReview(container, mapData) {
     </div>
   `
 
+  bindUserAccountMenu()
   const reviewMap = createMapLibreSurface(container.querySelector('#review-map'), {
     assets: scopedMapData.assets,
     networks: scopedMapData.networks,

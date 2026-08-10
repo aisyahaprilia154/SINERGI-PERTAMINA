@@ -219,6 +219,7 @@ export async function renderMapPage(container) {
       </main>
     </div>
   `
+  bindUserAccountMenu()
 
   const workspace = container.querySelector('.map-workspace')
   const sidebar = container.querySelector('.network-sidebar')
@@ -1266,6 +1267,64 @@ function renderDatasetState(container, {
       </main>
     </div>
   `
+  bindUserAccountMenu()
+}
+
+let userAccountMenuInteractionsBound = false
+
+export function bindUserAccountMenu() {
+  if (userAccountMenuInteractionsBound || typeof document === 'undefined') return
+  userAccountMenuInteractionsBound = true
+
+  document.addEventListener('click', (event) => {
+    const target = event.target
+    const trigger = target?.closest?.('[data-user-account-trigger]')
+    if (trigger) {
+      const menu = trigger.closest('[data-user-account-menu]')
+      if (!menu) return
+
+      const wasOpen = trigger.getAttribute('aria-expanded') === 'true'
+      closeUserAccountMenus()
+      if (!wasOpen) openUserAccountMenu(menu)
+      return
+    }
+
+    if (target?.closest?.('[data-user-account-item]')) {
+      closeUserAccountMenus()
+      return
+    }
+
+    if (!target?.closest?.('[data-user-account-menu]')) closeUserAccountMenus()
+  })
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return
+    const openMenu = document.querySelector('[data-user-account-menu].is-open')
+    if (!openMenu) return
+
+    event.preventDefault()
+    closeUserAccountMenus()
+    openMenu.querySelector('[data-user-account-trigger]')?.focus()
+  })
+}
+
+function openUserAccountMenu(menu) {
+  const trigger = menu.querySelector('[data-user-account-trigger]')
+  const dropdown = menu.querySelector('[data-user-account-dropdown]')
+  if (!trigger || !dropdown) return
+
+  menu.classList.add('is-open')
+  trigger.setAttribute('aria-expanded', 'true')
+  dropdown.hidden = false
+}
+
+function closeUserAccountMenus() {
+  document.querySelectorAll('[data-user-account-menu].is-open').forEach((menu) => {
+    menu.classList.remove('is-open')
+    menu.querySelector('[data-user-account-trigger]')?.setAttribute('aria-expanded', 'false')
+    const dropdown = menu.querySelector('[data-user-account-dropdown]')
+    if (dropdown) dropdown.hidden = true
+  })
 }
 
 export function findAssetMatches(assets, query, limit = 8) {
@@ -1507,11 +1566,43 @@ export function renderTopNavigation(activeView = 'map', context = null) {
         <button class="icon-button notification-button" type="button" aria-label="Notifikasi">
           <span class="material-symbols-outlined" aria-hidden="true">notifications</span><i></i>
         </button>
-        <button class="user-menu" type="button" aria-label="Profil SSC ICT Administrator">
-          <span>SI</span>
-          <div><strong>SSC ICT</strong><small>Administrator</small></div>
-          <span class="material-symbols-outlined" aria-hidden="true">expand_more</span>
-        </button>
+        <div class="user-account-menu" data-user-account-menu>
+          <button class="user-menu" data-user-account-trigger type="button"
+            aria-label="Menu akun SSC ICT" aria-haspopup="menu" aria-expanded="false"
+            aria-controls="user-account-dropdown">
+            <span class="user-menu-avatar" aria-hidden="true">SI</span>
+            <span class="user-menu-identity"><strong>SSC ICT</strong><small>Administrator</small></span>
+            <span class="material-symbols-outlined user-menu-chevron" aria-hidden="true">expand_more</span>
+          </button>
+          <div class="user-menu-dropdown" data-user-account-dropdown id="user-account-dropdown"
+            role="menu" aria-label="Menu akun" hidden>
+            <div class="user-menu-dropdown-header">
+              <span class="user-menu-dropdown-avatar" aria-hidden="true">SI</span>
+              <span class="user-menu-dropdown-identity">
+                <strong>SSC ICT</strong>
+                <small>Administrator</small>
+              </span>
+            </div>
+            <div class="user-menu-dropdown-divider" role="presentation"></div>
+            <div class="user-menu-dropdown-items">
+              <button class="user-menu-dropdown-item" data-user-account-item type="button" role="menuitem">
+                <span class="material-symbols-outlined" aria-hidden="true">person</span>
+                <span>Profil Saya</span>
+              </button>
+              <button class="user-menu-dropdown-item" data-user-account-item type="button" role="menuitem">
+                <span class="material-symbols-outlined" aria-hidden="true">settings</span>
+                <span>Pengaturan Akun</span>
+              </button>
+            </div>
+            <div class="user-menu-dropdown-divider" role="presentation"></div>
+            <div class="user-menu-dropdown-items user-menu-dropdown-items-last">
+              <button class="user-menu-dropdown-item" data-user-account-item type="button" role="menuitem">
+                <span class="material-symbols-outlined" aria-hidden="true">logout</span>
+                <span>Keluar</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </header>
   `
