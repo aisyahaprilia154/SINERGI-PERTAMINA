@@ -563,7 +563,7 @@
   --map-compact-toolbar-width: 196px;
   --map-safe-left: var(--space-4);
   --map-safe-right: var(--space-4);
-  --map-context-row-height: 84px;
+  --map-context-row-height: 104px;
   --panel-transition-duration: 200ms;
 }
 
@@ -4840,14 +4840,17 @@
 }
 
 .map-context-pill {
-  width: min(640px, calc(100% - 32px));
+  width: min(
+    680px,
+    calc(100% - var(--map-compact-toolbar-width) - var(--space-8) - var(--space-4))
+  );
   max-width: none;
-  min-height: 0;
-  padding: 9px 14px;
+  min-height: 102px;
+  padding: 12px 16px;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas: none;
-  gap: 7px;
+  gap: 10px;
   background: #fff;
   border-color: #e2e8f0;
   border-radius: 13px;
@@ -4859,9 +4862,9 @@
   min-width: 0;
   display: grid;
   grid-template-columns:
-    minmax(130px, 150px) 1px
-    minmax(180px, 260px) 1px
-    minmax(150px, 180px);
+    minmax(0, .28fr) 1px
+    minmax(0, .42fr) 1px
+    minmax(0, .30fr);
   align-items: center;
   gap: 12px;
 }
@@ -4885,11 +4888,11 @@
 }
 
 .context-area {
-  max-width: 280px;
+  max-width: none;
 }
 
 .context-dataset {
-  max-width: 190px;
+  max-width: none;
 }
 
 .context-separator {
@@ -4915,11 +4918,34 @@
   line-height: 1.25;
 }
 
+.context-secondary-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
 .context-statuses {
   grid-area: auto;
+  min-width: 0;
   padding-top: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   border-top: 0;
+}
+
+.context-metrics {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .context-readonly,
@@ -5012,55 +5038,12 @@
   z-index: 600;
 }
 
-.map-body .map-stage .basemap-status {
-  width: min(300px, calc(100% - 32px));
-  min-height: 68px;
-  max-width: 300px;
-  padding: 10px 12px;
-  gap: 4px;
-  background: #fff;
-  border-color: #e2e8f0;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, .08);
-}
-
-.map-body .map-stage .basemap-status-overview {
-  grid-template-columns: 30px minmax(0, 1fr);
-  gap: 8px;
-}
-
-.map-body .map-stage .basemap-status-overview > .material-symbols-outlined {
-  width: 30px;
-  height: 30px;
-  color: var(--color-primary);
-  background: #f1f5f9;
-}
-
-.map-body .map-stage .basemap-status-overview small {
-  color: #64748b;
-  letter-spacing: .07em;
-}
-
-.map-body .map-stage .basemap-status-overview strong {
-  overflow: hidden;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.map-body .map-stage .basemap-status-metrics {
-  padding-left: 38px;
-  display: block;
-  overflow: hidden;
-  color: #64748b;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 @media (max-width: 1450px) and (min-width: 961px) {
   .map-context-pill {
-    width: min(520px, calc(100% - 32px));
+    width: min(
+      640px,
+      calc(100% - var(--map-compact-toolbar-width) - var(--space-8) - var(--space-4))
+    );
   }
 
   .map-workspace.drawer-open .context-main-row {
@@ -5170,10 +5153,6 @@
     margin-top: 2px;
   }
 
-  .map-body .map-stage .basemap-status {
-    width: min(280px, calc(100% - 96px));
-    max-width: none;
-  }
 }
 
 /* Keep the context bar and compact action toolbar in separate safe areas
@@ -5181,7 +5160,7 @@
 @media (min-width: 961px) {
   .map-workspace.drawer-open .map-context-pill {
     width: min(
-      640px,
+      680px,
       calc(
         100% - var(--map-drawer-width) - var(--space-8) -
         var(--map-compact-toolbar-width) - var(--space-8)
@@ -5386,7 +5365,7 @@
 
   .map-context-pill {
     min-height: 48px;
-    max-height: 60px;
+    max-height: none;
     overflow: hidden;
   }
 
@@ -5429,6 +5408,11 @@
   .map-context-pill .context-area strong,
   .map-context-pill .context-area::before {
     display: inline;
+  }
+
+  .map-context-pill .context-metrics {
+    flex-basis: 100%;
+    margin-left: 0;
   }
 
   .mobile-map-tabs {
