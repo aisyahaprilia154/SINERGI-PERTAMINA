@@ -1576,14 +1576,6 @@ export function renderTopNavigation(activeView = 'map', context = null) {
           </button>
           <div class="user-menu-dropdown" data-user-account-dropdown id="user-account-dropdown"
             role="menu" aria-label="Menu akun" hidden>
-            <div class="user-menu-dropdown-header">
-              <span class="user-menu-dropdown-avatar" aria-hidden="true">SI</span>
-              <span class="user-menu-dropdown-identity">
-                <strong>SSC ICT</strong>
-                <small>Administrator</small>
-              </span>
-            </div>
-            <div class="user-menu-dropdown-divider" role="presentation"></div>
             <div class="user-menu-dropdown-items">
               <button class="user-menu-dropdown-item" data-user-account-item type="button" role="menuitem">
                 <span class="material-symbols-outlined" aria-hidden="true">person</span>

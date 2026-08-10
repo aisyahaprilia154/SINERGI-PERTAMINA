@@ -1,0 +1,124 @@
+.map-body .user-account-menu {
+  position: relative;
+  margin-left: var(--space-1);
+}
+
+.map-body .user-account-menu .user-menu {
+  min-width: 150px;
+  height: 46px;
+  margin-left: 0;
+  padding: 5px 9px 5px 5px;
+  gap: 9px;
+  background: #f6f8fa;
+  border: 1px solid #edf1f4;
+  border-radius: 14px;
+}
+
+.map-body .user-account-menu .user-menu:hover,
+.map-body .user-account-menu.is-open .user-menu {
+  background: #eef2f5;
+  border-color: #e4e9ee;
+}
+
+.map-body .user-menu-avatar {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 10px;
+}
+
+.map-body .user-menu-identity {
+  min-width: 0;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.map-body .user-menu-identity strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.map-body .user-menu-identity small {
+  margin-top: 3px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.map-body .user-menu-chevron {
+  flex: 0 0 18px;
+  color: var(--color-text-muted);
+  font-size: 18px;
+  transition: transform 160ms ease;
+}
+
+.map-body .user-account-menu.is-open .user-menu-chevron {
+  transform: rotate(180deg);
+}
+
+.map-body .user-menu-dropdown {
+  width: 224px;
+  top: calc(100% + 6px);
+  padding: 5px 0;
+  border-color: #e8edf1;
+  border-radius: 14px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, .12), 0 2px 8px rgba(15, 23, 42, .04);
+}
+
+.map-body .user-menu-dropdown-items {
+  padding: 2px 8px;
+}
+
+.map-body .user-menu-dropdown-items-last {
+  padding-top: 5px;
+  padding-bottom: 2px;
+}
+
+.map-body .user-menu-dropdown-divider {
+  height: 1px;
+  margin: 3px 14px;
+  background: #e8edf1;
+}
+
+.map-body .user-menu-dropdown-item {
+  min-height: 44px;
+  padding: 0 10px;
+  gap: 12px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.map-body .user-menu-dropdown-item:hover {
+  background: #f4f7f9;
+}
+
+.map-body .user-menu-dropdown-item .material-symbols-outlined {
+  width: 20px;
+  flex: 0 0 20px;
+  color: #7c8a99;
+  font-size: 20px;
+}
+
+@media (max-width: 900px) {
+  .map-body .user-account-menu .user-menu {
+    min-width: 0;
+    height: 40px;
+    padding: 3px 5px;
+    border-radius: 12px;
+  }
+
+  .map-body .user-account-menu .user-menu-identity,
+  .map-body .user-account-menu .user-menu-chevron {
+    display: none;
+  }
+}
+
+@media (max-width: 620px) {
+  .map-body .user-menu-dropdown {
+    width: min(224px, calc(100vw - 24px));
+  }
+}
