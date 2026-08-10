@@ -176,8 +176,7 @@
     --map-toolbar-width: 332px;
   }
 
-  .map-body .map-action-group > .import-toggle span:not(.material-symbols-outlined),
-  .map-body .map-more-menu > summary span:not(.material-symbols-outlined) {
+  .map-body .map-action-group > .import-toggle span:not(.material-symbols-outlined) {
     display: none;
   }
 }

@@ -208,19 +208,11 @@ export function renderMapFloatingControls(
           <span class="material-symbols-outlined" aria-hidden="true">upload_file</span>
           <span>Import</span>
         </button>
-        <details class="map-more-menu">
-          <summary class="tool-button map-action-more" aria-label="Buka menu lainnya"
-            title="Buka menu lainnya">
-            <span class="material-symbols-outlined" aria-hidden="true">more_horiz</span>
-            <span>Lainnya</span>
-          </summary>
-          <div class="map-more-popover">
-            <button class="export-toggle" type="button" title="Export data peta">
-              <span class="material-symbols-outlined" aria-hidden="true">download</span>
-              <span><strong>Export</strong><small>Unduh data sesuai konteks peta</small></span>
-            </button>
-          </div>
-        </details>
+        <button class="tool-button export-toggle map-action-ghost" type="button"
+          aria-label="Export" title="Export data peta">
+          <span class="material-symbols-outlined" aria-hidden="true">download</span>
+          <span>Export</span>
+        </button>
       </div>
     </div>
 
