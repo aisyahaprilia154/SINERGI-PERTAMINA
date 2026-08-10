@@ -566,8 +566,12 @@ export function createMapLibreSurface(element, {
           network,
           networkIds,
           active,
-          focusColor: focusedNetwork?.color ?? network?.color
-            ?? operationalLineColor(network, geometry.category),
+          // Keep focus aligned with the operational map palette. LAN is blue
+          // on the normal map and must not fall back to its gray card swatch.
+          focusColor: operationalLineColor(
+            focusedNetwork ?? network,
+            geometry.category,
+          ),
           highlighted: networkIds.includes(state.highlightedNetworkId),
           focused,
           focusContext,
@@ -1218,9 +1222,7 @@ function buildFeatureCollections({
       ? networks.find(({ id }) => id === state.focusedNetworkId)
       : null
     const lineColor = operationalLineColor(network, geometry.category)
-    const focusColor = safeColor(
-      focusedNetwork?.color ?? network?.color ?? lineColor,
-    )
+    const focusColor = operationalLineColor(focusedNetwork ?? network, geometry.category)
     const selectedCandidateGeometry = selectedCandidateGeometryIds.has(geometry.id)
       || selectedCandidateGeometryIds.has(geometry.sourceGeometryId)
     const candidateContextDimmed = selectedCandidateFocus
