@@ -42,10 +42,39 @@ test('drawer exposes read-only asset, network, relation, and action details', ()
   assert.match(html, /10\.42\.3\.31/)
   assert.match(html, /SMG Network Master/)
   assert.match(html, /JB-CCTV-01/)
-  assert.match(html, /Telusuri jaringan/)
+  assert.match(html, /Telusuri koneksi/)
+  assert.match(html, /Kesiapan topologi/)
   assert.match(html, /Buka detail aset/)
   assert.match(html, /Buat diagram 2D/)
+  assert.match(html, /asset-status success/)
+  assert.match(html, /Online/)
+  assert.doesNotMatch(html, /Status tidak tersedia/)
   assert.doesNotMatch(html, /tombol edit|tombol hapus|ubah relasi/i)
+})
+
+test('drawer moves an empty recorded operational status into asset information', () => {
+  const html = renderAssetDetailDrawer({
+    asset: { ...asset, status: null, hasOperationalStatusField: true },
+    activeContext,
+    trace: { status: 'idle' },
+  })
+
+  assert.doesNotMatch(html, /class="asset-status/)
+  assert.match(html, /<dt>Status operasional<\/dt><dd>Belum dicatat<\/dd>/)
+  assert.doesNotMatch(html, /Status tidak tersedia/)
+})
+
+test('drawer omits operational status when the asset model has no status field', () => {
+  const { status: _status, ...assetWithoutStatus } = asset
+  const html = renderAssetDetailDrawer({
+    asset: assetWithoutStatus,
+    activeContext,
+    trace: { status: 'idle' },
+  })
+
+  assert.doesNotMatch(html, /class="asset-status/)
+  assert.doesNotMatch(html, /Status operasional/)
+  assert.doesNotMatch(html, /Status tidak tersedia/)
 })
 
 test('drawer renders an explainable ordered trace', () => {
@@ -97,7 +126,7 @@ test('drawer supports loading and error states', () => {
   assert.match(error, /Coba lagi/)
 })
 
-test('drawer keeps tracing clickable while the site is not topology-ready', () => {
+test('drawer explains missing relations and keeps topology actions unavailable', () => {
   const html = renderAssetDetailDrawer({
     asset,
     assetNetworks: [network],
@@ -108,9 +137,9 @@ test('drawer keeps tracing clickable while the site is not topology-ready', () =
     trace: { status: 'idle' },
   })
 
-  assert.match(html, /Topology-ready: No/)
-  assert.match(html, /class="button primary trace-from"[^>]*title="Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\."/)
-  assert.doesNotMatch(html, /class="button primary trace-from"[^>]*\bdisabled\b/)
+  assert.match(html, /Topologi perlu diperiksa/)
+  assert.match(html, /Relasi aset belum tersedia\./)
+  assert.doesNotMatch(html, /class="button primary trace-from"/)
   assert.match(html, /class="button secondary open-schematic"[^>]*disabled aria-disabled="true"/)
   assert.match(html, /Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\./)
 })

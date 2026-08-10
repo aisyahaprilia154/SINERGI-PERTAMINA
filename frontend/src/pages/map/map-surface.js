@@ -4,6 +4,7 @@ export function renderNetworkMapCanvas(activeContext, {
   selectedArea = null,
   counts = {},
   confirmedConnectionCount = 0,
+  selectedAssetId = null,
   topologyReadiness = null,
 } = {}) {
   const traceAvailable = topologyReadiness?.traceAvailable
@@ -30,20 +31,19 @@ export function renderNetworkMapCanvas(activeContext, {
         <span class="basemap-status-overview">
           <span class="material-symbols-outlined" aria-hidden="true">map</span>
           <span>
-            <small>Peta kerja &middot; ${escapeHtml(selectedArea?.name ?? 'Area aktif')}</small>
-            <strong><b class="basemap-availability">memuat</b> &middot; <b class="basemap-mode-label">Jalan &amp; bangunan</b></strong>
+            <small>PETA KERJA</small>
+            <strong>${escapeHtml(selectedArea?.name ?? 'Area aktif')}</strong>
           </span>
         </span>
         <span class="basemap-status-metrics">
-          <span><b>${Number(counts.assetNodeCount) || 0}</b> aset</span>
-          <span><b>${Number(counts.lineCount) || 0}</b> jalur</span>
-          <span><b>${displayedConfirmedConnectionCount}</b> koneksi</span>
-          <span class="declutter-summary">adaptif</span>
+          ${Number(counts.assetNodeCount) || 0} aset &middot; ${Number(counts.lineCount) || 0} jalur &middot; ${displayedConfirmedConnectionCount} koneksi terkonfirmasi
         </span>
+        <span class="map-sr-only">Peta dasar <b class="basemap-availability">memuat</b>,
+          mode <b class="basemap-mode-label">Jalan &amp; bangunan</b>.</span>
       </div>
       ${!traceAvailable ? `
         <div class="map-topology-readiness" id="topology-not-ready-message" role="status">
-          <strong>Topology-ready: No</strong>
+          <strong>Topologi perlu diperiksa</strong>
           <span>${escapeHtml(topologyMessage)}</span>
         </div>
       ` : ''}
@@ -57,9 +57,8 @@ export function renderNetworkMapCanvas(activeContext, {
             : 'Pilih atau aktifkan dataset yang memiliki Point, LineString, atau Polygon valid.'}</p>
         </section>
       ` : ''}
-      ${renderMapContextPill(activeContext, topologyReadiness)}
-      ${renderMapAssetFinder()}
-      ${renderMapFloatingControls(activeContext, topologyReadiness)}
+      ${renderMapContextPill(activeContext, topologyReadiness, selectedArea)}
+      ${renderMapFloatingControls(activeContext, topologyReadiness, { selectedAssetId })}
 
       <div class="trace-banner" hidden>
         <span class="trace-step">1</span>
@@ -72,13 +71,7 @@ export function renderNetworkMapCanvas(activeContext, {
         </button>
       </div>
 
-      <div class="legend-popover" id="map-legend" hidden>
-        <strong>Legenda peta</strong>
-        <span><i class="legend-node"></i> Koordinat aktual dari KML</span>
-        <span><i class="legend-leader"></i> Label disebar dari titik asli</span>
-        <span><i class="legend-cluster">12</i> Kelompok aset; klik untuk buka</span>
-        <span><i class="legend-line"></i> Jalur fisik dari KML</span>
-      </div>
+      ${renderMapLegend(topologyReadiness)}
 
       <div class="basemap-popover" id="basemap-picker" hidden>
         <div class="basemap-popover-heading">
@@ -109,62 +102,58 @@ export function renderNetworkMapCanvas(activeContext, {
   `
 }
 
-export function renderMapContextPill(activeContext, topologyReadiness = null) {
+export function renderMapContextPill(activeContext, topologyReadiness = null, selectedArea = null) {
   const branchName = formatBranchName(activeContext.branchName)
   const topologyReady = topologyReadiness?.ready ?? activeContext?.topologyReady ?? true
   const topologyStatus = topologyReadiness?.status
     || (topologyReady ? 'ready' : 'not_ready')
-  const topologyLabel = topologyStatus === 'partial_ready'
-    ? 'Partial'
-    : topologyReady ? 'Yes' : 'No'
   const topologyText = topologyStatus === 'partial_ready'
-    ? 'Topology: Partial'
-    : `Topology-ready: ${topologyLabel}`
+    ? 'Topologi sebagian tersedia'
+    : topologyReady
+      ? 'Topologi tersedia'
+      : 'Topologi perlu diperiksa'
   return `
     <section class="map-context-pill" aria-label="Konteks peta aktif">
-      <span class="context-branch">
-        <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
-        <span>
-          <small>Kantor cabang</small>
-          <strong title="${escapeHtml(branchName)}">${escapeHtml(branchName)}</strong>
+      <span class="context-main-row">
+        <span class="context-branch context-item">
+          <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
+          <span>
+            <small>Kantor cabang</small>
+            <strong title="${escapeHtml(branchName)}">${escapeHtml(branchName)}</strong>
+          </span>
+        </span>
+        <span class="context-separator" aria-hidden="true"></span>
+        <span class="context-area context-item">
+          <small>Area</small>
+          <strong title="${escapeHtml(selectedArea?.name || 'Area aktif')}">${escapeHtml(selectedArea?.name || 'Area aktif')}</strong>
+        </span>
+        <span class="context-separator" aria-hidden="true"></span>
+        <span class="context-dataset context-item">
+          <small>Dataset aktif</small>
+          <strong>${escapeHtml(activeContext.version)}</strong>
         </span>
       </span>
-      <span class="context-separator" aria-hidden="true"></span>
-      <span class="context-dataset">
-        <small>Dataset aktif</small>
-        <strong>${escapeHtml(activeContext.version)}</strong>
-      </span>
-      <span class="context-readonly">
-        <span class="material-symbols-outlined" aria-hidden="true">lock</span>
-        Read-only
-      </span>
-      <span class="context-topology ${topologyStatus}"
-        title="${escapeHtml(topologyReadiness?.message || (topologyReady
-          ? 'Topologi siap untuk tracing.'
-          : 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.'))}">
-        ${topologyText}
+      <span class="context-statuses">
+        <span class="context-readonly">
+          <span class="material-symbols-outlined" aria-hidden="true">lock</span>
+          Read-only
+        </span>
+        <span class="context-topology ${topologyStatus}"
+          title="${escapeHtml(topologyReadiness?.message || (topologyReady
+            ? 'Topologi siap untuk tracing.'
+            : 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.'))}">
+          ${topologyText}
+        </span>
       </span>
     </section>
   `
 }
 
-export function renderMapAssetFinder() {
-  return `
-    <section class="map-asset-finder" aria-label="Cari lokasi aset">
-      <div class="map-asset-search">
-        <span class="material-symbols-outlined" aria-hidden="true">search</span>
-        <input type="search" autocomplete="off" spellcheck="false"
-          placeholder="Cari nama, ID, atau lokasi aset"
-          aria-label="Cari nama, ID, atau lokasi aset"
-          aria-controls="map-asset-results" aria-expanded="false">
-        <kbd>Ctrl K</kbd>
-      </div>
-      <div class="map-asset-results" id="map-asset-results" role="listbox" hidden></div>
-    </section>
-  `
-}
-
-export function renderMapFloatingControls(activeContext = null, topologyReadiness = null) {
+export function renderMapFloatingControls(
+  activeContext = null,
+  topologyReadiness = null,
+  { selectedAssetId = null } = {},
+) {
   const traceAvailable = topologyReadiness?.traceAvailable
     ?? topologyReadiness?.ready
     ?? activeContext?.topologyReady
@@ -176,45 +165,81 @@ export function renderMapFloatingControls(activeContext = null, topologyReadines
   const topologyMessage = topologyReadiness?.traceMessage
     || topologyReadiness?.message
     || 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.'
-  const traceActionAttributes = traceAvailable
-    ? ''
-    : `title="${escapeHtml(topologyMessage)}"`
+  const traceActionMessage = !traceAvailable ? topologyMessage : ''
+  const traceActionAttributes = traceActionMessage
+    ? `disabled aria-disabled="true" title="${escapeHtml(traceActionMessage)}"`
+    : `title="${escapeHtml(selectedAssetId
+      ? 'Telusuri koneksi dari aset terpilih.'
+      : 'Klik lalu pilih aset awal pada peta.')}"`
   const diagramActionAttributes = diagramAvailable
     ? ''
     : `disabled aria-disabled="true" title="${escapeHtml(
       topologyReadiness?.message || topologyMessage,
     )}"`
   return `
-    <div class="map-floating-top">
-      <button class="icon-button open-sidebar mobile-only" type="button"
-        aria-label="Buka daftar jaringan" aria-controls="network-sidebar" aria-expanded="false">
-        <span class="material-symbols-outlined" aria-hidden="true">left_panel_open</span>
-      </button>
+    <button class="open-sidebar sidebar-reopen" type="button" title="Buka panel"
+      aria-label="Buka panel jaringan" aria-controls="network-sidebar" aria-expanded="false">
+      <span class="material-symbols-outlined" aria-hidden="true">left_panel_open</span>
+    </button>
 
+    <div class="map-floating-top">
       <div class="map-action-group" aria-label="Aksi peta">
-        <button class="tool-button data-transfer-toggle" type="button">
-          <span class="material-symbols-outlined" aria-hidden="true">swap_vert</span>
-          <span>Import / Export</span>
-        </button>
-        <button class="tool-button trace-toggle" type="button" ${traceActionAttributes}>
+        <button class="tool-button trace-toggle map-action-primary" type="button"
+          aria-label="Tracing" ${traceActionAttributes || 'title="Telusuri hubungan antar aset"'}>
           <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>
           <span>Tracing</span>
         </button>
-        <button class="tool-button diagram-toggle" type="button" ${diagramActionAttributes}>
+        <button class="tool-button diagram-toggle map-action-secondary" type="button"
+          aria-label="Diagram 2D" ${diagramAvailable
+            ? 'title="Lihat jaringan dalam diagram 2D"'
+            : diagramActionAttributes}>
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
           <span>Diagram 2D</span>
         </button>
-        <button class="tool-button declutter-toggle" type="button" aria-pressed="true"
-          title="Sebarkan marker yang berdekatan tanpa mengubah koordinat KML">
-          <span class="material-symbols-outlined" aria-hidden="true">scatter_plot</span>
-          <span>Tata aset adaptif</span>
+        <button class="tool-button export-toggle map-action-ghost" type="button"
+          aria-label="Export" title="Export data peta">
+          <span class="material-symbols-outlined" aria-hidden="true">download</span>
+          <span>Export</span>
         </button>
-        <button class="tool-button dim-toggle" type="button" aria-pressed="true">
-          <span class="material-symbols-outlined" aria-hidden="true">contrast</span>
-          <span>Redupkan lainnya</span>
-        </button>
+        <details class="map-more-menu">
+          <summary class="tool-button map-action-more" aria-label="Buka menu lainnya"
+            title="Buka menu lainnya">
+            <span class="material-symbols-outlined" aria-hidden="true">more_horiz</span>
+            <span>Lainnya</span>
+          </summary>
+          <div class="map-more-popover">
+            <button class="export-toggle" type="button" title="Export data peta">
+              <span class="material-symbols-outlined" aria-hidden="true">download</span>
+              <span><strong>Export</strong><small>Unduh data sesuai konteks peta</small></span>
+            </button>
+            <button class="manage-dataset-toggle" type="button">
+              <span class="material-symbols-outlined" aria-hidden="true">database</span>
+              <span><strong>Kelola Dataset</strong><small>Import KML/KMZ dan versi dataset</small></span>
+            </button>
+            <button class="declutter-toggle" type="button"
+              title="Jalankan ulang tata marker adaptif tanpa mengubah koordinat sumber">
+              <span class="material-symbols-outlined" aria-hidden="true">scatter_plot</span>
+              <span><strong>Rapikan tampilan</strong><small>Atur marker tanpa mengubah koordinat</small></span>
+            </button>
+          </div>
+        </details>
       </div>
     </div>
+
+    <nav class="mobile-map-tabs" aria-label="Navigasi peta mobile">
+      <button class="mobile-map-tab active" type="button" data-mobile-map-tab="map" aria-current="page">
+        <span class="material-symbols-outlined" aria-hidden="true">map</span>
+        <span>Peta</span>
+      </button>
+      <button class="mobile-map-tab" type="button" data-mobile-map-tab="layers">
+        <span class="material-symbols-outlined" aria-hidden="true">layers</span>
+        <span>Layer</span>
+      </button>
+      <button class="mobile-map-tab" type="button" data-mobile-map-tab="assets">
+        <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
+        <span>Aset</span>
+      </button>
+    </nav>
 
     <div class="map-floating-bottom">
       <button class="icon-button basemap-toggle" type="button" aria-label="Pilih tampilan peta dasar"
@@ -238,6 +263,38 @@ export function renderMapFloatingControls(activeContext = null, topologyReadines
           <span class="material-symbols-outlined" aria-hidden="true">my_location</span>
         </button>
       </div>
+    </div>
+  `
+}
+
+function renderMapLegend(topologyReadiness = null) {
+  const showPending = topologyReadiness?.capabilities?.reviewTopology === true
+  return `
+    <div class="legend-popover" id="map-legend" hidden>
+      <strong>Legenda peta</strong>
+      <section>
+        <small>Warna jaringan</small>
+        <span><i class="legend-color cctv"></i>CCTV</span>
+        <span><i class="legend-color fiber"></i>Fiber Optic</span>
+        <span><i class="legend-color lan"></i>LAN</span>
+        <span><i class="legend-color infrastructure"></i>Infrastruktur</span>
+      </section>
+      <section>
+        <small>Bentuk aset</small>
+        <span><i class="legend-shape circle"></i>CCTV</span>
+        <span><i class="legend-shape diamond"></i>Junction Box</span>
+        <span><i class="legend-shape square"></i>Switch</span>
+        <span><i class="legend-shape rectangle"></i>NVR / Server</span>
+        <span><i class="legend-shape hexagon"></i>OTB</span>
+      </section>
+      <section>
+        <small>Jenis jalur</small>
+        <span><i class="legend-route geographic"></i>Jalur geografis</span>
+        <span><i class="legend-route confirmed"></i>Relasi terkonfirmasi</span>
+        <span><i class="legend-route trace"></i>Tracing aktif</span>
+        ${showPending ? '<span><i class="legend-route pending"></i>Perlu diperiksa (Admin)</span>' : ''}
+      </section>
+      <span class="legend-coordinate-note"><i class="legend-leader"></i>Offset visual tetap menunjuk koordinat KML</span>
     </div>
   `
 }

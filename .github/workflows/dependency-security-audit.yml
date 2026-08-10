@@ -34,7 +34,7 @@ jobs:
           cache: npm
           cache-dependency-path: ${{ matrix.lockfile }}
       - name: Install locked dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts --no-audit --fetch-retries=5 --fetch-retry-factor=2 --fetch-retry-mintimeout=1000 --fetch-retry-maxtimeout=60000
         working-directory: ${{ matrix.directory }}
       - name: Audit dependencies
         run: npm audit --audit-level=high

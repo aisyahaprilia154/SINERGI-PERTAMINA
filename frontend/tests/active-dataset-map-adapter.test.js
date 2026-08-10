@@ -144,6 +144,7 @@ test('active map layers preserve normalized line and polygon coordinates separat
     polygonCount: 1,
     geometryCount: 2,
     hiddenPlacemarkCount: 0,
+    hiddenPointAssetCount: 0,
   })
 })
 
@@ -354,11 +355,12 @@ test('unmapped objects are preserved in a dedicated semantic network without war
 
   assert.equal(result.networks[0].id, 'network:unmapped')
   assert.equal(result.networks[0].name, 'Belum terpetakan')
-  assert.equal(result.assets[0].status, 'Status tidak tersedia')
+  assert.equal(result.assets[0].status, null)
+  assert.equal(result.assets[0].hasOperationalStatusField, false)
   assert.equal(result.assets[0].sourceStatus, 'visible')
 })
 
-test('hidden Placemark is preserved for export but excluded from map nodes and networks', () => {
+test('hidden point Placemark remains discoverable while preserving source visibility status', () => {
   const payload = activePayload({
     layers: [layer('layer-cctv', 'CCTV', 'CCTV')],
     assets: [{
@@ -372,10 +374,12 @@ test('hidden Placemark is preserved for export but excluded from map nodes and n
 
   assert.equal(result.exportAssets.length, 1)
   assert.equal(result.exportAssets[0].sourceStatus, 'hidden')
-  assert.equal(result.assets.length, 0)
+  assert.equal(result.assets.length, 1)
+  assert.equal(result.assets[0].sourceStatus, 'hidden')
   assert.equal(result.geometries.length, 0)
-  assert.equal(result.networks.length, 0)
+  assert.equal(result.networks.length, 1)
   assert.equal(result.counts.hiddenPlacemarkCount, 1)
+  assert.equal(result.counts.hiddenPointAssetCount, 1)
 })
 
 test('hidden parent layer makes descendant Placemarks hidden in existing active versions', () => {
@@ -398,9 +402,10 @@ test('hidden parent layer makes descendant Placemarks hidden in existing active 
   const result = adaptActiveDatasetForMap(payload)
 
   assert.equal(result.exportAssets[0].sourceStatus, 'hidden')
-  assert.equal(result.assets.length, 0)
+  assert.equal(result.assets.length, 1)
   assert.equal(result.geometries.length, 0)
   assert.equal(result.counts.hiddenPlacemarkCount, 1)
+  assert.equal(result.counts.hiddenPointAssetCount, 1)
 })
 
 test('asset detail adapter adds metadata only after the detail request', () => {
@@ -408,7 +413,8 @@ test('asset detail adapter adds metadata only after the detail request', () => {
     id: 'SW-01',
     name: 'Switch',
     type: 'Access switch',
-    status: 'Status tidak tersedia',
+    status: null,
+    hasOperationalStatusField: false,
     location: 'Semarang',
   }
   const result = adaptActiveAssetDetail({
@@ -428,9 +434,43 @@ test('asset detail adapter adds metadata only after the detail request', () => {
 
   assert.equal(result.name, 'Switch Core')
   assert.equal(result.status, 'Online')
+  assert.equal(result.operationalStatus, 'Online')
+  assert.equal(result.hasOperationalStatusField, true)
   assert.equal(result.ip, '10.20.1.2')
   assert.equal(result.owner, 'IT')
   assert.equal(Object.hasOwn(mapAsset, 'properties'), false)
+})
+
+test('active adapter distinguishes valid, empty, and absent operational status fields', () => {
+  const payload = activePayload({
+    layers: [layer('layer-cctv', 'CCTV', 'CCTV')],
+    assets: [{
+      ...asset('node-valid', 'CCTV-VALID', 'CCTV'),
+      properties: { extendedData: { status: 'Aktif' } },
+    }, {
+      ...asset('node-empty', 'CCTV-EMPTY', 'CCTV'),
+      properties: { extendedData: { status: '  ' } },
+    }, asset('node-absent', 'CCTV-ABSENT', 'CCTV')],
+    geometries: [
+      point('point-valid', 'node-valid', 110.41, -6.96),
+      point('point-empty', 'node-empty', 110.42, -6.97),
+      point('point-absent', 'node-absent', 110.43, -6.98),
+    ],
+  })
+
+  const result = adaptActiveDatasetForMap(payload)
+  assert.deepEqual({
+    status: result.assetById['CCTV-VALID'].operationalStatus,
+    present: result.assetById['CCTV-VALID'].hasOperationalStatusField,
+  }, { status: 'Aktif', present: true })
+  assert.deepEqual({
+    status: result.assetById['CCTV-EMPTY'].operationalStatus,
+    present: result.assetById['CCTV-EMPTY'].hasOperationalStatusField,
+  }, { status: null, present: true })
+  assert.deepEqual({
+    status: result.assetById['CCTV-ABSENT'].operationalStatus,
+    present: result.assetById['CCTV-ABSENT'].hasOperationalStatusField,
+  }, { status: null, present: false })
 })
 
 test('active adapter resolves topology nodes and edges through canonical identity aliases', () => {

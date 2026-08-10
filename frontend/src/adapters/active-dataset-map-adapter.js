@@ -10,6 +10,13 @@ const CATEGORY_STYLE = Object.freeze({
   unmapped: { color: '#aeb8c5', softColor: '#f1f3f5', type: 'Belum terpetakan', order: 99 },
 })
 
+const OPERATIONAL_STATUS_KEYS = Object.freeze([
+  'operationalStatus',
+  'assetStatus',
+  'status',
+  'condition',
+])
+
 /**
  * Converts one active dataset version into the stable map view model.
  *
@@ -54,12 +61,17 @@ export function adaptActiveDatasetForMap(payload) {
   }))
   const featureByAssetId = new Map(exportAssets.map((asset) => [asset.id, asset]))
 
+  // KML visibility is presentation state, not proof that an inventory point
+  // does not exist. Keep hidden point assets discoverable on the map so a
+  // camera/device checked in the source cannot silently disappear from the
+  // operational inventory. Lines and polygons still honor source visibility
+  // to avoid changing the map surface significantly.
   const assets = exportAssets
-    .filter((asset) => asset.sourceStatus === 'visible')
+    .filter(isDiscoverableMapAsset)
     .map((asset) => createMapNode(asset))
     .filter(Boolean)
   const diagramAssets = exportAssets
-    .filter((asset) => asset.sourceStatus === 'visible' && asset.geometry.length)
+    .filter((asset) => isDiscoverableMapAsset(asset) && asset.geometry.length)
     .map(createDiagramAsset)
     .filter(Boolean)
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
@@ -124,6 +136,9 @@ export function adaptActiveDatasetForMap(payload) {
     polygonCount: geometries.filter(({ geometryType }) => geometryType === 'polygon').length,
     geometryCount: geometries.length,
     hiddenPlacemarkCount: exportAssets.filter(({ sourceStatus }) => sourceStatus === 'hidden').length,
+    hiddenPointAssetCount: exportAssets.filter((asset) => (
+      asset.sourceStatus === 'hidden' && hasPointGeometry(asset)
+    )).length,
   }
 
   return {
@@ -149,6 +164,7 @@ export function adaptActiveDatasetForMap(payload) {
     networks,
     locationGroups,
     topologyGraph,
+    topologySummary: structuredClone(payload.topologySummary ?? {}),
     topologyReadiness,
     readiness: structuredClone(payload.readiness ?? null),
     readinessContract: structuredClone(payload.readinessContract ?? null),
@@ -319,6 +335,11 @@ export function adaptActiveAssetDetail(payload, mapAsset) {
     throw new TypeError('Response detail aset aktif tidak valid.')
   }
   const asset = payload.asset
+  const detailOperationalStatus = readOperationalStatus(asset)
+  const mapOperationalStatus = readMapOperationalStatus(mapAsset)
+  const operationalStatus = detailOperationalStatus.present
+    ? detailOperationalStatus
+    : mapOperationalStatus
   return {
     ...mapAsset,
     name: asset.name || mapAsset.name,
@@ -329,7 +350,9 @@ export function adaptActiveAssetDetail(payload, mapAsset) {
       || readProperty(asset, 'location')
       || readProperty(asset, 'description')
       || mapAsset.location,
-    status: readProperty(asset, 'status') || mapAsset.status,
+    status: operationalStatus.value,
+    operationalStatus: operationalStatus.value,
+    hasOperationalStatusField: operationalStatus.present,
     ip: readProperty(asset, 'ipAddress') || readProperty(asset, 'ip_address') || '—',
     owner: readProperty(asset, 'owner') || 'Tidak tersedia',
     properties: structuredClone(asset.properties ?? {}),
@@ -339,7 +362,7 @@ export function adaptActiveAssetDetail(payload, mapAsset) {
 function createOwnerFeature({ asset, layer, geometries }) {
   const category = normalizeCategory(asset.category, asset.type, layer)
   const type = normalizeAssetType(asset.type, asset.category || category, layer)
-  const explicitStatus = readProperty(asset, 'status')
+  const operationalStatus = readOperationalStatus(asset)
   const locationGroup = locationGroupFor(layer?.sourceFolderPath)
   const canonicalAssetId = canonicalAssetIdFor(asset)
   return {
@@ -357,7 +380,9 @@ function createOwnerFeature({ asset, layer, geometries }) {
     type,
     assetType: type,
     category,
-    status: explicitStatus || 'Status tidak tersedia',
+    status: operationalStatus.value,
+    operationalStatus: operationalStatus.value,
+    hasOperationalStatusField: operationalStatus.present,
     sourceStatus: sourceStatusFor(asset, layer),
     location: asset.location
       || readProperty(asset, 'location')
@@ -874,6 +899,61 @@ function readProperty(asset, key) {
     ?? asset?.properties?.semanticMetadata?.values?.[key]
     ?? asset?.properties?.extendedData?.[key]
     ?? asset?.properties?.[key]
+}
+
+function isDiscoverableMapAsset(asset) {
+  return asset?.sourceStatus === 'visible' || hasPointGeometry(asset)
+}
+
+function hasPointGeometry(asset) {
+  return asset?.geometry?.some(({ geometryType, coordinates }) => (
+    geometryType === 'point' && validPosition(coordinates)
+  )) === true
+}
+
+function readMapOperationalStatus(asset) {
+  if (typeof asset?.hasOperationalStatusField === 'boolean') {
+    return {
+      present: asset.hasOperationalStatusField,
+      value: normalizeOperationalStatus(asset.operationalStatus ?? asset.status),
+    }
+  }
+  return readOperationalStatus(asset)
+}
+
+function readOperationalStatus(asset) {
+  const containers = [
+    asset,
+    asset?.properties?.semanticMetadata,
+    asset?.properties?.semanticMetadata?.values,
+    asset?.properties?.extendedData,
+    asset?.properties,
+  ]
+  for (const key of OPERATIONAL_STATUS_KEYS) {
+    for (const container of containers) {
+      const entry = findOwnProperty(container, key)
+      if (entry.found) {
+        return { present: true, value: normalizeOperationalStatus(entry.value) }
+      }
+    }
+  }
+  return { present: false, value: null }
+}
+
+function findOwnProperty(container, expectedKey) {
+  if (!container || typeof container !== 'object') return { found: false, value: null }
+  const key = Object.keys(container).find((candidate) => (
+    candidate.toLocaleLowerCase('id') === expectedKey.toLocaleLowerCase('id')
+  ))
+  return key === undefined
+    ? { found: false, value: null }
+    : { found: true, value: container[key] }
+}
+
+function normalizeOperationalStatus(value) {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim()
+  return normalized || null
 }
 
 function groupBy(records, key) {

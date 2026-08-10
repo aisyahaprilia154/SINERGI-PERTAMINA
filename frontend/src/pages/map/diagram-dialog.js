@@ -15,7 +15,7 @@ export function openSchematicDialog({
       <header class="schematic-header">
         <div>
           <span class="eyebrow">DIAGRAM SKEMATIK 2D</span>
-          <h2 class="schematic-current-title">Peta jaringan lengkap</h2>
+          <h2 class="schematic-current-title">Seluruh aset</h2>
           <p class="schematic-current-meta"></p>
         </div>
         <button class="icon-button close-schematic" type="button" aria-label="Tutup diagram">
@@ -26,9 +26,14 @@ export function openSchematicDialog({
       <div class="schematic-mode-bar">
         <div class="schematic-mode-switch" role="tablist" aria-label="Cakupan diagram">
           <button class="schematic-mode-option active" type="button" role="tab"
-            data-schematic-mode="full-map" aria-selected="true">
+            data-schematic-mode="all-assets" aria-selected="true">
             <span class="material-symbols-outlined" aria-hidden="true">hub</span>
-            <span><strong>Peta penuh</strong><small>Seluruh koneksi dataset aktif</small></span>
+            <span><strong>Seluruh aset</strong><small>Semua aset pada area aktif</small></span>
+          </button>
+          <button class="schematic-mode-option" type="button" role="tab"
+            data-schematic-mode="full-map" aria-selected="false">
+            <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
+            <span><strong>Topologi jaringan</strong><small>Relasi terkonfirmasi pada area aktif</small></span>
           </button>
           <button class="schematic-mode-option" type="button" role="tab"
             data-schematic-mode="trace" aria-selected="false">
@@ -108,7 +113,7 @@ function bindDialogEvents({
   const viewControlButtons = dialog.querySelectorAll(
     '.diagram-zoom-out, .diagram-zoom-in, .diagram-zoom-level, .diagram-fit, .diagram-reset',
   )
-  let currentMode = 'full-map'
+  let currentMode = 'all-assets'
   let currentSelectedAssetId = selectedAssetId
   let zoom = 1
 
