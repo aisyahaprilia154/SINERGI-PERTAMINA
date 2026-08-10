@@ -2719,6 +2719,29 @@
   }
 }
 
+/* Keep the reopen control outside the context card when the sidebar is
+   collapsed. The context card is positioned by .map-info-overlays, so the
+   safe inset must be applied to that parent rather than the child card. */
+@media (min-width: 961px) {
+  .map-workspace.sidebar-collapsed .map-stage {
+    --map-collapsed-sidebar-safe-left: calc(
+      var(--space-4) + 42px + var(--space-4)
+    );
+  }
+
+  .map-body .map-workspace.sidebar-collapsed .map-info-overlays {
+    left: var(--map-collapsed-sidebar-safe-left);
+    width: min(
+      680px,
+      calc(
+        100% - var(--map-collapsed-sidebar-safe-left) -
+        var(--map-toolbar-width) - var(--map-overlay-inset) -
+        var(--map-overlay-gap)
+      )
+    );
+  }
+}
+
 /* Network sidebar */
 .sidebar-list-header {
   padding: 0 var(--space-4) var(--space-3);
