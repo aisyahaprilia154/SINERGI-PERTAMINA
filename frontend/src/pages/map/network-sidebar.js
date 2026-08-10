@@ -2,13 +2,23 @@ export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, 
   locationGroups = [],
   selectedArea = null,
   topologyReadiness = null,
-  } = {}) {
+  topologySummary = {},
+} = {}) {
   const countSummary = formatDatasetCounts(counts)
   const topologyReady = topologyReadiness?.ready ?? activeContext?.topologyReady ?? true
   const traceAvailable = topologyReadiness?.traceAvailable ?? topologyReady
   const topologyStatus = topologyReadiness?.status || (topologyReady ? 'ready' : 'not_ready')
   const topologyMessage = topologyReadiness?.message
     || 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.'
+  const confirmedCount = Number(topologySummary.confirmedConnectionCount) || 0
+  const pendingCount = Number(topologySummary.pendingConnectionCount) || 0
+  const isolatedCount = Number(topologySummary.isolatedAssetCount) || 0
+  const canReviewTopology = topologyReadiness?.capabilities?.reviewTopology === true
+  const reviewQuery = new URLSearchParams({
+    datasetId: activeContext.datasetId,
+    branchId: activeContext.branchId,
+  })
+  if (selectedArea?.key) reviewQuery.set('area', selectedArea.key)
   return `
     <aside class="network-sidebar" id="network-sidebar"
       aria-label="Pemilih jaringan. ${escapeAttribute(countSummary)}">
@@ -19,7 +29,8 @@ export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, 
         </div>
         <div class="sidebar-heading-actions">
           <button class="icon-button sidebar-collapse desktop-only" type="button"
-            aria-label="Ciutkan daftar jaringan" aria-controls="network-sidebar" aria-expanded="true">
+            title="Tutup panel" aria-label="Tutup panel jaringan"
+            aria-controls="network-sidebar" aria-expanded="true">
             <span class="material-symbols-outlined" aria-hidden="true">left_panel_close</span>
           </button>
           <button class="icon-button close-sidebar mobile-only" type="button"
@@ -30,45 +41,35 @@ export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, 
       </header>
 
       <div class="sidebar-content">
-        <section class="dataset-card" aria-label="Dataset aktif. ${escapeAttribute(countSummary)}">
-          <span class="dataset-icon material-symbols-outlined" aria-hidden="true">database</span>
-          <div>
-            <strong>${escapeHtml(activeContext.datasetName)}</strong>
-            <span>${escapeHtml(activeContext.version)} · ${escapeHtml(activeContext.publishedAt)}</span>
-          </div>
-          <span class="status-dot" title="Dataset aktif"></span>
-        </section>
-
-        <section class="sidebar-topology-readiness ${topologyStatus}"
-          role="status" aria-label="Status kesiapan topologi">
-          <strong>Topology: ${topologyStatus === 'partial_ready'
-            ? 'Partial'
-            : topologyReady ? 'Ready' : 'Not ready'}</strong>
-          <span>${escapeHtml(traceAvailable
-            ? topologyStatus === 'partial_ready'
-              ? 'Tracing tersedia hanya pada komponen terverifikasi.'
-              : 'Tracing dan diagram dapat menggunakan graph terkonfirmasi.'
-            : topologyMessage)}</span>
-        </section>
-
         <label class="area-selector">
           <span>Area fasilitas</span>
-          <select aria-label="Area fasilitas">
-            ${locationGroups.map((group) => `
-              <option value="${escapeAttribute(group.key)}"
-                ${group.key === selectedArea?.key ? 'selected' : ''}>
-                ${escapeHtml(group.name)}
-              </option>
-            `).join('')}
-          </select>
+          <span class="area-selector-control">
+            <select aria-label="Area fasilitas" aria-haspopup="listbox" aria-expanded="false">
+              ${locationGroups.map((group) => `
+                <option value="${escapeAttribute(group.key)}"
+                  ${group.key === selectedArea?.key ? 'selected' : ''}>
+                  ${escapeHtml(group.name)}
+                </option>
+              `).join('')}
+            </select>
+            <span class="area-selector-icon material-symbols-outlined"
+              aria-hidden="true">expand_more</span>
+          </span>
         </label>
 
-        <label class="search-control">
-          <span class="material-symbols-outlined" aria-hidden="true">search</span>
-          <input type="search" placeholder="Cari Asset ID, nama aset, atau lokasi"
-            aria-label="Cari Asset ID, nama aset, atau lokasi" />
-          <kbd>⌘ K</kbd>
-        </label>
+        <div class="asset-search-combobox">
+          <label class="search-control">
+            <span class="material-symbols-outlined" aria-hidden="true">search</span>
+            <input type="search" autocomplete="off" spellcheck="false"
+              placeholder="Cari ID, nama, atau lokasi aset"
+              aria-label="Cari Asset ID, nama aset, lokasi, atau hostname"
+              role="combobox" aria-autocomplete="list" aria-haspopup="listbox"
+              aria-controls="sidebar-asset-search-results" aria-expanded="false" />
+            <kbd>Ctrl K</kbd>
+          </label>
+          <div class="sidebar-asset-search-results" id="sidebar-asset-search-results"
+            role="listbox" aria-label="Hasil pencarian aset" hidden></div>
+        </div>
 
         <div class="map-category-presets" aria-label="Preset kategori peta">
           <button type="button" data-category-preset="all" class="active"
@@ -89,13 +90,47 @@ export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, 
             <span aria-hidden="true"></span>
             <button class="text-button hide-all-networks" type="button">Sembunyikan semua</button>
           </div>
-          <button class="inactive-mode-toggle" type="button" aria-pressed="false">
-            <span class="material-symbols-outlined" aria-hidden="true">contrast</span>
-            <span>Redupkan jaringan nonaktif</span>
-          </button>
         </div>
 
         <div class="network-list" aria-label="Daftar jaringan" aria-busy="true"></div>
+
+        <section class="sidebar-secondary-context" aria-label="Informasi dataset dan topologi">
+          <section class="dataset-card" aria-label="Dataset aktif. ${escapeAttribute(countSummary)}">
+            <span class="dataset-icon material-symbols-outlined" aria-hidden="true">database</span>
+            <div>
+              <strong>${escapeHtml(activeContext.datasetName)}</strong>
+              <span>Versi aktif</span>
+            </div>
+            <span class="status-dot" title="Dataset aktif"></span>
+          </section>
+
+          <details class="sidebar-topology-readiness ${topologyStatus}">
+            <summary>
+              <span>
+                <strong>Status topologi</strong>
+                <small>${formatCount(confirmedCount)} terkonfirmasi · ${formatCount(isolatedCount)} tanpa relasi</small>
+              </span>
+              <span class="material-symbols-outlined topology-summary-chevron"
+                aria-hidden="true">expand_more</span>
+            </summary>
+            <div class="sidebar-topology-detail">
+              <span class="sidebar-topology-metrics">
+                <span><b>${formatCount(confirmedCount)}</b> terkonfirmasi</span>
+                <span title="Jumlah kandidat pada dataset aktif"><b>${formatCount(pendingCount)}</b> perlu diperiksa</span>
+                <span><b>${formatCount(isolatedCount)}</b> tanpa relasi</span>
+              </span>
+              <small>${escapeHtml(traceAvailable
+                ? 'Tracing menggunakan graph koneksi terkonfirmasi.'
+                : topologyMessage)}</small>
+              ${canReviewTopology ? `
+                <a class="topology-review-link" href="/admin/topology-review?${reviewQuery}">
+                  Buka Konfirmasi Koneksi
+                  <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
+                </a>
+              ` : ''}
+            </div>
+          </details>
+        </section>
 
         <footer class="sidebar-footer">
           <span class="material-symbols-outlined" aria-hidden="true">info</span>
@@ -135,7 +170,6 @@ export function renderNetworkList({
 }
 
 function renderNetworkItem({ network, assetById, selected, expanded }) {
-  const category = getNetworkCategory(network)
   const subcategories = getNetworkSubcategories(network, assetById)
   const networkId = escapeAttribute(network.id)
   const networkName = escapeHtml(network.name)
@@ -151,17 +185,29 @@ function renderNetworkItem({ network, assetById, selected, expanded }) {
           <i class="network-color-indicator" style="--network-color:${network.color}" aria-hidden="true"></i>
           <span class="network-copy">
             <strong>${networkName}</strong>
-            <small><span class="network-health"><i></i>${escapeHtml(network.health)}</span> · ${escapeHtml(category)}</small>
+            <small>
+              <span class="network-health"><i></i>${escapeHtml(network.health)}</span>
+              <span>${Number(network.confirmedConnectionCount) || 0} koneksi</span>
+              ${network.isolatedAssetCount ? `
+                <span class="network-relation-warning"
+                  title="${Number(network.isolatedAssetCount)} aset belum memiliki relasi terkonfirmasi">
+                  <span class="material-symbols-outlined" aria-hidden="true">warning</span>
+                  ${Number(network.isolatedAssetCount)}
+                </span>
+              ` : ''}
+            </small>
           </span>
           <span class="network-count" aria-label="${networkCountLabel(network)}">${network.assetCount}</span>
         </button>
         <div class="network-row-actions">
           <button class="network-icon-action focus-network" type="button" data-network-focus="${networkId}"
-            aria-label="Fokuskan peta ke ${networkName}" ${network.assetCount ? '' : 'disabled'}>
+            aria-label="Fokuskan peta ke ${networkName}" title="Fokuskan peta ke ${networkName}"
+            ${network.assetCount ? '' : 'disabled'}>
             <span class="material-symbols-outlined" aria-hidden="true">center_focus_strong</span>
           </button>
           <button class="network-icon-action expand-network" type="button" data-network-expand="${networkId}"
             aria-label="${expanded ? 'Tutup' : 'Buka'} subkategori ${networkName}"
+            title="${expanded ? 'Tutup' : 'Buka'} detail ${networkName}"
             aria-expanded="${expanded}" aria-controls="network-subcategories-${networkId}">
             <span class="material-symbols-outlined" aria-hidden="true">${expanded ? 'expand_less' : 'expand_more'}</span>
           </button>
@@ -186,17 +232,9 @@ function matchesNetworkSearch(network, assetById, search) {
   return network.nodeIds.some((assetId) => {
     const asset = assetById[assetId]
     if (!asset) return false
-    return `${asset.id} ${asset.name} ${asset.location}`.toLowerCase().includes(search)
+    return `${asset.id} ${asset.name} ${asset.location} ${asset.hostname || ''}`
+      .toLowerCase().includes(search)
   })
-}
-
-function getNetworkCategory(network) {
-  if (network.categoryLabel) return network.categoryLabel
-  if (network.type === 'CCTV') return 'CCTV'
-  if (network.type === 'Fiber optic') return 'Fiber Optic'
-  if (network.type === 'LAN') return 'LAN'
-  if (network.type === 'Server') return 'Peripheral'
-  return 'Infrastruktur'
 }
 
 function getNetworkSubcategories(network, assetById) {
@@ -226,6 +264,10 @@ function formatDatasetCounts(counts) {
     + `${Number(counts.assetNodeCount) || 0} node, `
     + `${Number(counts.lineCount) || 0} line, `
     + `${Number(counts.polygonCount) || 0} polygon`
+}
+
+function formatCount(value) {
+  return Number(value || 0).toLocaleString('id-ID')
 }
 
 function networkCountLabel(network) {

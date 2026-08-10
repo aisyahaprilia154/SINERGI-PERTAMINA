@@ -230,6 +230,7 @@ function nodeGlyph(type = '') {
 
 function modeLabel(mode) {
   if (mode === 'trace') return 'hasil tracing'
+  if (mode === 'all-assets') return 'seluruh aset'
   if (mode === 'full-map') return 'peta jaringan lengkap'
   if (mode === 'focus') return 'relasi langsung aset fokus'
   return 'jaringan terpilih'
