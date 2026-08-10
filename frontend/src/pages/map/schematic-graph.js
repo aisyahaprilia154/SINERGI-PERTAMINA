@@ -1,3 +1,11 @@
+import {
+  buildSelectedAssetRelationGraph,
+  isConfirmedTopologyEdge,
+  normalizeTopologyEdge,
+} from './selected-asset-relation-graph.js'
+
+export { buildSelectedAssetRelationGraph }
+
 export function buildSchematicGraph({
   assets,
   networks,
@@ -12,9 +20,11 @@ export function buildSchematicGraph({
   const networkById = new Map(networks.map((network) => [network.id, network]))
   const selectedIds = new Set(selectedNetworkIds)
   const topologyEdges = Array.isArray(topologyGraph?.edges)
-    ? topologyGraph.edges.map((edge, index) => ({
-      sourceId: edge.sourceNodeId,
-      targetId: edge.targetNodeId,
+    ? topologyGraph.edges.filter(isConfirmedTopologyEdge).map((edge, index) => {
+      const normalized = normalizeTopologyEdge(edge)
+      return {
+      sourceId: normalized.sourceId,
+      targetId: normalized.targetId,
       id: edge.id,
       networkId: edge.networkId || null,
       relationType: edge.relationType,
@@ -23,7 +33,8 @@ export function buildSchematicGraph({
       sourceGeometryIds: edge.sourceGeometryIds ?? [],
       pathAssetIds: edge.pathAssetIds ?? [],
       order: index,
-    }))
+      }
+    })
     : []
   const hasTopology = topologyEdges.length > 0
   const topologyNodeIds = new Set(
@@ -36,8 +47,33 @@ export function buildSchematicGraph({
   let anchorAssetId = null
   let nodeIds = []
   let sourceEdges = []
+  let categorySummary = null
+  const selectedScope = scope === 'selected' || scope === 'relation'
 
-  if (scope === 'trace' && tracePath.length < 2) {
+  if (selectedScope) {
+    const selectedGraph = buildSelectedAssetRelationGraph({
+      selectedAssetId: focusedAssetId,
+      topologyGraph,
+      assets,
+    })
+    if (selectedGraph.status !== 'ready') {
+      return {
+        status: 'empty',
+        message: selectedGraph.message,
+        mode: 'selected',
+        anchorAssetId: focusedAssetId,
+        nodes: [],
+        edges: [],
+        neighborCount: selectedGraph.neighborCount,
+        relationCount: selectedGraph.relationCount,
+      }
+    }
+    mode = 'selected'
+    anchorAssetId = focusedAssetId
+    nodeIds = selectedGraph.nodes.map((asset) => asset.id)
+    sourceEdges = selectedGraph.edges
+    categorySummary = selectedGraph.categorySummary
+  } else if (scope === 'trace' && tracePath.length < 2) {
     return {
       status: 'empty',
       message: 'Jalur terpilih belum tersedia. Jalankan tracing terlebih dahulu.',
@@ -114,7 +150,7 @@ export function buildSchematicGraph({
     ]).filter((assetId) => assetById.has(assetId)
       && (!hasTopology || topologyNodeIds.has(assetId)))
     sourceEdges = directEdges
-  } else {
+  } else if (!selectedScope) {
     const selectedNetworks = networks.filter((network) => selectedIds.has(network.id))
     nodeIds = uniqueIds(selectedNetworks.flatMap((network) => network.nodeIds || []))
       .filter((assetId) => assetById.has(assetId)
@@ -192,6 +228,14 @@ export function buildSchematicGraph({
     nodes,
     edges,
     sourceBounds: getSourceDisplayBounds(assets),
+    neighborCount: mode === 'selected' ? Math.max(0, nodes.length - 1) : undefined,
+    relationCount: edges.length,
+    ...(categorySummary ? { categorySummary } : {}),
+    isolatedNodeIds: mode === 'all-assets'
+      ? nodes.filter((node) => !edges.some((edge) => (
+        edge.sourceId === node.id || edge.targetId === node.id
+      ))).map((node) => node.id)
+      : [],
     title: getDiagramTitle(mode, nodes, networkById, selectedIds),
   }
 }
@@ -307,6 +351,7 @@ function isConnectorType(type = '') {
 }
 
 function getDiagramTitle(mode, nodes, networkById, selectedIds) {
+  if (mode === 'selected') return `Relasi ${nodes.find((node) => node.isAnchor)?.name || 'aset'}`
   if (mode === 'trace') return 'Jalur koneksi terpilih'
   if (mode === 'all-assets') return 'Seluruh aset'
   if (mode === 'full-map') return 'Peta jaringan lengkap'
