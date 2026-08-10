@@ -1174,11 +1174,9 @@ export async function renderMapPage(container) {
   })
   container.querySelectorAll('.export-toggle').forEach((button) => button.addEventListener('click', () => {
     openDataTransfer('export')
-    container.querySelector('.map-more-menu')?.removeAttribute('open')
   }))
   container.querySelector('.import-toggle')?.addEventListener('click', () => {
     openDataTransfer('import')
-    container.querySelector('.map-more-menu')?.removeAttribute('open')
   })
   container.querySelector('.trace-toggle').addEventListener('click', beginToolbarTracing)
   container.querySelector('.diagram-toggle').addEventListener('click', openSchematic)
