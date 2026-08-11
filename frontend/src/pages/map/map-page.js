@@ -315,6 +315,23 @@ export async function renderMapPage(container) {
       focusedNetworkId: state.focusedNetworkId,
     })
     container.querySelector('.selected-count').textContent = selection.selectedNetworkIds.size
+    syncNetworkSelectionActions()
+  }
+
+  function syncNetworkSelectionActions() {
+    const selectedCount = selection.selectedNetworkIds.size
+    const totalNetworkCount = networks.length
+    const showAllActive = totalNetworkCount > 0 && selectedCount === totalNetworkCount
+    const hideAllActive = totalNetworkCount > 0 && selectedCount === 0
+
+    for (const [selector, active] of [
+      ['.show-all-networks', showAllActive],
+      ['.hide-all-networks', hideAllActive],
+    ]) {
+      const button = container.querySelector(selector)
+      button?.classList.toggle('active', active)
+      button?.setAttribute('aria-pressed', String(active))
+    }
   }
 
   function loadSidebarData() {
@@ -1026,12 +1043,6 @@ export async function renderMapPage(container) {
     handleAssetSelect(assetId)
   }
 
-  function refreshDeclutter() {
-    canvasApi.setDeclutterEnabled(true)
-    canvasApi.invalidateSize?.()
-    container.querySelector('.map-more-menu')?.removeAttribute('open')
-  }
-
   function beginToolbarTracing() {
     const selectedAssetId = selection.selectedAssetId
     const selectedHasRelations = selectedAssetId
@@ -1191,19 +1202,12 @@ export async function renderMapPage(container) {
   })
   container.querySelectorAll('.export-toggle').forEach((button) => button.addEventListener('click', () => {
     openDataTransfer('export')
-    container.querySelector('.map-more-menu')?.removeAttribute('open')
   }))
   container.querySelector('.import-toggle')?.addEventListener('click', () => {
     openDataTransfer('import')
-    container.querySelector('.map-more-menu')?.removeAttribute('open')
-  })
-  container.querySelector('.manage-dataset-toggle').addEventListener('click', () => {
-    openDataTransfer('import')
-    container.querySelector('.map-more-menu')?.removeAttribute('open')
   })
   container.querySelector('.trace-toggle').addEventListener('click', beginToolbarTracing)
   container.querySelector('.diagram-toggle').addEventListener('click', openSchematic)
-  container.querySelector('.declutter-toggle').addEventListener('click', refreshDeclutter)
   container.querySelector('.cancel-trace').addEventListener('click', stopTracing)
   container.querySelector('.zoom-in').addEventListener('click', canvasApi.zoomIn)
   container.querySelector('.zoom-out').addEventListener('click', canvasApi.zoomOut)
