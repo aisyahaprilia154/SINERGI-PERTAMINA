@@ -99,13 +99,22 @@ test('map data transfer dialog exposes direct import and complete export choices
 })
 
 test('map context and toolbar present compact professional map actions', () => {
-  const context = renderMapContextPill(activeContext, null, { name: 'Booster Kutawinangun' })
+  const context = renderMapContextPill(activeContext, null, { name: 'Booster Kutawinangun' }, {
+    counts: { assetNodeCount: 98, lineCount: 62 },
+    confirmedConnectionCount: 62,
+  })
   const controls = renderMapFloatingControls()
 
   assert.match(context, />Semarang</)
   assert.doesNotMatch(context, />Kantor Cabang Semarang</)
   assert.match(context, />Area</)
   assert.match(context, />Booster Kutawinangun</)
+  assert.match(context, /98 aset &middot; 62 jalur &middot; 62 koneksi terkonfirmasi/)
+  assert.doesNotMatch(context, /PETA KERJA/)
+  assert.match(controls, /class="tool-button import-toggle map-action-ghost"/)
+  assert.match(controls, /aria-label="Import" title="Import data peta"/)
+  assert.match(controls, /upload_file/)
+  assert.match(controls, />Import</)
   assert.match(controls, />Export</)
   assert.match(controls, />Tracing</)
   assert.match(controls, />Diagram 2D</)
@@ -114,6 +123,7 @@ test('map context and toolbar present compact professional map actions', () => {
   assert.match(controls, /title="Buka panel"/)
   assert.match(controls, /aria-label="Buka panel jaringan"[^>]*aria-expanded="false"/)
   assert.match(controls, /Kelola Dataset/)
+  assert.match(controls, /<strong>Export<\/strong>/)
   assert.match(controls, /Klik lalu pilih aset awal pada peta\./)
   assert.doesNotMatch(controls, /class="tool-button trace-toggle"[^>]*\bdisabled\b/)
   assert.doesNotMatch(controls, /Import \/ Export/)
@@ -121,6 +131,8 @@ test('map context and toolbar present compact professional map actions', () => {
   assert.match(controls, /basemap-toggle/)
   assert.doesNotMatch(controls, /map-asset-results/)
   assert.ok(controls.indexOf('trace-toggle') < controls.indexOf('diagram-toggle'))
+  assert.ok(controls.indexOf('diagram-toggle') < controls.indexOf('import-toggle'))
+  assert.ok(controls.indexOf('import-toggle') < controls.indexOf('map-more-menu'))
   assert.ok(controls.indexOf('diagram-toggle') < controls.indexOf('export-toggle'))
   assert.ok(controls.indexOf('export-toggle') < controls.indexOf('map-more-menu'))
 })

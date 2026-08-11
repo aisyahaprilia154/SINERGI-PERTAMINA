@@ -6,10 +6,16 @@ const projectRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const localAdminToken = process.env.SINERGI_LOCAL_ADMIN_TOKEN ?? 'local-admin'
 const backendPort = process.env.SINERGI_PORT ?? '5000'
 const frontendPort = process.env.SINERGI_DEV_FRONTEND_PORT
+const branchIds = process.env.SINERGI_BRANCH_IDS ?? 'semarang'
+const branchDatasets = process.env.SINERGI_BRANCH_DATASETS ?? JSON.stringify({
+  semarang: 'dataset-semarang',
+})
 const authTokens = process.env.SINERGI_AUTH_TOKENS ?? JSON.stringify({
   [localAdminToken]: {
     id: 'local-admin',
     role: 'Administrator',
+    branchIds: ['semarang'],
+    datasetIds: ['dataset-semarang'],
   },
 })
 
@@ -21,6 +27,8 @@ const services = [
     env: {
       ...process.env,
       SINERGI_AUTH_TOKENS: authTokens,
+      SINERGI_BRANCH_IDS: branchIds,
+      SINERGI_BRANCH_DATASETS: branchDatasets,
     },
   },
   {

@@ -11,8 +11,8 @@ export function renderSchematicSvg({
 }) {
   if (graph.status !== 'ready' || layout.status !== 'ready') return ''
 
-  const legendCategories = [...new Set(layout.nodes.map((node) => node.category))]
-  const legendNetworks = uniqueNetworks(layout.edges)
+  const legendCategories = uniqueNodeTypes(layout.nodes)
+  const legendNetworks = uniqueNetworks(layout.edges, graph.mode)
   const diagramBottom = layout.height - layout.options.footerHeight
 
   return `
@@ -40,14 +40,18 @@ export function renderSchematicSvg({
           .diagram-edge.trace{stroke-width:4}
           .diagram-edge.logical{stroke-dasharray:6 5;stroke-width:2}
           .diagram-node{cursor:pointer;outline:none}
+          .node-card{fill:${SVG_THEME.backgroundSubtle};stroke:${SVG_THEME.border};stroke-width:1.5}
+          .diagram-node.anchor .node-card,.diagram-node.selected .node-card{stroke:${SVG_THEME.selected};stroke-width:2.5}
+          .diagram-node:hover .node-card,.diagram-node:focus .node-card{stroke:${SVG_THEME.selected};stroke-width:2}
+          .node-halo{fill:none;stroke:${SVG_THEME.selected};stroke-width:3;opacity:0}
+          .diagram-node.anchor .node-halo{opacity:.18}
+          .diagram-node.selected .node-halo,.diagram-node:focus .node-halo{opacity:1}
+          .node-icon-backdrop{stroke:none}
           .node-ring{fill:${SVG_THEME.background};stroke-width:2.5}
-          .diagram-node.connector .node-ring{stroke-width:4}
-          .diagram-node.anchor .node-halo{fill:none;stroke:${SVG_THEME.warning};stroke-width:2;opacity:.75}
-          .diagram-node.selected .node-halo,.diagram-node:focus .node-halo{fill:none;stroke:${SVG_THEME.selected};stroke-width:3;opacity:1}
-          .diagram-node:hover .node-halo{fill:none;stroke:${SVG_THEME.selected};stroke-width:2;opacity:.8}
-          .node-glyph{font:700 7px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.text};letter-spacing:-.02em}
-          .node-id{font:700 9.5px "Segoe UI Mono",Consolas,monospace}
-          .node-name{font:500 8.5px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.textSecondary}}
+          .diagram-node.connector .node-ring{stroke-width:3}
+          .node-glyph{font:700 8px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.text};letter-spacing:-.02em}
+          .node-id{font:700 12.5px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.text}}
+          .node-name{font:500 10.5px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.textSecondary}}
           .node-ip{font:500 8.5px "Segoe UI Mono",Consolas,monospace;fill:${SVG_THEME.textMuted}}
           .sequence-badge{fill:${SVG_THEME.backgroundSubtle};stroke:${SVG_THEME.textSecondary};stroke-width:1}
           .sequence-text{font:700 7px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.text}}
@@ -110,25 +114,30 @@ function renderEdge(edge, mode) {
 
 function renderNode(node, selectedAssetId) {
   const categoryStyle = CATEGORY_STYLES[node.category] || CATEGORY_STYLES.infrastructure
-  const { nodeX, nodeY, labelX, labelY } = node.diagram
-  const radius = node.isConnector ? 11 : 8
+  const { x, y, width, height } = node.diagram
+  const nodeX = x + 25
+  const nodeY = y + height / 2
+  const labelX = x + 52
+  const labelY = y + 28
+  const radius = node.isAnchor ? 16 : 14
   const classes = [
     'diagram-node',
     node.isConnector ? 'connector' : '',
     node.isAnchor ? 'anchor' : '',
     node.id === selectedAssetId ? 'selected' : '',
   ].filter(Boolean).join(' ')
-  const detailLabel = node.ip || shortAssetId(node.id)
-  const displayName = shortenNodeLabel(node.name)
+  const detailLabel = shortenType(node.type)
+  const displayName = shortenNodeLabel(node.name || 'Aset tanpa nama')
 
   return `
     <g class="${classes}" data-asset-id="${escapeAttribute(node.id)}" tabindex="0"
       role="button" aria-label="Pilih aset ${escapeAttribute(node.id)}">
       <title>${escapeXml(node.id)} · ${escapeXml(node.name)} · ${escapeXml(node.type)} · ${escapeXml(node.location)}${node.ip ? ` · ${escapeXml(node.ip)}` : ''}</title>
-      <circle class="node-halo" cx="${nodeX}" cy="${nodeY}" r="${radius + 5}" opacity="0"/>
-      <circle class="node-ring" cx="${nodeX}" cy="${nodeY}" r="${radius}" stroke="${categoryStyle.color}"/>
-      <circle cx="${nodeX}" cy="${nodeY}" r="${Math.max(3, radius - 5)}"
-        fill="${node.isConnector ? categoryStyle.color : SVG_THEME.backgroundSubtle}"/>
+      <rect class="node-halo" x="${x - 5}" y="${y - 5}" width="${width + 10}" height="${height + 10}" rx="14"/>
+      <rect class="node-card" x="${x}" y="${y}" width="${width}" height="${height}" rx="12"/>
+      <rect class="node-icon-backdrop" x="${nodeX - 19}" y="${nodeY - 19}" width="38" height="38" rx="10"
+        fill="${categoryStyle.color}" fill-opacity=".14"/>
+      ${renderNodeShape(node, nodeX, nodeY, radius, categoryStyle.color)}
       <text class="node-glyph" x="${nodeX}" y="${nodeY + 2.5}" text-anchor="middle">
         ${escapeXml(nodeGlyph(node.type))}
       </text>
@@ -142,21 +151,44 @@ function renderNode(node, selectedAssetId) {
         <text class="status-alert-text" x="${nodeX - radius - 3}" y="${nodeY - radius + 3}"
           text-anchor="middle">!</text>
       ` : ''}
-      <text class="node-id" x="${labelX}" y="${labelY}" text-anchor="middle"
-        fill="${categoryStyle.color}">${escapeXml(displayName)}</text>
-      <text class="${node.ip ? 'node-ip' : 'node-name'}" x="${labelX}" y="${labelY + 12}"
-        text-anchor="middle">${escapeXml(detailLabel)}</text>
-      ${node.ip ? `
-        <text class="node-name" x="${labelX}" y="${labelY + 23}"
-          text-anchor="middle">${escapeXml(node.shortName)}</text>
-      ` : ''}
+      <text class="node-id" x="${labelX}" y="${labelY}" text-anchor="start">${escapeXml(displayName)}</text>
+      <text class="node-name" x="${labelX}" y="${labelY + 17}"
+        text-anchor="start">${escapeXml(detailLabel)}</text>
     </g>
   `
+}
+
+function renderNodeShape(node, x, y, radius, color) {
+  const normalized = String(node.type || '').toLowerCase()
+  if (normalized.includes('junction')) {
+    return `<polygon class="node-ring" points="${x},${y - radius} ${x + radius},${y} ${x},${y + radius} ${x - radius},${y}" stroke="${color}"/>`
+  }
+  if (normalized.includes('switch')) {
+    return `<rect class="node-ring" x="${x - radius}" y="${y - radius}" width="${radius * 2}" height="${radius * 2}" rx="5" stroke="${color}"/>`
+  }
+  if (normalized.includes('server') || normalized.includes('nvr')) {
+    return `<rect class="node-ring" x="${x - radius - 4}" y="${y - radius + 2}" width="${(radius + 4) * 2}" height="${(radius - 2) * 2}" rx="3" stroke="${color}"/>`
+  }
+  if (normalized.includes('otb')) {
+    const points = Array.from({ length: 6 }, (_, index) => {
+      const angle = Math.PI / 3 * index - Math.PI / 6
+      return `${x + Math.cos(angle) * radius},${y + Math.sin(angle) * radius}`
+    }).join(' ')
+    return `<polygon class="node-ring" points="${points}" stroke="${color}"/>`
+  }
+  return `<circle class="node-ring" cx="${x}" cy="${y}" r="${radius}" stroke="${color}"/>`
+}
+
+function shortenType(value = '') {
+  const normalized = String(value).trim()
+  if (!normalized) return 'Jenis aset belum tersedia'
+  return normalized.length > 18 ? `${normalized.slice(0, 16)}…` : normalized
 }
 
 function renderCategorySections(sections) {
   return sections.map((section) => {
     const style = CATEGORY_STYLES[section.category] || CATEGORY_STYLES.infrastructure
+    const title = section.title || style.label
     return `
       <g class="diagram-category-section" data-category="${escapeAttribute(section.category)}">
         <rect class="category-section" x="${section.x}" y="${section.y}"
@@ -164,7 +196,7 @@ function renderCategorySections(sections) {
           fill="${style.color}" fill-opacity=".055" stroke="${style.color}" stroke-opacity=".4"/>
         <circle cx="${section.x + 22}" cy="${section.y + 25}" r="6" fill="${style.color}"/>
         <text class="category-section-title" x="${section.x + 36}" y="${section.y + 30}"
-          fill="${style.color}">${escapeXml(style.label)}</text>
+          fill="${style.color}">${escapeXml(title)}</text>
         <text class="category-section-count" x="${section.x + section.width - 20}"
           y="${section.y + 29}" text-anchor="end">${section.nodeCount} aset</text>
       </g>
@@ -176,12 +208,11 @@ function renderLegend(categories, networks, diagramBottom) {
   return `
     <g class="diagram-legend" transform="translate(32 ${diagramBottom + 28})">
       <text class="legend-title" x="0" y="0">NODE</text>
-      ${categories.map((category, index) => {
-        const style = CATEGORY_STYLES[category] || CATEGORY_STYLES.infrastructure
-        const offsetX = 48 + index * 106
+      ${categories.map((entry, index) => {
+        const offsetX = 48 + index * 136
         return `
-          <circle cx="${offsetX}" cy="-3" r="5" fill="${SVG_THEME.background}" stroke="${style.color}" stroke-width="2"/>
-          <text class="legend-label" x="${offsetX + 10}" y="0">${escapeXml(style.label)}</text>
+          ${renderLegendShape(entry, offsetX)}
+          <text class="legend-label" x="${offsetX + 12}" y="0">${escapeXml(entry.label)}</text>
         `
       }).join('')}
     </g>
@@ -192,16 +223,38 @@ function renderLegend(categories, networks, diagramBottom) {
         return `
           <line x1="${offsetX}" y1="-3" x2="${offsetX + 18}" y2="-3"
             stroke="${sanitizeColor(network.color)}" stroke-width="3" stroke-linecap="round"/>
-          <text class="legend-label" x="${offsetX + 25}" y="0">${escapeXml(shortenLegend(network.name))}</text>
+          <text class="legend-label" x="${offsetX + 25}" y="0">${escapeXml(shortenLegend(network.name || 'Relasi terkonfirmasi'))}</text>
         `
       }).join('')}
     </g>
   `
 }
 
-function uniqueNetworks(edges) {
+function uniqueNodeTypes(nodes) {
   const seen = new Set()
-  return edges
+  return nodes.map((node) => {
+    const label = nodeTypeLabel(node.type)
+    if (seen.has(label)) return null
+    seen.add(label)
+    const style = CATEGORY_STYLES[node.category] || CATEGORY_STYLES.infrastructure
+    return { label, color: style.color, type: node.type }
+  }).filter(Boolean)
+}
+
+function renderLegendShape(entry, x) {
+  const type = String(entry.type || '').toLowerCase()
+  if (type.includes('junction')) {
+    return `<polygon points="${x},-9 ${x + 7},-3 ${x},3 ${x - 7},-3" fill="${SVG_THEME.background}" stroke="${entry.color}" stroke-width="2"/>`
+  }
+  if (type.includes('switch')) {
+    return `<rect x="${x - 6}" y="-9" width="12" height="12" rx="3" fill="${SVG_THEME.background}" stroke="${entry.color}" stroke-width="2"/>`
+  }
+  return `<circle cx="${x}" cy="-3" r="6" fill="${SVG_THEME.background}" stroke="${entry.color}" stroke-width="2"/>`
+}
+
+function uniqueNetworks(edges, mode) {
+  const seen = new Set()
+  const entries = edges
     .filter((edge) => {
       const key = edge.networkId || edge.networkName
       if (seen.has(key)) return false
@@ -210,9 +263,25 @@ function uniqueNetworks(edges) {
     })
     .map((edge) => ({
       id: edge.networkId,
-      name: edge.networkName,
+      name: mode === 'selected' ? 'Relasi terkonfirmasi' : (edge.networkName || 'Relasi terkonfirmasi'),
       color: edge.networkColor,
     }))
+  return entries.length ? entries : [{
+    id: 'confirmed-relation',
+    name: 'Relasi terkonfirmasi',
+    color: SVG_THEME.textSecondary,
+  }]
+}
+
+function nodeTypeLabel(type = '') {
+  const normalized = String(type).toLowerCase()
+  if (normalized.includes('junction')) return 'Junction Box'
+  if (normalized.includes('cctv') || normalized.includes('camera')) return 'CCTV'
+  if (normalized.includes('switch')) return 'Switch'
+  if (normalized.includes('server') || normalized.includes('nvr')) return 'Server / NVR'
+  if (normalized.includes('otb')) return 'OTB'
+  if (normalized.includes('tiang') || normalized.includes('pole')) return 'Tiang'
+  return type || 'Aset lainnya'
 }
 
 function nodeGlyph(type = '') {
@@ -229,6 +298,7 @@ function nodeGlyph(type = '') {
 }
 
 function modeLabel(mode) {
+  if (mode === 'selected') return 'relasi aset terpilih'
   if (mode === 'trace') return 'hasil tracing'
   if (mode === 'all-assets') return 'seluruh aset'
   if (mode === 'full-map') return 'peta jaringan lengkap'

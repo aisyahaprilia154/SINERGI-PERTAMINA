@@ -98,6 +98,14 @@ test('MapLibre basemap is environment-configured and operational data is fail-sa
     new URL('../src/pages/map/maplibre-map.js', import.meta.url),
     'utf8',
   )
+  const surfaceSource = await readFile(
+    new URL('../src/pages/map/map-surface.js', import.meta.url),
+    'utf8',
+  )
+  const mapPageSource = await readFile(
+    new URL('../src/pages/map/map-page.js', import.meta.url),
+    'utf8',
+  )
 
   assert.match(source, /VITE_SINERGI_BASEMAP_TILES/)
   assert.match(source, /VITE_SINERGI_VECTOR_TILES_URL/)
@@ -122,6 +130,17 @@ test('MapLibre basemap is environment-configured and operational data is fail-sa
   assert.match(source, /map\.dragRotate\.enable\(\)/)
   assert.match(source, /map\.dragRotate\.disable\(\)/)
   assert.doesNotMatch(source, /\bnew Marker\(/)
+  assert.match(source, /new AttributionControl\(\{ compact: false \}\), 'bottom-left'/)
+  assert.doesNotMatch(source, /customAttribution/)
+  assert.match(source, /id: 'asset-points',[\s\S]*?layout: \{ visibility: 'none' \}/)
+  assert.match(surfaceSource, /class="map-primary-controls"/)
+  assert.match(surfaceSource, /class="map-secondary-controls"/)
+  assert.match(surfaceSource, /class="map-info-overlays"/)
+  assert.match(surfaceSource, /class="basemap-status loading"/)
+  assert.match(surfaceSource, /basemap-status-overview/)
+  assert.match(surfaceSource, /basemap-status-metrics/)
+  assert.match(surfaceSource, /class="map-attribution"/)
+  assert.match(mapPageSource, /account_tree<\/span>Topologi Cabang/)
 })
 
 test('fallback and vector basemap styles are valid and use a visible neutral canvas', () => {

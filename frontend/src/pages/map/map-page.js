@@ -793,6 +793,14 @@ export async function renderMapPage(container) {
       traceRelations: state.traceStatus === 'active' ? state.traceRelations : [],
       topologyReady: topologyReadiness.ready,
     })
+    const selectedAssetGraph = buildSchematicGraph({
+      assets,
+      networks,
+      topologyGraph,
+      focusedAssetId: selection.selectedAssetId,
+      scope: 'selected',
+      topologyReady: topologyReadiness.ready,
+    })
     openSchematicDialog({
       diagrams: {
         'all-assets': {
@@ -807,9 +815,18 @@ export async function renderMapPage(container) {
           graph: traceGraph,
           layout: calculateSchematicLayout(traceGraph, { preserveMapOrientation: true }),
         },
+        selected: {
+          graph: selectedAssetGraph,
+          layout: calculateSchematicLayout(selectedAssetGraph),
+        },
       },
       activeContext,
       selectedAssetId: selection.selectedAssetId,
+      initialMode: state.traceStatus === 'active'
+        ? 'trace'
+        : selection.selectedAssetId
+          ? 'selected'
+          : 'all-assets',
       onSelectAsset: selectAssetFromDiagram,
     })
   }
@@ -1165,6 +1182,10 @@ export async function renderMapPage(container) {
     openDataTransfer('export')
     container.querySelector('.map-more-menu')?.removeAttribute('open')
   }))
+  container.querySelector('.import-toggle')?.addEventListener('click', () => {
+    openDataTransfer('import')
+    container.querySelector('.map-more-menu')?.removeAttribute('open')
+  })
   container.querySelector('.manage-dataset-toggle').addEventListener('click', () => {
     openDataTransfer('import')
     container.querySelector('.map-more-menu')?.removeAttribute('open')

@@ -107,6 +107,63 @@ test('parallel network relations receive separate visual lanes', () => {
   assert.notDeepEqual(layout.edges[0].routePoints, layout.edges[1].routePoints)
 })
 
+test('selected relation with one neighbor keeps both cards and the edge inside final bounds', () => {
+  const selectedGraph = {
+    status: 'ready',
+    mode: 'selected',
+    anchorAssetId: 'focus',
+    nodes: [
+      { id: 'focus', name: 'JB-008-exp', type: 'Junction Box', category: 'cctv', isAnchor: true },
+      { id: 'neighbor', name: 'JB-00X-exp', type: 'Junction Box', category: 'cctv', isAnchor: false },
+    ],
+    edges: [{ id: 'focus-neighbor', sourceId: 'focus', targetId: 'neighbor' }],
+  }
+  const layout = calculateSchematicLayout(selectedGraph)
+  const focus = layout.nodes.find((node) => node.id === 'focus')
+  const neighbor = layout.nodes.find((node) => node.id === 'neighbor')
+
+  assert.equal(layout.nodes.length, 2)
+  assert.equal(layout.edges.length, 1)
+  assert.ok(neighbor.diagram.x > focus.diagram.x)
+  assertBoundsContainLayout(layout)
+  assert.deepEqual(layout.edges[0].routePoints[0], {
+    x: focus.diagram.x + focus.diagram.width,
+    y: focus.diagram.nodeY,
+  })
+  assert.deepEqual(layout.edges[0].routePoints.at(-1), {
+    x: neighbor.diagram.x,
+    y: neighbor.diagram.nodeY,
+  })
+})
+
+test('full graph layout keeps every connected and isolated node available', () => {
+  const nodes = Array.from({ length: 98 }, (_, index) => ({
+    id: `asset-${index}`,
+    name: `Asset ${index}`,
+    type: index % 2 ? 'CCTV' : 'Junction Box',
+    category: index % 2 ? 'cctv' : 'infrastructure',
+  }))
+  const edges = Array.from({ length: 46 }, (_, index) => ({
+    id: `edge-${index}`,
+    sourceId: `asset-${index}`,
+    targetId: `asset-${index + 1}`,
+  }))
+  const layout = calculateSchematicLayout({
+    status: 'ready',
+    mode: 'all-assets',
+    nodes,
+    edges,
+  })
+
+  assert.equal(layout.nodes.length, 98)
+  assert.equal(layout.edges.length, 46)
+  assert.equal(layout.sections.find((section) => section.kind === 'isolated').nodeCount, 51)
+  assert.ok(layout.sections.filter((section) => section.kind === 'connected').length > 0)
+  assert.ok(layout.width > layout.options.minWidth)
+  assert.equal(layout.defaultZoom, .62)
+  assertBoundsContainLayout(layout)
+})
+
 test('full-map layout creates readable category sections', () => {
   const mapGraph = {
     status: 'ready',
@@ -134,4 +191,19 @@ function rectanglesOverlap(left, right) {
     && left.x + left.width > right.x
     && left.y < right.y + right.height
     && left.y + left.height > right.y
+}
+
+function assertBoundsContainLayout(layout) {
+  layout.nodes.forEach((node) => {
+    assert.ok(node.diagram.x >= layout.bounds.minX)
+    assert.ok(node.diagram.y >= layout.bounds.minY)
+    assert.ok(node.diagram.x + node.diagram.width <= layout.bounds.maxX)
+    assert.ok(node.diagram.y + node.diagram.height <= layout.bounds.maxY)
+  })
+  layout.edges.forEach((edge) => edge.routePoints.forEach((point) => {
+    assert.ok(point.x >= layout.bounds.minX)
+    assert.ok(point.y >= layout.bounds.minY)
+    assert.ok(point.x <= layout.bounds.maxX)
+    assert.ok(point.y <= layout.bounds.maxY)
+  }))
 }
