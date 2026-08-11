@@ -115,6 +115,7 @@ test('map context and toolbar present compact professional map actions', () => {
   assert.match(controls, /aria-label="Import" title="Import data peta"/)
   assert.match(controls, /upload_file/)
   assert.match(controls, />Import</)
+  assert.match(controls, />Export</)
   assert.match(controls, />Tracing</)
   assert.match(controls, />Diagram 2D</)
   assert.match(controls, /class="tool-button export-toggle map-action-ghost"/)
