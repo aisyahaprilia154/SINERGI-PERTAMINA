@@ -27,22 +27,26 @@ export function renderNetworkMapCanvas(activeContext, {
         tahan tombol Control sambil drag pada peta.
       </p>
       <div class="map-accessible-assets map-sr-only" aria-label="Daftar aset pada peta"></div>
-      <p class="map-sr-only basemap-status loading" role="status">
-        Peta dasar <b class="basemap-availability">memuat</b>,
-        mode <b class="basemap-mode-label">Jalan &amp; bangunan</b>.
-      </p>
-      <div class="map-info-overlays" aria-label="Informasi konteks peta">
-        ${!traceAvailable ? `
-          <div class="map-topology-readiness" id="topology-not-ready-message" role="status">
-            <strong>Topologi perlu diperiksa</strong>
-            <span>${escapeHtml(topologyMessage)}</span>
-          </div>
-        ` : ''}
-        ${renderMapContextPill(activeContext, topologyReadiness, selectedArea, {
-          counts,
-          confirmedConnectionCount: displayedConfirmedConnectionCount,
-        })}
+      <div class="basemap-status loading" role="status">
+        <span class="basemap-status-overview">
+          <span class="material-symbols-outlined" aria-hidden="true">map</span>
+          <span>
+            <small>PETA KERJA</small>
+            <strong>${escapeHtml(selectedArea?.name ?? 'Area aktif')}</strong>
+          </span>
+        </span>
+        <span class="basemap-status-metrics">
+          ${Number(counts.assetNodeCount) || 0} aset &middot; ${Number(counts.lineCount) || 0} jalur &middot; ${displayedConfirmedConnectionCount} koneksi terkonfirmasi
+        </span>
+        <span class="map-sr-only">Peta dasar <b class="basemap-availability">memuat</b>,
+          mode <b class="basemap-mode-label">Jalan &amp; bangunan</b>.</span>
       </div>
+      ${!traceAvailable ? `
+        <div class="map-topology-readiness" id="topology-not-ready-message" role="status">
+          <strong>Topologi perlu diperiksa</strong>
+          <span>${escapeHtml(topologyMessage)}</span>
+        </div>
+      ` : ''}
       <div class="map-asset-tooltip" id="map-asset-tooltip" role="tooltip" aria-live="polite" hidden></div>
       ${empty ? `
         <section class="map-empty-layer" aria-live="polite">
@@ -53,6 +57,12 @@ export function renderNetworkMapCanvas(activeContext, {
             : 'Pilih atau aktifkan dataset yang memiliki Point, LineString, atau Polygon valid.'}</p>
         </section>
       ` : ''}
+      <div class="map-info-overlays" aria-label="Informasi konteks peta">
+        ${renderMapContextPill(activeContext, topologyReadiness, selectedArea, {
+          counts,
+          confirmedConnectionCount: displayedConfirmedConnectionCount,
+        })}
+      </div>
       ${renderMapFloatingControls(activeContext, topologyReadiness, { selectedAssetId })}
 
       <div class="trace-banner" hidden>
@@ -90,6 +100,7 @@ export function renderNetworkMapCanvas(activeContext, {
         </button>
       </div>
 
+      <div class="map-attribution">SINERGI Topology · Dataset ${escapeHtml(activeContext.version)}</div>
       <button class="mobile-panel-backdrop" type="button" tabindex="-1" aria-label="Tutup panel"></button>
       <aside class="asset-drawer" aria-live="polite" aria-label="Detail aset" aria-hidden="true"></aside>
     </section>
@@ -135,22 +146,20 @@ export function renderMapContextPill(
           <strong>${escapeHtml(activeContext.version)}</strong>
         </span>
       </span>
-      <span class="context-secondary-row">
-        <span class="context-statuses">
-          <span class="context-readonly">
-            <span class="material-symbols-outlined" aria-hidden="true">lock</span>
-            Read-only
-          </span>
-          <span class="context-topology ${topologyStatus}"
-            title="${escapeHtml(topologyReadiness?.message || (topologyReady
-              ? 'Topologi siap untuk tracing.'
-              : 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.'))}">
-            ${topologyText}
-          </span>
+      <span class="context-statuses">
+        <span class="context-readonly">
+          <span class="material-symbols-outlined" aria-hidden="true">lock</span>
+          Read-only
         </span>
-        <span class="context-metrics" aria-label="Ringkasan aset dan jalur">
-          ${assetCount} aset &middot; ${lineCount} jalur &middot; ${confirmedCount} koneksi terkonfirmasi
+        <span class="context-topology ${topologyStatus}"
+          title="${escapeHtml(topologyReadiness?.message || (topologyReady
+            ? 'Topologi siap untuk tracing.'
+            : 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.'))}">
+          ${topologyText}
         </span>
+      </span>
+      <span class="context-metrics" aria-label="Ringkasan aset dan jalur">
+        ${assetCount} aset &middot; ${lineCount} jalur &middot; ${confirmedCount} koneksi terkonfirmasi
       </span>
     </section>
   `

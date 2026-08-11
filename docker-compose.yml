@@ -1,0 +1,75 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sinergi}
+      POSTGRES_USER: ${POSTGRES_USER:-sinergi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sinergi_local_dev_password}
+    volumes:
+      - sinergi-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    environment:
+      SINERGI_DATABASE_URL: "postgresql://${POSTGRES_USER:-sinergi}:${POSTGRES_PASSWORD:-sinergi_local_dev_password}@db:5432/${POSTGRES_DB:-sinergi}"
+      SINERGI_STORAGE_MODE: postgres
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["npm", "run", "db:migrate"]
+    restart: "no"
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    environment:
+      NODE_ENV: production
+      SINERGI_HOST: 0.0.0.0
+      SINERGI_PORT: 5000
+      SINERGI_DATA_ROOT: /app/.data
+      SINERGI_STORAGE_MODE: postgres
+      SINERGI_DATABASE_URL: "postgresql://${POSTGRES_USER:-sinergi}:${POSTGRES_PASSWORD:-sinergi_local_dev_password}@db:5432/${POSTGRES_DB:-sinergi}"
+      SINERGI_AUTH_TOKENS: '${SINERGI_AUTH_TOKENS:-{"local-admin":{"id":"local-admin","role":"Administrator","name":"Local Administrator"}}}'
+    volumes:
+      - sinergi-app-data:/app/.data
+    ports:
+      - "${SINERGI_API_PORT:-5000}:5000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5000/health').then((response) => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 20
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        VITE_SINERGI_BASEMAP_TILES: ${VITE_SINERGI_BASEMAP_TILES:-}
+        VITE_SINERGI_VECTOR_TILES_URL: ${VITE_SINERGI_VECTOR_TILES_URL:-}
+        VITE_SINERGI_BASEMAP_ATTRIBUTION: ${VITE_SINERGI_BASEMAP_ATTRIBUTION:-}
+    ports:
+      - "${SINERGI_HTTP_PORT:-8080}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  sinergi-postgres-data:
+  sinergi-app-data:
+
