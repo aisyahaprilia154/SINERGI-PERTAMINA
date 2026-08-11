@@ -1,0 +1,13 @@
+.git
+.github
+.runtime
+docs
+**/node_modules
+**/dist
+**/.data
+backend/artifacts/database-backup
+*.log
+.env
+.env.*
+!.env.docker.example
+

@@ -5128,7 +5128,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .context-readonly,
 .context-topology {
   min-height: 22px;
@@ -5217,6 +5216,52 @@
   border-radius: 12px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, .12);
   z-index: 600;
+}
+
+.map-body .map-stage .basemap-status {
+  width: min(300px, calc(100% - 32px));
+  min-height: 68px;
+  max-width: 300px;
+  padding: 10px 12px;
+  gap: 4px;
+  background: #fff;
+  border-color: #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, .08);
+}
+
+.map-body .map-stage .basemap-status-overview {
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.map-body .map-stage .basemap-status-overview > .material-symbols-outlined {
+  width: 30px;
+  height: 30px;
+  color: var(--color-primary);
+  background: #f1f5f9;
+}
+
+.map-body .map-stage .basemap-status-overview small {
+  color: #64748b;
+  letter-spacing: .07em;
+}
+
+.map-body .map-stage .basemap-status-overview strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-body .map-stage .basemap-status-metrics {
+  padding-left: 38px;
+  display: block;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 1450px) and (min-width: 961px) {
@@ -5334,6 +5379,10 @@
     margin-top: 2px;
   }
 
+  .map-body .map-stage .basemap-status {
+    width: min(280px, calc(100% - 96px));
+    max-width: none;
+  }
 }
 
 /* Keep the context bar and compact action toolbar in separate safe areas
@@ -5595,7 +5644,6 @@
     flex-basis: 100%;
     margin-left: 0;
   }
-
   .mobile-map-tabs {
     min-height: 52px;
     padding: 4px;
