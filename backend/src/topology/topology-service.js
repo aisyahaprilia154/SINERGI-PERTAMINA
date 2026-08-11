@@ -46,6 +46,10 @@ export class TopologyService {
     this.config = config
     this.clock = clock
     this.candidateQueryIndexes = new Map()
+    // Bulk review rewrites a large aggregate and its indexed graph projection.
+    // Keep one such mutation in flight per dataset so a browser retry cannot
+    // multiply the 35MB+ JSONB working set until Node exhausts its heap.
+    this.activeMutationDatasetIds = new Set()
   }
 
   async regenerate(datasetVersionId, actorId, {
@@ -534,7 +538,8 @@ export class TopologyService {
       })
       : null
     try {
-      return await this.#withMutationTransaction(async ({ repository, auditLog }) => {
+      return await this.#withDatasetMutationLock(datasetVersionId, () => (
+        this.#withMutationTransaction(async ({ repository, auditLog }) => {
         const replay = await findMutationReceipt(repository, normalizedIdempotencyKey, fingerprint)
         if (replay) return replay
         const current = await repository.get(datasetVersionId)
@@ -670,7 +675,8 @@ export class TopologyService {
           candidateIds,
           auditEventId: event.id,
         })
-      })
+        })
+      ))
     } catch (error) {
       if (!normalizedIdempotencyKey || error?.code !== 'dataset_version_stale_revision') {
         throw error
@@ -1511,6 +1517,27 @@ export class TopologyService {
     ))
   }
 
+  async #withDatasetMutationLock(datasetVersionId, operation) {
+    const key = String(datasetVersionId ?? '').trim()
+    if (!key || typeof operation !== 'function') return operation()
+    if (this.activeMutationDatasetIds.has(key)) {
+      throw new AppError(
+        'Aksi topology untuk dataset ini masih diproses. Tunggu sampai selesai sebelum mencoba lagi.',
+        {
+          code: 'topology_mutation_in_progress',
+          statusCode: 409,
+          details: { datasetVersionId: key },
+        },
+      )
+    }
+    this.activeMutationDatasetIds.add(key)
+    try {
+      return await operation()
+    } finally {
+      this.activeMutationDatasetIds.delete(key)
+    }
+  }
+
   async #findCandidate(candidateId, repository = this.repository, datasetVersionId = null) {
     assertEntityId(candidateId, 'candidate')
     const records = datasetVersionId
@@ -1801,7 +1828,14 @@ function revokedRelationResponse({
 }
 
 async function findMutationReceipt(repository, key, fingerprint) {
-  if (!key || typeof repository?.list !== 'function') return null
+  if (!key) return null
+  if (typeof repository?.findTopologyMutationReceipt === 'function') {
+    const receipt = await repository.findTopologyMutationReceipt(key)
+    if (!receipt) return null
+    assertTopologyMutationFingerprint(receipt, fingerprint)
+    return structuredClone(receipt.response)
+  }
+  if (typeof repository?.list !== 'function') return null
   const records = await repository.list()
   for (const record of records) {
     const receipt = findTopologyMutationReceipt(record, key)

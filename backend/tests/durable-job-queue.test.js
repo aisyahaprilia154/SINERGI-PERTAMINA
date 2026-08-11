@@ -55,6 +55,46 @@ test('durable job survives queue lifecycle, reports progress, and deduplicates i
   }
 })
 
+test('queue survives transient database errors while polling for recovery', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-durable-poll-error-'))
+  const repository = new JsonDurableJobRepository(root)
+  const queue = new DurableJobQueue({
+    repository,
+    workerId: 'worker-poll-error',
+    pollMilliseconds: 10,
+    leaseMilliseconds: 10000,
+  })
+
+  try {
+    await queue.start()
+    const recoverExpiredLeases = repository.recoverExpiredLeases.bind(repository)
+    let failuresRemaining = 2
+    repository.recoverExpiredLeases = async (...args) => {
+      if (failuresRemaining > 0) {
+        failuresRemaining -= 1
+        throw new Error('transient database timeout')
+      }
+      return recoverExpiredLeases(...args)
+    }
+    queue.registerHandler('poll_error_recovery', async () => ({ ok: true }))
+    const created = await queue.enqueue({
+      jobType: 'poll_error_recovery',
+      datasetVersionId: 'dv-poll-error',
+      inputFingerprint: 'sha256:poll-error',
+      payload: {},
+    })
+
+    await queue.onIdle()
+
+    const completed = await repository.get(created.jobId)
+    assert.equal(completed.status, 'succeeded')
+    assert.deepEqual(completed.result, { ok: true })
+  } finally {
+    await queue.stop()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('two repository workers cannot claim the same durable job', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-durable-double-claim-'))
   const firstRepository = new JsonDurableJobRepository(root)

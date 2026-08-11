@@ -196,6 +196,45 @@ test('selected bulk confirmation confirms exactly the selected candidates atomic
   )
 })
 
+test('bulk topology mutations reject a concurrent retry for the same dataset', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  let releaseFirst
+  let firstAuditStarted
+  const auditStarted = new Promise((resolve) => {
+    firstAuditStarted = resolve
+  })
+  const firstAuditMayContinue = new Promise((resolve) => {
+    releaseFirst = resolve
+  })
+  let paused = false
+  const auditLog = new MemoryAuditLog({
+    beforeRecord: async () => {
+      if (paused) return
+      paused = true
+      firstAuditStarted()
+      await firstAuditMayContinue
+    },
+  })
+  const service = new TopologyService({ repository, auditLog })
+  const first = service.confirmAllCandidates('dv-review', 'admin-1', {
+    reason: 'Konfirmasi pertama sedang diproses.',
+  })
+  await auditStarted
+  await assert.rejects(
+    service.confirmAllCandidates('dv-review', 'admin-2', {
+      reason: 'Percobaan ulang paralel.',
+    }),
+    (error) => error.code === 'topology_mutation_in_progress'
+      && error.statusCode === 409,
+  )
+  releaseFirst()
+  const result = await first
+  assert.equal(result.affectedCount, 2)
+  assert.equal(auditLog.entries.length, 1)
+})
+
 test('line label bulk action confirms only connections read from line names', async () => {
   const bundle = lineLabelReviewBundle()
   const initial = generateRelationArtifacts(bundle)

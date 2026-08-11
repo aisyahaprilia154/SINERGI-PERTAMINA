@@ -86,6 +86,47 @@ test('records NetworkLink without fetching it', () => {
   )))
 })
 
+test('blocks unsupported feature-level overlays instead of silently omitting them', () => {
+  const output = parseKmlText(`<?xml version="1.0"?>
+    <kml><Document>
+      <PhotoOverlay><name>Field photo</name></PhotoOverlay>
+      <ScreenOverlay><name>Legend</name></ScreenOverlay>
+    </Document></kml>`)
+
+  assert.ok(output.unsupportedElements
+    .filter(({ name }) => ['PhotoOverlay', 'ScreenOverlay'].includes(name))
+    .every(({ canActivate }) => canActivate === false))
+})
+
+test('preserves features inside nested Document containers without double counting', () => {
+  const output = parseKmlText(`<?xml version="1.0"?>
+    <kml xmlns="http://www.opengis.net/kml/2.2">
+      <Document><name>Outer</name>
+        <Placemark id="outer"><name>Outer camera</name>
+          <Point><coordinates>110,-7</coordinates></Point>
+        </Placemark>
+        <Document><name>Nested document</name>
+          <Placemark id="nested"><name>Nested camera</name>
+            <Point><coordinates>111,-7</coordinates></Point>
+          </Placemark>
+          <Folder><name>Assets</name>
+            <Document>
+              <Placemark id="folder-nested"><name>Folder nested camera</name>
+                <Point><coordinates>112,-7</coordinates></Point>
+              </Placemark>
+            </Document>
+          </Folder>
+        </Document>
+      </Document>
+    </kml>`)
+
+  assert.equal(output.structure.documentCount, 3)
+  assert.equal(output.structure.placemarkCount, 3)
+  assert.deepEqual(output.placemarks.map(({ id }) => id), ['outer', 'nested'])
+  assert.deepEqual(output.folders[0].placemarks.map(({ id }) => id), ['folder-nested'])
+  assert.equal(output.coverage.placemarkCount, 3)
+})
+
 test('rejects DTD and entity declarations before XML parsing', () => {
   assert.throws(
     () => parseKmlText(`<?xml version="1.0"?>

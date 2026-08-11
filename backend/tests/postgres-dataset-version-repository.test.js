@@ -42,15 +42,24 @@ test('PostgreSQL adapter casts GeoJSON parameters before PostGIS conversion', as
     geometryId: 'geometry-1',
     sourceFeatureId: 'feature-1',
     geometryType: 'LineString',
-    coordinates: [[106, -6], [107, -6]],
+    coordinates: [[106, -6, 12], [107, -6, 13]],
   }]
   record.topologyGraph = {
     graphRevision: 'graph-1',
-    nodes: [{ id: 'node-1', location: [106, -6] }],
+    nodes: [{ id: 'node-1', location: [106, -6, 12] }],
     edges: [],
   }
 
   await repository.create(record)
+
+  const geometryParameters = pool.parameters.find(({ command }) => (
+    command.includes('INSERT INTO source_geometries')
+  ))?.values
+  assert.deepEqual(JSON.parse(geometryParameters[5]).coordinates, [[106, -6], [107, -6]])
+  const graphNodeParameters = pool.parameters.find(({ command }) => (
+    command.includes('INSERT INTO graph_nodes')
+  ))?.values
+  assert.deepEqual(JSON.parse(graphNodeParameters[7]).coordinates, [106, -6])
 
   const geometryInsert = pool.commands.find((command) => (
     command.includes('INSERT INTO source_geometries')
@@ -103,6 +112,57 @@ test('topology review updates only changed indexed topology rows', async () => {
   assert.ok(!pool.commands.some((command) => command.includes('DELETE FROM source_features')))
   assert.ok(!pool.commands.some((command) => command.includes('DELETE FROM source_geometries')))
   assert.ok(!pool.commands.some((command) => command.includes('DELETE FROM classified_objects')))
+})
+
+test('topology review supersedes the active graph before inserting its replacement', async () => {
+  const pool = new FakePool()
+  const repository = new PostgresDatasetVersionRepository(pool)
+  const record = datasetRecord('version-review-graph-order', 'active')
+  record.topologyGraph = {
+    graphRevision: 'graph-old',
+    nodes: [],
+    edges: [],
+  }
+  await repository.create(record)
+  pool.commands = []
+
+  await repository.update('version-review-graph-order', (current) => ({
+    ...current,
+    topologyGraph: {
+      ...current.topologyGraph,
+      graphRevision: 'graph-new',
+    },
+  }), {
+    expectedRevision: 0,
+    projectionMode: 'topology-review',
+  })
+
+  const supersedeIndex = pool.commands.findIndex((command) => (
+    command.includes('UPDATE graph_revisions')
+      && command.includes("status = 'superseded'")
+  ))
+  const insertIndex = pool.commands.findIndex((command) => (
+    command.includes('INSERT INTO graph_revisions')
+  ))
+  assert.notEqual(supersedeIndex, -1)
+  assert.notEqual(insertIndex, -1)
+  assert.ok(supersedeIndex < insertIndex)
+})
+
+test('PostgreSQL adapter looks up topology receipts without loading every aggregate', async () => {
+  const pool = new FakePool()
+  pool.topologyReceipt = {
+    key: 'review-key',
+    fingerprint: 'review-fingerprint',
+    response: { action: 'confirm_selected' },
+  }
+  const repository = new PostgresDatasetVersionRepository(pool)
+  const receipt = await repository.findTopologyMutationReceipt('review-key')
+  assert.deepEqual(receipt, pool.topologyReceipt)
+  assert.ok(pool.commands.some((command) => (
+    command.includes('jsonb_array_elements')
+      && command.includes("receipt->>'key'")
+  )))
 })
 
 test('PostgreSQL adapter maps missing, duplicate, and schema errors to application errors', async () => {
@@ -220,6 +280,10 @@ test('PostgreSQL adapter activates one version with a transactional active point
   assert.equal(activation.activated.datasetVersion.status, 'active')
   assert.equal(activation.pointer.datasetVersionId, 'version-new')
   assert.notEqual(activation.pointer.revision, '')
+  const advisoryLock = pool.parameters.find(({ command }) => (
+    command.includes('pg_advisory_xact_lock')
+  ))
+  assert.deepEqual(advisoryLock.values, ['dataset-1:branch-1'])
   assert.equal((await repository.get('version-old')).datasetVersion.status, 'archived')
 
   const active = await repository.resolveActiveVersion({
@@ -306,9 +370,11 @@ class FakePool {
     this.pointers = new Map()
     this.auditEvents = []
     this.commands = []
+    this.parameters = []
     this.released = 0
     this.failInsert = null
     this.failAudit = null
+    this.topologyReceipt = null
   }
 
   async query(text, values = []) {
@@ -322,6 +388,7 @@ class FakePool {
   handle(text, values, client = null) {
     const sql = text.trim().replace(/\s+/g, ' ')
     this.commands.push(text.trim())
+    this.parameters.push({ command: text.trim(), values })
     if (sql === 'BEGIN') {
       client?.begin()
       return { rows: [] }
@@ -337,6 +404,9 @@ class FakePool {
     if (sql.startsWith('SELECT payload FROM dataset_versions WHERE id = $1')) {
       const record = this.records.get(values[0])
       return { rows: record ? [{ payload: structuredClone(record) }] : [] }
+    }
+    if (sql.startsWith('SELECT receipt FROM dataset_versions')) {
+      return { rows: this.topologyReceipt ? [{ receipt: structuredClone(this.topologyReceipt) }] : [] }
     }
     if (sql === 'SELECT payload FROM dataset_versions ORDER BY id ASC') {
       return {
@@ -396,7 +466,14 @@ class FakePool {
       return { rows: [] }
     }
     if (sql.startsWith('UPDATE dataset_versions')) {
-      this.records.set(values[0], JSON.parse(values[13]))
+      const nextPayload = JSON.parse(values[13])
+      const current = this.records.get(values[0])
+      this.records.set(
+        values[0],
+        sql.includes('payload = payload ||')
+          ? { ...structuredClone(current), ...nextPayload }
+          : nextPayload,
+      )
       return { rows: [] }
     }
     if (sql.startsWith('INSERT INTO dataset_active_pointers')) {
