@@ -187,6 +187,7 @@ export async function renderMapPage(container) {
     dimOthers: true,
     search: '',
     expandedNetworkIds: new Set(),
+    focusedNetworkId: null,
     dataStatus: 'loading',
     dataError: null,
   }
@@ -310,6 +311,7 @@ export async function renderMapPage(container) {
       selectedNetworkIds: selection.selectedNetworkIds,
       expandedNetworkIds: state.expandedNetworkIds,
       search: state.search,
+      focusedNetworkId: state.focusedNetworkId,
     })
     container.querySelector('.selected-count').textContent = selection.selectedNetworkIds.size
   }
@@ -487,7 +489,7 @@ export async function renderMapPage(container) {
     })
     drawer.querySelectorAll('[data-focus-network]').forEach((button) => button.addEventListener('click', () => {
       const networkId = button.dataset.focusNetwork
-      canvasApi.focusNetworkBounds(networkId)
+      toggleNetworkFocus(networkId)
     }))
     drawer.querySelector('.open-schematic')?.addEventListener('click', openSchematic)
   }
@@ -687,6 +689,14 @@ export async function renderMapPage(container) {
     updateTraceBanner()
     renderDrawer()
     syncMap()
+  }
+
+  function toggleNetworkFocus(networkId) {
+    if (!networks.some(({ id }) => id === networkId)) return
+    state.focusedNetworkId = state.focusedNetworkId === networkId ? null : networkId
+    canvasApi.setFocusedNetworkId(state.focusedNetworkId)
+    renderNetworkList()
+    if (state.focusedNetworkId) canvasApi.focusNetworkBounds(state.focusedNetworkId)
   }
 
   async function runTraceTo(targetId, { historyMode = 'push' } = {}) {
@@ -1065,7 +1075,7 @@ export async function renderMapPage(container) {
 
     const focusButton = event.target.closest('[data-network-focus]')
     if (focusButton) {
-      canvasApi.focusNetworkBounds(focusButton.dataset.networkFocus)
+      toggleNetworkFocus(focusButton.dataset.networkFocus)
       return
     }
 

@@ -351,6 +351,26 @@
   opacity: .3;
 }
 
+/* Focus mode keeps the selected network's nodes readable while retaining
+   enough context to understand how the surrounding network is arranged. */
+.map-adaptive-asset.focus-context {
+  opacity: .42;
+}
+
+.map-adaptive-asset.network-focused {
+  z-index: 4;
+  opacity: 1;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, .98),
+    0 0 0 4px color-mix(in srgb, var(--marker-color) 68%, transparent),
+    0 5px 12px rgba(3, 12, 24, .34);
+  transform: translate(-50%, -50%) scale(1.04);
+}
+
+.map-adaptive-asset.network-focused .map-adaptive-asset-icon {
+  background: var(--marker-color);
+}
+
 .map-adaptive-cluster {
   z-index: 2;
   width: 34px;
@@ -387,6 +407,16 @@
     0 0 0 2px rgba(255, 255, 255, .96),
     0 5px 12px rgba(3, 12, 24, .28);
   transform: translate(-50%, -50%) scale(1.06);
+}
+
+.map-adaptive-cluster.network-focused {
+  color: #fff;
+  background: color-mix(in srgb, #17324d 82%, var(--marker-color, #1367d1));
+  border-color: var(--marker-color, #1367d1);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, .96),
+    0 0 0 4px color-mix(in srgb, var(--marker-color, #1367d1) 54%, transparent),
+    0 5px 12px rgba(3, 12, 24, .28);
 }
 
 .map-asset-tooltip strong {
