@@ -39,6 +39,8 @@ services:
       SINERGI_STORAGE_MODE: postgres
       SINERGI_DATABASE_URL: "postgresql://${POSTGRES_USER:-sinergi}:${POSTGRES_PASSWORD:-sinergi_local_dev_password}@db:5432/${POSTGRES_DB:-sinergi}"
       SINERGI_AUTH_TOKENS: '${SINERGI_AUTH_TOKENS:-{"local-admin":{"id":"local-admin","role":"Administrator","name":"Local Administrator"}}}'
+      SINERGI_BRANCH_IDS: "${SINERGI_BRANCH_IDS:-semarang}"
+      SINERGI_BRANCH_DATASETS: '${SINERGI_BRANCH_DATASETS:-{"semarang":"dataset-semarang"}}'
     volumes:
       - sinergi-app-data:/app/.data
     ports:
@@ -60,7 +62,7 @@ services:
       dockerfile: docker/frontend.Dockerfile
       args:
         VITE_SINERGI_BASEMAP_TILES: ${VITE_SINERGI_BASEMAP_TILES:-}
-        VITE_SINERGI_VECTOR_TILES_URL: ${VITE_SINERGI_VECTOR_TILES_URL:-}
+        VITE_SINERGI_VECTOR_TILES_URL: ${VITE_SINERGI_VECTOR_TILES_URL:-/api/basemap/openfreemap/planet}
         VITE_SINERGI_BASEMAP_ATTRIBUTION: ${VITE_SINERGI_BASEMAP_ATTRIBUTION:-}
     ports:
       - "${SINERGI_HTTP_PORT:-8080}:8080"
@@ -72,4 +74,3 @@ services:
 volumes:
   sinergi-postgres-data:
   sinergi-app-data:
-

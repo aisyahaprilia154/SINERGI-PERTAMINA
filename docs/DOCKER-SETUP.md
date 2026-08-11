@@ -20,9 +20,14 @@ Copy-Item .env.docker.example .env.docker
 docker compose --env-file .env.docker up --build -d
 ```
 
-Buka [http://localhost:8080](http://localhost:8080). API langsung tersedia di
+`SINERGI_BRANCH_IDS` dan `SINERGI_BRANCH_DATASETS` menentukan cabang yang
+tersedia pada halaman import. Contoh bawaan mendaftarkan `semarang` ke
+`dataset-semarang`; tambahkan pasangan baru di `.env.docker` bila deployment
+memiliki cabang lain.
+
+Buka [http://localhost:5173](http://localhost:5173). API langsung tersedia di
 [http://localhost:5000/health](http://localhost:5000/health), sedangkan healthcheck
-melalui frontend tersedia di [http://localhost:8080/health](http://localhost:8080/health).
+melalui frontend tersedia di [http://localhost:5173/health](http://localhost:5173/health).
 
 Perintah operasional:
 
@@ -37,4 +42,3 @@ perubahan migration, gunakan `docker compose --env-file .env.docker run --rm mig
 
 `sinergi-postgres-data` dan `sinergi-app-data` adalah named volume. Jangan menjalankan
 `docker compose down -v` kecuali memang ingin menghapus database dan file upload lokal.
-

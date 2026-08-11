@@ -172,6 +172,13 @@ export function openMapDataTransferDialog({
       return
     }
 
+    const importTarget = resolveConfiguredImportTarget(activeContext, state.config)
+    if (!importTarget?.id || !importTarget.datasetId) {
+      state.error = 'Kantor cabang aktif belum terdaftar pada konfigurasi server. Muat ulang halaman lalu coba lagi.'
+      render()
+      return
+    }
+
     state.controller?.abort()
     state.controller = new AbortController()
     state.phase = 'uploading'
@@ -183,8 +190,8 @@ export function openMapDataTransferDialog({
       const response = await uploadDataset({
         token: getDefaultAdminToken(),
         fields: {
-          branchId: activeContext.branchId,
-          datasetId: activeContext.datasetId,
+          branchId: importTarget.id,
+          datasetId: importTarget.datasetId,
           versionName: state.versionName.trim(),
           officialSourceConfirmed: true,
         },
@@ -308,6 +315,40 @@ export function openMapDataTransferDialog({
   dialog.addEventListener('click', (event) => {
     if (event.target === dialog) close()
   })
+}
+
+/**
+ * Resolve a possibly stale active-map context to the canonical branch and
+ * dataset pair advertised by the current backend configuration. Older map
+ * sessions may retain a display label (for example "Kantor Cabang Semarang")
+ * or a differently-cased branch ID; sending that value directly would make a
+ * valid import fail the server-side branch allow-list check.
+ */
+export function resolveConfiguredImportTarget(activeContext, config) {
+  const branches = Array.isArray(config?.branches) ? config.branches : []
+  const contextId = String(activeContext?.branchId ?? '').trim()
+  const exact = branches.find((branch) => String(branch?.id ?? '').trim() === contextId)
+  if (exact) return exact
+
+  const normalizedId = normalizeBranchKey(contextId)
+  const byId = normalizedId
+    ? branches.find((branch) => normalizeBranchKey(branch?.id) === normalizedId)
+    : null
+  if (byId) return byId
+
+  const normalizedName = normalizeBranchKey(activeContext?.branchName)
+  return normalizedName
+    ? branches.find((branch) => normalizeBranchKey(branch?.name) === normalizedName)
+    : null
+}
+
+function normalizeBranchKey(value) {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .trim()
+    .replace(/^kantor\s+cabang\s+/i, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
 }
 
 export function renderMapDataTransferDialog({
