@@ -339,7 +339,7 @@ export function createApp({
       }
       const bulkTopologyActionMatch = request.method === 'POST'
         ? url.pathname.match(
-          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/(confirm-all|confirm-line-labels|revoke-all)$/,
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/(confirm-all|confirm-selected|confirm-line-labels|revoke-all)$/,
         )
         : null
       if (bulkTopologyActionMatch) {
@@ -355,6 +355,7 @@ export function createApp({
         }
         const method = {
           'confirm-all': 'confirmAllCandidates',
+          'confirm-selected': 'confirmSelectedCandidates',
           'confirm-line-labels': 'confirmLineLabelCandidates',
           'revoke-all': 'revokeAllRelations',
         }[bulkTopologyActionMatch[2]]

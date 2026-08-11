@@ -90,13 +90,13 @@ export class PostgresDatasetVersionRepository {
     return this.#listWithExecutor(this.pool)
   }
 
-  async update(id, updater, { expectedRevision } = {}) {
+  async update(id, updater, { expectedRevision, projectionMode = 'full' } = {}) {
     assertSafeId(id)
     return this.#withTransaction((client) => this.#updateWithExecutor(
       client,
       id,
       updater,
-      { expectedRevision },
+      { expectedRevision, projectionMode },
     ))
   }
 
@@ -355,7 +355,10 @@ export class PostgresDatasetVersionRepository {
     return (result.rows ?? []).map(payloadFromRow)
   }
 
-  async #updateWithExecutor(executor, id, updater, { expectedRevision } = {}) {
+  async #updateWithExecutor(executor, id, updater, {
+    expectedRevision,
+    projectionMode = 'full',
+  } = {}) {
     assertSafeId(id)
     const currentResult = await executor.query(
       `${DATASET_VERSION_SELECT.trim()} FOR UPDATE`,
@@ -376,7 +379,11 @@ export class PostgresDatasetVersionRepository {
     }, id)
     try {
       await updateDatasetVersion(executor, normalized, this.clock)
-      await replaceProjections(executor, normalized)
+      if (projectionMode === 'topology-review') {
+        await replaceTopologyReviewProjections(executor, current, normalized)
+      } else {
+        await replaceProjections(executor, normalized)
+      }
     } catch (error) {
       throw mapDatabaseError(error)
     }
@@ -642,27 +649,225 @@ async function replaceProjections(client, record) {
   await insertGraphProjection(client, record)
 }
 
+/**
+ * Review mutations already carry a complete aggregate for correctness, but
+ * their indexed PostgreSQL projections only need the changed topology rows.
+ * Source features, geometries, and classified objects are immutable after
+ * import and must not be deleted/reinserted for every reviewer click.
+ */
+async function replaceTopologyReviewProjections(client, previous, record) {
+  const datasetVersionId = record.datasetVersion.id
+  const previousCandidates = new Map(asArray(previous.topologyCandidates).map((candidate) => (
+    [candidate.candidateId, candidate]
+  )))
+  const nextCandidates = new Map(asArray(record.topologyCandidates).map((candidate) => (
+    [candidate.candidateId, candidate]
+  )))
+  const previousRelations = new Map(asArray(previous.confirmedRelations).map((relation) => (
+    [relation.relationId ?? relation.id, relation]
+  )))
+  const nextRelations = new Map(asArray(record.confirmedRelations).map((relation) => (
+    [relation.relationId ?? relation.id, relation]
+  )))
+
+  for (const [relationId] of previousRelations) {
+    if (nextRelations.has(relationId)) continue
+    await client.query(
+      'DELETE FROM confirmed_relations WHERE dataset_version_id = $1 AND relation_id = $2',
+      [datasetVersionId, relationId],
+    )
+  }
+  for (const [candidateId, candidate] of nextCandidates) {
+    if (jsonValuesEqual(previousCandidates.get(candidateId), candidate)) continue
+    await upsertTopologyCandidate(client, datasetVersionId, candidate)
+  }
+  for (const [relationId, relation] of nextRelations) {
+    if (jsonValuesEqual(previousRelations.get(relationId), relation)) continue
+    await upsertConfirmedRelation(client, datasetVersionId, relation)
+  }
+  for (const [candidateId] of previousCandidates) {
+    if (nextCandidates.has(candidateId)) continue
+    await client.query(
+      'DELETE FROM topology_candidates WHERE dataset_version_id = $1 AND candidate_id = $2',
+      [datasetVersionId, candidateId],
+    )
+  }
+
+  const previousGraphRevision = previous.topologyGraph?.graphRevision
+  const nextGraphRevision = record.topologyGraph?.graphRevision
+  if (nextGraphRevision && nextGraphRevision !== previousGraphRevision) {
+    await insertGraphProjection(client, record)
+    if (previousGraphRevision) {
+      await client.query(
+        `UPDATE graph_revisions
+         SET status = 'superseded'
+         WHERE dataset_version_id = $1
+           AND revision = $2
+           AND revision <> $3`,
+        [datasetVersionId, previousGraphRevision, nextGraphRevision],
+      )
+    }
+  }
+}
+
+async function upsertTopologyCandidate(client, datasetVersionId, candidate) {
+  await client.query(
+    `INSERT INTO topology_candidates (
+       dataset_version_id, candidate_id, candidate_type, source_endpoint_id,
+       source_geometry_id, source_path_asset_id, target_asset_id,
+       target_endpoint_id, target_path_asset_id, site_id, network_family,
+       candidate_status, proposal_status, score, score_margin, evidence,
+       revision, payload
+     ) VALUES (
+       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+       $15, $16::jsonb, $17, $18::jsonb
+     )
+     ON CONFLICT (dataset_version_id, candidate_id) DO UPDATE SET
+       candidate_type = EXCLUDED.candidate_type,
+       source_endpoint_id = EXCLUDED.source_endpoint_id,
+       source_geometry_id = EXCLUDED.source_geometry_id,
+       source_path_asset_id = EXCLUDED.source_path_asset_id,
+       target_asset_id = EXCLUDED.target_asset_id,
+       target_endpoint_id = EXCLUDED.target_endpoint_id,
+       target_path_asset_id = EXCLUDED.target_path_asset_id,
+       site_id = EXCLUDED.site_id,
+       network_family = EXCLUDED.network_family,
+       candidate_status = EXCLUDED.candidate_status,
+       proposal_status = EXCLUDED.proposal_status,
+       score = EXCLUDED.score,
+       score_margin = EXCLUDED.score_margin,
+       evidence = EXCLUDED.evidence,
+       revision = EXCLUDED.revision,
+       payload = EXCLUDED.payload,
+       updated_at = now()` ,
+    [
+      datasetVersionId,
+      candidate.candidateId,
+      requiredText(candidate.candidateType, 'candidateType'),
+      candidate.sourceEndpointId ?? null,
+      candidate.sourceGeometryId ?? candidate.sourceGeometryIds?.[0] ?? null,
+      candidate.sourcePathAssetId ?? null,
+      candidate.targetAssetId ?? null,
+      candidate.targetEndpointId ?? null,
+      candidate.targetPathAssetId ?? null,
+      candidate.siteId ?? null,
+      candidate.networkFamily ?? null,
+      requiredText(candidate.candidateStatus, 'candidateStatus'),
+      requiredText(candidate.proposalStatus, 'proposalStatus'),
+      numberOrNull(candidate.score),
+      numberOrNull(candidate.scoreMargin),
+      JSON.stringify(candidate.evidence ?? []),
+      integerOrZero(candidate.revision),
+      JSON.stringify(candidate),
+    ],
+  )
+}
+
+async function upsertConfirmedRelation(client, datasetVersionId, relation) {
+  const relationId = requiredText(relation.relationId ?? relation.id, 'relationId')
+  await client.query(
+    `INSERT INTO confirmed_relations (
+       dataset_version_id, relation_id, candidate_id, source_asset_id,
+       target_asset_id, relation_type, relation_kind, direction, provenance,
+       verification_status, verified_by, verified_at, audit_event_id,
+       evidence, payload
+     ) VALUES (
+       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+       $14::jsonb, $15::jsonb
+     )
+     ON CONFLICT (dataset_version_id, relation_id) DO UPDATE SET
+       candidate_id = EXCLUDED.candidate_id,
+       source_asset_id = EXCLUDED.source_asset_id,
+       target_asset_id = EXCLUDED.target_asset_id,
+       relation_type = EXCLUDED.relation_type,
+       relation_kind = EXCLUDED.relation_kind,
+       direction = EXCLUDED.direction,
+       provenance = EXCLUDED.provenance,
+       verification_status = EXCLUDED.verification_status,
+       verified_by = EXCLUDED.verified_by,
+       verified_at = EXCLUDED.verified_at,
+       audit_event_id = EXCLUDED.audit_event_id,
+       evidence = EXCLUDED.evidence,
+       payload = EXCLUDED.payload,
+       updated_at = now()` ,
+    [
+      datasetVersionId,
+      relationId,
+      relation.candidateId ?? null,
+      requiredText(relation.sourceAssetId, 'sourceAssetId'),
+      requiredText(relation.targetAssetId, 'targetAssetId'),
+      relation.relationType ?? 'connected-to',
+      relation.relationKind ?? null,
+      relation.direction ?? 'undirected',
+      relation.provenance ?? 'unknown',
+      relation.verificationStatus ?? relation.relationStatus ?? 'confirmed',
+      relation.verifiedBy ?? null,
+      relation.verifiedAt ?? null,
+      relation.auditEventId ?? null,
+      JSON.stringify(relation.evidence ?? []),
+      JSON.stringify(relation),
+    ],
+  )
+}
+
+function jsonValuesEqual(left, right) {
+  return left === undefined && right === undefined
+    || JSON.stringify(left) === JSON.stringify(right)
+}
+
 async function insertGraphProjection(client, record) {
   const graph = record.topologyGraph
   if (!graph?.graphRevision) return
+  const status = record.datasetVersion.status === 'active' ? 'active' : 'validated'
   const revisionResult = await client.query(
     `INSERT INTO graph_revisions (
        dataset_version_id, revision, parent_revision, status, validation,
        node_count, edge_count, payload
-     ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb)
-     RETURNING graph_revision_id`,
+       ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb)
+       ON CONFLICT (dataset_version_id, revision) DO NOTHING
+       RETURNING graph_revision_id`,
     [
       record.datasetVersion.id,
       graph.graphRevision,
       record.topologyGraph.parentGraphRevision ?? null,
-      record.datasetVersion.status === 'active' ? 'active' : 'validated',
+      status,
       jsonValue(record.topologyValidation),
       asArray(graph.nodes).length,
       asArray(graph.edges).length,
       JSON.stringify(graph),
     ],
   )
-  const graphRevisionId = revisionResult.rows?.[0]?.graph_revision_id
+  let graphRevisionId = revisionResult.rows?.[0]?.graph_revision_id
+  if (graphRevisionId === undefined || graphRevisionId === null) {
+    const existing = await client.query(
+      `SELECT graph_revision_id
+       FROM graph_revisions
+       WHERE dataset_version_id = $1 AND revision = $2`,
+      [record.datasetVersion.id, graph.graphRevision],
+    )
+    graphRevisionId = existing.rows?.[0]?.graph_revision_id
+    if (graphRevisionId !== undefined && graphRevisionId !== null) {
+      await client.query(
+        `UPDATE graph_revisions
+         SET status = $3,
+             validation = $4::jsonb,
+             node_count = $5,
+             edge_count = $6,
+             payload = $7::jsonb
+         WHERE graph_revision_id = $1 AND dataset_version_id = $2`,
+        [
+          graphRevisionId,
+          record.datasetVersion.id,
+          status,
+          jsonValue(record.topologyValidation),
+          asArray(graph.nodes).length,
+          asArray(graph.edges).length,
+          JSON.stringify(graph),
+        ],
+      )
+      return graphRevisionId
+    }
+  }
   if (graphRevisionId === undefined || graphRevisionId === null) {
     throw new Error('PostgreSQL tidak mengembalikan graph_revision_id.')
   }

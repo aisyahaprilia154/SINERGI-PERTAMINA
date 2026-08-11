@@ -157,6 +157,45 @@ test('bulk confirmation excludes ambiguous alternatives', async () => {
   )
 })
 
+test('selected bulk confirmation confirms exactly the selected candidates atomically', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const auditLog = new MemoryAuditLog()
+  const service = new TopologyService({ repository, auditLog })
+  const selected = initial.candidates
+    .filter(({ candidateStatus }) => candidateStatus === 'candidate')
+    .slice(0, 2)
+  const selectedIds = new Set(selected.map(({ candidateId }) => candidateId))
+
+  assert.equal(selected.length, 2)
+  const result = await service.confirmSelectedCandidates('dv-review', 'admin-1', {
+    candidateIds: [...selectedIds],
+    reason: 'Dua koneksi terpilih sudah diverifikasi bersama.',
+  })
+
+  assert.equal(result.action, 'confirm_selected')
+  assert.equal(result.affectedCount, 2)
+  assert.deepEqual(new Set(result.candidateIds), selectedIds)
+  const record = await repository.get('dv-review')
+  assert.equal(
+    record.topologyCandidates.filter(({ candidateId, candidateStatus }) => (
+      selectedIds.has(candidateId) && candidateStatus === 'confirmed'
+    )).length,
+    2,
+  )
+  assert.equal(
+    record.topologyCandidates.filter(({ candidateId, candidateStatus }) => (
+      !selectedIds.has(candidateId) && candidateStatus === 'confirmed'
+    )).length,
+    0,
+  )
+  assert.deepEqual(
+    auditLog.entries.map(({ event }) => event),
+    ['topology.candidates_selected_bulk_confirmed'],
+  )
+})
+
 test('line label bulk action confirms only connections read from line names', async () => {
   const bundle = lineLabelReviewBundle()
   const initial = generateRelationArtifacts(bundle)
