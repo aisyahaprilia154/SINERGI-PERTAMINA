@@ -136,11 +136,11 @@ test('MapLibre basemap is environment-configured and operational data is fail-sa
   assert.match(surfaceSource, /class="map-primary-controls"/)
   assert.match(surfaceSource, /class="map-secondary-controls"/)
   assert.match(surfaceSource, /class="map-info-overlays"/)
-  assert.match(surfaceSource, /class="map-sr-only basemap-status loading"/)
-  assert.doesNotMatch(surfaceSource, /basemap-status-overview/)
-  assert.doesNotMatch(surfaceSource, /basemap-status-metrics/)
-  assert.doesNotMatch(surfaceSource, /class="map-attribution"/)
-  assert.doesNotMatch(mapPageSource, /account_tree<\/span>Topologi Cabang/)
+  assert.match(surfaceSource, /class="basemap-status loading"/)
+  assert.match(surfaceSource, /basemap-status-overview/)
+  assert.match(surfaceSource, /basemap-status-metrics/)
+  assert.match(surfaceSource, /class="map-attribution"/)
+  assert.match(mapPageSource, /account_tree<\/span>Topologi Cabang/)
 })
 
 test('fallback and vector basemap styles are valid and use a visible neutral canvas', () => {
