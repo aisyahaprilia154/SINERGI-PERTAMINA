@@ -1317,6 +1317,12 @@ export function bindUserAccountMenu() {
       return
     }
 
+    if (target?.closest?.('[data-user-account-logout]')) {
+      closeUserAccountMenus()
+      window.location.assign('/')
+      return
+    }
+
     if (target?.closest?.('[data-user-account-item]')) {
       closeUserAccountMenus()
       return
@@ -1619,7 +1625,8 @@ export function renderTopNavigation(activeView = 'map', context = null) {
             </div>
             <div class="user-menu-dropdown-divider" role="presentation"></div>
             <div class="user-menu-dropdown-items user-menu-dropdown-items-last">
-              <button class="user-menu-dropdown-item" data-user-account-item type="button" role="menuitem">
+              <button class="user-menu-dropdown-item" data-user-account-item data-user-account-logout
+                type="button" role="menuitem">
                 <span class="material-symbols-outlined" aria-hidden="true">logout</span>
                 <span>Keluar</span>
               </button>
