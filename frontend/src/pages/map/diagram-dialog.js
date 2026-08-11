@@ -32,6 +32,16 @@ export function openSchematicDialog({
             <span><strong>Seluruh aset</strong><small>Semua aset pada area aktif</small></span>
           </button>
           <button class="schematic-mode-option" type="button" role="tab"
+            data-schematic-mode="full-map" aria-selected="false">
+            <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
+            <span><strong>Topologi jaringan</strong><small>Relasi terkonfirmasi pada area aktif</small></span>
+          </button>
+          <button class="schematic-mode-option" type="button" role="tab"
+            data-schematic-mode="trace" aria-selected="false">
+            <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>
+            <span><strong>Tracing aktif</strong><small>Hanya hasil tracing yang sedang dipilih</small></span>
+          </button>
+          <button class="schematic-mode-option" type="button" role="tab"
             data-schematic-mode="selected" aria-selected="false"
             ${selectedAssetId ? '' : 'disabled title="Pilih satu aset pada peta untuk melihat relasinya."'}>
             <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>
@@ -117,7 +127,9 @@ function bindDialogEvents({
   )
   let currentMode = initialMode === 'selected' && selectedAssetId && diagrams.selected
     ? 'selected'
-    : 'all-assets'
+    : initialMode === 'trace' && diagrams.trace
+      ? 'trace'
+      : 'all-assets'
   let currentSelectedAssetId = selectedAssetId
   let zoom = 1
 

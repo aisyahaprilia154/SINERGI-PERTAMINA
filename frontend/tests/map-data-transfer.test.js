@@ -115,6 +115,7 @@ test('map context and toolbar present compact professional map actions', () => {
   assert.match(controls, /aria-label="Import" title="Import data peta"/)
   assert.match(controls, /upload_file/)
   assert.match(controls, />Import</)
+  assert.match(controls, />Export</)
   assert.match(controls, />Tracing</)
   assert.match(controls, />Diagram 2D</)
   assert.match(controls, />Lainnya</)
@@ -132,6 +133,8 @@ test('map context and toolbar present compact professional map actions', () => {
   assert.ok(controls.indexOf('trace-toggle') < controls.indexOf('diagram-toggle'))
   assert.ok(controls.indexOf('diagram-toggle') < controls.indexOf('import-toggle'))
   assert.ok(controls.indexOf('import-toggle') < controls.indexOf('map-more-menu'))
+  assert.ok(controls.indexOf('diagram-toggle') < controls.indexOf('export-toggle'))
+  assert.ok(controls.indexOf('export-toggle') < controls.indexOf('map-more-menu'))
 })
 
 test('map disables unavailable tracing and displays an Indonesian readiness status', () => {
