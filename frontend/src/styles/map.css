@@ -2423,7 +2423,8 @@
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);
-  transition: right 200ms ease, transform 200ms ease, opacity 150ms ease;
+  transition: right 200ms ease, transform 200ms ease, opacity 150ms ease,
+    visibility 0s linear 150ms;
 }
 
 .sidebar-collapse,
@@ -2558,6 +2559,17 @@
 .map-workspace.drawer-open .map-floating-top,
 .map-workspace.drawer-open .map-floating-bottom {
   right: calc(var(--map-drawer-width) + var(--space-4) + var(--map-control-gap));
+}
+
+/* The detail drawer exposes the asset actions again, so keep the map action
+   toolbar mounted but remove it from the visual and hit-test layers. The
+   toolbar is absolutely positioned, therefore this does not reserve space
+   or move the map controls when the drawer opens and closes. */
+.map-workspace.drawer-open .map-floating-top {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
 }
 
 .map-workspace.drawer-open .map-action-group .tool-button span:not(.material-symbols-outlined) {
