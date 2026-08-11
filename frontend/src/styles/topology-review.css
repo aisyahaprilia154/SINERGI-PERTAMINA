@@ -304,6 +304,38 @@
   white-space: nowrap;
 }
 
+.queue-selection-control {
+  min-height: 30px;
+  padding-top: 8px;
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 7px;
+  color: var(--color-text-secondary);
+  border-top: 1px solid var(--color-divider);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.queue-selection-control input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--color-primary);
+}
+
+.queue-selection-control span {
+  flex: 1;
+  overflow: visible;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.queue-selection-control strong {
+  color: var(--color-primary);
+  font-size: 9px;
+}
+
 .queue-filters {
   padding: 11px 12px 10px;
   display: grid;
@@ -456,10 +488,44 @@
   overflow-y: auto;
 }
 
+.candidate-card-row {
+  min-width: 0;
+  margin-bottom: 6px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: stretch;
+  gap: 5px;
+}
+
+.candidate-select-control {
+  min-height: 86px;
+  display: grid;
+  place-items: center;
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.candidate-select-control input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+.candidate-select-control.disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+
+.candidate-select-control.disabled input {
+  cursor: not-allowed;
+}
+
 .candidate-card {
   width: 100%;
   min-height: 86px;
-  margin-bottom: 6px;
+  margin-bottom: 0;
   padding: 10px;
   position: relative;
   display: grid;
@@ -484,6 +550,15 @@
   background: #f2f7fc;
   border-color: #5d83ab;
   box-shadow: inset 3px 0 #315f91;
+}
+
+.candidate-card-row.selection-selected .candidate-card {
+  border-color: #82b6a4;
+  box-shadow: inset 3px 0 #2a8a68;
+}
+
+.candidate-card-row.selection-selected .candidate-select-control {
+  color: #2a8a68;
 }
 
 .candidate-card > strong {

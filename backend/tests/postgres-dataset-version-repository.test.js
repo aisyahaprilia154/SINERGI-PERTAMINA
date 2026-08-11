@@ -65,6 +65,46 @@ test('PostgreSQL adapter casts GeoJSON parameters before PostGIS conversion', as
   assert.match(graphNodeInsert, /ST_GeomFromGeoJSON\(\$8::text\)/)
 })
 
+test('topology review updates only changed indexed topology rows', async () => {
+  const pool = new FakePool()
+  const repository = new PostgresDatasetVersionRepository(pool)
+  const record = datasetRecord('version-review-projection')
+  record.sourceFeatures = [{ sourceFeatureId: 'feature-1' }]
+  record.topologyCandidates = [{
+    candidateId: 'candidate-1',
+    candidateType: 'endpoint_device',
+    candidateStatus: 'candidate',
+    proposalStatus: 'candidate',
+    score: 0.9,
+    scoreMargin: 0.2,
+    evidence: [],
+    revision: 0,
+  }]
+  await repository.create(record)
+  pool.commands = []
+
+  const updated = await repository.update('version-review-projection', (current) => ({
+    ...current,
+    topologyCandidates: [{
+      ...current.topologyCandidates[0],
+      candidateStatus: 'confirmed',
+      proposalStatus: 'confirmed_by_admin',
+    }],
+  }), {
+    expectedRevision: 0,
+    projectionMode: 'topology-review',
+  })
+
+  assert.equal(updated.topologyCandidates[0].candidateStatus, 'confirmed')
+  assert.ok(pool.commands.some((command) => (
+    command.includes('INSERT INTO topology_candidates')
+      && command.includes('ON CONFLICT (dataset_version_id, candidate_id)')
+  )))
+  assert.ok(!pool.commands.some((command) => command.includes('DELETE FROM source_features')))
+  assert.ok(!pool.commands.some((command) => command.includes('DELETE FROM source_geometries')))
+  assert.ok(!pool.commands.some((command) => command.includes('DELETE FROM classified_objects')))
+})
+
 test('PostgreSQL adapter maps missing, duplicate, and schema errors to application errors', async () => {
   const pool = new FakePool()
   const repository = new PostgresDatasetVersionRepository(pool)

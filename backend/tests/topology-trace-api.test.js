@@ -187,3 +187,64 @@ test('line label bulk topology API forwards the dedicated confirmation action', 
     },
   ]])
 })
+
+test('selected bulk topology API forwards candidate IDs and review snapshot', async (t) => {
+  const calls = []
+  const app = createApp({
+    authenticator: {
+      authenticate() {
+        return { id: 'admin-1', role: 'Administrator' }
+      },
+    },
+    topologyService: {
+      async confirmSelectedCandidates(...args) {
+        calls.push(args)
+        return {
+          action: 'confirm_selected',
+          affectedCount: 2,
+        }
+      },
+    },
+  })
+  await new Promise((resolve, reject) => {
+    app.once('error', reject)
+    app.listen(0, '127.0.0.1', resolve)
+  })
+  t.after(() => app.close())
+
+  const address = app.address()
+  const requestBody = {
+    candidateIds: ['candidate:aaaaaaaaaaaaaaaaaaaaaaaa', 'candidate:bbbbbbbbbbbbbbbbbbbbbbbb'],
+    reason: 'Pilihan koneksi sudah diverifikasi bersama.',
+    expectedGraphRevision: 4,
+    expectedCandidateRevision: 7,
+  }
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/api/dataset-versions/dv-1/topology/confirm-selected`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer admin',
+        'content-type': 'application/json',
+        'idempotency-key': 'selected-bulk-api-2026-08-10-001',
+        'x-correlation-id': 'selected-bulk-api-test',
+      },
+      body: JSON.stringify(requestBody),
+    },
+  )
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), {
+    action: 'confirm_selected',
+    affectedCount: 2,
+  })
+  assert.deepEqual(calls, [[
+    'dv-1',
+    'admin-1',
+    {
+      ...requestBody,
+      idempotencyKey: 'selected-bulk-api-2026-08-10-001',
+      correlationId: 'selected-bulk-api-test',
+    },
+  ]])
+})

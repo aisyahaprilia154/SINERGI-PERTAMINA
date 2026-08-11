@@ -114,6 +114,39 @@ export async function loadAllTopologyCandidates({
   limit = 500,
 } = {}) {
   if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
+  let pageLimit = limit
+  while (true) {
+    try {
+      return await loadAllTopologyCandidatesAtLimit({
+        datasetVersionId,
+        status,
+        site,
+        networkFamily,
+        minScore,
+        token,
+        signal,
+        apiBase,
+        limit: pageLimit,
+      })
+    } catch (error) {
+      const nextLimit = smallerCandidatePageLimit(error, pageLimit)
+      if (nextLimit === null) throw error
+      pageLimit = nextLimit
+    }
+  }
+}
+
+async function loadAllTopologyCandidatesAtLimit({
+  datasetVersionId,
+  status,
+  site,
+  networkFamily,
+  minScore,
+  token,
+  signal,
+  apiBase,
+  limit,
+}) {
   let cursor = null
   let firstPage = null
   const items = []
@@ -155,6 +188,13 @@ export async function loadAllTopologyCandidates({
       total: items.length,
     },
   }
+}
+
+function smallerCandidatePageLimit(error, limit) {
+  if (error?.code !== 'topology_candidate_response_too_large') return null
+  const currentLimit = Number(limit)
+  if (!Number.isInteger(currentLimit) || currentLimit <= 1) return null
+  return Math.max(1, Math.floor(currentLimit / 2))
 }
 
 export async function traceTopology({
@@ -228,6 +268,7 @@ export async function reviewTopologyCandidate({
 export async function reviewTopologyBulk({
   datasetVersionId,
   action,
+  candidateIds,
   reason,
   expectedGraphRevision,
   expectedCandidateRevision,
@@ -236,8 +277,11 @@ export async function reviewTopologyBulk({
   apiBase = '',
 } = {}) {
   if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
-  if (!['confirm-all', 'confirm-line-labels', 'revoke-all'].includes(action)) {
+  if (!['confirm-all', 'confirm-selected', 'confirm-line-labels', 'revoke-all'].includes(action)) {
     throw new TypeError('Action bulk topology tidak valid.')
+  }
+  if (action === 'confirm-selected' && (!Array.isArray(candidateIds) || candidateIds.length === 0)) {
+    throw new TypeError('Minimal satu candidate harus dipilih.')
   }
   return topologyRequest(
     `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
@@ -246,11 +290,12 @@ export async function reviewTopologyBulk({
       token,
       signal,
       method: 'POST',
-       body: {
-         reason: String(reason ?? '').trim() || undefined,
-         ...(expectedGraphRevision !== undefined ? { expectedGraphRevision } : {}),
-         ...(expectedCandidateRevision !== undefined ? { expectedCandidateRevision } : {}),
-       },
+      body: {
+        reason: String(reason ?? '').trim() || undefined,
+        ...(action === 'confirm-selected' ? { candidateIds } : {}),
+        ...(expectedGraphRevision !== undefined ? { expectedGraphRevision } : {}),
+        ...(expectedCandidateRevision !== undefined ? { expectedCandidateRevision } : {}),
+      },
     },
   )
 }
