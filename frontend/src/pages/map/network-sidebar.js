@@ -13,6 +13,10 @@ export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, 
   const confirmedCount = Number(topologySummary.confirmedConnectionCount) || 0
   const pendingCount = Number(topologySummary.pendingConnectionCount) || 0
   const isolatedCount = Number(topologySummary.isolatedAssetCount) || 0
+  const totalNetworkCount = Number(counts.networkCount) || 0
+  const normalizedSelectedCount = Number(selectedCount) || 0
+  const showAllActive = totalNetworkCount > 0 && normalizedSelectedCount === totalNetworkCount
+  const hideAllActive = totalNetworkCount > 0 && normalizedSelectedCount === 0
   const canReviewTopology = topologyReadiness?.capabilities?.reviewTopology === true
   const reviewQuery = new URLSearchParams({
     datasetId: activeContext.datasetId,
@@ -86,9 +90,11 @@ export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, 
             <span><strong class="selected-count">${selectedCount}</strong> jaringan ditampilkan</span>
           </div>
           <div class="selection-actions" aria-label="Aksi pilihan jaringan">
-            <button class="text-button show-all-networks" type="button">Tampilkan semua</button>
+            <button class="text-button show-all-networks${showAllActive ? ' active' : ''}" type="button"
+              aria-pressed="${showAllActive}">Tampilkan semua</button>
             <span aria-hidden="true"></span>
-            <button class="text-button hide-all-networks" type="button">Sembunyikan semua</button>
+            <button class="text-button hide-all-networks${hideAllActive ? ' active' : ''}" type="button"
+              aria-pressed="${hideAllActive}">Sembunyikan semua</button>
           </div>
         </div>
 
