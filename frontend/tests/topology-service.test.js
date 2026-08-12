@@ -279,6 +279,44 @@ test('manual topology relation sends the selected device pair and audit reason',
   }
 })
 
+test('manual topology relation forwards optional graph evidence references', async () => {
+  const originalFetch = globalThis.fetch
+  let request
+  globalThis.fetch = async (url, options) => {
+    request = { url, options }
+    return new Response(JSON.stringify({ relation: {} }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    await createTopologyRelation({
+      datasetVersionId: 'dv-1',
+      sourceAssetId: 'asset-a',
+      targetAssetId: 'asset-b',
+      relationKind: 'service_link',
+      pathAssetIds: ['FO-01'],
+      sourceGeometryIds: ['geometry:fo-01'],
+      evidenceRefs: ['document:network-plan:page-3'],
+      reason: 'Diverifikasi dari dokumentasi resmi.',
+      token: 'admin',
+    })
+    assert.deepEqual(JSON.parse(request.options.body), {
+      sourceAssetId: 'asset-a',
+      targetAssetId: 'asset-b',
+      relationType: 'connected-to',
+      relationKind: 'service_link',
+      direction: 'undirected',
+      pathAssetIds: ['FO-01'],
+      sourceGeometryIds: ['geometry:fo-01'],
+      reason: 'Diverifikasi dari dokumentasi resmi.',
+      evidenceRefs: ['document:network-plan:page-3'],
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('authoritative trace request includes source, target, direction, and graph revision', async () => {
   const originalFetch = globalThis.fetch
   let request

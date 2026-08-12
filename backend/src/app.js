@@ -356,6 +356,21 @@ export function createApp({
           await topologyService.trace(topologyTraceMatch[1], body, user.id, correlationId),
         )
       }
+      const topologyReviewPreviewMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/review-preview$/,
+        )
+        : null
+      if (topologyReviewPreviewMatch) {
+        requireAdministrator(request, authenticator)
+        assertTopologyService(topologyService)
+        const body = await readJsonBody(request)
+        return sendJson(
+          response,
+          200,
+          await topologyService.reviewPreview(topologyReviewPreviewMatch[1], body),
+        )
+      }
       const regenerateTopologyMatch = request.method === 'POST'
         ? url.pathname.match(
           /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/regenerate$/,
@@ -1462,7 +1477,14 @@ function candidateQueryFromUrl(searchParams) {
     status: searchParams.get('status'),
     site: searchParams.get('site'),
     networkFamily: searchParams.get('networkFamily'),
+    candidateType: searchParams.get('candidateType'),
+    proposalStatus: searchParams.get('proposalStatus'),
     minScore: searchParams.get('minScore'),
+    maxScore: searchParams.get('maxScore'),
+    minDistance: searchParams.get('minDistance'),
+    maxDistance: searchParams.get('maxDistance'),
+    assetSearch: searchParams.get('assetSearch') ?? searchParams.get('q'),
+    requiredTopologyOnly: searchParams.get('requiredTopologyOnly'),
     cursor: searchParams.get('cursor'),
     limit: searchParams.get('limit'),
   }

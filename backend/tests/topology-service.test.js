@@ -146,7 +146,9 @@ test('bulk confirmation excludes ambiguous alternatives', async () => {
     auditLog: new MemoryAuditLog(),
   })
 
-  const result = await service.confirmAllCandidates('dv-review', 'admin-1')
+  const result = await service.confirmAllCandidates('dv-review', 'admin-1', {
+    reason: 'Kandidat recommended telah diverifikasi oleh reviewer.',
+  })
   const record = await repository.get('dv-review')
   assert.equal(result.affectedCount, 1)
   assert.equal(
@@ -154,6 +156,64 @@ test('bulk confirmation excludes ambiguous alternatives', async () => {
       candidateStatus === 'ambiguous'
     )).length,
     2,
+  )
+})
+
+test('bulk review preview predicts graph changes and rejects endpoint conflicts', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const service = new TopologyService({
+    repository,
+    auditLog: new MemoryAuditLog(),
+  })
+  const recommended = initial.candidates
+    .filter(({ candidateStatus, proposalStatus }) => (
+      candidateStatus === 'candidate' && proposalStatus === 'recommended'
+    ))
+    .map(({ candidateId }) => candidateId)
+  const snapshot = await service.getSummary('dv-review')
+  const preview = await service.reviewPreview('dv-review', {
+    candidateIds: recommended,
+    expectedGraphRevision: snapshot.graphRevision,
+    expectedCandidateRevision: snapshot.candidateRevision,
+  })
+  assert.equal(preview.safeToApply, true)
+  assert.equal(preview.predictedSummary.confirmedRelationDelta, 2)
+  assert.equal(preview.predictedSummary.componentCountAfter, 1)
+  assert.equal(preview.validationPreview.summary.errors, 0)
+
+  const conflictBundle = reviewBundle({ secondNode: true })
+  const conflictArtifacts = generateRelationArtifacts(conflictBundle)
+  const conflictCandidates = conflictArtifacts.candidates
+    .filter(({ candidateType }) => candidateType === 'endpoint_device')
+  assert.ok(conflictCandidates.length >= 2)
+  const conflictRecord = applyArtifacts(baseRecord(conflictBundle), conflictArtifacts)
+  const conflictIds = conflictCandidates.slice(0, 2).map(({ candidateId }) => candidateId)
+  conflictRecord.topologyCandidates = conflictRecord.topologyCandidates.map((candidate) => (
+    conflictIds.includes(candidate.candidateId)
+      ? { ...candidate, candidateStatus: 'candidate', proposalStatus: 'recommended' }
+      : candidate
+  ))
+  const conflictRepository = new MemoryRepository([conflictRecord])
+  const conflictService = new TopologyService({
+    repository: conflictRepository,
+    auditLog: new MemoryAuditLog(),
+  })
+  const conflictPreview = await conflictService.reviewPreview('dv-review', {
+    candidateIds: conflictIds,
+  })
+  assert.equal(conflictPreview.safeToApply, false)
+  assert.ok(conflictPreview.ineligible.length === 0)
+  assert.ok(conflictPreview.validationPreview.issues.some(({ issueCode }) => (
+    issueCode === 'endpoint_conflict'
+  )))
+  await assert.rejects(
+    conflictService.confirmSelectedCandidates('dv-review', 'admin-1', {
+      candidateIds: conflictIds,
+      reason: 'Konflik endpoint harus ditolak oleh safe batch gate.',
+    }),
+    (error) => error.code === 'topology_bulk_review_not_safe',
   )
 })
 
@@ -464,6 +524,45 @@ test('manual device relation is audited, materialized, and retained across regen
       reason: 'Percobaan relasi duplikat.',
     }),
     (error) => error.code === 'topology_manual_relation_exists',
+  )
+})
+
+test('manual relation preserves path and geometry evidence through the graph projection', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle, {
+    config: { autoConfirmExplicitMetadata: false },
+  })
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const service = new TopologyService({
+    repository,
+    auditLog: new MemoryAuditLog(),
+    config: { autoConfirmExplicitMetadata: false },
+  })
+
+  const created = await service.createDeviceRelation('dv-review', 'admin-1', {
+    sourceAssetId: 'CAM-01',
+    targetAssetId: 'CAM-END',
+    relationKind: 'service_link',
+    pathAssetIds: ['CBL-01'],
+    sourceGeometryIds: ['geometry:CBL-01'],
+    evidenceRefs: ['document:network-plan:page-3'],
+    reason: 'Diverifikasi dari dokumentasi jaringan resmi.',
+  })
+
+  assert.equal(created.relation.relationKind, 'service_link')
+  assert.deepEqual(created.relation.pathAssetIds, ['CBL-01'])
+  assert.deepEqual(created.relation.sourceGeometryIds, ['geometry:CBL-01'])
+  assert.deepEqual(created.relation.evidenceRefs, ['document:network-plan:page-3'])
+  assert.equal(created.graph.edges[0].relationKind, 'service_link')
+  assert.deepEqual(created.graph.edges[0].pathAssetIds, ['CBL-01'])
+  await assert.rejects(
+    service.createDeviceRelation('dv-review', 'admin-1', {
+      sourceAssetId: 'CAM-01',
+      targetAssetId: 'CAM-END',
+      pathAssetIds: ['CBL-MISSING'],
+      reason: 'Referensi path tidak valid.',
+    }),
+    (error) => error.code === 'topology_manual_relation_path_not_found',
   )
 })
 

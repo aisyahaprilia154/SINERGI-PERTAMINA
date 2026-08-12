@@ -58,6 +58,58 @@ test('topology trace API authenticates a viewer and forwards the graph revision 
   assert.deepEqual(calls, [['dv-1', requestBody, 'viewer-1', 'trace-api-test']])
 })
 
+test('topology review preview API is administrator-only and forwards the snapshot', async (t) => {
+  const calls = []
+  const app = createApp({
+    authenticator: {
+      authenticate() {
+        return { id: 'admin-1', role: 'Administrator' }
+      },
+    },
+    topologyService: {
+      async reviewPreview(...args) {
+        calls.push(args)
+        return {
+          datasetVersionId: args[0],
+          candidateIds: args[1].candidateIds,
+          safeToApply: true,
+        }
+      },
+    },
+  })
+  await new Promise((resolve, reject) => {
+    app.once('error', reject)
+    app.listen(0, '127.0.0.1', resolve)
+  })
+  t.after(() => app.close())
+
+  const address = app.address()
+  const requestBody = {
+    candidateIds: ['candidate:a', 'candidate:b'],
+    expectedGraphRevision: 'topology-graph:abc',
+    expectedCandidateRevision: 'topology-candidates:def',
+  }
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/api/dataset-versions/dv-1/topology/review-preview`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer admin',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    },
+  )
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), {
+    datasetVersionId: 'dv-1',
+    candidateIds: requestBody.candidateIds,
+    safeToApply: true,
+  })
+  assert.deepEqual(calls, [['dv-1', requestBody]])
+})
+
 test('manual topology relation API is administrator-only and forwards device references', async (t) => {
   const calls = []
   const app = createApp({

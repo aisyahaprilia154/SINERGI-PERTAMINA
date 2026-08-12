@@ -82,7 +82,9 @@ export function generateRelationArtifacts(topologyInputBundle, {
   candidates.forEach((candidate) => {
     candidate.datasetVersionId = bundle.datasetVersion.id
   })
-  reconcilePreviousDecisions(candidates, previousCandidates)
+  const reopenedReviewHistory = reconcilePreviousDecisions(candidates, previousCandidates, {
+    generatedAt,
+  })
   applyCapacityConstraints(candidates, nodes, settings, eligibilityIssues, accuracyGate)
 
   const confirmedRelations = buildConfirmedRelations({
@@ -117,6 +119,8 @@ export function generateRelationArtifacts(topologyInputBundle, {
   })
   const readiness = evaluateTopologyReadiness({
     bundle,
+    nodes,
+    paths,
     candidates,
     confirmedRelations,
     validation,
@@ -142,6 +146,7 @@ export function generateRelationArtifacts(topologyInputBundle, {
     unresolved,
     summary,
     readiness,
+    reopenedReviewHistory,
   }
 }
 
@@ -211,6 +216,8 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
   })
   const readiness = evaluateTopologyReadiness({
     bundle,
+    nodes,
+    paths,
     candidates: normalizedCandidates,
     confirmedRelations,
     validation,
@@ -494,11 +501,6 @@ export function normalizeAndValidateBundle(input) {
           expectedSiteId: site,
         })
       }
-      if (!record.networkFamily || record.networkFamily === 'unknown') {
-        throw invalidBundle(`${kind} memiliki network family yang tidak eligible.`, {
-          sourceFeatureId: record.sourceFeatureId,
-        })
-      }
       asArray(record.geometryIds).forEach((geometryId) => {
         const geometry = geometryById.get(geometryId)
         if (!geometry) {
@@ -580,10 +582,56 @@ function validateIdentityAliases(objects) {
   })
 }
 
+function topologyObjectEligibility(object) {
+  const identityStatus = String(
+    object.identityStatus ?? object.identityResolutionStatus ?? '',
+  ).trim().toLowerCase()
+  const stableIdentity = Boolean(readString(object.stableAssetId))
+    || ['stable', 'stable_explicit', 'stable_registry'].includes(identityStatus)
+    || (object.identityStatus === undefined && Boolean(readString(object.assetId)))
+  if (!stableIdentity || ['onboarding', 'onboarding_candidate', 'conflict'].includes(identityStatus)) {
+    return {
+      code: 'missing_stable_asset_id',
+      message: `Object ${object.sourceFeatureId ?? 'unknown'} belum memiliki stable Asset ID.`,
+    }
+  }
+  if (object.sourceStatus === 'retired') {
+    return {
+      code: 'retired_topology_object',
+      message: `Object ${object.sourceFeatureId ?? 'unknown'} berstatus retired.`,
+    }
+  }
+  if (!readString(object.siteId)) {
+    return {
+      code: 'missing_topology_site',
+      message: `Object ${object.sourceFeatureId ?? 'unknown'} belum memiliki site.`,
+    }
+  }
+  if (!readString(object.networkFamily) || object.networkFamily === 'unknown') {
+    return {
+      code: 'unknown_network_family',
+      message: `Object ${object.sourceFeatureId ?? 'unknown'} belum memiliki network family.`,
+    }
+  }
+  return null
+}
+
 function prepareNodes(bundle, issues) {
   const geometryById = new Map(bundle.geometries.map((geometry) => [geometry.geometryId, geometry]))
   return bundle.classifiedNodes.flatMap((object) => {
     const identity = objectIdentity(object)
+    const eligibility = topologyObjectEligibility(object)
+    if (eligibility) {
+      issues.push(topologyIssue(bundle, {
+        severity: 'error',
+        issueCode: eligibility.code,
+        scope: 'eligibility',
+        message: eligibility.message,
+        entityReference: object.sourceFeatureId,
+        readinessImpact: 'blocking',
+      }))
+      return []
+    }
     const geometries = asArray(object.geometryIds)
       .map((id) => geometryById.get(id))
       .filter(Boolean)
@@ -613,6 +661,8 @@ function prepareNodes(bundle, issues) {
       identityAliases: structuredClone(object.identityAliases ?? {}),
       sourceFeatureId: object.sourceFeatureId,
       siteId: object.siteId,
+      sourceStatus: object.sourceStatus ?? 'unknown',
+      topologyRequired: object.topologyRequired === true,
       sourceName: object.sourceName ?? null,
       sourceFolderPath: object.sourceFolderPath ?? null,
       networkFamily: object.networkFamily,
@@ -621,6 +671,8 @@ function prepareNodes(bundle, issues) {
       category: object.category ?? 'unknown',
       coordinate: cloneCoordinate(point.coordinates),
       geometryId: point.geometryId,
+      geometryFingerprint: point.geometryFingerprint
+        ?? coordinateSequenceKey([point.coordinates]),
       classificationEvidence: structuredClone(object.classificationEvidence ?? []),
       sourceContext: evidenceContext(object.classificationEvidence),
     }]
@@ -631,6 +683,18 @@ function preparePaths(bundle, issues, lineworkIssues) {
   const geometryById = new Map(bundle.geometries.map((geometry) => [geometry.geometryId, geometry]))
   return bundle.classifiedPaths.flatMap((object) => {
     const identity = objectIdentity(object)
+    const eligibility = topologyObjectEligibility(object)
+    if (eligibility) {
+      issues.push(topologyIssue(bundle, {
+        severity: 'error',
+        issueCode: eligibility.code,
+        scope: 'eligibility',
+        message: eligibility.message,
+        entityReference: object.sourceFeatureId,
+        readinessImpact: 'blocking',
+      }))
+      return []
+    }
     const validLines = asArray(object.geometryIds)
       .map((id) => geometryById.get(id))
       .filter((geometry) => (
@@ -680,6 +744,8 @@ function preparePaths(bundle, issues, lineworkIssues) {
         identityAliases: structuredClone(object.identityAliases ?? {}),
         sourceFeatureId: object.sourceFeatureId,
         siteId: object.siteId,
+        sourceStatus: object.sourceStatus ?? 'unknown',
+        topologyRequired: object.topologyRequired === true,
         sourceName: object.sourceName ?? null,
         sourceFolderPath: object.sourceFolderPath ?? null,
         networkFamily: object.networkFamily,
@@ -687,7 +753,8 @@ function preparePaths(bundle, issues, lineworkIssues) {
         assetType: object.assetType ?? 'unknown',
         category: object.category ?? 'unknown',
         geometryId: geometry.geometryId,
-        geometryFingerprint: geometry.geometryFingerprint,
+        geometryFingerprint: geometry.geometryFingerprint
+          ?? coordinateSequenceKey(geometry.coordinates),
         coordinates,
         segmentLengths,
         cumulativeLengths,
@@ -1233,9 +1300,10 @@ function generateExplicitCandidates(bundle, nodes, paths, issues, candidateBudge
       }))
       return
     }
-    pushCandidate(candidates, {
-      ...baseCandidate({
-        candidateType: 'explicit_metadata',
+    const base = baseCandidate({
+        candidateType: relation.source === 'manual_admin'
+          ? 'manual_relation'
+          : 'explicit_metadata',
         sourceEndpointId: `explicit:${relation.explicitRelationEvidenceId}`,
         sourcePath: source,
         targetAssetId: target.id,
@@ -1258,14 +1326,33 @@ function generateExplicitCandidates(bundle, nodes, paths, issues, candidateBudge
           weight: 1,
           explanation: 'Relasi dinyatakan eksplisit pada metadata sumber.',
         }],
-      }),
+    })
+    const candidate = {
+      ...base,
+      sourceGeometryIds: asArray(relation.sourceGeometryIds).length
+        ? unique(asArray(relation.sourceGeometryIds).filter(Boolean))
+        : base.sourceGeometryIds,
+      sourceGeometryFingerprints: unique([
+        ...base.sourceGeometryFingerprints,
+        ...asArray(relation.sourceGeometryIds).map((geometryId) => {
+          const geometry = bundle.geometries.find((item) => item.geometryId === geometryId)
+          return geometry?.geometryFingerprint
+            ?? (geometry?.coordinates ? coordinateSequenceKey(geometry.coordinates) : null)
+        }),
+      ].filter(Boolean)),
       explicitRelationEvidenceId: relation.explicitRelationEvidenceId,
       explicitRelationType: relation.relationType,
       direction: normalizeDirection(relation.direction),
+      ...compact({
+        relationKind: relation.relationKind,
+        pathAssetIds: unique(asArray(relation.pathAssetIds).filter(Boolean)),
+        evidenceRefs: unique(asArray(relation.evidenceRefs).filter(Boolean)),
+      }),
       manualConfirmation: relation.source === 'manual_admin'
         ? structuredClone(relation.manualConfirmation ?? null)
         : null,
-    }, candidateBudget, 'explicit_metadata')
+    }
+    pushCandidate(candidates, candidate, candidateBudget, candidate.candidateType)
   })
   return candidates
 }
@@ -1302,12 +1389,20 @@ function baseCandidate({
       sourcePath.geometryId,
       targetPath?.geometryId,
     ].filter(Boolean)),
+    sourceGeometryFingerprints: unique([
+      sourcePath.geometryFingerprint,
+      targetPath?.geometryFingerprint,
+      targetNode?.geometryFingerprint,
+    ].filter(Boolean)),
     targetAssetId,
     targetEndpointId,
     targetPathAssetId: targetPath?.id,
     targetFeatureId: targetNode?.sourceFeatureId ?? targetPath?.sourceFeatureId,
     sourceObjectRole: sourcePath?.objectRole ?? null,
     targetObjectRole: targetNode?.objectRole ?? targetPath?.objectRole ?? null,
+    topologyRequired: sourcePath?.topologyRequired === true
+      || targetNode?.topologyRequired === true
+      || targetPath?.topologyRequired === true,
     distanceMeters,
     sourceCoordinate: sourceCoordinate ? cloneCoordinate(sourceCoordinate) : null,
     targetCoordinate: targetCoordinate ? cloneCoordinate(targetCoordinate) : null,
@@ -1414,7 +1509,8 @@ function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, dataset
       candidateType: candidate.candidateType,
       sourceObjectRole: candidate.sourceObjectRole,
       targetObjectRole: candidate.targetObjectRole,
-      relationKind: relationKindForCandidate(candidate),
+      topologyRequired: candidate.topologyRequired === true,
+      relationKind: candidate.relationKind ?? relationKindForCandidate(candidate),
       score: round(score, 6),
       scoreMargin: null,
       evidence: [
@@ -1429,6 +1525,7 @@ function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, dataset
       topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
       generatedAt,
       sourceGeometryIds: candidate.sourceGeometryIds,
+      sourceGeometryFingerprints: candidate.sourceGeometryFingerprints,
       sourceCoordinate: candidate.sourceCoordinate,
       targetCoordinate: candidate.targetCoordinate,
       networkFamily: candidate.networkFamily,
@@ -1437,6 +1534,8 @@ function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, dataset
         explicitRelationEvidenceId: candidate.explicitRelationEvidenceId,
         relationType: candidate.explicitRelationType,
         direction: candidate.direction,
+        pathAssetIds: candidate.pathAssetIds,
+        evidenceRefs: candidate.evidenceRefs,
       }),
     }
   })
@@ -1451,9 +1550,10 @@ function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, dataset
       const next = group[index + 2]
       candidate.scoreMargin = next ? round(candidate.score - next.score, 6) : candidate.score
     })
-    if (best.candidateType === 'explicit_metadata') {
+    if (['explicit_metadata', 'manual_relation'].includes(best.candidateType)) {
       const manualConfirmation = best.manualConfirmation
-      const shouldConfirm = settings.autoConfirmExplicitMetadata || Boolean(manualConfirmation)
+      const shouldConfirm = Boolean(manualConfirmation)
+        || (best.candidateType === 'explicit_metadata' && settings.autoConfirmExplicitMetadata)
       best.proposalStatus = shouldConfirm
         ? manualConfirmation ? 'confirmed_by_admin' : 'confirmed_by_explicit_policy'
         : 'recommended'
@@ -1515,7 +1615,7 @@ function applyCapacityConstraints(candidates, nodes, settings, issues, accuracyG
     .filter((candidate) => (
       candidate.proposalStatus === 'recommended'
       && candidate.candidateStatus === 'candidate'
-      && candidate.candidateType !== 'explicit_metadata'
+      && !['explicit_metadata', 'manual_relation'].includes(candidate.candidateType)
     ))
     .sort((left, right) => right.score - left.score || compareCandidate(left, right))
   const capacityConstrained = recommended.filter((candidate) => (
@@ -1558,20 +1658,50 @@ function applyCapacityConstraints(candidates, nodes, settings, issues, accuracyG
   }
 }
 
-function reconcilePreviousDecisions(candidates, previousCandidates) {
+function reconcilePreviousDecisions(candidates, previousCandidates, { generatedAt } = {}) {
   const previousById = new Map(asArray(previousCandidates).map((candidate) => [
     candidate.candidateId,
     candidate,
   ]))
+  const reopenedReviewHistory = []
   candidates.forEach((candidate) => {
     const previous = previousById.get(candidate.candidateId)
     if (!previous) return
     if (!['confirmed', 'rejected', 'revoked'].includes(previous.candidateStatus)) return
+    if (!sameCandidateReviewInput(candidate, previous)) {
+      reopenedReviewHistory.push({
+        ...structuredClone(previous),
+        supersededAt: generatedAt ?? new Date().toISOString(),
+        supersededReason: 'topology_input_changed_review_reopened',
+        reissuedCandidateId: candidate.candidateId,
+      })
+      return
+    }
     candidate.candidateStatus = previous.candidateStatus
     candidate.proposalStatus = previous.proposalStatus ?? candidate.proposalStatus
     candidate.review = structuredClone(previous.review)
     candidate.supersedesCandidateId = previous.supersedesCandidateId
   })
+  return reopenedReviewHistory
+}
+
+function sameCandidateReviewInput(candidate, previous) {
+  const fields = [
+    'candidateType',
+    'relationKind',
+    'siteId',
+    'networkFamily',
+    'sourcePathAssetId',
+    'targetAssetId',
+    'targetPathAssetId',
+    'topologyRuleSetVersion',
+    'topologyRequired',
+  ]
+  if (fields.some((field) => candidate[field] !== previous[field])) return false
+  const currentFingerprints = [...(candidate.sourceGeometryFingerprints ?? [])].sort()
+  const previousFingerprints = [...(previous.sourceGeometryFingerprints ?? [])].sort()
+  if (!currentFingerprints.length && !previousFingerprints.length) return true
+  return stableStringify(currentFingerprints) === stableStringify(previousFingerprints)
 }
 
 function buildConfirmedRelations({
@@ -1617,6 +1747,8 @@ function buildConfirmedRelations({
         ].includes(candidate.candidateType)
           ? candidate.sourcePathAssetId
           : undefined,
+        pathAssetIds: candidate.pathAssetIds,
+        evidenceRefs: candidate.evidenceRefs,
       }),
       sourceGeometryIds: structuredClone(candidate.sourceGeometryIds),
       ...compact({
@@ -1810,6 +1942,7 @@ function collapseConfirmedPath(bundle, sourceAssetId, targetAssetId, relations) 
   )))
   const pathAssetIds = unique(relations.flatMap((relation) => [
     relation.pathAssetId,
+    ...(relation.pathAssetIds ?? []),
     ...(relation.relationType === 'path-continuation'
       ? [relation.sourceAssetId, relation.targetAssetId]
       : []),
@@ -1853,7 +1986,9 @@ function collapseConfirmedPath(bundle, sourceAssetId, targetAssetId, relations) 
       : allExplicit
         ? 'explicit_kml_metadata'
         : allLineLabel ? 'line_label_inference' : 'spatial_inference',
-    relationKind: 'device_edge',
+    relationKind: relations.length === 1
+      ? relations[0].relationKind ?? 'device_edge'
+      : 'device_edge',
     candidateId: candidateIds.length === 1 ? candidateIds[0] : undefined,
     candidateIds,
     sourceRelationIds: relations.map(({ relationId }) => relationId),
@@ -2014,6 +2149,8 @@ function buildSummary({ candidates, confirmedRelations, graph, unresolved, valid
 
 function evaluateTopologyReadiness({
   bundle,
+  nodes,
+  paths,
   candidates,
   confirmedRelations,
   validation,
@@ -2033,6 +2170,13 @@ function evaluateTopologyReadiness({
     )).length / identities.length
     : 0
   const accuracyReady = accuracyGate.approved
+  const requiredTopology = evaluateRequiredTopologyReadiness({
+    bundle,
+    nodes,
+    paths,
+    candidates,
+    confirmedRelations,
+  })
   const blockingReasons = []
   if (stableIdentityCoverage < 1) blockingReasons.push('stable_identity_coverage')
   if (validation.summary.errors > 0) blockingReasons.push('confirmed_graph_invalid')
@@ -2040,6 +2184,15 @@ function evaluateTopologyReadiness({
   if (!TOPOLOGY_RULE_SET_VERSION) blockingReasons.push('rule_set_version_missing')
   if (candidates.some(({ candidateStatus }) => candidateStatus === 'confirmed')
     && !confirmedRelations.length) blockingReasons.push('confirmed_decision_not_materialized')
+  if (requiredTopology.unresolvedNodeCount > 0) {
+    blockingReasons.push('topology_required_node_unresolved')
+  }
+  if (requiredTopology.unresolvedEndpointCount > 0) {
+    blockingReasons.push('topology_required_endpoint_unresolved')
+  }
+  if (requiredTopology.ambiguousCount > 0) {
+    blockingReasons.push('topology_required_ambiguous')
+  }
   return {
     topologyReadiness: blockingReasons.length ? 'not_ready' : 'ready',
     stableIdentityCoverage,
@@ -2057,8 +2210,84 @@ function evaluateTopologyReadiness({
     },
     unresolvedCount: unresolved.length,
     ambiguousCount: candidates.filter(({ candidateStatus }) => candidateStatus === 'ambiguous').length,
+    requiredTopology,
     blockingReasons,
     topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+  }
+}
+
+function evaluateRequiredTopologyReadiness({
+  bundle,
+  nodes,
+  paths,
+  candidates,
+  confirmedRelations,
+}) {
+  const requiredNodes = asArray(nodes).filter(({ topologyRequired }) => topologyRequired === true)
+  const requiredPaths = asArray(paths).filter(({ topologyRequired }) => topologyRequired === true)
+  const approvedExceptions = asArray(bundle.topologyExceptions).filter((exception) => (
+    exception?.approved === true && String(exception.reason ?? '').trim().length >= 3
+  ))
+  const exceptionKeys = new Set(approvedExceptions.flatMap((exception) => [
+    exception.entityReference,
+    exception.assetId,
+    exception.sourceFeatureId,
+    exception.sourceEndpointId,
+  ].filter(Boolean).map(String)))
+  const confirmedAssetIds = new Set(
+    asArray(confirmedRelations)
+      .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+      .flatMap((relation) => [relation.sourceAssetId, relation.targetAssetId])
+      .filter(Boolean)
+      .map(String),
+  )
+  const unresolvedNodeIds = requiredNodes
+    .map((node) => node.id)
+    .filter((id) => !confirmedAssetIds.has(String(id)) && !exceptionKeys.has(String(id)))
+  const candidateByEndpoint = new Map()
+  asArray(candidates).forEach((candidate) => {
+    if (!candidate.sourceEndpointId) return
+    const list = candidateByEndpoint.get(candidate.sourceEndpointId) ?? []
+    list.push(candidate)
+    candidateByEndpoint.set(candidate.sourceEndpointId, list)
+  })
+  const requiredEndpointIds = requiredPaths.flatMap((path) => (
+    lineEndpoints(path).map(({ id }) => id)
+  ))
+  const unresolvedEndpointIds = []
+  const ambiguousEndpointIds = []
+  const confirmedCandidateIds = new Set(
+    asArray(confirmedRelations)
+      .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+      .map(({ candidateId }) => candidateId)
+      .filter(Boolean),
+  )
+  requiredEndpointIds.forEach((endpointId) => {
+    if (exceptionKeys.has(endpointId)) return
+    const endpointCandidates = candidateByEndpoint.get(endpointId) ?? []
+    const hasConfirmed = endpointCandidates.some((candidate) => (
+      candidate.candidateStatus === 'confirmed'
+        && confirmedCandidateIds.has(candidate.candidateId)
+    ))
+    if (hasConfirmed) return
+    if (endpointCandidates.some(({ candidateStatus, proposalStatus }) => (
+      candidateStatus === 'ambiguous' || proposalStatus === 'ambiguous'
+    ))) {
+      ambiguousEndpointIds.push(endpointId)
+    }
+    unresolvedEndpointIds.push(endpointId)
+  })
+  return {
+    requiredNodeCount: requiredNodes.length,
+    requiredPathCount: requiredPaths.length,
+    requiredEndpointCount: requiredEndpointIds.length,
+    unresolvedNodeCount: unresolvedNodeIds.length,
+    unresolvedEndpointCount: unresolvedEndpointIds.length,
+    ambiguousCount: ambiguousEndpointIds.length,
+    approvedExceptionCount: approvedExceptions.length,
+    unresolvedNodeIds,
+    unresolvedEndpointIds,
+    ambiguousEndpointIds,
   }
 }
 

@@ -213,6 +213,40 @@ test('stored topology rebuild refreshes stale known classifications from source 
   assert.ok(repaired.changed)
 })
 
+test('stored topology rebuild preserves manual relation evidence without a source feature', () => {
+  const parserOutput = parseKmlText(`<?xml version="1.0"?>
+    <kml><Document>
+      <Folder><name>Fiber Optic</name>
+        <Placemark id="fo-manual"><name>FO-Manual</name>
+          <ExtendedData><Data name="asset_id"><value>FO-01</value></Data></ExtendedData>
+          <LineString><coordinates>110,-7 111,-7</coordinates></LineString>
+        </Placemark>
+      </Folder>
+    </Document></kml>`)
+  const parsed = buildCanonicalParserResult({
+    parserOutput,
+    datasetVersion: DATASET_VERSION,
+    sourceSelection: { selectedKmlPath: 'doc.kml', resources: [] },
+  })
+  const manualRelation = {
+    explicitRelationEvidenceId: 'manual:relation-1',
+    datasetVersionId: DATASET_VERSION.id,
+    sourceReference: 'FO-01',
+    targetReference: 'FO-02',
+    source: 'manual_admin',
+    sourceKey: 'manual_device_connection',
+  }
+  const repaired = rebuildStoredTopologyInputBundle({
+    ...structuredClone(parsed),
+    topologyInputBundle: {
+      ...structuredClone(parsed.topologyInputBundle),
+      explicitRelations: [manualRelation],
+    },
+  })
+
+  assert.deepEqual(repaired.topologyInputBundle.explicitRelations, [manualRelation])
+})
+
 test('overlay resources resolve relative to selected KML, deduplicate by checksum, and never fetch URLs', () => {
   const parserOutput = parseKmlText(`<?xml version="1.0"?>
     <kml><Document>
