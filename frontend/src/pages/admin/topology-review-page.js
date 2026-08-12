@@ -58,6 +58,7 @@ async function initializeReview(container, mapData) {
   const requestedCategory = params.get('category')
   const state = {
     selectedCandidateId: params.get('reviewCandidateId'),
+    selectedCandidateIds: new Set(),
     status: requestedStatus === 'open' ? 'needs-review' : requestedStatus ?? 'needs-review',
     category: isRelationCategoryId(requestedCategory) ? requestedCategory : 'all',
     family: params.get('family') ?? 'all',
@@ -186,7 +187,7 @@ async function initializeReview(container, mapData) {
               </div>
             </details>
           </div>
-          <div class="candidate-list" role="listbox" aria-label="Kandidat relasi"></div>
+          <div class="candidate-list" role="list" aria-label="Kandidat relasi"></div>
         </aside>
         <section class="review-map-panel" aria-label="Peta koneksi yang ditinjau">
           <header>
@@ -272,6 +273,7 @@ async function initializeReview(container, mapData) {
 
   function renderAll() {
     const items = filterCandidates(candidatesForLocation(), state)
+    pruneSelectedCandidates()
     if (!items.some(({ candidateId }) => candidateId === state.selectedCandidateId)) {
       state.selectedCandidateId = items[0]?.candidateId ?? null
     }
@@ -281,6 +283,23 @@ async function initializeReview(container, mapData) {
     renderDetail()
     focusCandidateOnMap()
     updateUrl()
+  }
+
+  function pruneSelectedCandidates() {
+    const confirmableIds = new Set(
+      projections.candidates.items.filter(canConfirm)
+        .map(({ candidateId }) => candidateId),
+    )
+    state.selectedCandidateIds.forEach((candidateId) => {
+      if (!confirmableIds.has(candidateId)) state.selectedCandidateIds.delete(candidateId)
+    })
+  }
+
+  function getSelectedConfirmableCandidates() {
+    return projections.candidates.items.filter((candidate) => (
+      state.selectedCandidateIds.has(candidate.candidateId)
+      && canConfirm(candidate)
+    ))
   }
 
   function candidatesForLocation() {
@@ -388,6 +407,10 @@ async function initializeReview(container, mapData) {
 
   function renderQueue(items) {
     const locationCandidates = candidatesForLocation()
+    const selectableItems = items.filter(canConfirm)
+    const selectedVisibleCount = selectableItems.filter(({ candidateId }) => (
+      state.selectedCandidateIds.has(candidateId)
+    )).length
     container.querySelector('.queue-summary').innerHTML = `
       <div><strong>${items.length}</strong><span>ditampilkan</span></div>
       <div><strong>${locationCandidates.filter(isBulkConfirmableCandidate).length}</strong>
@@ -395,7 +418,38 @@ async function initializeReview(container, mapData) {
       <div><strong>${locationCandidates.filter(({ candidateStatus }) => (
         candidateStatus === 'ambiguous'
       )).length}</strong><span>belum pasti</span></div>
+      <label class="queue-selection-control">
+        <input class="select-visible-candidates" type="checkbox"
+          ${selectableItems.length > 0 && selectedVisibleCount === selectableItems.length
+            ? 'checked' : ''}
+          ${selectableItems.length ? '' : 'disabled'}
+          aria-label="Pilih semua koneksi yang tampil dan bisa dikonfirmasi">
+        <span>Pilih semua yang tampil</span>
+        <strong>${state.selectedCandidateIds.size} dipilih</strong>
+      </label>
     `
+    const selectVisible = container.querySelector('.select-visible-candidates')
+    let pendingSelectionScrollTop = null
+    const captureSelectionScroll = () => {
+      pendingSelectionScrollTop = container.querySelector('.candidate-list')?.scrollTop ?? null
+    }
+    const consumeSelectionScroll = () => {
+      const scrollTop = pendingSelectionScrollTop
+      pendingSelectionScrollTop = null
+      return scrollTop
+    }
+    if (selectVisible) {
+      selectVisible.indeterminate = selectedVisibleCount > 0
+        && selectedVisibleCount < selectableItems.length
+      selectVisible.addEventListener('pointerdown', captureSelectionScroll)
+      selectVisible.addEventListener('change', (event) => {
+        selectableItems.forEach(({ candidateId }) => {
+          if (event.target.checked) state.selectedCandidateIds.add(candidateId)
+          else state.selectedCandidateIds.delete(candidateId)
+        })
+        renderSelectionState(consumeSelectionScroll())
+      })
+    }
     const list = container.querySelector('.candidate-list')
     if (!items.length) {
       list.innerHTML = `<div class="empty-candidate-list">
@@ -405,24 +459,48 @@ async function initializeReview(container, mapData) {
       </div>`
       return
     }
-    list.innerHTML = items.map((candidate) => `
-      <button type="button" role="option" class="candidate-card${
+    list.innerHTML = items.map((candidate) => {
+      const selectable = canConfirm(candidate)
+      const selectedForBulk = state.selectedCandidateIds.has(candidate.candidateId)
+      const sourceName = endpointName(candidate, 'source', projections.sourceFeatures)
+      const targetName = endpointName(candidate, 'target', projections.sourceFeatures)
+      return `
+      <div class="candidate-card-row${selectedForBulk ? ' selection-selected' : ''}" role="listitem">
+        <label class="candidate-select-control${selectable ? '' : ' disabled'}"
+          title="${selectable ? 'Pilih koneksi ini' : 'Koneksi ini belum dapat dikonfirmasi'}">
+          <input type="checkbox" data-candidate-select="${escapeHtml(candidate.candidateId)}"
+            ${selectable ? '' : 'disabled'} ${selectedForBulk ? 'checked' : ''}
+            aria-label="Pilih koneksi ${escapeHtml(sourceName)} ke ${escapeHtml(targetName)}">
+          <span aria-hidden="true"></span>
+        </label>
+        <button type="button" class="candidate-card${
         candidate.candidateId === state.selectedCandidateId ? ' selected' : ''
-      }" aria-selected="${candidate.candidateId === state.selectedCandidateId}"
+      }" aria-current="${candidate.candidateId === state.selectedCandidateId ? 'true' : 'false'}"
         data-candidate-id="${escapeHtml(candidate.candidateId)}">
         <span class="candidate-status ${escapeHtml(candidate.candidateStatus)}">
           ${escapeHtml(statusLabel(candidate))}
         </span>
-        <strong>${escapeHtml(endpointName(candidate, 'source', projections.sourceFeatures))}</strong>
+        <strong>${escapeHtml(sourceName)}</strong>
         <span class="candidate-arrow" aria-hidden="true">→</span>
-        <strong>${escapeHtml(endpointName(candidate, 'target', projections.sourceFeatures))}</strong>
+        <strong>${escapeHtml(targetName)}</strong>
         <small>${escapeHtml(labelCandidateType(candidate.candidateType))} · ${
           formatDistance(candidate.distanceMeters)
         }</small>
         <span class="candidate-score">${Math.round((candidate.score ?? 0) * 100)}%</span>
-      </button>
-    `).join('')
-    list.querySelectorAll('[data-candidate-id]').forEach((button) => {
+        </button>
+      </div>
+    `
+    }).join('')
+    list.querySelectorAll('[data-candidate-select]').forEach((input) => {
+      input.addEventListener('pointerdown', captureSelectionScroll)
+      input.addEventListener('change', (event) => {
+        const candidateId = event.target.dataset.candidateSelect
+        if (event.target.checked) state.selectedCandidateIds.add(candidateId)
+        else state.selectedCandidateIds.delete(candidateId)
+        renderSelectionState(consumeSelectionScroll())
+      })
+    })
+    list.querySelectorAll('button[data-candidate-id]').forEach((button) => {
       button.addEventListener('click', () => {
         state.selectedCandidateId = button.dataset.candidateId
         state.actionStatus = 'idle'
@@ -464,6 +542,55 @@ async function initializeReview(container, mapData) {
     })
   }
 
+  function renderSelectionState(scrollTop = null) {
+    const selectedCount = getSelectedConfirmableCandidates().length
+    const currentCandidate = projections.candidates.items.find(({ candidateId }) => (
+      candidateId === state.selectedCandidateId
+    ))
+    const button = container.querySelector('.confirm-candidate')
+    if (button) {
+      button.disabled = selectedCount === 0 && !canConfirm(currentCandidate)
+      button.title = selectedCount
+        ? 'Hubungkan ' + selectedCount + ' koneksi yang dipilih'
+        : canConfirm(currentCandidate) ? 'Hubungkan koneksi ini' : 'Koneksi ini belum dapat dihubungkan'
+      button.textContent = selectedCount
+        ? 'Hubungkan pilihan (' + selectedCount + ')'
+        : 'Hubungkan'
+    }
+
+    const selectedCountLabel = container.querySelector('.queue-selection-control strong')
+    if (selectedCountLabel) {
+      selectedCountLabel.textContent = state.selectedCandidateIds.size + ' dipilih'
+    }
+
+    const selectableInputs = [...container.querySelectorAll(
+      'input[data-candidate-select]:not(:disabled)',
+    )]
+    const selectedVisibleCount = selectableInputs.filter((input) => (
+      state.selectedCandidateIds.has(input.dataset.candidateSelect)
+    )).length
+    selectableInputs.forEach((input) => {
+      const selected = state.selectedCandidateIds.has(input.dataset.candidateSelect)
+      input.checked = selected
+      input.closest('.candidate-card-row')?.classList.toggle('selection-selected', selected)
+    })
+    const selectVisible = container.querySelector('.select-visible-candidates')
+    if (selectVisible) {
+      selectVisible.checked = selectableInputs.length > 0
+        && selectedVisibleCount === selectableInputs.length
+      selectVisible.indeterminate = selectedVisibleCount > 0
+        && selectedVisibleCount < selectableInputs.length
+    }
+    if (scrollTop === null) return
+    const candidateList = container.querySelector('.candidate-list')
+    if (!candidateList) return
+    const restoreScroll = () => {
+      candidateList.scrollTop = scrollTop
+    }
+    restoreScroll()
+    requestAnimationFrame(restoreScroll)
+  }
+
   function renderDetail() {
     const panel = container.querySelector('.candidate-review-panel')
     const candidate = projections.candidates.items.find(({ candidateId }) => (
@@ -487,6 +614,7 @@ async function initializeReview(container, mapData) {
     ))
     const sourceName = endpointName(candidate, 'source', projections.sourceFeatures)
     const targetName = endpointName(candidate, 'target', projections.sourceFeatures)
+    const selectedCount = getSelectedConfirmableCandidates().length
     panel.innerHTML = `
       <header class="candidate-detail-header">
         <div>
@@ -557,8 +685,11 @@ async function initializeReview(container, mapData) {
         }</p>` : ''}
         <div class="review-primary-actions">
           <button class="button primary confirm-candidate" type="button"${
-            canConfirm(candidate) ? '' : ' disabled'
-          }>Hubungkan</button>
+            selectedCount || canConfirm(candidate) ? '' : ' disabled'
+          } title="${selectedCount
+            ? `Hubungkan ${selectedCount} koneksi yang dipilih`
+            : canConfirm(candidate) ? 'Hubungkan koneksi ini' : 'Koneksi ini belum dapat dihubungkan'
+          }">${selectedCount ? `Hubungkan pilihan (${selectedCount})` : 'Hubungkan'}</button>
           <button class="button secondary select-alternative" type="button"${
             alternatives.length ? '' : ' disabled'
           }>Pilih target lain</button>
@@ -584,9 +715,14 @@ async function initializeReview(container, mapData) {
 
   function bindActions(candidate, relation) {
     const panel = container.querySelector('.candidate-review-panel')
-    panel.querySelector('.confirm-candidate')?.addEventListener('click', () => (
+    panel.querySelector('.confirm-candidate')?.addEventListener('click', () => {
+      const selectedCount = getSelectedConfirmableCandidates().length
+      if (selectedCount) {
+        openBulkDialog('confirm-selected', selectedCount)
+        return
+      }
       performCandidateAction(candidate, 'confirm')
-    ))
+    })
     panel.querySelector('.reject-candidate')?.addEventListener('click', () => {
       openDecisionDialog('reject', { candidate, relation })
     })
@@ -607,13 +743,13 @@ async function initializeReview(container, mapData) {
   }
 
   async function performCandidateAction(candidate, action, extra = {}, reason = '') {
-    await performMutation(async () => {
-      await reviewTopologyCandidate({
+    await performMutation(async () => (
+      reviewTopologyCandidate({
         candidateId: candidate.candidateId,
         action,
         body: { ...reviewSnapshotBody(), reason, ...extra },
       })
-    }, actionSuccessMessage(action))
+    ), actionSuccessMessage(action))
   }
 
   async function performMutation(mutation, successMessage) {
@@ -622,8 +758,8 @@ async function initializeReview(container, mapData) {
     state.actionMessage = 'Menyimpan keputusan dan memperbarui confirmed graph…'
     renderDetail()
     try {
-      await mutation()
-      projections = await loadReviewProjections(datasetVersionId, mapData.geometries)
+      const result = await mutation()
+      projections = applyReviewMutationResult(projections, result)
       state.actionStatus = 'success'
       state.actionMessage = successMessage
     } catch (error) {
@@ -631,6 +767,47 @@ async function initializeReview(container, mapData) {
       state.actionMessage = error.message
     }
     renderAll()
+  }
+
+  function applyReviewMutationResult(current, result) {
+    if (!result || typeof result !== 'object') return current
+    const next = {
+      ...current,
+      candidates: {
+        ...current.candidates,
+        ...(result.graphRevision !== undefined ? { graphRevision: result.graphRevision } : {}),
+        ...(result.candidateRevision !== undefined
+          ? { candidateRevision: result.candidateRevision }
+          : {}),
+        ...(result.recordRevision !== undefined ? { recordRevision: result.recordRevision } : {}),
+        items: current.candidates.items.map((candidate) => (
+          result.candidate?.candidateId === candidate.candidateId
+            ? { ...candidate, ...result.candidate }
+            : result.updatedCandidates?.find(({ candidateId }) => (
+              candidateId === candidate.candidateId
+            )) ?? candidate
+        )),
+      },
+      graph: {
+        ...current.graph,
+        ...(result.graph ? { graph: result.graph } : {}),
+        ...(result.confirmedRelations
+          ? { confirmedRelations: result.confirmedRelations }
+          : {}),
+      },
+      ...(result.summary ? { summary: result.summary } : {}),
+    }
+    if (result.candidate && !next.candidates.items.some(({ candidateId }) => (
+      candidateId === result.candidate.candidateId
+    ))) {
+      next.candidates.items = [...next.candidates.items, result.candidate]
+    }
+    const existingIds = new Set(next.candidates.items.map(({ candidateId }) => candidateId))
+    const newCandidates = (result.updatedCandidates ?? []).filter(({ candidateId }) => (
+      !existingIds.has(candidateId)
+    ))
+    if (newCandidates.length) next.candidates.items = [...next.candidates.items, ...newCandidates]
+    return next
   }
 
   function bindDecisionDialog() {
@@ -749,14 +926,14 @@ async function initializeReview(container, mapData) {
       cancel.disabled = true
       message.textContent = 'Menyimpan koneksi dan membangun ulang graph…'
       try {
-        await createTopologyRelation({
+        const result = await createTopologyRelation({
           datasetVersionId,
           sourceAssetId,
           targetAssetId,
           reason: normalizedReason,
           ...reviewSnapshotBody(),
         })
-        projections = await loadReviewProjections(datasetVersionId, mapData.geometries)
+        projections = applyReviewMutationResult(projections, result)
         reviewMap.setTopologyGraph(scopeMapData({
           selectedArea,
           assets: mapData.assets,
@@ -823,6 +1000,8 @@ async function initializeReview(container, mapData) {
     const dialog = container.querySelector('.bulk-review-dialog')
     const destructive = action === 'revoke-all'
     const lineLabelAction = action === 'confirm-line-labels'
+    const selectedAction = action === 'confirm-selected'
+    if (selectedAction && getSelectedConfirmableCandidates().length < 1) return
     dialog.dataset.action = action
     dialog.querySelector('.bulk-dialog-icon').textContent = destructive
       ? 'delete_sweep'
@@ -831,11 +1010,15 @@ async function initializeReview(container, mapData) {
       ? `Hapus ${count} konfirmasi?`
       : lineLabelAction
         ? `Konfirmasi ${count} koneksi dari garis?`
+        : selectedAction
+          ? `Hubungkan ${count} koneksi terpilih?`
         : `Konfirmasi ${count} koneksi yang direkomendasikan?`
     dialog.querySelector('.bulk-dialog-description').textContent = destructive
       ? 'Semua relasi confirmed akan dikeluarkan dari graph dan tidak lagi dapat dipakai tracing.'
       : lineLabelAction
         ? 'Sistem memakai urutan nama device pada garis dan lokasi sumbernya. Garis yang ambigu tidak ikut.'
+        : selectedAction
+          ? 'Hanya koneksi yang kamu centang yang akan dikonfirmasi. Pastikan semua pilihan sudah diperiksa.'
         : 'Hanya kandidat berstatus recommended yang dikonfirmasi. Ambiguous, unresolved, rejected, dan revoked tidak ikut.'
     dialog.querySelector('.bulk-reason-label').textContent = destructive
       ? 'Alasan penghapusan konfirmasi'
@@ -843,7 +1026,9 @@ async function initializeReview(container, mapData) {
     const submit = dialog.querySelector('.submit-bulk-action')
     submit.textContent = destructive
       ? 'Hapus semua konfirmasi'
-      : lineLabelAction ? 'Konfirmasi koneksi dari garis' : 'Konfirmasi rekomendasi'
+      : lineLabelAction
+        ? 'Konfirmasi koneksi dari garis'
+        : selectedAction ? 'Hubungkan pilihan' : 'Konfirmasi rekomendasi'
     submit.className = `button ${destructive ? 'danger' : 'primary'} submit-bulk-action`
     dialog.querySelector('.bulk-dialog-message').textContent = ''
     dialog.showModal()
@@ -859,15 +1044,25 @@ async function initializeReview(container, mapData) {
     dialog.querySelector('.bulk-dialog-message').textContent =
       'Menyimpan keputusan dan membangun ulang graph…'
     try {
+      const selectedCandidateIds = action === 'confirm-selected'
+        ? getSelectedConfirmableCandidates().map(({ candidateId }) => candidateId)
+        : null
+      if (action === 'confirm-selected' && selectedCandidateIds.length < 1) {
+        throw new Error('Pilih minimal satu koneksi yang bisa dikonfirmasi terlebih dahulu.')
+      }
       const result = await reviewTopologyBulk({
         datasetVersionId,
         action,
         reason,
+        ...(selectedCandidateIds ? { candidateIds: selectedCandidateIds } : {}),
         ...reviewSnapshotBody(),
       })
-      projections = await loadReviewProjections(datasetVersionId, mapData.geometries)
+      projections = applyReviewMutationResult(projections, result)
       state.bulkStatus = 'success'
-      if (['confirm-all', 'confirm-line-labels'].includes(action)) {
+      if (action === 'confirm-selected') {
+        selectedCandidateIds.forEach((candidateId) => state.selectedCandidateIds.delete(candidateId))
+        state.bulkMessage = `${result.affectedCount} koneksi terpilih dihubungkan. Graph dan tracing telah diperbarui.`
+      } else if (['confirm-all', 'confirm-line-labels'].includes(action)) {
         const remaining = action === 'confirm-line-labels'
           ? result.remainingLineLabelCount
           : result.remainingRecommendedCount
@@ -891,6 +1086,7 @@ async function initializeReview(container, mapData) {
 
   function reviewSnapshotBody() {
     return {
+      datasetVersionId,
       ...(projections.candidates.graphRevision !== undefined
         ? { expectedGraphRevision: projections.candidates.graphRevision }
         : {}),
@@ -1371,7 +1567,7 @@ function actionSuccessMessage(action) {
 }
 
 function canConfirm(candidate) {
-  return ['candidate', 'ambiguous', 'revoked'].includes(candidate.candidateStatus)
+  return ['candidate', 'ambiguous', 'revoked'].includes(candidate?.candidateStatus)
 }
 
 function canReject(candidate) {

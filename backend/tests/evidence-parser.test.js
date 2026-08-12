@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   buildCanonicalParserResult,
+  CLASSIFICATION_RULE_SET_VERSION,
   PARSER_VERSION,
   rebuildStoredTopologyInputBundle,
 } from '../src/domain/parser-contract.js'
@@ -125,6 +126,55 @@ test('canonical evidence is deterministic, versioned, and topology bundle only c
   assert.ok(first.sourceGeometries.some(({ valid }) => valid === false))
 })
 
+test('canonical coverage is fail-closed when parser structure and preserved features diverge', () => {
+  const parserOutput = parseKmlText(`<?xml version="1.0"?>
+    <kml><Document>
+      <Placemark id="asset-1"><name>CCTV 1</name>
+        <Point><coordinates>110,-7</coordinates></Point>
+      </Placemark>
+    </Document></kml>`)
+  parserOutput.structure.placemarkCount = 2
+
+  const result = buildCanonicalParserResult({
+    parserOutput,
+    datasetVersion: DATASET_VERSION,
+    sourceSelection: { selectedKmlPath: 'doc.kml', resources: [] },
+  })
+
+  assert.equal(result.coverage.canonicalPlacemarkCount, 1)
+  assert.equal(result.coverage.unpreservedPlacemarkCount, 1)
+  assert.equal(result.readiness.parseReadiness, 'not_ready')
+  assert.ok(result.issues.some(({ issueCode, canPublish }) => (
+    issueCode === 'parser_placemark_coverage_mismatch' && canPublish === false
+  )))
+})
+
+test('adding a new asset preserves every old feature and increments coverage exactly once', () => {
+  const build = (extra = '') => buildCanonicalParserResult({
+    parserOutput: parseKmlText(`<?xml version="1.0"?>
+      <kml><Document><Folder><name>CCTV</name>
+        <Placemark id="cam-1"><name>Camera 1</name>
+          <Point><coordinates>110,-7</coordinates></Point>
+        </Placemark>
+        ${extra}
+      </Folder></Document></kml>`),
+    datasetVersion: DATASET_VERSION,
+    sourceSelection: { selectedKmlPath: 'doc.kml', resources: [] },
+  })
+  const before = build()
+  const after = build(`<Placemark id="cam-2"><name>Camera 2</name>
+    <Point><coordinates>111,-7</coordinates></Point>
+  </Placemark>`)
+
+  assert.equal(before.coverage.placemarkCount, 1)
+  assert.equal(after.coverage.placemarkCount, 2)
+  assert.equal(after.coverage.canonicalPlacemarkCount, 2)
+  assert.equal(after.coverage.unpreservedPlacemarkCount, 0)
+  assert.ok(before.sourceFeatures.every((feature) => (
+    after.sourceFeatures.some(({ sourceFeatureId }) => sourceFeatureId === feature.sourceFeatureId)
+  )))
+})
+
 test('stored topology rebuild refreshes stale known classifications from source evidence', () => {
   const parserOutput = parseKmlText(`<?xml version="1.0"?>
     <kml><Document>
@@ -159,7 +209,7 @@ test('stored topology rebuild refreshes stale known classifications from source 
   assert.equal(node.objectRole, 'device_node')
   assert.equal(node.networkFamily, 'cctv')
   assert.equal(node.assetType, 'junction box')
-  assert.equal(node.classificationRuleSetVersion, 'semantic-classifier/1.1.0')
+  assert.equal(node.classificationRuleSetVersion, CLASSIFICATION_RULE_SET_VERSION)
   assert.ok(repaired.changed)
 })
 

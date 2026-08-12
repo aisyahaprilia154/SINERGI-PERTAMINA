@@ -110,6 +110,46 @@ test('all candidate pages are combined only when their revisions remain stable',
   }
 })
 
+test('all candidate pages reduce their limit when a response exceeds the byte budget', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  globalThis.fetch = async (url) => {
+    requests.push(url)
+    if (url.endsWith('limit=500')) {
+      return new Response(JSON.stringify({
+        error: {
+          code: 'topology_candidate_response_too_large',
+          message: 'Response candidate terlalu besar.',
+        },
+      }), {
+        status: 413,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    return new Response(JSON.stringify({
+      items: [{ candidateId: 'candidate-a' }],
+      nextCursor: null,
+      graphRevision: 'topology-graph:one',
+      candidateRevision: 'topology-candidates:one',
+      pageInfo: { total: 1 },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    const result = await loadAllTopologyCandidates({
+      datasetVersionId: 'dv-1',
+      token: 'admin',
+    })
+    assert.deepEqual(result.items.map(({ candidateId }) => candidateId), ['candidate-a'])
+    assert.match(requests[0], /[?]limit=500$/)
+    assert.match(requests[1], /[?]limit=250$/)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('candidate mutation sends only the selected review action and body', async () => {
   const originalFetch = globalThis.fetch
   let request
@@ -154,6 +194,15 @@ test('bulk topology mutation uses the versioned admin endpoint', async () => {
     })
     await reviewTopologyBulk({
       datasetVersionId: 'dv-1',
+      action: 'confirm-selected',
+      candidateIds: ['candidate-1', 'candidate-2'],
+      reason: 'Pilihan koneksi sudah diverifikasi.',
+      expectedGraphRevision: 4,
+      expectedCandidateRevision: 7,
+      token: 'admin',
+    })
+    await reviewTopologyBulk({
+      datasetVersionId: 'dv-1',
       action: 'confirm-line-labels',
       reason: 'Endpoint garis terverifikasi.',
       token: 'admin',
@@ -168,6 +217,7 @@ test('bulk topology mutation uses the versioned admin endpoint', async () => {
       requests.map(({ url }) => url),
       [
         '/api/dataset-versions/dv-1/topology/confirm-all',
+        '/api/dataset-versions/dv-1/topology/confirm-selected',
         '/api/dataset-versions/dv-1/topology/confirm-line-labels',
         '/api/dataset-versions/dv-1/topology/revoke-all',
       ],
@@ -177,6 +227,12 @@ test('bulk topology mutation uses the versioned admin endpoint', async () => {
       requests.map(({ options }) => JSON.parse(options.body)),
       [
         { reason: 'Review bulk pilot.' },
+        {
+          reason: 'Pilihan koneksi sudah diverifikasi.',
+          candidateIds: ['candidate-1', 'candidate-2'],
+          expectedGraphRevision: 4,
+          expectedCandidateRevision: 7,
+        },
         { reason: 'Endpoint garis terverifikasi.' },
         { reason: 'Perlu verifikasi ulang.' },
       ],

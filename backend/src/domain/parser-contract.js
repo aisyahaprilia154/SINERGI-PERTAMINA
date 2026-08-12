@@ -2,9 +2,11 @@ import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { buildCanonicalAssetIdentityMap } from './canonical-asset-identity.js'
 
-export const PARSER_VERSION = 'evidence-parser/1.0.0'
+export const PARSER_VERSION = 'evidence-parser/1.1.0'
 export const NORMALIZER_VERSION = 'canonical-normalizer/1.0.0'
-export const CLASSIFICATION_RULE_SET_VERSION = 'semantic-classifier/1.1.0'
+// Bumped to force stored imports through the current vocabulary. Historical
+// records exist whose classifier output changed while still carrying 1.1.0.
+export const CLASSIFICATION_RULE_SET_VERSION = 'semantic-classifier/1.2.0'
 export const METADATA_ALIAS_VERSION = 'metadata-aliases/1.0.0'
 export const FOLDER_MAPPING_VERSION = 'folder-mappings/1.0.0'
 export const STYLE_MAPPING_VERSION = 'style-mappings/1.0.0'
@@ -410,6 +412,32 @@ export function buildCanonicalParserResult({
     }
   })
   identityIssues(assetIdentityMap).forEach(addIssue)
+  const parsedPlacemarkCount = parserOutput.structure?.placemarkCount ?? 0
+  const canonicalPlacemarkCount = sourceFeatures.filter(({ sourceElementType }) => (
+    sourceElementType === 'Placemark'
+  )).length
+  const parsedOverlayCount = parserOutput.structure?.overlayCount ?? 0
+  const canonicalOverlayCount = sourceOverlays.length
+  if (canonicalPlacemarkCount !== parsedPlacemarkCount) {
+    addIssue({
+      severity: 'error',
+      issueCode: 'parser_placemark_coverage_mismatch',
+      scope: 'structure',
+      message: `Parser menemukan ${parsedPlacemarkCount} Placemark tetapi hanya ${canonicalPlacemarkCount} yang masuk canonical storage.`,
+      readinessDimension: 'parse',
+      canPublish: false,
+    })
+  }
+  if (canonicalOverlayCount !== parsedOverlayCount) {
+    addIssue({
+      severity: 'error',
+      issueCode: 'parser_overlay_coverage_mismatch',
+      scope: 'structure',
+      message: `Parser menemukan ${parsedOverlayCount} GroundOverlay tetapi hanya ${canonicalOverlayCount} yang masuk canonical storage.`,
+      readinessDimension: 'parse',
+      canPublish: false,
+    })
+  }
   const topologyInputBundle = buildTopologyInputBundle({
     datasetVersion,
     classifiedObjects: identityClassifiedObjects,
@@ -1005,12 +1033,25 @@ function buildCoverage({
     ['device_node', 'cable_path'].includes(objectRole)
   ))
   const stableObjects = operationalObjects.filter(({ assetId }) => Boolean(assetId))
+  const canonicalPlacemarkCount = sourceFeatures.filter(({ sourceElementType }) => (
+    sourceElementType === 'Placemark'
+  )).length
   return {
     documentCount: parserOutput.structure?.documentCount ?? 0,
     folderCount: parserOutput.structure?.folderCount ?? 0,
     placemarkCount: parserOutput.structure?.placemarkCount ?? 0,
+    canonicalPlacemarkCount,
+    unpreservedPlacemarkCount: Math.max(
+      0,
+      (parserOutput.structure?.placemarkCount ?? 0) - canonicalPlacemarkCount,
+    ),
     geometryCountByType: countBy(sourceGeometries, 'geometryType'),
     overlayCount: sourceOverlays.length,
+    parsedOverlayCount: parserOutput.structure?.overlayCount ?? 0,
+    unpreservedOverlayCount: Math.max(
+      0,
+      (parserOutput.structure?.overlayCount ?? 0) - sourceOverlays.length,
+    ),
     styleCount: parserOutput.styles?.length ?? 0,
     styleMapCount: parserOutput.styleMaps?.length ?? 0,
     resourceCount: resources.length,

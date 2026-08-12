@@ -96,7 +96,7 @@ export class PostgresDurableJobRepository {
     return rowToJob(result.rows[0])
   }
 
-  async list({ statuses, jobType, datasetVersionId } = {}) {
+  async list({ statuses, jobType, datasetVersionId, summary = false } = {}) {
     const conditions = []
     const values = []
     const add = (value, expression) => {
@@ -106,14 +106,20 @@ export class PostgresDurableJobRepository {
     if (statuses !== undefined) add(statuses, 'status = ANY(?::text[])')
     if (jobType) add(String(jobType), 'job_type = ?')
     if (datasetVersionId) add(String(datasetVersionId), 'dataset_version_id = ?')
+    const columns = summary ? 'job_type, status' : JOB_COLUMNS
     const result = await this.pool.query(
-      `SELECT ${JOB_COLUMNS}
+      `SELECT ${columns}
        FROM topology_jobs
        ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
        ORDER BY available_at ASC, queued_at ASC, job_id ASC`,
       values,
     )
-    return (result.rows ?? []).map(rowToJob)
+    return summary
+      ? (result.rows ?? []).map((row) => ({
+        jobType: row.job_type,
+        status: row.status,
+      }))
+      : (result.rows ?? []).map(rowToJob)
   }
 
   async findByIdempotencyKey(idempotencyKey) {
