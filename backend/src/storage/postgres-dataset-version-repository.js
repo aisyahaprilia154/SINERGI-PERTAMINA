@@ -107,8 +107,8 @@ export class PostgresDatasetVersionRepository {
     ))
   }
 
-  async findActive(datasetId, { excludeId } = {}) {
-    const resolved = await this.resolveActiveVersion({ datasetId })
+  async findActive(datasetId, { excludeId, branchId } = {}) {
+    const resolved = await this.resolveActiveVersion({ datasetId, branchId })
     if (resolved && resolved.record.datasetVersion.id !== excludeId) {
       return resolved.record
     }
@@ -123,7 +123,7 @@ export class PostgresDatasetVersionRepository {
     const pointerResult = await this.pool.query(
       `SELECT dataset_id, branch_id, dataset_version_id,
           previous_dataset_version_id, revision, activated_by, activated_at,
-          migrated_from_legacy_status
+          migrated_from_legacy_status, publication_profile
        FROM dataset_active_pointers
        WHERE dataset_id = $1
          AND ($2::text IS NULL OR branch_id = $2)
@@ -174,6 +174,10 @@ export class PostgresDatasetVersionRepository {
     actorId,
     activatedAt,
     expectedActiveVersionId,
+    expectedRecordRevision,
+    expectedActivePointerRevision,
+    publicationProfile,
+    archiveReason = 'superseded',
     validateTarget,
   }) {
     assertSafeId(datasetVersionId)
@@ -230,11 +234,20 @@ export class PostgresDatasetVersionRepository {
             statusCode: 409,
           })
         }
+        const targetRevision = normalizeRecordRevision(lockedTarget.recordRevision)
+        if (expectedRecordRevision !== undefined
+          && targetRevision !== expectedRecordRevision) {
+          throw staleRecordRevision(
+            datasetVersionId,
+            expectedRecordRevision,
+            targetRevision,
+          )
+        }
 
         const pointerResult = await client.query(
           `SELECT dataset_id, branch_id, dataset_version_id,
               previous_dataset_version_id, revision, activated_by, activated_at,
-              migrated_from_legacy_status
+              migrated_from_legacy_status, publication_profile
            FROM dataset_active_pointers
            WHERE dataset_id = $1 AND branch_id = $2
            FOR UPDATE`,
@@ -255,6 +268,16 @@ export class PostgresDatasetVersionRepository {
         if (pointerRow && !previous) throw activeVersionIntegrityError()
         const previousVersionId = previous?.datasetVersion.id ?? null
         activationContext.previousVersionId = previousVersionId
+        const currentPointerRevision = pointerRow?.revision
+          ?? (previous ? 'legacy' : null)
+        if (expectedActivePointerRevision !== undefined
+          && expectedActivePointerRevision !== currentPointerRevision) {
+          throw staleActivePointerRevision(
+            datasetVersionId,
+            expectedActivePointerRevision,
+            currentPointerRevision,
+          )
+        }
         if (expectedActiveVersionId !== undefined
           && expectedActiveVersionId !== previousVersionId) {
           throw new AppError(
@@ -280,6 +303,7 @@ export class PostgresDatasetVersionRepository {
             publicationStatus: 'archived',
             archivedAt: activatedAt,
             archivedBy: actorId,
+            archiveReason,
             activePointerRevision: null,
           })
           archived.recordRevision = normalizeRecordRevision(record.recordRevision) + 1
@@ -293,6 +317,8 @@ export class PostgresDatasetVersionRepository {
           activatedBy: actorId,
           activatedAt,
           activePointerRevision: revision,
+          publicationProfile,
+          archiveReason: null,
         })
         activated.recordRevision = normalizeRecordRevision(lockedTarget.recordRevision) + 1
         await updateDatasetVersion(client, activated, this.clock)
@@ -311,19 +337,24 @@ export class PostgresDatasetVersionRepository {
           previousVersionId,
           activatedBy: actorId,
           activatedAt,
+          publicationProfile: publicationProfile
+            ?? lockedTarget.datasetVersion.publicationProfile
+            ?? null,
           revision,
         }
         await client.query(
           `INSERT INTO dataset_active_pointers (
              dataset_id, branch_id, dataset_version_id,
-             previous_dataset_version_id, revision, activated_by, activated_at
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+             previous_dataset_version_id, revision, activated_by, activated_at,
+             publication_profile
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            ON CONFLICT (dataset_id, branch_id) DO UPDATE SET
              dataset_version_id = EXCLUDED.dataset_version_id,
              previous_dataset_version_id = EXCLUDED.previous_dataset_version_id,
              revision = EXCLUDED.revision,
              activated_by = EXCLUDED.activated_by,
              activated_at = EXCLUDED.activated_at,
+             publication_profile = EXCLUDED.publication_profile,
              migrated_from_legacy_status = false`,
           [
             datasetId,
@@ -333,6 +364,7 @@ export class PostgresDatasetVersionRepository {
             revision,
             actorId,
             activatedAt,
+            pointer.publicationProfile,
           ],
         )
         return {
@@ -430,10 +462,10 @@ async function insertDatasetVersion(client, record, clock) {
        id, dataset_id, branch_id, version_name, source_filename,
        source_storage_key, source_size, source_checksum, contract_version,
        validation_status, publication_status, status, active_pointer_revision,
-       payload, created_at, updated_at
+       payload, created_at, updated_at, publication_profile
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-       $14::jsonb, $15, $15
+       $14::jsonb, $15, $15, $16
      )`,
     datasetVersionValues(record, clock),
   )
@@ -459,7 +491,8 @@ async function updateDatasetVersion(client, record, clock, { topologyReview = fa
          status = $12,
          active_pointer_revision = $13,
          payload = ${payloadExpression},
-         updated_at = $15
+         updated_at = $15,
+         publication_profile = $16
      WHERE id = $1`,
     datasetVersionValues(record, clock, payload),
   )
@@ -513,6 +546,7 @@ function datasetVersionValues(record, clock, payload = JSON.stringify(record)) {
     version.activePointerRevision ?? null,
     payload,
     clock().toISOString(),
+    version.publicationProfile ?? null,
   ]
 }
 
@@ -590,6 +624,96 @@ async function replaceProjections(client, record) {
         feature.sourceFingerprint ?? null,
         JSON.stringify(feature.rawProperties ?? {}),
         JSON.stringify(feature),
+      ],
+    )
+  }
+  await client.query(
+    `DELETE FROM dataset_version_diffs
+     WHERE candidate_dataset_version_id = $1`,
+    [datasetVersionId],
+  )
+
+  const identityRegistry = asArray(
+    record.assetIdentityRegistry ?? record.identityRegistry,
+  )
+  for (const entry of identityRegistry) {
+    await client.query(
+      `INSERT INTO asset_identity_registry (
+         registry_id, dataset_id, branch_id, asset_id, source_match_type,
+         source_match_value, valid_from_dataset_version_id,
+         valid_to_dataset_version_id, status, approved_by, approved_at,
+         evidence, audit_event_id
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+         $12::jsonb, $13)
+       ON CONFLICT (registry_id) DO UPDATE SET
+         dataset_id = EXCLUDED.dataset_id,
+         branch_id = EXCLUDED.branch_id,
+         asset_id = EXCLUDED.asset_id,
+         source_match_type = EXCLUDED.source_match_type,
+         source_match_value = EXCLUDED.source_match_value,
+         valid_from_dataset_version_id = EXCLUDED.valid_from_dataset_version_id,
+         valid_to_dataset_version_id = EXCLUDED.valid_to_dataset_version_id,
+         status = EXCLUDED.status,
+         approved_by = EXCLUDED.approved_by,
+         approved_at = EXCLUDED.approved_at,
+         evidence = EXCLUDED.evidence,
+         audit_event_id = EXCLUDED.audit_event_id,
+         updated_at = now()`,
+      [
+        requiredText(
+          entry.registryId
+            ?? `identity-registry:${datasetVersionId}:${entry.sourceMatchType}:${entry.sourceMatchValue}`,
+          'registryId',
+        ),
+        requiredText(entry.datasetId ?? record.datasetVersion.datasetId, 'datasetId'),
+        requiredText(entry.branchId ?? record.datasetVersion.branchId, 'branchId'),
+        requiredText(entry.assetId, 'assetId'),
+        requiredText(entry.sourceMatchType, 'sourceMatchType'),
+        requiredText(entry.sourceMatchValue, 'sourceMatchValue'),
+        requiredText(
+          entry.validFromDatasetVersionId ?? datasetVersionId,
+          'validFromDatasetVersionId',
+        ),
+        entry.validToDatasetVersionId ?? null,
+        entry.status ?? 'active',
+        entry.approvedBy ?? null,
+        entry.approvedAt ?? null,
+        JSON.stringify(entry.evidence ?? {}),
+        entry.auditEventId ?? null,
+      ],
+    )
+  }
+
+  for (const diff of asArray(record.datasetVersionDiffs)) {
+    await client.query(
+      `INSERT INTO dataset_version_diffs (
+         candidate_dataset_version_id, base_dataset_version_id,
+         comparison_revision, change_id, change_type, risk, asset_id,
+         before_ref, after_ref, changed_fields, explanation
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb,
+         $10::jsonb, $11)
+       ON CONFLICT (candidate_dataset_version_id, change_id) DO UPDATE SET
+         base_dataset_version_id = EXCLUDED.base_dataset_version_id,
+         comparison_revision = EXCLUDED.comparison_revision,
+         change_type = EXCLUDED.change_type,
+         risk = EXCLUDED.risk,
+         asset_id = EXCLUDED.asset_id,
+         before_ref = EXCLUDED.before_ref,
+         after_ref = EXCLUDED.after_ref,
+         changed_fields = EXCLUDED.changed_fields,
+         explanation = EXCLUDED.explanation`,
+      [
+        datasetVersionId,
+        diff.baseDatasetVersionId ?? null,
+        requiredText(diff.comparisonRevision, 'comparisonRevision'),
+        requiredText(diff.changeId, 'changeId'),
+        requiredText(diff.changeType, 'changeType'),
+        requiredText(diff.risk, 'risk'),
+        diff.assetId ?? null,
+        JSON.stringify(diff.beforeRef ?? null),
+        JSON.stringify(diff.afterRef ?? null),
+        JSON.stringify(diff.changedFields ?? []),
+        requiredText(diff.explanation, 'explanation'),
       ],
     )
   }
@@ -1061,6 +1185,7 @@ function pointerFromRow(row) {
     activatedBy: row.activated_by ?? null,
     activatedAt: timestampValue(row.activated_at),
     revision: row.revision,
+    publicationProfile: row.publication_profile ?? null,
     ...(row.migrated_from_legacy_status ? { migratedFromLegacyStatus: true } : {}),
   }
 }
@@ -1180,6 +1305,22 @@ function staleRecordRevision(datasetVersionId, expectedRevision, currentRevision
       datasetVersionId,
       expectedRevision,
       currentRevision,
+    },
+  })
+}
+
+function staleActivePointerRevision(
+  datasetVersionId,
+  expectedRevision,
+  currentRevision,
+) {
+  return new AppError('Pointer dataset aktif berubah sejak preview dimuat.', {
+    code: 'stale_active_pointer_revision',
+    statusCode: 409,
+    details: {
+      datasetVersionId,
+      expectedActivePointerRevision: expectedRevision,
+      currentActivePointerRevision: currentRevision,
     },
   })
 }

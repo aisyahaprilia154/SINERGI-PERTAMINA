@@ -72,8 +72,8 @@ export class JsonDatasetVersionRepository {
     return records
   }
 
-  async findActive(datasetId, { excludeId } = {}) {
-    const resolved = await this.resolveActiveVersion({ datasetId })
+  async findActive(datasetId, { excludeId, branchId } = {}) {
+    const resolved = await this.resolveActiveVersion({ datasetId, branchId })
     if (resolved && resolved.record.datasetVersion.id !== excludeId) {
       return resolved.record
     }
@@ -134,6 +134,10 @@ export class JsonDatasetVersionRepository {
     actorId,
     activatedAt,
     expectedActiveVersionId,
+    expectedRecordRevision,
+    expectedActivePointerRevision,
+    publicationProfile,
+    archiveReason = 'superseded',
     validateTarget,
   }) {
     const initialTarget = await this.get(datasetVersionId)
@@ -154,6 +158,15 @@ export class JsonDatasetVersionRepository {
           statusCode: 409,
         })
       }
+      const targetRevision = normalizeRecordRevision(target.recordRevision)
+      if (expectedRecordRevision !== undefined
+        && targetRevision !== expectedRecordRevision) {
+        throw staleRecordRevision(
+          datasetVersionId,
+          expectedRecordRevision,
+          targetRevision,
+        )
+      }
       await validateTarget(structuredClone(target))
 
       const resolved = await this.resolveActiveVersion({
@@ -163,6 +176,15 @@ export class JsonDatasetVersionRepository {
       })
       const previous = resolved?.record ?? null
       const previousVersionId = previous?.datasetVersion.id ?? null
+      const currentPointerRevision = resolved?.pointer.revision ?? null
+      if (expectedActivePointerRevision !== undefined
+        && expectedActivePointerRevision !== currentPointerRevision) {
+        throw staleActivePointerRevision(
+          datasetVersionId,
+          expectedActivePointerRevision,
+          currentPointerRevision,
+        )
+      }
       if (expectedActiveVersionId !== undefined
         && expectedActiveVersionId !== previousVersionId) {
         throw new AppError(
@@ -218,6 +240,7 @@ export class JsonDatasetVersionRepository {
               publicationStatus: 'archived',
               archivedAt: activatedAt,
               archivedBy: actorId,
+              archiveReason,
             },
           }))
         )))
@@ -229,6 +252,8 @@ export class JsonDatasetVersionRepository {
             publicationStatus: 'published',
             activatedBy: actorId,
             activatedAt,
+            ...(publicationProfile ? { publicationProfile } : {}),
+            archiveReason: null,
           },
         }))
 
@@ -246,6 +271,9 @@ export class JsonDatasetVersionRepository {
           previousVersionId,
           activatedBy: actorId,
           activatedAt,
+          publicationProfile: publicationProfile
+            ?? target.datasetVersion.publicationProfile
+            ?? null,
           revision: crypto.randomUUID(),
         }
         await this.#writeActivePointer(pointer)
@@ -492,6 +520,22 @@ function staleRecordRevision(datasetVersionId, expectedRevision, currentRevision
       datasetVersionId,
       expectedRevision,
       currentRevision,
+    },
+  })
+}
+
+function staleActivePointerRevision(
+  datasetVersionId,
+  expectedRevision,
+  currentRevision,
+) {
+  return new AppError('Pointer dataset aktif berubah sejak preview dimuat.', {
+    code: 'stale_active_pointer_revision',
+    statusCode: 409,
+    details: {
+      datasetVersionId,
+      expectedActivePointerRevision: expectedRevision,
+      currentActivePointerRevision: currentRevision,
     },
   })
 }

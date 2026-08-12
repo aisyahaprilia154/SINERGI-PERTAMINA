@@ -131,6 +131,20 @@ test('PostgreSQL primary runtime migration adds durable queue state columns', as
   assert.match(migration.downSql, /DROP COLUMN IF EXISTS revision/)
 })
 
+test('Fase 1 migration adds publication profile, identity registry, and diff projection', async () => {
+  const migration = await loadMigration(
+    migrationDirectory,
+    '0004_phase_one_publication_identity_diff',
+  )
+  assert.match(migration.upSql, /publication_profile/)
+  assert.match(migration.upSql, /CREATE TABLE asset_identity_registry/)
+  assert.match(migration.upSql, /asset_identity_registry_active_source_idx/)
+  assert.match(migration.upSql, /CREATE TABLE dataset_version_diffs/)
+  assert.match(migration.upSql, /risk IN \('low', 'medium', 'high'\)/)
+  assert.match(migration.downSql, /DROP TABLE IF EXISTS dataset_version_diffs/)
+  assert.match(migration.downSql, /DROP TABLE IF EXISTS asset_identity_registry/)
+})
+
 class RecordingClient {
   constructor({ failOn = null } = {}) {
     this.commands = []

@@ -22,6 +22,7 @@ export class PostgresAuditLog {
   }
 
   async record(event, {
+    eventId = null,
     actorId = null,
     datasetVersionId = null,
     branchId = null,
@@ -30,7 +31,7 @@ export class PostgresAuditLog {
     details = {},
   } = {}, { executor = this.pool } = {}) {
     const entry = {
-      id: randomUUID(),
+      id: eventId ?? randomUUID(),
       event: normalizeText(event, 'event'),
       actorId: nullableText(actorId),
       datasetVersionId: nullableText(datasetVersionId),
