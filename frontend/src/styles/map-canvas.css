@@ -356,6 +356,17 @@
   opacity: .42;
 }
 
+.map-adaptive-asset.candidate-context,
+.map-adaptive-cluster.candidate-context {
+  opacity: .28;
+}
+
+.map-adaptive-asset.candidate-endpoint,
+.map-adaptive-cluster.candidate-endpoint {
+  z-index: 5;
+  opacity: 1;
+}
+
 .map-adaptive-asset.network-focused {
   z-index: 4;
   opacity: 1;

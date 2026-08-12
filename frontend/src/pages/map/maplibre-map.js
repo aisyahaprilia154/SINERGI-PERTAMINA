@@ -356,6 +356,8 @@ export function createMapLibreSurface(element, {
           active,
           focusContext,
           networkFocused,
+          candidateEndpoint: focusedAssetIds.has(asset.id),
+          candidateContext: Boolean(selectedCandidate && !focusedAssetIds.has(asset.id)),
           selected: asset.id === state.selectedAssetId,
           trace: traceIds.has(asset.id),
           isCoreNode: asset.isCoreNode,
@@ -421,21 +423,21 @@ export function createMapLibreSurface(element, {
     }
     const sourceLabel = overlap
       ? {
-        x: clampNumber(midpoint.x - 104, 86, width - 86),
-        y: clampNumber(midpoint.y - 70, 92, height - 48),
+        x: clampNumber(midpoint.x - 40, 40, width - 40),
+        y: clampNumber(midpoint.y - 44, 68, height - 36),
       }
       : {
-        x: clampNumber(sourcePoint.x, 86, width - 86),
-        y: clampNumber(sourcePoint.y - 58, 92, height - 48),
+        x: clampNumber(sourcePoint.x, 40, width - 40),
+        y: clampNumber(sourcePoint.y - 34, 68, height - 36),
       }
     const targetLabel = overlap
       ? {
-        x: clampNumber(midpoint.x + 104, 86, width - 86),
-        y: clampNumber(midpoint.y + 70, 92, height - 48),
+        x: clampNumber(midpoint.x + 40, 40, width - 40),
+        y: clampNumber(midpoint.y + 44, 68, height - 36),
       }
       : {
-        x: clampNumber(targetPoint.x, 86, width - 86),
-        y: clampNumber(targetPoint.y + 58, 92, height - 48),
+        x: clampNumber(targetPoint.x, 40, width - 40),
+        y: clampNumber(targetPoint.y + 34, 68, height - 36),
       }
     const sourceName = candidate.sourceDisplayName
       || candidate.sourcePathAssetId
@@ -466,16 +468,17 @@ export function createMapLibreSurface(element, {
           cy="${styleNumber(targetPoint.y)}" r="${overlap ? 5 : 8}"></circle>
       </svg>
       <div class="selected-candidate-map-summary">
-        <small>Koneksi dipilih</small>
         <strong>${escapeHtml(sourceName)} <span>→</span> ${escapeHtml(targetName)}</strong>
         <b>${escapeHtml(distance)}</b>
       </div>
       <div class="selected-map-endpoint source"
-        style="left:${styleNumber(sourceLabel.x)}px;top:${styleNumber(sourceLabel.y)}px">
+        style="left:${styleNumber(sourceLabel.x)}px;top:${styleNumber(sourceLabel.y)}px"
+        title="Dari: ${escapeHtml(sourceName)}">
         <span>Dari</span><strong>${escapeHtml(sourceName)}</strong>
       </div>
       <div class="selected-map-endpoint target"
-        style="left:${styleNumber(targetLabel.x)}px;top:${styleNumber(targetLabel.y)}px">
+        style="left:${styleNumber(targetLabel.x)}px;top:${styleNumber(targetLabel.y)}px"
+        title="Ke: ${escapeHtml(targetName)}">
         <span>Ke</span><strong>${escapeHtml(targetName)}</strong>
       </div>
     `
@@ -1055,6 +1058,8 @@ function renderAdaptiveAssetMarker(marker) {
     marker.displaced ? 'displaced' : '',
     marker.networkFocused ? 'network-focused' : '',
     marker.focusContext ? 'focus-context' : '',
+    marker.candidateEndpoint ? 'candidate-endpoint' : '',
+    marker.candidateContext ? 'candidate-context' : '',
     marker.active === false ? 'inactive' : '',
   ].filter(Boolean).join(' ')
   const label = shortAssetLabel(marker.label || marker.id)
@@ -1076,6 +1081,8 @@ function renderClusterMarker(marker, key) {
   const classes = [
     'map-adaptive-cluster',
     marker.networkFocused ? 'network-focused' : '',
+    marker.candidateEndpoint ? 'candidate-endpoint' : '',
+    marker.candidateContext ? 'candidate-context' : '',
   ].filter(Boolean).join(' ')
   const title = `${marker.count} aset berdekatan · klik untuk memperbesar`
   return `
