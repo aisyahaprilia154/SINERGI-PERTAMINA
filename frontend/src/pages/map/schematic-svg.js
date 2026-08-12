@@ -14,6 +14,8 @@ export function renderSchematicSvg({
   const legendCategories = uniqueNodeTypes(layout.nodes)
   const legendNetworks = uniqueNetworks(layout.edges, graph.mode)
   const diagramBottom = layout.height - layout.options.footerHeight
+  const headingDividerY = graph.mode === 'all-assets' ? 96 : 78
+  const diagramTop = headingDividerY + 4
 
   return `
     <svg class="schematic-svg topology-schematic" xmlns="http://www.w3.org/2000/svg"
@@ -32,6 +34,8 @@ export function renderSchematicSvg({
           .diagram-grid{fill:url(#topology-grid);opacity:.32}
           .diagram-title{font:700 19px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.text}}
           .diagram-meta{font:500 11px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.textSecondary}}
+          .diagram-coverage{font:700 12px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.text}}
+          .section-overview-title{font:700 11px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.text};letter-spacing:.08em}
           .category-section{stroke-width:1.5}
           .category-section-title{font:700 14px Inter,ui-sans-serif,system-ui}
           .category-section-count{font:600 10px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.textSecondary}}
@@ -39,10 +43,14 @@ export function renderSchematicSvg({
           .diagram-edge{fill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
           .diagram-edge.trace{stroke-width:4}
           .diagram-edge.logical{stroke-dasharray:6 5;stroke-width:2}
+          .diagram-edge.recommended{stroke-dasharray:9 7;stroke-width:2.5}
+          .diagram-edge.recommended-underlay{stroke-dasharray:9 7}
           .diagram-node{cursor:pointer;outline:none}
           .node-card{fill:${SVG_THEME.backgroundSubtle};stroke:${SVG_THEME.border};stroke-width:1.5}
           .diagram-node.anchor .node-card,.diagram-node.selected .node-card{stroke:${SVG_THEME.selected};stroke-width:2.5}
           .diagram-node:hover .node-card,.diagram-node:focus .node-card{stroke:${SVG_THEME.selected};stroke-width:2}
+          .diagram-node.resolution-review .node-card{stroke:${SVG_THEME.warning};stroke-dasharray:5 3}
+          .diagram-node.resolution-unresolved .node-card{stroke:${SVG_THEME.textMuted};stroke-dasharray:3 3}
           .node-halo{fill:none;stroke:${SVG_THEME.selected};stroke-width:3;opacity:0}
           .diagram-node.anchor .node-halo{opacity:.18}
           .diagram-node.selected .node-halo,.diagram-node:focus .node-halo{opacity:1}
@@ -65,15 +73,10 @@ export function renderSchematicSvg({
       </defs>
 
       <rect class="diagram-bg" width="${layout.width}" height="${layout.height}"/>
-      <rect class="diagram-grid" y="82" width="${layout.width}" height="${diagramBottom - 82}"/>
+      <rect class="diagram-grid" y="${diagramTop}" width="${layout.width}"
+        height="${Math.max(0, diagramBottom - diagramTop)}"/>
 
-      <g class="diagram-heading">
-        <text class="diagram-title" x="32" y="34">${escapeXml(graph.title)}</text>
-        <text class="diagram-meta" x="32" y="56">
-          ${escapeXml(context.branchName)} · Dataset ${escapeXml(context.version)} · ${layout.nodes.length} aset · ${modeLabel(graph.mode)}
-        </text>
-        <line class="diagram-divider" x1="32" y1="78" x2="${layout.width - 32}" y2="78"/>
-      </g>
+      ${renderDiagramHeading(graph, layout, context, headingDividerY)}
 
       <g class="diagram-category-sections" aria-label="Section kategori aset">
         ${renderCategorySections(layout.sections ?? [])}
@@ -102,17 +105,21 @@ function renderEdge(edge, mode) {
   const color = sanitizeColor(edge.networkColor)
   const logicalClass = edge.networkType === 'Server' ? 'logical' : ''
   const traceClass = mode === 'trace' ? 'trace' : ''
+  const recommendedClass = edge.relationStatus === 'recommended' ? 'recommended' : ''
   return `
-    <path class="diagram-edge-underlay" d="${path}" aria-hidden="true"/>
-    <path class="diagram-edge ${traceClass} ${logicalClass}"
+    <path class="diagram-edge-underlay ${recommendedClass ? 'recommended-underlay' : ''}"
+      d="${path}" aria-hidden="true"/>
+    <path class="diagram-edge ${traceClass} ${logicalClass} ${recommendedClass}"
       d="${path}" stroke="${color}" data-edge-id="${escapeAttribute(edge.id)}"
-      data-network-id="${escapeAttribute(edge.networkId || '')}">
-      <title>${escapeXml(edge.networkName)} · relasi eksplisit</title>
+      data-network-id="${escapeAttribute(edge.networkId || '')}"
+      data-relation-status="${escapeAttribute(edge.relationStatus || 'confirmed')}">
+      <title>${escapeXml(describeEdgeEvidence(edge))}</title>
     </path>
   `
 }
 
 function renderNode(node, selectedAssetId) {
+  if (node.presentation === 'compact') return renderCompactNode(node, selectedAssetId)
   const categoryStyle = CATEGORY_STYLES[node.category] || CATEGORY_STYLES.infrastructure
   const { x, y, width, height } = node.diagram
   const nodeX = x + 25
@@ -158,6 +165,37 @@ function renderNode(node, selectedAssetId) {
   `
 }
 
+function renderCompactNode(node, selectedAssetId) {
+  const categoryStyle = CATEGORY_STYLES[node.category] || CATEGORY_STYLES.infrastructure
+  const { x, y, width, height } = node.diagram
+  const nodeX = x + 20
+  const nodeY = y + height / 2
+  const labelX = x + 39
+  const classes = [
+    'diagram-node',
+    'compact',
+    `resolution-${node.resolutionStatus || 'unresolved'}`,
+    node.isConnector ? 'connector' : '',
+    node.id === selectedAssetId ? 'selected' : '',
+  ].filter(Boolean).join(' ')
+  return `
+    <g class="${classes}" data-asset-id="${escapeAttribute(node.id)}" tabindex="0"
+      role="button" aria-label="Pilih aset ${escapeAttribute(node.id)}">
+      <title>${escapeXml(node.id)} · ${escapeXml(node.name)} · ${escapeXml(node.type)} · ${escapeXml(node.location)} · ${escapeXml(resolutionLabel(node.resolutionStatus))}</title>
+      <rect class="node-halo" x="${x - 4}" y="${y - 4}" width="${width + 8}" height="${height + 8}" rx="12"/>
+      <rect class="node-card" x="${x}" y="${y}" width="${width}" height="${height}" rx="10"/>
+      ${renderNodeShape(node, nodeX, nodeY, 9, categoryStyle.color)}
+      <text class="node-glyph" x="${nodeX}" y="${nodeY + 2.5}" text-anchor="middle">
+        ${escapeXml(nodeGlyph(node.type))}
+      </text>
+      <text class="node-id" x="${labelX}" y="${nodeY + 4}" text-anchor="start">
+        ${escapeXml(shortenCompactLabel(node.name || node.id))}
+      </text>
+      ${renderResolutionBadge(node, x + width - 12, nodeY)}
+    </g>
+  `
+}
+
 function renderNodeShape(node, x, y, radius, color) {
   const normalized = String(node.type || '').toLowerCase()
   if (normalized.includes('junction')) {
@@ -189,6 +227,37 @@ function renderCategorySections(sections) {
   return sections.map((section) => {
     const style = CATEGORY_STYLES[section.category] || CATEGORY_STYLES.infrastructure
     const title = section.title || style.label
+    if (section.kind === 'connected-overview' || section.kind === 'isolated') {
+      const detail = section.kind === 'connected-overview'
+        ? `${section.nodeCount} aset · ${section.componentCount} komponen`
+        : `${section.nodeCount} aset`
+      return `
+        <g class="diagram-category-section overview" data-section-kind="${section.kind}">
+          <rect class="category-section" x="${section.x}" y="${section.y}"
+            width="${section.width}" height="${section.height}" rx="18"
+            fill="${SVG_THEME.backgroundSubtle}" stroke="${SVG_THEME.border}"/>
+          <text class="section-overview-title" x="${section.x + 22}" y="${section.y + 32}">
+            ${escapeXml(title.toUpperCase())}
+          </text>
+          <text class="category-section-count" x="${section.x + section.width - 22}"
+            y="${section.y + 32}" text-anchor="end">${escapeXml(detail)}</text>
+        </g>
+      `
+    }
+    if (section.kind === 'isolated-category') {
+      return `
+        <g class="diagram-category-section isolated-category"
+          data-category="${escapeAttribute(section.category)}">
+          <circle cx="${section.x + 6}" cy="${section.y + 18}" r="5" fill="${style.color}"/>
+          <text class="category-section-title" x="${section.x + 19}" y="${section.y + 23}"
+            fill="${SVG_THEME.text}">${escapeXml(title)}</text>
+          <text class="category-section-count" x="${section.x + section.width}"
+            y="${section.y + 22}" text-anchor="end">${section.nodeCount} aset</text>
+          <line class="diagram-divider" x1="${section.x}" y1="${section.y + 35}"
+            x2="${section.x + section.width}" y2="${section.y + 35}"/>
+        </g>
+      `
+    }
     return `
       <g class="diagram-category-section" data-category="${escapeAttribute(section.category)}">
         <rect class="category-section" x="${section.x}" y="${section.y}"
@@ -202,6 +271,80 @@ function renderCategorySections(sections) {
       </g>
     `
   }).join('')
+}
+
+function renderDiagramHeading(graph, layout, context, dividerY) {
+  if (graph.mode !== 'all-assets') {
+    return `
+      <g class="diagram-heading">
+        <text class="diagram-title" x="32" y="34">${escapeXml(graph.title)}</text>
+        <text class="diagram-meta" x="32" y="56">
+          ${escapeXml(context.branchName)} · Dataset ${escapeXml(context.version)} · ${layout.nodes.length} aset · ${modeLabel(graph.mode)}
+        </text>
+        <line class="diagram-divider" x1="32" y1="${dividerY}"
+          x2="${layout.width - 32}" y2="${dividerY}"/>
+      </g>
+    `
+  }
+  const summary = layout.summary || {}
+  const totalCount = summary.totalCount ?? layout.nodes.length
+  const connectedCount = summary.connectedCount ?? totalCount - (summary.isolatedCount || 0)
+  const isolatedCount = summary.isolatedCount ?? 0
+  const coveragePercent = summary.coveragePercent ?? 100
+  return `
+    <g class="diagram-heading all-assets-heading">
+      <text class="diagram-title" x="32" y="32">Seluruh aset · ${totalCount}</text>
+      <text class="diagram-coverage" x="${layout.width - 32}" y="32" text-anchor="end">
+        ${coveragePercent}% tercakup
+      </text>
+      <text class="diagram-meta" x="32" y="54">
+        ${connectedCount} memiliki evidence · ${isolatedCount} belum terhubung · ${summary.componentCount ?? 0} komponen
+      </text>
+      <text class="diagram-meta" x="32" y="76">
+        ${summary.confirmedCount ?? 0} aset evidence terkonfirmasi · ${summary.recommendedCount ?? 0} rekomendasi kuat · ${summary.reviewCount ?? 0} perlu ditinjau · ${summary.unresolvedCount ?? 0} tanpa evidence
+      </text>
+      <line class="diagram-divider" x1="32" y1="${dividerY}"
+        x2="${layout.width - 32}" y2="${dividerY}"/>
+    </g>
+  `
+}
+
+function renderResolutionBadge(node, x, y) {
+  if (node.resolutionStatus === 'review') {
+    return `<circle class="status-alert" cx="${x}" cy="${y}" r="6"/>
+      <text class="status-alert-text" x="${x}" y="${y + 2.5}" text-anchor="middle">?</text>`
+  }
+  if (node.resolutionStatus === 'unresolved') {
+    return `<circle cx="${x}" cy="${y}" r="6" fill="${SVG_THEME.textMuted}"
+      stroke="${SVG_THEME.background}" stroke-width="1.5"/>
+      <text class="status-alert-text" x="${x}" y="${y + 2.5}" text-anchor="middle">!</text>`
+  }
+  if (node.resolutionStatus === 'recommended') {
+    return `<circle class="status-alert" cx="${x}" cy="${y}" r="5"/>
+      <text class="status-alert-text" x="${x}" y="${y + 2}" text-anchor="middle">R</text>`
+  }
+  return ''
+}
+
+function describeEdgeEvidence(edge) {
+  const status = edge.relationStatus === 'recommended'
+    ? 'rekomendasi kuat'
+    : 'terkonfirmasi'
+  const confidence = Number.isFinite(edge.confidence)
+    ? ` · confidence ${Math.round(edge.confidence * 100)}%`
+    : ''
+  const distance = Number.isFinite(edge.distanceMeters)
+    ? ` · jarak ${edge.distanceMeters.toFixed(2)} m`
+    : ''
+  const provenance = edge.relationSource ? ` · ${edge.relationSource}` : ''
+  return `${edge.networkName || 'Relasi'} · ${status}${confidence}${distance}${provenance}`
+}
+
+function resolutionLabel(status) {
+  if (status === 'confirmed') return 'Evidence terkonfirmasi'
+  if (status === 'recommended') return 'Rekomendasi kuat'
+  if (status === 'review') return 'Perlu Konfirmasi Koneksi'
+  return 'Belum ada evidence'
 }
 
 function renderLegend(categories, networks, diagramBottom) {
@@ -222,7 +365,8 @@ function renderLegend(categories, networks, diagramBottom) {
         const offsetX = 48 + index * 128
         return `
           <line x1="${offsetX}" y1="-3" x2="${offsetX + 18}" y2="-3"
-            stroke="${sanitizeColor(network.color)}" stroke-width="3" stroke-linecap="round"/>
+            stroke="${sanitizeColor(network.color)}" stroke-width="3" stroke-linecap="round"
+            ${network.relationStatus === 'recommended' ? 'stroke-dasharray="6 4"' : ''}/>
           <text class="legend-label" x="${offsetX + 25}" y="0">${escapeXml(shortenLegend(network.name || 'Relasi terkonfirmasi'))}</text>
         `
       }).join('')}
@@ -256,15 +400,20 @@ function uniqueNetworks(edges, mode) {
   const seen = new Set()
   const entries = edges
     .filter((edge) => {
-      const key = edge.networkId || edge.networkName
+      const key = `${edge.networkId || edge.networkName}|${edge.relationStatus || 'confirmed'}`
       if (seen.has(key)) return false
       seen.add(key)
       return true
     })
     .map((edge) => ({
       id: edge.networkId,
-      name: mode === 'selected' ? 'Relasi terkonfirmasi' : (edge.networkName || 'Relasi terkonfirmasi'),
+      name: edge.relationStatus === 'recommended'
+        ? 'Rekomendasi kuat'
+        : mode === 'selected'
+          ? 'Relasi terkonfirmasi'
+          : (edge.networkName || 'Relasi terkonfirmasi'),
       color: edge.networkColor,
+      relationStatus: edge.relationStatus || 'confirmed',
     }))
   return entries.length ? entries : [{
     id: 'confirmed-relation',
@@ -312,6 +461,10 @@ function shortenLegend(value = '') {
 
 function shortenNodeLabel(value = '') {
   return value.length > 20 ? `${value.slice(0, 18)}â€¦` : value
+}
+
+function shortenCompactLabel(value = '') {
+  return value.length > 16 ? `${value.slice(0, 14)}…` : value
 }
 
 function shortAssetId(value = '') {

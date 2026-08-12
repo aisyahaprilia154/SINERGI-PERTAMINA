@@ -6,6 +6,7 @@ import {
 import {
   loadActiveAssetDetail,
   loadActiveDataset,
+  loadAllTopologyCandidates,
   loadDatasetProjection,
   loadTopologyProjection,
   traceTopology,
@@ -137,6 +138,7 @@ export async function renderMapPage(container) {
     datasetTopologySummary,
   })
   const hasRenderableData = geometries.length > 0
+  let diagramCandidateProjectionPromise = null
   const resolvedOverlays = (overlayResult[0].status === 'fulfilled'
     ? overlayResult[0].value.items ?? []
     : [])
@@ -788,7 +790,7 @@ export async function renderMapPage(container) {
     renderDrawer()
   }
 
-  function openSchematic() {
+  async function openSchematic(event) {
     if (!diagramAvailable) {
       state.traceStatus = 'error'
       state.traceError = topologyReadiness.message
@@ -798,13 +800,41 @@ export async function renderMapPage(container) {
       renderDrawer()
       return
     }
+    const trigger = event?.currentTarget
+    const previousBusy = trigger?.getAttribute('aria-busy')
+    if (trigger) {
+      trigger.disabled = true
+      trigger.setAttribute('aria-busy', 'true')
+    }
+    let topologyCandidates = []
+    let candidateLoadError = null
+    try {
+      diagramCandidateProjectionPromise ??= loadAllTopologyCandidates({
+        datasetVersionId: activeContext.datasetVersionId,
+      })
+      const projection = await diagramCandidateProjectionPromise
+      topologyCandidates = projection.items ?? []
+    } catch (error) {
+      diagramCandidateProjectionPromise = null
+      candidateLoadError = error.message
+    } finally {
+      if (trigger) {
+        trigger.disabled = false
+        if (previousBusy === null) trigger.removeAttribute('aria-busy')
+        else trigger.setAttribute('aria-busy', previousBusy)
+      }
+    }
     const allAssetsGraph = buildSchematicGraph({
       assets: diagramAssets,
       networks,
       topologyGraph,
+      topologyCandidates,
       scope: 'all-assets',
       topologyReady: topologyReadiness.ready,
     })
+    if (candidateLoadError && allAssetsGraph.diagnostics) {
+      allAssetsGraph.diagnostics.candidateLoadError = candidateLoadError
+    }
     const fullMapGraph = buildSchematicGraph({
       assets: diagramAssets,
       networks,

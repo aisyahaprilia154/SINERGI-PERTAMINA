@@ -175,6 +175,7 @@ export function buildCanonicalParserResult({
     const geometryFingerprint = fingerprint(geometryEvidenceValue(placemark.geometry))
     const sourceFeatureKey = [
       placemark.id ?? '',
+      placemark.sourceDocumentPath ?? '',
       sourceFolderPath,
       placemark.name ?? '',
       'Placemark',
@@ -203,6 +204,7 @@ export function buildCanonicalParserResult({
       sourceName: placemark.name,
       ...compact({
         sourceKmlId: placemark.id,
+        sourceDocumentPath: placemark.sourceDocumentPath,
         sourceStyleUrl: placemark.properties?.styleUrl,
       }),
       visibility: placemark.properties?.visibility !== false,
@@ -263,6 +265,7 @@ export function buildCanonicalParserResult({
   const registerOverlay = (overlay, sourceFolderPath, sourceIndex) => {
     const overlayFingerprint = fingerprint({
       id: overlay.id,
+      sourceDocumentPath: overlay.sourceDocumentPath,
       sourceFolderPath,
       name: overlay.name,
       sourceIndex,
@@ -278,7 +281,7 @@ export function buildCanonicalParserResult({
     const resourceLink = resolveOverlayResource(
       overlay.iconHref,
       resourceResult.resources,
-      sourceSelection.selectedKmlPath,
+      overlay.sourceDocumentPath ?? sourceSelection.selectedKmlPath,
     )
     const canonicalOverlay = {
       sourceOverlayId: deterministicId('source-overlay', datasetVersionId, overlayFingerprint),
@@ -298,6 +301,7 @@ export function buildCanonicalParserResult({
       ...(overlay.latLonBox ? { latLonBox: structuredClone(overlay.latLonBox) } : {}),
       ...(overlay.latLonQuad ? { latLonQuad: structuredClone(overlay.latLonQuad) } : {}),
       sourceFolderPath,
+      ...compact({ sourceDocumentPath: overlay.sourceDocumentPath }),
       valid: overlay.valid !== false && resourceLink.status === 'resolved',
       resourceResolutionStatus: resourceLink.status,
       sourceFingerprint: overlayFingerprint,

@@ -19,7 +19,7 @@ export function calculateSchematicLayout(graph, options = {}) {
 
   const settings = { ...DEFAULT_OPTIONS, ...options }
   if (graph.mode === 'all-assets') {
-    return calculateFullGraphLayout(graph, settings)
+    return calculateSingleCanvasEvidenceLayout(graph, settings)
   }
   if (graph.mode === 'full-map') {
     return calculateCategorySectionLayout(graph, settings)
@@ -155,14 +155,14 @@ function calculateSelectedRelationLayout(graph, settings) {
 }
 
 function calculateFullGraphLayout(graph, settings) {
-  const connected = connectedComponents(graph)
-  const isolated = graph.nodes.filter((node) => !connected.some((component) => component.length > 1
-    && component.includes(node.id)))
-  const components = connected
+  const allAssetSettings = { ...settings, headerHeight: Math.max(settings.headerHeight, 122) }
+  const connectedNodeIds = new Set(graph.edges.flatMap((edge) => [edge.sourceId, edge.targetId]))
+  const isolated = graph.nodes.filter((node) => !connectedNodeIds.has(node.id))
+  const components = connectedComponents(graph)
     .filter((component) => component.length > 1)
     .sort((left, right) => left[0].localeCompare(right[0], 'id'))
   const nodeById = new Map()
-  const componentGap = Math.max(settings.rowGap * 2, 48)
+  const componentGap = Math.max(allAssetSettings.rowGap * 2, 48)
   const componentSpecs = components.map((component, componentIndex) => {
     const componentNodes = graph.nodes.filter((node) => component.includes(node.id))
     const componentEdges = graph.edges.filter((edge) => component.includes(edge.sourceId)
@@ -171,28 +171,29 @@ function calculateFullGraphLayout(graph, settings) {
     const depths = calculateComponentDepths(root, componentNodes, componentEdges)
     const grouped = groupNodesByDepth(componentNodes, depths)
     const maxRows = Math.max(...[...grouped.values()].map((nodes) => nodes.length), 1)
-    const contentHeight = maxRows * settings.nodeHeight
-      + Math.max(0, maxRows - 1) * settings.rowGap
+    const contentHeight = maxRows * allAssetSettings.nodeHeight
+      + Math.max(0, maxRows - 1) * allAssetSettings.rowGap
     const componentWidth = Math.max(
       520,
-      40 * 2 + grouped.size * settings.nodeWidth
-        + Math.max(0, grouped.size - 1) * settings.columnGap,
+      40 * 2 + grouped.size * allAssetSettings.nodeWidth
+        + Math.max(0, grouped.size - 1) * allAssetSettings.columnGap,
     )
     const componentHeaderHeight = 34
     const componentPadding = 24
     const componentHeight = componentHeaderHeight + componentPadding * 2 + contentHeight
     const localNodes = new Map()
     for (const [depth, nodes] of grouped) {
-      const groupHeight = nodes.length * settings.nodeHeight
-        + Math.max(0, nodes.length - 1) * settings.rowGap
+      const groupHeight = nodes.length * allAssetSettings.nodeHeight
+        + Math.max(0, nodes.length - 1) * allAssetSettings.rowGap
       const startY = componentHeaderHeight + componentPadding + (contentHeight - groupHeight) / 2
       nodes.forEach((node, index) => {
         localNodes.set(node.id, createDiagramNode(node, {
-          x: componentPadding + depth * (settings.nodeWidth + settings.columnGap),
-          y: startY + index * (settings.nodeHeight + settings.rowGap),
+          x: componentPadding + depth
+            * (allAssetSettings.nodeWidth + allAssetSettings.columnGap),
+          y: startY + index * (allAssetSettings.nodeHeight + allAssetSettings.rowGap),
           depth,
           parentId: findParentId(node.id, depth, componentEdges, depths),
-          settings,
+          settings: allAssetSettings,
         }))
       })
     }
@@ -202,29 +203,55 @@ function calculateFullGraphLayout(graph, settings) {
       width: componentWidth,
       height: componentHeight,
       nodes: localNodes,
-      title: `Aset terhubung · Komponen ${componentIndex + 1}`,
+      title: `Komponen ${componentIndex + 1}`,
     }
   })
 
-  const sections = []
-  const componentColumns = componentSpecs.length > 1 ? 2 : 1
+  const isolatedGroups = groupIsolatedAssets(isolated)
+  const compactNodeWidth = 152
+  const compactNodeHeight = 42
+  const compactColumnGap = 16
+  const largestIsolatedGroup = Math.max(0, ...isolatedGroups.map((group) => group.nodes.length))
+  const preferredCompactColumns = Math.max(1, Math.min(7, largestIsolatedGroup))
+  const preferredIsolatedWidth = allAssetSettings.marginX * 2
+    + preferredCompactColumns * compactNodeWidth
+    + Math.max(0, preferredCompactColumns - 1) * compactColumnGap
+  const componentColumns = componentSpecs.length > 1
+    && componentSpecs.every((spec) => spec.width <= 620) ? 2 : 1
   const columnWidths = Array.from({ length: componentColumns }, (_, column) => Math.max(
     0,
     ...componentSpecs.filter((_, index) => index % componentColumns === column)
       .map((spec) => spec.width),
   ))
-  const packedWidth = columnWidths.reduce((sum, value) => sum + value, 0)
+  const componentWidth = columnWidths.reduce((sum, value) => sum + value, 0)
     + Math.max(0, componentColumns - 1) * componentGap
-    + settings.marginX * 2
+    + allAssetSettings.marginX * 2
+  const layoutWidth = Math.max(
+    allAssetSettings.minWidth,
+    componentWidth,
+    preferredIsolatedWidth,
+  )
+  const sections = []
   const rowSpecs = []
   for (let index = 0; index < componentSpecs.length; index += componentColumns) {
     rowSpecs.push(componentSpecs.slice(index, index + componentColumns))
   }
-  let sectionY = settings.headerHeight + 16
+  const connectedSection = {
+    kind: 'connected-overview',
+    title: 'Komponen terhubung',
+    nodeCount: connectedNodeIds.size,
+    componentCount: components.length,
+    x: 32,
+    y: allAssetSettings.headerHeight + 16,
+    width: layoutWidth - 64,
+    height: 0,
+  }
+  sections.push(connectedSection)
+  let sectionY = connectedSection.y + 56
   rowSpecs.forEach((row) => {
     const rowHeight = Math.max(...row.map((spec) => spec.height))
     row.forEach((spec, columnIndex) => {
-      const offsetX = settings.marginX + columnWidths
+      const offsetX = allAssetSettings.marginX + columnWidths
         .slice(0, columnIndex)
         .reduce((sum, value) => sum + value + componentGap, 0)
       const offsetY = sectionY + (rowHeight - spec.height) / 2
@@ -244,67 +271,273 @@ function calculateFullGraphLayout(graph, settings) {
     })
     sectionY += rowHeight + componentGap
   })
+  connectedSection.height = Math.max(88, sectionY - componentGap - connectedSection.y + 24)
+  sectionY = connectedSection.y + connectedSection.height + 28
 
   if (isolated.length) {
-    const fullWidth = Math.max(settings.minWidth, packedWidth)
-    const isolatedColumns = Math.max(1, Math.min(8, Math.ceil(Math.sqrt(isolated.length))))
-    const isolatedCellGap = Math.max(settings.columnGap / 2, 28)
-    const isolatedCellWidth = settings.nodeWidth + isolatedCellGap
-    const isolatedRows = Math.ceil(isolated.length / isolatedColumns)
-    const sectionPadding = 24
-    const sectionHeight = 48 + isolatedRows * (settings.nodeHeight + settings.rowGap) + sectionPadding
-    sections.push({
+    const isolatedSection = {
       kind: 'isolated',
       title: 'Aset tanpa relasi',
       nodeCount: isolated.length,
       x: 32,
       y: sectionY,
-      width: Math.max(fullWidth - 64, isolatedColumns * isolatedCellWidth + sectionPadding * 2),
-      height: sectionHeight,
+      width: layoutWidth - 64,
+      height: 0,
+    }
+    sections.push(isolatedSection)
+    const categoryX = isolatedSection.x + 24
+    const categoryWidth = isolatedSection.width - 48
+    const compactColumns = Math.max(1, Math.floor(
+      (categoryWidth + compactColumnGap) / (compactNodeWidth + compactColumnGap),
+    ))
+    let categoryY = isolatedSection.y + 58
+    isolatedGroups.forEach((group) => {
+      const rowCount = Math.ceil(group.nodes.length / compactColumns)
+      const categoryHeaderHeight = 38
+      const compactRowGap = 12
+      const categoryHeight = categoryHeaderHeight
+        + rowCount * compactNodeHeight
+        + Math.max(0, rowCount - 1) * compactRowGap
+        + 18
+      sections.push({
+        kind: 'isolated-category',
+        category: group.category,
+        title: group.label,
+        nodeCount: group.nodes.length,
+        x: categoryX,
+        y: categoryY,
+        width: categoryWidth,
+        height: categoryHeight,
+      })
+      group.nodes.forEach((node, index) => {
+        const column = index % compactColumns
+        const row = Math.floor(index / compactColumns)
+        nodeById.set(node.id, createDiagramNode(node, {
+          x: categoryX + column * (compactNodeWidth + compactColumnGap),
+          y: categoryY + categoryHeaderHeight + row * (compactNodeHeight + compactRowGap),
+          depth: null,
+          parentId: null,
+          settings: allAssetSettings,
+          width: compactNodeWidth,
+          height: compactNodeHeight,
+          presentation: 'compact',
+        }))
+      })
+      categoryY += categoryHeight + 12
     })
-    isolated.forEach((node, index) => {
-      const column = index % isolatedColumns
-      const row = Math.floor(index / isolatedColumns)
-      nodeById.set(node.id, createDiagramNode(node, {
-        x: 32 + sectionPadding + column * isolatedCellWidth,
-        y: sectionY + 62 + row * (settings.nodeHeight + settings.rowGap),
-        depth: null,
-        parentId: null,
-        settings,
-      }))
-    })
-    sectionY += sectionHeight
+    isolatedSection.height = categoryY - 12 - isolatedSection.y + 22
+    sectionY = isolatedSection.y + isolatedSection.height
   }
 
   return finalizeLayout({
     status: 'ready',
     strategy: 'graph-hierarchy',
-    width: Math.max(settings.minWidth, packedWidth),
-    height: sectionY + settings.footerHeight,
-    options: settings,
+    width: layoutWidth,
+    height: sectionY + allAssetSettings.footerHeight,
+    options: allAssetSettings,
     sections,
     nodes: graph.nodes.map((node) => nodeById.get(node.id)).filter(Boolean),
     edges: layoutEdges(graph.edges, nodeById),
-    defaultZoom: .62,
+    summary: {
+      totalCount: graph.nodes.length,
+      connectedCount: connectedNodeIds.size,
+      isolatedCount: isolated.length,
+      componentCount: components.length,
+      coveragePercent: graph.nodes.length
+        ? Math.round((nodeById.size / graph.nodes.length) * 100)
+        : 100,
+    },
+    defaultZoom: .78,
     focusNodeId: graph.anchorAssetId || components[0]?.[0] || isolated[0]?.id || null,
-  }, settings)
+  }, allAssetSettings)
 }
 
-function createDiagramNode(node, { x, y, depth, parentId, settings }) {
+function calculateSingleCanvasEvidenceLayout(graph, settings) {
+  const nodeWidth = 132
+  const nodeHeight = 46
+  const horizontalGap = 14
+  const verticalGap = 12
+  const columnCount = Math.max(8, Math.ceil(Math.sqrt(graph.nodes.length * 1.6)))
+  const rowCount = Math.max(1, Math.ceil(graph.nodes.length / columnCount))
+  const fullSettings = {
+    ...settings,
+    headerHeight: Math.max(settings.headerHeight, 122),
+    footerHeight: Math.max(settings.footerHeight, 118),
+    nodeWidth,
+    nodeHeight,
+  }
+  const width = Math.max(
+    settings.minWidth,
+    settings.marginX * 2 + columnCount * (nodeWidth + horizontalGap),
+  )
+  const contentHeight = Math.max(760, rowCount * (nodeHeight + verticalGap) + 160)
+  const height = fullSettings.headerHeight + contentHeight + fullSettings.footerHeight
+  const bounds = canUseSourcePositions(graph)
+    ? (graph.sourceBounds || getNodeSourceBounds(graph.nodes))
+    : null
+  const rangeX = Math.max((bounds?.maxX ?? 1) - (bounds?.minX ?? 0), .000001)
+  const rangeY = Math.max((bounds?.maxY ?? 1) - (bounds?.minY ?? 0), .000001)
+  const canvas = {
+    minX: settings.marginX,
+    maxX: width - settings.marginX - nodeWidth,
+    minY: fullSettings.headerHeight + 32,
+    maxY: fullSettings.headerHeight + contentHeight - nodeHeight - 24,
+  }
+  const sorted = [...graph.nodes].sort((left, right) => (
+    compareSourcePosition(left, right)
+    || String(left.name || left.id).localeCompare(String(right.name || right.id), 'id')
+  ))
+  const availablePositions = []
+  for (let y = canvas.minY; y <= canvas.maxY; y += nodeHeight + verticalGap) {
+    for (let x = canvas.minX; x <= canvas.maxX; x += nodeWidth + horizontalGap) {
+      availablePositions.push({ x, y })
+    }
+  }
+  const nodeById = new Map()
+
+  sorted.forEach((node, index) => {
+    const fallbackColumn = index % columnCount
+    const fallbackRow = Math.floor(index / columnCount)
+    const targetX = bounds
+      ? canvas.minX + ((node.sourcePosition.x - bounds.minX) / rangeX)
+        * Math.max(1, canvas.maxX - canvas.minX)
+      : canvas.minX + fallbackColumn * (nodeWidth + horizontalGap)
+    const targetY = bounds
+      ? canvas.minY + ((node.sourcePosition.y - bounds.minY) / rangeY)
+        * Math.max(1, canvas.maxY - canvas.minY)
+      : canvas.minY + fallbackRow * (nodeHeight + verticalGap)
+    const position = findNearestFreePosition({
+      targetX,
+      targetY,
+      availablePositions,
+    })
+    nodeById.set(node.id, createDiagramNode(node, {
+      x: position.x,
+      y: position.y,
+      depth: null,
+      parentId: null,
+      settings: fullSettings,
+      width: nodeWidth,
+      height: nodeHeight,
+      presentation: 'compact',
+    }))
+  })
+
+  const connectedNodeIds = new Set(graph.edges.flatMap((edge) => [edge.sourceId, edge.targetId]))
+  const componentCount = connectedComponents(graph).filter((component) => component.length > 1).length
+  const diagnostic = graph.diagnostics ?? {}
+  return finalizeLayout({
+    status: 'ready',
+    strategy: 'single-evidence-canvas',
+    width,
+    height,
+    options: fullSettings,
+    sections: [],
+    nodes: graph.nodes.map((node) => nodeById.get(node.id)).filter(Boolean),
+    edges: layoutEdges(graph.edges, nodeById),
+    summary: {
+      totalCount: graph.nodes.length,
+      connectedCount: connectedNodeIds.size,
+      isolatedCount: graph.nodes.length - connectedNodeIds.size,
+      confirmedCount: diagnostic.confirmedNodeCount ?? connectedNodeIds.size,
+      recommendedCount: diagnostic.recommendedNodeCount ?? 0,
+      reviewCount: diagnostic.reviewNodeCount ?? 0,
+      unresolvedCount: diagnostic.unresolvedNodeCount
+        ?? graph.nodes.length - connectedNodeIds.size,
+      componentCount,
+      coveragePercent: 100,
+    },
+    defaultZoom: .55,
+    focusNodeId: graph.anchorAssetId || graph.nodes[0]?.id || null,
+  }, fullSettings)
+}
+
+function findNearestFreePosition({ targetX, targetY, availablePositions }) {
+  let bestIndex = 0
+  let bestDistance = Number.POSITIVE_INFINITY
+  availablePositions.forEach((position, index) => {
+    const distance = Math.hypot(position.x - targetX, position.y - targetY)
+    if (distance < bestDistance
+      || (distance === bestDistance && (
+        position.y < availablePositions[bestIndex].y
+        || (position.y === availablePositions[bestIndex].y
+          && position.x < availablePositions[bestIndex].x)
+      ))) {
+      bestIndex = index
+      bestDistance = distance
+    }
+  })
+  return availablePositions.splice(bestIndex, 1)[0]
+}
+
+function createDiagramNode(node, {
+  x,
+  y,
+  depth,
+  parentId,
+  settings,
+  width = settings.nodeWidth,
+  height = settings.nodeHeight,
+  presentation = 'standard',
+}) {
   return {
     ...node,
     depth,
     parentId,
+    presentation,
     diagram: {
       x,
       y,
-      width: settings.nodeWidth,
-      height: settings.nodeHeight,
-      nodeX: x + settings.nodeWidth / 2,
-      nodeY: y + settings.nodeHeight / 2,
-      labelX: x + settings.nodeWidth / 2,
-      labelY: y + settings.nodeHeight - 22,
+      width,
+      height,
+      nodeX: x + width / 2,
+      nodeY: y + height / 2,
+      labelX: x + width / 2,
+      labelY: y + height - 22,
     },
+  }
+}
+
+function groupIsolatedAssets(nodes) {
+  const groups = new Map()
+  nodes.forEach((node) => {
+    const descriptor = describeIsolatedType(node)
+    if (!groups.has(descriptor.key)) {
+      groups.set(descriptor.key, { ...descriptor, nodes: [] })
+    }
+    groups.get(descriptor.key).nodes.push(node)
+  })
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      nodes: group.nodes.sort((left, right) => (
+        String(left.name || left.id).localeCompare(String(right.name || right.id), 'id')
+      )),
+    }))
+    .sort((left, right) => left.order - right.order || left.label.localeCompare(right.label, 'id'))
+}
+
+function describeIsolatedType(node) {
+  const type = String(node.type || '').trim()
+  const normalized = type.toLowerCase()
+  if ((normalized.includes('fo') || normalized.includes('fiber'))
+    && normalized.includes('rekomendasi')) {
+    return { key: 'fo-recommendation', label: 'FO Rekomendasi', category: 'fiber-optic', order: 2 }
+  }
+  if (normalized.includes('cctv') || normalized.includes('camera')) {
+    return { key: 'cctv', label: 'CCTV', category: 'cctv', order: 0 }
+  }
+  if (normalized.includes('rekomendasi') || normalized.includes('recommendation')) {
+    return { key: 'recommendation', label: 'Rekomendasi', category: node.category, order: 1 }
+  }
+  if (normalized.includes('junction')) {
+    return { key: 'junction-box', label: 'Junction Box', category: node.category, order: 3 }
+  }
+  return {
+    key: normalized || 'other',
+    label: type || 'Aset lainnya',
+    category: node.category || 'infrastructure',
+    order: 10,
   }
 }
 

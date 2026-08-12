@@ -86,6 +86,36 @@ test('records NetworkLink without fetching it', () => {
   )))
 })
 
+test('parses gx:Track and recursive MultiGeometry without changing coordinate order', () => {
+  const output = parseKmlText(`<?xml version="1.0"?>
+    <kml xmlns="http://www.opengis.net/kml/2.2"
+      xmlns:gx="http://www.google.com/kml/ext/2.2">
+      <Document><Placemark id="mixed-track"><name>Mixed track</name>
+        <MultiGeometry>
+          <Point><coordinates>110,-7,0</coordinates></Point>
+          <MultiGeometry>
+            <gx:Track>
+              <when>2026-01-01T00:00:00Z</when>
+              <when>2026-01-01T00:01:00Z</when>
+              <gx:coord>110.1 -7.1 3</gx:coord>
+              <gx:coord>110.2 -7.2 4</gx:coord>
+            </gx:Track>
+          </MultiGeometry>
+        </MultiGeometry>
+      </Placemark></Document>
+    </kml>`)
+
+  const geometry = output.placemarks[0].geometry
+  assert.equal(geometry.type, 'MultiGeometry')
+  assert.equal(geometry.geometries[1].type, 'MultiGeometry')
+  const track = geometry.geometries[1].geometries[0]
+  assert.equal(track.type, 'LineString')
+  assert.deepEqual(track.coordinates, [[110.1, -7.1, 3], [110.2, -7.2, 4]])
+  assert.equal(track.normalization.sourceGeometryType, 'gx:Track')
+  assert.equal(track.normalization.timeCount, 2)
+  assert.equal(output.unsupportedElements.some(({ name }) => name === 'Track'), false)
+})
+
 test('blocks unsupported feature-level overlays instead of silently omitting them', () => {
   const output = parseKmlText(`<?xml version="1.0"?>
     <kml><Document>
