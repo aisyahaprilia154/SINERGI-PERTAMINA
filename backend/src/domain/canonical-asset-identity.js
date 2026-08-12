@@ -12,6 +12,7 @@ export function buildCanonicalAssetIdentityMap({
   datasetVersion,
   sourceFeatures = [],
   classifiedObjects = [],
+  identityRegistry = [],
 } = {}) {
   const datasetVersionId = readString(datasetVersion?.id) ?? 'unknown-dataset-version'
   const featureById = new Map(
@@ -30,10 +31,25 @@ export function buildCanonicalAssetIdentityMap({
   ))
   const legacyTotals = countValues(legacyBases.filter(Boolean))
   const legacyOccurrences = new Map()
+  const registryMatches = buildRegistryMatches(identityRegistry, datasetVersion)
 
   const items = records.map(({ object, feature }) => {
     const sourceFeatureId = object.sourceFeatureId
-    const stableAssetId = readString(object.assetId)
+    const nonAsset = object.identityResolutionStatus === 'not_applicable'
+    const explicitAssetId = readString(object.assetId)
+    const registryMatch = nonAsset || explicitAssetId
+      ? null
+      : registryMatchFor({ feature, sourceFeatureId, registryMatches })
+    const stableAssetId = nonAsset ? null : explicitAssetId ?? registryMatch?.assetId ?? null
+    const identityResolutionStatus = nonAsset
+      ? 'not_applicable'
+      : explicitAssetId
+      ? 'stable_explicit'
+      : registryMatch?.conflict
+        ? 'conflict'
+        : registryMatch
+        ? 'stable_registry'
+        : 'onboarding_candidate'
     const onboardingId = deterministicId(
       'onboarding-identity',
       datasetVersionId,
@@ -65,7 +81,17 @@ export function buildCanonicalAssetIdentityMap({
       legacyId,
       sourceFeatureId,
       sourceKmlId: feature?.sourceKmlId ?? null,
-      identityStatus: stableAssetId ? 'stable' : 'onboarding',
+      // `identityStatus` is retained for the existing topology/map contract.
+      // `identityResolutionStatus` is the Fase 1 vocabulary.
+      identityStatus: nonAsset ? 'not_applicable' : stableAssetId ? 'stable' : 'onboarding',
+      identityResolutionStatus,
+      sourceMatchType: explicitAssetId
+        ? 'explicit_asset_id'
+        : registryMatch?.sourceMatchType ?? null,
+      sourceMatchValue: explicitAssetId
+        ? explicitAssetId
+        : registryMatch?.sourceMatchValue ?? null,
+      registryId: registryMatch?.registryId ?? null,
       aliasValues: unique(Object.values(aliases).flat()),
       aliases,
     }
@@ -78,6 +104,7 @@ export function buildCanonicalAssetIdentityMap({
     items,
     aliasToCanonicalAssetId: buildAliasIndex(items, validation),
     validation,
+    identityRegistry: normalizeIdentityRegistry(identityRegistry, datasetVersion),
   }
 }
 
@@ -148,6 +175,8 @@ export function buildAssetIdentityMapFromRecord(record = {}) {
       sourceKmlId: asset.sourcePlacemarkId ?? null,
       identityStatus: asset.identityStatus
         ?? (stableAssetId ? 'stable' : onboardingId ? 'onboarding' : 'legacy'),
+      identityResolutionStatus: asset.identityResolutionStatus
+        ?? (stableAssetId ? 'stable_explicit' : 'onboarding_candidate'),
       aliasValues: unique(Object.values(aliases).flat().filter(Boolean)),
       aliases,
     }
@@ -312,4 +341,54 @@ function unique(values) {
 
 function readString(...values) {
   return values.find((value) => typeof value === 'string' && value.trim())?.trim()
+}
+
+function buildRegistryMatches(identityRegistry, datasetVersion) {
+  return normalizeIdentityRegistry(identityRegistry, datasetVersion)
+    .filter((entry) => entry.status === 'active')
+}
+
+function registryMatchFor({ feature, sourceFeatureId, registryMatches }) {
+  const matches = registryMatches.filter((entry) => (
+    entry.sourceMatchType === 'source_kml_id'
+      ? entry.sourceMatchValue && entry.sourceMatchValue === feature?.sourceKmlId
+      : entry.sourceMatchType === 'source_feature_id'
+        ? entry.sourceMatchValue === sourceFeatureId
+        : entry.sourceMatchType === 'source_feature_key'
+          ? entry.sourceMatchValue === feature?.sourceFeatureKey
+          : false
+  ))
+  if (!matches.length) return null
+  const uniqueAssetIds = [...new Set(matches.map(({ assetId }) => assetId))]
+  if (uniqueAssetIds.length !== 1) {
+    return {
+      ...matches[0],
+      assetId: null,
+      conflict: true,
+    }
+  }
+  return matches[0]
+}
+
+function normalizeIdentityRegistry(entries, datasetVersion = {}) {
+  return (Array.isArray(entries) ? entries : [])
+    .filter((entry) => entry && typeof entry === 'object')
+    .map((entry) => ({
+      registryId: entry.registryId ?? entry.id ?? null,
+      datasetId: entry.datasetId ?? datasetVersion.datasetId ?? null,
+      branchId: entry.branchId ?? datasetVersion.branchId ?? null,
+      assetId: readString(entry.assetId),
+      sourceMatchType: entry.sourceMatchType ?? entry.matchType ?? null,
+      sourceMatchValue: readString(entry.sourceMatchValue ?? entry.matchValue),
+      validFromDatasetVersionId: entry.validFromDatasetVersionId
+        ?? datasetVersion.id
+        ?? null,
+      validToDatasetVersionId: entry.validToDatasetVersionId ?? null,
+      status: entry.status ?? 'active',
+      approvedBy: entry.approvedBy ?? null,
+      approvedAt: entry.approvedAt ?? null,
+      evidence: structuredClone(entry.evidence ?? {}),
+      auditEventId: entry.auditEventId ?? null,
+    }))
+    .filter((entry) => entry.assetId && entry.sourceMatchType && entry.sourceMatchValue)
 }

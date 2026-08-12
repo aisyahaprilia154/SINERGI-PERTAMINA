@@ -469,6 +469,41 @@ export function createApp({
           await lifecycleService.getPreview(previewMatch[1]),
         )
       }
+      const comparisonMatch = request.method === 'GET'
+        ? url.pathname.match(/^\/api\/admin\/imports\/([a-zA-Z0-9_-]+)\/comparison$/)
+        : null
+      if (comparisonMatch) {
+        requireAdministrator(request, authenticator)
+        return sendJson(
+          response,
+          200,
+          await lifecycleService.getComparison(comparisonMatch[1], {
+            risk: normalizeQueryEnum(url.searchParams.get('risk'), ['low', 'medium', 'high']),
+            type: normalizeQueryText(url.searchParams.get('type')),
+            limit: normalizeQueryLimit(url.searchParams.get('limit')),
+            cursor: normalizeQueryText(url.searchParams.get('cursor')),
+          }),
+        )
+      }
+      const identityAssignmentsMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/admin\/imports\/([a-zA-Z0-9_-]+)\/identity-assignments$/,
+        )
+        : null
+      if (identityAssignmentsMatch) {
+        const user = requireAdministrator(request, authenticator)
+        const body = await readJsonBody(request)
+        return sendJson(
+          response,
+          200,
+          await lifecycleService.assignIdentityAssignments(identityAssignmentsMatch[1], user.id, {
+            assignments: body.assignments,
+            expectedRecordRevision: normalizeExpectedRecordRevision(body),
+            idempotencyKey: request.headers['idempotency-key'] ?? null,
+            correlationId,
+          }),
+        )
+      }
       const activationMatch = request.method === 'POST'
         ? url.pathname.match(/^\/api\/admin\/imports\/([a-zA-Z0-9_-]+)\/activate$/)
         : null
@@ -487,6 +522,10 @@ export function createApp({
           200,
           await lifecycleService.activate(activationMatch[1], user.id, {
             expectedActiveVersionId,
+            expectedRecordRevision: normalizeExpectedRecordRevision(body),
+            expectedActivePointerRevision: normalizeExpectedActivePointerRevision(body),
+            publicationProfile: normalizePublicationProfileBody(body),
+            confirmBreakingChanges: body.confirmBreakingChanges === true,
             correlationId,
           }),
         )
@@ -518,10 +557,17 @@ export function createApp({
         : null
       if (rejectionMatch) {
         const user = requireAdministrator(request, authenticator)
+        const hasJsonBody = Boolean(request.headers['content-type'])
+        const body = hasJsonBody
+          ? await readJsonBody(request)
+          : {}
         return sendJson(
           response,
           200,
-          await lifecycleService.reject(rejectionMatch[1], user.id, { correlationId }),
+          await lifecycleService.reject(rejectionMatch[1], user.id, {
+            reason: normalizeRejectReason(body, { allowLegacyDefault: !hasJsonBody }),
+            correlationId,
+          }),
         )
       }
       const jobMatch = request.method === 'GET'
@@ -672,6 +718,83 @@ function normalizeExpectedActiveVersion(body) {
   return value
 }
 
+function normalizeRejectReason(body, { allowLegacyDefault = false } = {}) {
+  if (body.reason === undefined || body.reason === null || body.reason === '') {
+    if (allowLegacyDefault) return 'Ditolak oleh administrator.'
+    throw new AppError('Alasan reject wajib diberikan.', {
+      code: 'rejection_reason_required',
+      statusCode: 400,
+    })
+  }
+  const reason = String(body.reason).trim()
+  if (!reason || reason.length > 1000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(reason)) {
+    throw new AppError('Alasan reject tidak valid.', {
+      code: 'invalid_rejection_reason',
+      statusCode: 400,
+    })
+  }
+  return reason
+}
+
+function normalizeExpectedRecordRevision(body) {
+  if (!Object.hasOwn(body, 'expectedRecordRevision')) return undefined
+  const value = Number(body.expectedRecordRevision)
+  if (!Number.isInteger(value) || value < 0) {
+    throw new AppError('Expected record revision tidak valid.', {
+      code: 'invalid_expected_record_revision',
+      statusCode: 400,
+    })
+  }
+  return value
+}
+
+function normalizeExpectedActivePointerRevision(body) {
+  if (!Object.hasOwn(body, 'expectedActivePointerRevision')) return undefined
+  if (body.expectedActivePointerRevision === null) return null
+  const value = String(body.expectedActivePointerRevision)
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,255}$/.test(value)) {
+    throw new AppError('Expected active pointer revision tidak valid.', {
+      code: 'invalid_expected_active_pointer_revision',
+      statusCode: 400,
+    })
+  }
+  return value
+}
+
+function normalizePublicationProfileBody(body) {
+  if (!Object.hasOwn(body, 'publicationProfile')) return undefined
+  const value = String(body.publicationProfile ?? '').trim().toLowerCase()
+  if (!['map_only', 'operational_topology'].includes(value)) {
+    throw new AppError('Publication profile tidak valid.', {
+      code: 'invalid_publication_profile',
+      statusCode: 400,
+    })
+  }
+  return value
+}
+
+function normalizeQueryEnum(value, allowed) {
+  if (value === null || value === '') return undefined
+  return allowed.includes(value) ? value : undefined
+}
+
+function normalizeQueryText(value) {
+  if (value === null || value === '') return undefined
+  return String(value).slice(0, 512)
+}
+
+function normalizeQueryLimit(value) {
+  if (value === null || value === '') return 50
+  const limit = Number(value)
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+    throw new AppError('Limit comparison tidak valid.', {
+      code: 'invalid_comparison_limit',
+      statusCode: 400,
+    })
+  }
+  return limit
+}
+
 function normalizeActiveBranch(value) {
   if (value === null) return undefined
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value)) {
@@ -761,6 +884,11 @@ async function handleCreateImport({
       size: upload.size,
       maxFileSize: config.upload.maxFileSize,
     })
+    const duplicateVersions = (await repository.list()).filter((record) => (
+      record.datasetVersion?.datasetId === datasetId
+        && record.datasetVersion?.branchId === branchId
+        && record.datasetVersion?.checksum === upload.checksum
+    ))
 
     const datasetVersionId = `dv-${crypto.randomUUID()}`
     const importedAt = clock().toISOString()
@@ -787,6 +915,10 @@ async function handleCreateImport({
       importedAt,
       validationStatus: 'pending',
       publicationStatus: 'unpublished',
+      ...(duplicateVersions.length ? {
+        duplicateSourceChecksum: true,
+        duplicateSourceChecksumVersionIds: duplicateVersions.map(({ datasetVersion: version }) => version.id),
+      } : {}),
       status: 'processing',
       summary: emptySummary(),
     }
@@ -1011,6 +1143,9 @@ function toImportConfigResponse(config) {
       requiresOfficialSourceConfirmation: true,
       activatesAutomatically: false,
       supportsCancellationAfterAccepted: false,
+      publicationProfiles: ['map_only', 'operational_topology'],
+      frontendUsesBackendPublishability: true,
+      highRiskActivationRequiresConfirmation: true,
     },
   }
 }
@@ -1049,6 +1184,14 @@ function toStatusResponse(record) {
     parserCoverage: record.parserCoverage ?? null,
     readiness: record.readiness ?? null,
     parserVersions: record.parserVersions ?? null,
+    publicationStatus: record.datasetVersion.publicationStatus ?? 'unpublished',
+    publicationProfile: record.datasetVersion.publicationProfile ?? null,
+    publishableProfiles: record.readiness?.publishableProfiles ?? [],
+    comparisonSummary: record.comparisonSummary ?? null,
+    links: {
+      preview: `/api/admin/imports/${encodeURIComponent(record.datasetVersion.id)}/preview`,
+      comparison: `/api/admin/imports/${encodeURIComponent(record.datasetVersion.id)}/comparison`,
+    },
     sourceOverlays: record.sourceOverlays ?? [],
     sourceResources: record.sourceResources ?? [],
     canActivate: record.validation?.canActivate === true

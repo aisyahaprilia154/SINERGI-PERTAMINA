@@ -69,6 +69,7 @@ const ISSUE_CODE_ALIASES = Object.freeze({
   unselected_kml_features: 'KML_UNSELECTED_FEATURES',
   invalid_kml_candidate: 'KML_CANDIDATE_INVALID',
   branch_metadata_mismatch: 'BRANCH_CONTEXT_MISMATCH',
+  duplicate_source_checksum: 'DUPLICATE_SOURCE_CHECKSUM',
 })
 
 const CODE_SCOPES = Object.freeze({
@@ -83,6 +84,7 @@ const CODE_SCOPES = Object.freeze({
   KML_MULTIPLE_MAIN_CANDIDATES: 'file',
   KML_UNSELECTED_FEATURES: 'file',
   KML_CANDIDATE_INVALID: 'file',
+  DUPLICATE_SOURCE_CHECKSUM: 'file',
   KML_XML_INVALID: 'file',
   KML_XML_UNSAFE: 'file',
   KML_ROOT_MISSING: 'structure',
@@ -243,6 +245,17 @@ function validateFile({
   maxFileSize,
   issues,
 }) {
+  if (datasetVersion.duplicateSourceChecksum === true) {
+    issues.add({
+      severity: 'warning',
+      issueCode: 'DUPLICATE_SOURCE_CHECKSUM',
+      message: 'Checksum sumber sama dengan dataset version pada dataset dan branch ini; lanjutkan hanya bila metadata versi memang berbeda.',
+      scope: 'file',
+      details: {
+        duplicateVersionIds: datasetVersion.duplicateSourceChecksumVersionIds ?? [],
+      },
+    })
+  }
   const extension = extensionOf(datasetVersion.sourceFilename)
   if (!['.kml', '.kmz'].includes(extension)) {
     issues.add({
@@ -731,7 +744,12 @@ function createIssueCollector(datasetVersionId, sourceIssues = []) {
         : {}),
       message: String(input.message ?? 'Validation issue tidak mempunyai pesan.'),
       scope: input.scope ?? scopeForCode(canonicalCode),
-      canActivate: severity !== 'error',
+      readinessDimension: input.readinessDimension
+        ?? readinessDimensionForCode(canonicalCode, input.scope),
+      blockingProfiles: normalizeBlockingProfiles(input, severity, canonicalCode),
+      canActivate: input.canActivate !== undefined
+        ? input.canActivate
+        : canActivateForProfiles(input, severity, canonicalCode),
       ...(Object.keys(focus).length ? { focus } : {}),
       ...(focus.sourceFolderPath ? { sourceFolderPath: focus.sourceFolderPath } : {}),
       ...(focus.sourcePlacemarkName
@@ -742,6 +760,8 @@ function createIssueCollector(datasetVersionId, sourceIssues = []) {
         ? { geometryReference: focus.geometryReference }
         : {}),
       ...(input.details ? { details: structuredClone(input.details) } : {}),
+      recommendedAction: input.recommendedAction
+        ?? recommendedActionForCode(canonicalCode),
     })
   }
 
@@ -816,6 +836,44 @@ function normalizeSeverity(code, requested) {
     : 'warning'
 }
 
+function normalizeBlockingProfiles(input, severity, code) {
+  if (Array.isArray(input.blockingProfiles)) {
+    return [...new Set(input.blockingProfiles.filter((profile) => (
+      ['map_only', 'operational_topology'].includes(profile)
+    )))]
+  }
+  if (severity !== 'error') return []
+  const dimension = readinessDimensionForCode(code, input.scope)
+  return dimension === 'inventory' || dimension === 'topology'
+    ? ['operational_topology']
+    : ['map_only', 'operational_topology']
+}
+
+function canActivateForProfiles(input, severity, code) {
+  if (input.canPublish === false) return false
+  if (Array.isArray(input.blockingProfiles)
+    && !input.blockingProfiles.includes('map_only')) return true
+  if (input.canActivate === true) return true
+  return severity !== 'error'
+}
+
+function readinessDimensionForCode(code, scope) {
+  if (['asset', 'metadata'].includes(scope)) return 'inventory'
+  if (scope === 'relation') return 'topology'
+  const normalized = String(code ?? '').toLowerCase()
+  if (/identity|asset|metadata|vocabulary|classification|category/.test(normalized)) return 'inventory'
+  if (/relation|topology|candidate|graph/.test(normalized)) return 'topology'
+  if (/coordinate|geometry|overlay|site|visual|map/.test(normalized)) return 'map'
+  return 'parse'
+}
+
+function recommendedActionForCode(code) {
+  if (code === 'ASSET_ID_MISSING') return 'Tetapkan Asset ID resmi melalui identity review.'
+  if (code === 'ASSET_ID_DUPLICATE') return 'Resolusi duplicate Asset ID sebelum publikasi topology.'
+  if (code === 'COORDINATE_INVALID') return 'Perbaiki koordinat pada source KML/KMZ di Google Earth.'
+  return 'Periksa evidence sumber dan ulangi validasi dataset version.'
+}
+
 function scopeForCode(code) {
   return CODE_SCOPES[code] ?? 'processing'
 }
@@ -834,6 +892,7 @@ function focusFor(input = {}) {
     relationId: directFocus.relationId ?? relation?.id,
     sourceAssetId: directFocus.sourceAssetId ?? relation?.sourceAssetId,
     targetAssetId: directFocus.targetAssetId ?? relation?.targetAssetId,
+    sourceFeatureId: directFocus.sourceFeatureId ?? input.sourceFeatureId,
     sourceFolderPath: directFocus.sourceFolderPath ?? input.sourceFolderPath,
     sourcePlacemarkName: directFocus.sourcePlacemarkName ?? input.sourcePlacemarkName,
   })

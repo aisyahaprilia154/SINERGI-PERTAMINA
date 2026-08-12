@@ -12,6 +12,8 @@ const DEFAULT_OPERATIONAL_TABLES = Object.freeze([
   'accuracy_evaluations',
   'audit_events',
   'dataset_active_pointers',
+  'asset_identity_registry',
+  'dataset_version_diffs',
 ])
 
 export const POSTGRES_RUNTIME_REQUIRED_COLUMNS = Object.freeze([

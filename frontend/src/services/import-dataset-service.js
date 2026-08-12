@@ -107,6 +107,10 @@ export async function activateDatasetVersion({
   token,
   datasetVersionId,
   expectedActiveVersionId,
+  expectedRecordRevision,
+  expectedActivePointerRevision,
+  publicationProfile = 'map_only',
+  confirmBreakingChanges = false,
   signal,
   apiBase = '',
 }) {
@@ -119,6 +123,10 @@ export async function activateDatasetVersion({
       body: {
         confirmArchiveCurrent: true,
         expectedActiveVersionId: expectedActiveVersionId ?? null,
+        expectedRecordRevision,
+        expectedActivePointerRevision,
+        publicationProfile,
+        confirmBreakingChanges,
       },
     },
   )
