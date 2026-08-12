@@ -8,9 +8,11 @@ Spesifikasi acuan: [`docs/SPESIFIKASI-IMPLEMENTASI-FUNGSIONAL-FASE-1-5.md`](./SP
 
 ## Status ringkas
 
-Fase 1 sudah diimplementasikan dan lulus regresi otomatis. Fase 2–5 belum
-dieksekusi; checkpoint-nya dibuat sebagai kontrol dependensi dan backlog
-penerimaan, bukan sebagai klaim selesai. Fase 2 code implementation is now in place; pilot evidence is still pending. Detail checkpoint Fase 2 ada di [`docs/CHECKPOINT-FASE-2.md`](./CHECKPOINT-FASE-2.md).
+Fase 1–4 sudah diimplementasikan dan lulus automated gate masing-masing.
+Exit gate pilot Fase 2–4 tetap pending; Fase 5 belum dieksekusi. Detail
+checkpoint ada di [`docs/CHECKPOINT-FASE-2.md`](./CHECKPOINT-FASE-2.md),
+[`docs/CHECKPOINT-FASE-3.md`](./CHECKPOINT-FASE-3.md), dan
+[`docs/CHECKPOINT-FASE-4.md`](./CHECKPOINT-FASE-4.md).
 
 > Status Fase 2 pada paragraf legacy di atas telah disupersede oleh checkpoint
 > khusus [`CHECKPOINT-FASE-2.md`](./CHECKPOINT-FASE-2.md): automated gate lulus,
@@ -21,13 +23,14 @@ penerimaan, bukan sebagai klaim selesai. Fase 2 code implementation is now in pl
 | Fase 1 — Dataset benar dan dapat dipercaya | **Implemented + verified** | Kontrak readiness v2, parser evidence, identity registry, diff/risk, preview/activation/rollback, migration, dan test suite lulus. Pilot source production tetap perlu sign-off sebelum menyatakan exit gate operasional final. |
 | Fase 2 — Peta operasional minimum | **Implemented + verified; pilot pending** | Automated gate lulus; usability/source baseline dan sign-off pilot masih diperlukan. |
 | Fase 3 — Pembangunan dan verifikasi topologi | **Implemented + verified; pilot pending** | Automated gate lulus; known-path verification dan operational-topology publication masih diperlukan. |
-| Fase 4 — Tracing dan analisis dampak | **Pending** | Bergantung pada confirmed graph dan readiness Fase 3. |
+| Fase 4 — Tracing dan analisis dampak | **Implemented + verified; pilot pending** | Automated gate dan synthetic performance lulus; known-path, lima failure scenario teknisi, deployment-target verification, dan publication sign-off masih diperlukan. |
 | Fase 5 — Diagram topologi cabang | **Pending** | Bergantung pada graph/revision dan trace/impact Fase 3–4. |
 
 > Current Fase 2 checkpoint: **Implemented + verified; pilot pending**. Lihat
 > [`docs/CHECKPOINT-FASE-2.md`](./CHECKPOINT-FASE-2.md) untuk deliverable dan
 > bukti automated acceptance terbaru. Current Fase 3 checkpoint: lihat
-> [`docs/CHECKPOINT-FASE-3.md`](./CHECKPOINT-FASE-3.md).
+> [`CHECKPOINT-FASE-3.md`](./CHECKPOINT-FASE-3.md). Current Fase 4 checkpoint:
+> lihat [`CHECKPOINT-FASE-4.md`](./CHECKPOINT-FASE-4.md).
 
 ## Checkpoint Fase 1
 
@@ -131,20 +134,19 @@ bukti test/lint, serta batasan exit gate pilot ada di
 [`CHECKPOINT-FASE-3.md`](./CHECKPOINT-FASE-3.md). Known-path verification,
 source baseline, dan operational-topology publication tetap menunggu pilot.
 
-## Checkpoint Fase 4 — Pending
+## Checkpoint Fase 4 — Implemented + verified; pilot pending
 
-Fase 4 belum dieksekusi pada checkpoint ini. Scope berikut menjadi gate yang
-harus dibuktikan:
+Fase 4 telah dieksekusi dan automated acceptance gate lulus. Trace modes,
+directional BFS, negative taxonomy, roots, impact simulation, audit/cache,
+active-version boundary, API, dan frontend client contract tersedia. Detail
+deliverable serta bukti terbaru ada di
+[`CHECKPOINT-FASE-4.md`](./CHECKPOINT-FASE-4.md).
 
-- [ ] trace modes, request/response contract, path algorithm, dan direction.
-- [ ] negative result taxonomy yang actionable.
-- [ ] confirmed impact dipisahkan dari potential impact.
-- [ ] minimal lima failure scenario pilot diverifikasi teknisi.
-- [ ] trace hanya memakai confirmed relation dan performance/integration gate
-  lulus.
+- Known-path sample, minimal lima failure scenario pilot yang diverifikasi
+  teknisi, deployment-target verification, dan sign-off deployment tetap
+  menjadi exit gate operasional. Synthetic performance 50.000 node/100.000
+  edge sudah lulus pada environment verifikasi checkpoint.
 
-Checkpoint Fase 4 bergantung pada confirmed graph dan known-path evidence dari
-Fase 3.
 
 ## Checkpoint Fase 5 — Pending
 
@@ -164,13 +166,15 @@ harus dibuktikan:
 Checkpoint Fase 5 bergantung pada graph/revision Fase 3–4. Tidak ada perubahan
 Fase 5 yang dijalankan dalam task ini.
 
-> **Status superseding 2026-08-12:** Fase 1, Fase 2, dan Fase 3 telah
+> **Status superseding 2026-08-12:** Fase 1, Fase 2, Fase 3, dan Fase 4 telah
 > diimplementasikan dan lulus automated acceptance gate. Exit gate
 > production/pilot Fase 2 masih menunggu usability/source baseline; Fase 3
-> masih menunggu known-path verification dan operational-topology publication.
-> Detail: [`CHECKPOINT-FASE-2.md`](./CHECKPOINT-FASE-2.md) dan
-> [`CHECKPOINT-FASE-3.md`](./CHECKPOINT-FASE-3.md). Fase 4 dan Fase 5 belum
-> dieksekusi.
+> masih menunggu known-path verification dan operational-topology publication;
+> Fase 4 masih menunggu known-path, lima failure scenario teknisi,
+> deployment-target verification, dan deployment sign-off.
+> Detail: [`CHECKPOINT-FASE-2.md`](./CHECKPOINT-FASE-2.md),
+> [`CHECKPOINT-FASE-3.md`](./CHECKPOINT-FASE-3.md), dan
+> [`CHECKPOINT-FASE-4.md`](./CHECKPOINT-FASE-4.md). Fase 5 belum dieksekusi.
 
 ## Aturan checkpoint berikutnya
 

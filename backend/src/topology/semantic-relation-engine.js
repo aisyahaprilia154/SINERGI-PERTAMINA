@@ -667,6 +667,7 @@ function prepareNodes(bundle, issues) {
       sourceFolderPath: object.sourceFolderPath ?? null,
       networkFamily: object.networkFamily,
       objectRole: 'device_node',
+      topologyRole: object.topologyRole ?? 'unknown',
       assetType: object.assetType ?? 'unknown',
       category: object.category ?? 'unknown',
       coordinate: cloneCoordinate(point.coordinates),
@@ -1739,6 +1740,7 @@ function buildConfirmedRelations({
       targetAssetId: candidate.targetAssetId ?? candidate.targetPathAssetId,
       relationType: candidate.relationType ?? relationTypeForCandidate(candidate.candidateType),
       direction: candidate.direction ?? 'undirected',
+      networkFamily: candidate.networkFamily ?? null,
       ...compact({
         pathAssetId: [
           'endpoint_device',
@@ -1856,7 +1858,11 @@ export function buildConfirmedGraph({ bundle, nodes, paths, confirmedRelations }
       siteId: node.siteId,
       networkFamily: node.networkFamily,
       objectRole: 'device_node',
+      topologyRole: node.topologyRole ?? 'unknown',
+      topologyRequired: node.topologyRequired === true,
       assetType: node.assetType,
+      category: node.category,
+      sourceStatus: node.sourceStatus ?? 'unknown',
     })).sort(compareId)
   const deviceIds = new Set(graphNodes.map(({ id }) => id))
   const pathIds = new Set(paths.map(({ id }) => id))
@@ -1948,6 +1954,14 @@ function collapseConfirmedPath(bundle, sourceAssetId, targetAssetId, relations) 
       : []),
   ].filter(Boolean)))
   const candidateIds = unique(relations.map(({ candidateId }) => candidateId).filter(Boolean))
+  const pathById = new Map((bundle.paths ?? []).map((path) => [path.id, path]))
+  const pathLengths = pathAssetIds.map((pathAssetId) => (
+    Number(pathById.get(pathAssetId)?.totalLengthMeters)
+  ))
+  const lengthMeters = pathLengths.length === pathAssetIds.length
+    && pathLengths.every(Number.isFinite)
+    ? pathLengths.reduce((total, length) => total + length, 0)
+    : undefined
   const allManual = relations.every(({ provenance }) => provenance === 'manual_admin')
   const allExplicit = relations.every(({ provenance }) => (
     provenance === 'explicit_kml_metadata'
@@ -1971,6 +1985,10 @@ function collapseConfirmedPath(bundle, sourceAssetId, targetAssetId, relations) 
       ? relations[0].relationType
       : 'connected-via-path',
     direction: relations.length === 1 ? relations[0].direction : 'undirected',
+    networkFamily: unique(relations.map(({ networkFamily }) => networkFamily).filter(Boolean)).length === 1
+      ? relations.find(({ networkFamily }) => networkFamily)?.networkFamily
+      : null,
+    lengthMeters,
     pathAssetId: pathAssetIds.length === 1 ? pathAssetIds[0] : undefined,
     pathAssetIds,
     sourceGeometryIds,
