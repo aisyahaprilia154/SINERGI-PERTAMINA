@@ -165,6 +165,9 @@ export function renderPreviewImportPage(container, datasetVersionId) {
       container.querySelector('#preview-confirm-dialog')?.close()
       page.confirmAction = null
     })
+    container.querySelector('[data-confirm-breaking]')?.addEventListener('change', (event) => {
+      page.state.confirmBreakingChanges = event.currentTarget.checked
+    })
     container.querySelector('[data-confirm-action]')?.addEventListener('click', performAction)
     function bindFilter(selector, values, datasetKey) {
       container.querySelectorAll(selector).forEach((input) => {
@@ -240,6 +243,9 @@ export function renderPreviewImportPage(container, datasetVersionId) {
           datasetVersionId,
           expectedActiveVersionId:
             page.model.payload.comparison?.activeDatasetVersionId ?? null,
+          expectedRecordRevision: page.model.payload.datasetVersion.recordRevision,
+          publicationProfile: 'map_only',
+          confirmBreakingChanges: page.state.confirmBreakingChanges === true,
         })
         : await rejectDatasetVersion({
           token: getDefaultAdminToken(),
@@ -343,7 +349,7 @@ function renderReady(page, datasetVersionId) {
       <div class="preview-mobile-backdrop" ${state.sidebarOpen ? '' : 'hidden'}></div>
     </main>
     ${renderActivationBar(model, state)}
-    ${renderConfirmationDialog(page.confirmAction, model)}
+    ${renderConfirmationDialog(page.confirmAction, model, state)}
   `
 }
 
@@ -392,6 +398,10 @@ function renderError(message) {
 
 export function renderActivationBar(model, state) {
   const { datasetVersion, validation, canActivate } = model.payload
+  const publishableProfiles = model.payload.publishableProfiles
+  const mapOnlyPublishable = Array.isArray(publishableProfiles)
+    ? publishableProfiles.includes('map_only')
+    : canActivate === true
   const blocking = validation?.summary?.blockingErrors
     ?? model.payload.issues.filter(({ canActivate: allowed }) => allowed === false).length
   const warnings = validation?.summary?.warnings
@@ -428,8 +438,8 @@ export function renderActivationBar(model, state) {
           Tolak versi
         </button>
         <button class="button primary" type="button" data-request-activate
-          ${canActivate && !terminal && state.actionStatus !== 'loading' ? '' : 'disabled'}
-          title="${canActivate ? 'Aktifkan dataset version ini' : 'Selesaikan blocking error sebelum aktivasi'}">
+          ${mapOnlyPublishable && !terminal && state.actionStatus !== 'loading' ? '' : 'disabled'}
+          title="${mapOnlyPublishable ? 'Aktifkan dataset version ini' : 'Selesaikan blocking error sebelum aktivasi'}">
           <span class="material-symbols-outlined" aria-hidden="true">publish</span>Aktifkan dataset
         </button>
       </div>
@@ -437,8 +447,9 @@ export function renderActivationBar(model, state) {
   `
 }
 
-function renderConfirmationDialog(action, model) {
+function renderConfirmationDialog(action, model, state) {
   const activate = action !== 'reject'
+  const highRisk = model.payload.comparison?.summary?.requiresBreakingChangeConfirmation === true
   return `
     <dialog id="preview-confirm-dialog" class="preview-confirm-dialog">
       <form method="dialog">
@@ -453,9 +464,17 @@ function renderConfirmationDialog(action, model) {
           <div><dt>Versi</dt><dd>${escapeHtml(model.payload.datasetVersion.versionName)}</dd></div>
           <div><dt>Cabang</dt><dd>${escapeHtml(model.payload.datasetVersion.branchId)}</dd></div>
         </dl>
+        ${activate && highRisk ? `
+          <label class="preview-breaking-confirmation">
+            <input type="checkbox" data-confirm-breaking
+              ${state.confirmBreakingChanges === true ? 'checked' : ''}>
+            Saya sudah meninjau perubahan berisiko tinggi dan menyetujui publikasi.
+          </label>
+        ` : ''}
         <div>
           <button class="button secondary" type="button" data-cancel-confirmation>Batal</button>
-          <button class="button ${activate ? 'primary' : 'danger'}" type="button" data-confirm-action>
+          <button class="button ${activate ? 'primary' : 'danger'}" type="button" data-confirm-action
+            ${activate && highRisk && state.confirmBreakingChanges !== true ? 'disabled' : ''}>
             ${activate ? 'Ya, aktifkan dataset' : 'Ya, tolak versi'}
           </button>
         </div>

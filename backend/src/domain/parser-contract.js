@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { buildCanonicalAssetIdentityMap } from './canonical-asset-identity.js'
+import {
+  buildReadinessContract,
+  canonicalVocabularyValue,
+  CONTROLLED_VOCABULARY_VERSION,
+  normalizeIssue,
+  PUBLICATION_POLICY_VERSION,
+} from './publication-contract.js'
 
 export const PARSER_VERSION = 'evidence-parser/1.1.0'
 export const NORMALIZER_VERSION = 'canonical-normalizer/1.0.0'
@@ -95,6 +102,8 @@ export function buildCanonicalParserResult({
   sourceSelection = {},
   metadataAliases = {},
   resources = sourceSelection.resources ?? [],
+  identityRegistry = [],
+  publicationPolicyVersion = PUBLICATION_POLICY_VERSION,
 } = {}) {
   if (!parserOutput || typeof parserOutput !== 'object') {
     throw new TypeError('parserOutput wajib berupa object.')
@@ -138,6 +147,7 @@ export function buildCanonicalParserResult({
       message: String(issue.message ?? 'Parser issue tidak memiliki pesan.'),
       readinessDimension: issue.readinessDimension ?? 'parse',
       canPublish: issue.canPublish ?? issue.canActivate !== false,
+      blockingProfiles: issue.blockingProfiles,
       ...compact({
         sourceFeatureId: issue.sourceFeatureId,
         sourceFolderPath: issue.sourceFolderPath,
@@ -211,7 +221,7 @@ export function buildCanonicalParserResult({
         partPath,
         geometryIndex,
       )
-      const canonicalGeometry = {
+    const canonicalGeometry = {
         geometryId,
         datasetVersionId,
         sourceFeatureId,
@@ -219,8 +229,9 @@ export function buildCanonicalParserResult({
         geometryType: geometry.type,
         coordinates: structuredClone(geometry.coordinates),
         sourceCoordinateText: structuredClone(geometry.sourceCoordinates ?? ''),
-        sourceVertexOrderPreserved: true,
-        valid: geometry.valid !== false,
+      sourceVertexOrderPreserved: true,
+      valid: geometry.valid !== false,
+      requiredForMap: geometry.requiredForMap !== false,
         ...compact({ altitudeMode: geometry.altitudeMode }),
         geometryFingerprint: fingerprint({
           type: geometry.type,
@@ -291,6 +302,7 @@ export function buildCanonicalParserResult({
       resourceResolutionStatus: resourceLink.status,
       sourceFingerprint: overlayFingerprint,
       parserVersion: PARSER_VERSION,
+      requiredForMap: overlay.requiredForMap !== false,
     }
     sourceOverlays.push(canonicalOverlay)
     sourceFeatures.push({
@@ -326,6 +338,9 @@ export function buildCanonicalParserResult({
         explanation: 'GroundOverlay selalu dipisahkan dari inventory dan topology.',
       }],
       classificationRuleSetVersion: CLASSIFICATION_RULE_SET_VERSION,
+      sourceStatus: 'active',
+      assetName: overlay.name,
+      identityResolutionStatus: 'not_applicable',
     })
     if (resourceLink.status === 'external') {
       addIssue({
@@ -393,6 +408,7 @@ export function buildCanonicalParserResult({
     datasetVersion,
     sourceFeatures,
     classifiedObjects,
+    identityRegistry,
   })
   const identityByFeature = new Map(assetIdentityMap.items.map((item) => [
     item.sourceFeatureId,
@@ -408,10 +424,14 @@ export function buildCanonicalParserResult({
       onboardingIdentity: identity.onboardingId,
       legacyAssetId: identity.legacyId,
       identityStatus: identity.identityStatus,
+      identityResolutionStatus: identity.identityResolutionStatus,
+      sourceMatchType: identity.sourceMatchType,
+      sourceMatchValue: identity.sourceMatchValue,
+      registryId: identity.registryId,
       identityAliases: structuredClone(identity.aliases),
     }
   })
-  identityIssues(assetIdentityMap).forEach(addIssue)
+  identityIssues(assetIdentityMap, identityClassifiedObjects).forEach(addIssue)
   const parsedPlacemarkCount = parserOutput.structure?.placemarkCount ?? 0
   const canonicalPlacemarkCount = sourceFeatures.filter(({ sourceElementType }) => (
     sourceElementType === 'Placemark'
@@ -454,16 +474,23 @@ export function buildCanonicalParserResult({
     classifiedObjects: identityClassifiedObjects,
     topologyInputBundle,
   })
-  const readiness = evaluateReadiness({
-    issues,
+  const readiness = buildReadinessContract({
+    datasetVersion,
+    issues: issues.map((issue) => normalizeIssue(issue, {
+      datasetVersionId,
+    })),
+    parserCoverage: coverage,
+    sourceFeatures,
     sourceGeometries,
     sourceOverlays,
     classifiedObjects: identityClassifiedObjects,
-    coverage,
+    topologyReadiness: null,
+    topologyGraph: null,
+    policyVersion: publicationPolicyVersion,
   })
 
   return {
-    schemaVersion: '1.0.0',
+    schemaVersion: '2.0.0',
     datasetVersionId,
     sourceChecksum,
     package: {
@@ -479,6 +506,8 @@ export function buildCanonicalParserResult({
       packageIssues: issues.filter(({ scope }) => ['file', 'resource'].includes(scope)),
     },
     ...versions,
+    controlledVocabularyVersion: CONTROLLED_VOCABULARY_VERSION,
+    publicationPolicyVersion,
     sourceFeatures,
     sourceGeometries,
     sourceMetadataEntries,
@@ -487,6 +516,7 @@ export function buildCanonicalParserResult({
     sourceResources: resourceResult.resources,
     classifiedObjects: identityClassifiedObjects,
     assetIdentityMap,
+    identityRegistry: structuredClone(assetIdentityMap.identityRegistry ?? identityRegistry),
     explicitRelationEvidence,
     topologyInputBundle,
     coverage,
@@ -603,6 +633,8 @@ function classifyFeature({ feature, placemark, metadata, geometries, datasetVers
   }
   const objectRole = match?.objectRole ?? 'unknown'
   const networkFamily = match?.networkFamily ?? 'unknown'
+  const rawAssetType = metadata.semanticValues.asset_type ?? match?.tokens?.[0] ?? 'unknown'
+  const rawCategory = metadata.semanticValues.category ?? inferredCategory(match)
   if (!match) {
     evidence.push({
       source: 'classifier',
@@ -627,13 +659,64 @@ function classifyFeature({ feature, placemark, metadata, geometries, datasetVers
     }),
     objectRole,
     networkFamily,
-    assetType: metadata.semanticValues.asset_type ?? match?.tokens?.[0] ?? 'unknown',
-    category: metadata.semanticValues.category ?? match?.tokens?.[0] ?? 'unknown',
+    sourceStatus: canonicalVocabularyValue(
+      'sourceStatus',
+      metadata.semanticValues.source_status,
+    ) ?? 'unknown',
+    assetName: feature.sourceName ?? null,
+    // Preserve the observed/display value while storing the canonical value
+    // used by readiness and publication policy.
+    assetType: rawAssetType,
+    canonicalAssetType: canonicalVocabularyValue(
+      'assetType',
+      metadata.semanticValues.asset_type ?? inferredAssetType(match, geometries),
+    ) ?? 'unknown',
+    category: rawCategory,
+    canonicalCategory: canonicalVocabularyValue('category', rawCategory) ?? 'unknown',
     classificationStatus: match ? 'classified' : 'review_required',
     classificationScore: match?.score ?? 0,
     classificationEvidence: evidence,
     classificationRuleSetVersion: CLASSIFICATION_RULE_SET_VERSION,
   }
+}
+
+function inferredAssetType(match, geometries) {
+  if (!match) return 'unknown'
+  if (match.objectRole === 'cable_path') {
+    if (match.networkFamily === 'fiber_optic') return 'fiber_cable'
+    if (match.networkFamily === 'lan') return 'lan_cable'
+    return 'infrastructure_path'
+  }
+  if (match.objectRole === 'coverage_area') return 'unknown'
+  if (match.tokens?.some((token) => /junction|jb/i.test(token))) return 'junction_box'
+  if (match.tokens?.some((token) => /nvr/i.test(token))) return 'nvr'
+  if (match.tokens?.some((token) => /switch/i.test(token))) return 'switch'
+  if (match.tokens?.some((token) => /server/i.test(token))) return 'server'
+  if (match.tokens?.some((token) => /router/i.test(token))) return 'router'
+  if (match.tokens?.some((token) => /rack/i.test(token))) return 'rack'
+  if (match.tokens?.some((token) => /tiang|pole|pylon/i.test(token))) return 'pole'
+  if (match.networkFamily === 'cctv') return 'cctv_fixed'
+  if (match.networkFamily === 'lan') return 'peripheral'
+  return geometries.some(({ geometryType }) => geometryType === 'Point') ? 'unknown' : 'infrastructure_path'
+}
+
+function inferredCategory(match) {
+  if (!match) return 'unknown'
+  if (match.objectRole === 'cable_path') {
+    if (match.networkFamily === 'cctv') return 'cctv_cable'
+    if (match.networkFamily === 'fiber_optic') return 'fiber_optic'
+    if (match.networkFamily === 'lan') return 'lan'
+    return 'supporting_infrastructure'
+  }
+  if (match.objectRole === 'coverage_area') return 'coverage_area'
+  if (match.networkFamily === 'cctv') {
+    return match.tokens?.some((token) => /junction|jb/i.test(token))
+      ? 'junction_box'
+      : 'cctv'
+  }
+  if (match.networkFamily === 'lan') return 'peripheral'
+  if (match.networkFamily === 'infrastructure') return 'supporting_infrastructure'
+  return 'unknown'
 }
 
 function findRoleRule(value, geometries) {
@@ -778,7 +861,7 @@ function buildExplicitRelationEvidence({ metadata, sourceFeatureId, datasetVersi
   ))
 }
 
-function buildTopologyInputBundle({
+export function buildTopologyInputBundle({
   datasetVersion,
   classifiedObjects,
   sourceFeatures = [],
@@ -960,6 +1043,11 @@ function applyStoredIdentity(object, identity) {
     onboardingIdentity: object.onboardingIdentity ?? identity.onboardingId,
     legacyAssetId: object.legacyAssetId ?? identity.legacyId ?? null,
     identityStatus: object.identityStatus ?? identity.identityStatus,
+    identityResolutionStatus: object.identityResolutionStatus
+      ?? identity.identityResolutionStatus,
+    sourceMatchType: object.sourceMatchType ?? identity.sourceMatchType ?? null,
+    sourceMatchValue: object.sourceMatchValue ?? identity.sourceMatchValue ?? null,
+    registryId: object.registryId ?? identity.registryId ?? null,
     identityAliases: structuredClone(object.identityAliases ?? identity.aliases ?? {}),
   }
 }
@@ -980,16 +1068,17 @@ function geometryMatchesRole(geometry, objectRole) {
   return false
 }
 
-function identityIssues(identityMap) {
+function identityIssues(identityMap, classifiedObjects = []) {
   const issues = []
   identityMap.validation.duplicateAliases.forEach((duplicate) => {
     issues.push({
       severity: 'error',
       issueCode: 'duplicate_asset_identity_alias',
-      scope: 'identity',
+      scope: 'asset',
       message: `Alias asset ${duplicate.alias} merujuk lebih dari satu canonicalAssetId.`,
       readinessDimension: 'inventory',
       canPublish: false,
+      blockingProfiles: ['operational_topology'],
       sourceFeatureId: duplicate.sourceFeatureId,
       focusReference: duplicate.alias,
     })
@@ -998,10 +1087,11 @@ function identityIssues(identityMap) {
     issues.push({
       severity: 'error',
       issueCode: 'duplicate_canonical_asset_id',
-      scope: 'identity',
+      scope: 'asset',
       message: `canonicalAssetId ${duplicate.canonicalAssetId} digunakan ${duplicate.count} kali.`,
       readinessDimension: 'inventory',
       canPublish: false,
+      blockingProfiles: ['operational_topology'],
       focusReference: duplicate.canonicalAssetId,
     })
   })
@@ -1009,16 +1099,83 @@ function identityIssues(identityMap) {
     issues.push({
       severity: 'error',
       issueCode: 'canonical_identity_source_feature_missing',
-      scope: 'identity',
+      scope: 'asset',
       message: `Identity asset merujuk source feature ${sourceFeatureId} yang tidak ditemukan.`,
       readinessDimension: 'inventory',
       canPublish: false,
+      blockingProfiles: ['operational_topology'],
       sourceFeatureId,
       focusReference: sourceFeatureId,
     })
   })
+  classifiedObjects
+    .filter(({ objectRole }) => ['device_node', 'cable_path'].includes(objectRole))
+    .forEach((object) => {
+      if (!object.stableAssetId && object.identityResolutionStatus !== 'not_applicable') {
+        issues.push({
+          severity: 'warning',
+          issueCode: 'missing_stable_asset_id',
+          scope: 'asset',
+          message: `Object ${object.assetName ?? object.sourceFeatureId} belum memiliki stable Asset ID bisnis.`,
+          readinessDimension: 'inventory',
+          canPublish: true,
+          blockingProfiles: ['operational_topology'],
+          sourceFeatureId: object.sourceFeatureId,
+          focusReference: object.canonicalAssetId,
+          recommendedAction: 'Tetapkan Asset ID resmi melalui identity review.',
+        })
+      }
+      if (object.identityResolutionStatus === 'conflict') {
+        issues.push({
+          severity: 'error',
+          issueCode: 'identity_conflict',
+          scope: 'asset',
+          message: `Identity source ${object.sourceFeatureId} menunjuk lebih dari satu Asset ID.`,
+          readinessDimension: 'inventory',
+          canPublish: true,
+          blockingProfiles: ['operational_topology'],
+          sourceFeatureId: object.sourceFeatureId,
+          focusReference: object.canonicalAssetId,
+        })
+      }
+      if (!String(object.assetName ?? '').trim()
+        || object.sourceStatus === 'unknown') {
+        issues.push({
+          severity: 'warning',
+          issueCode: 'missing_required_metadata',
+          scope: 'asset',
+          message: `Metadata minimum asset ${object.sourceFeatureId} belum lengkap.`,
+          readinessDimension: 'inventory',
+          canPublish: true,
+          blockingProfiles: ['operational_topology'],
+          sourceFeatureId: object.sourceFeatureId,
+          details: {
+            missingFields: [
+              ...(!String(object.assetName ?? '').trim() ? ['asset_name'] : []),
+              ...(object.sourceStatus === 'unknown' ? ['source_status'] : []),
+            ],
+          },
+        })
+      }
+      if (['unknown', ''].includes(String(object.canonicalAssetType ?? 'unknown'))
+        || ['unknown', ''].includes(String(object.canonicalCategory ?? 'unknown'))
+        || ['unknown', ''].includes(String(object.networkFamily ?? 'unknown'))) {
+        issues.push({
+          severity: 'warning',
+          issueCode: 'invalid_vocabulary_value',
+          scope: 'classification',
+          message: `Classification object ${object.sourceFeatureId} belum canonical.`,
+          readinessDimension: 'inventory',
+          canPublish: true,
+          blockingProfiles: ['operational_topology'],
+          sourceFeatureId: object.sourceFeatureId,
+        })
+      }
+    })
   return issues
 }
+
+export const buildIdentityIssues = identityIssues
 
 function buildCoverage({
   parserOutput,
@@ -1032,7 +1189,7 @@ function buildCoverage({
   const operationalObjects = classifiedObjects.filter(({ objectRole }) => (
     ['device_node', 'cable_path'].includes(objectRole)
   ))
-  const stableObjects = operationalObjects.filter(({ assetId }) => Boolean(assetId))
+  const stableObjects = operationalObjects.filter(({ stableAssetId }) => Boolean(stableAssetId))
   const canonicalPlacemarkCount = sourceFeatures.filter(({ sourceElementType }) => (
     sourceElementType === 'Placemark'
   )).length
@@ -1070,6 +1227,35 @@ function buildCoverage({
       + (parserOutput.styles?.length ?? 0)
       + (parserOutput.styleMaps?.length ?? 0)
       + (parserOutput.unsupportedElements?.length ?? 0),
+    sourceElementCounts: {
+      Document: parserOutput.structure?.documentCount ?? 0,
+      Folder: parserOutput.structure?.folderCount ?? 0,
+      Placemark: parserOutput.structure?.placemarkCount ?? 0,
+      GroundOverlay: parserOutput.structure?.overlayCount ?? 0,
+    },
+    parsedElementCounts: {
+      Document: parserOutput.structure?.documentCount ?? 0,
+      Folder: parserOutput.structure?.folderCount ?? 0,
+      Placemark: parserOutput.structure?.placemarkCount ?? 0,
+      GroundOverlay: parserOutput.structure?.overlayCount ?? 0,
+    },
+    unsupportedElementCounts: countBy(parserOutput.unsupportedElements ?? [], 'name'),
+    renderableGeometryCounts: countBy(
+      sourceGeometries.filter(({ valid }) => valid !== false),
+      'geometryType',
+    ),
+    invalidGeometryCounts: countBy(
+      sourceGeometries.filter(({ valid }) => valid === false),
+      'geometryType',
+    ),
+    overlayCounts: {
+      total: sourceOverlays.length,
+      resolved: sourceOverlays.filter(({ resourceResolutionStatus, valid }) => (
+        valid !== false && resourceResolutionStatus === 'resolved'
+      )).length,
+      missing: sourceOverlays.filter(({ resourceResolutionStatus }) => resourceResolutionStatus === 'missing').length,
+      externalBlocked: sourceOverlays.filter(({ resourceResolutionStatus }) => resourceResolutionStatus === 'external').length,
+    },
   }
 }
 

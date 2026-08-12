@@ -1,5 +1,7 @@
 import path from 'node:path'
 import { buildCanonicalParserResult } from '../domain/parser-contract.js'
+import { compareCanonicalDatasetVersions } from '../domain/dataset-version-diff.js'
+import { buildReadinessContract } from '../domain/publication-contract.js'
 import { AppError, asAppError } from '../errors.js'
 import { generateRelationArtifacts } from '../topology/semantic-relation-engine.js'
 import { applyArtifacts } from '../topology/topology-service.js'
@@ -19,6 +21,7 @@ export class ImportPipeline {
     folderMappings = [],
     relationMappings = [],
     topology = {},
+    publicationPolicyVersion = null,
     validationService = new DatasetVersionValidationService(),
     clock = () => new Date(),
   }) {
@@ -31,6 +34,7 @@ export class ImportPipeline {
     this.folderMappings = folderMappings
     this.relationMappings = relationMappings
     this.topology = topology
+    this.publicationPolicyVersion = publicationPolicyVersion
     this.validationService = validationService
     this.clock = clock
   }
@@ -112,6 +116,13 @@ export class ImportPipeline {
 
       await this.#progress(datasetVersionId, 70, 'validating_import', progressReporter)
       const current = await this.repository.get(datasetVersionId)
+      const activeRecord = await this.repository.findActive(
+        current.datasetVersion.datasetId,
+        {
+          excludeId: datasetVersionId,
+          branchId: current.datasetVersion.branchId,
+        },
+      )
       const sourceSelection = {
         selectedKmlPath,
         resources,
@@ -123,6 +134,12 @@ export class ImportPipeline {
         sourceSelection,
         metadataAliases: this.metadataAliases,
         resources,
+        identityRegistry: activeRecord?.assetIdentityRegistry
+          ?? activeRecord?.identityRegistry
+          ?? [],
+        ...(this.publicationPolicyVersion
+          ? { publicationPolicyVersion: this.publicationPolicyVersion }
+          : {}),
       })
       const adaptedResult = projectCanonicalImport({
         parserOutput,
@@ -153,6 +170,24 @@ export class ImportPipeline {
         sourceSelection,
         expectedBranchId: current.datasetVersion.branchId,
       })
+      const readiness = buildReadinessContract({
+        datasetVersion: result.datasetVersion,
+        issues: result.issues,
+        parserCoverage: canonicalParser.coverage,
+        sourceFeatures: canonicalParser.sourceFeatures,
+        sourceGeometries: canonicalParser.sourceGeometries,
+        sourceOverlays: canonicalParser.sourceOverlays,
+        classifiedObjects: canonicalParser.classifiedObjects,
+        topologyReadiness: result.topologyGraph?.edges?.length
+          ? result.topologyReadiness ?? null
+          : null,
+        topologyGraph: result.topologyGraph?.edges?.length
+          ? result.topologyGraph
+          : null,
+        evaluatedAt: this.clock().toISOString(),
+      })
+      canonicalParser.readiness = readiness
+      const comparison = compareCanonicalDatasetVersions(result, activeRecord)
 
       await this.#progress(datasetVersionId, 90, 'persisting_result', progressReporter)
       const completedAt = this.clock().toISOString()
@@ -167,9 +202,19 @@ export class ImportPipeline {
         sourceResources: canonicalParser.sourceResources,
         classifiedObjects: canonicalParser.classifiedObjects,
         assetIdentityMap: canonicalParser.assetIdentityMap,
+        assetIdentityRegistry: canonicalParser.identityRegistry ?? [],
+        identityRegistry: canonicalParser.identityRegistry ?? [],
         topologyInputBundle: canonicalParser.topologyInputBundle,
         parserCoverage: canonicalParser.coverage,
-        readiness: canonicalParser.readiness,
+        readiness,
+        datasetVersionDiffs: comparison.items.map((item) => ({
+          ...item,
+          baseDatasetVersionId: comparison.baseDatasetVersionId,
+          candidateDatasetVersionId: comparison.candidateDatasetVersionId,
+          comparisonRevision: comparison.comparisonRevision,
+        })),
+        comparisonRevision: comparison.comparisonRevision,
+        comparisonSummary: comparison.summary,
         parserVersions: {
           sourceChecksum: canonicalParser.sourceChecksum,
           parserVersion: canonicalParser.parserVersion,
@@ -178,6 +223,8 @@ export class ImportPipeline {
           metadataAliasVersion: canonicalParser.metadataAliasVersion,
           folderMappingVersion: canonicalParser.folderMappingVersion,
           styleMappingVersion: canonicalParser.styleMappingVersion,
+          controlledVocabularyVersion: canonicalParser.controlledVocabularyVersion,
+          publicationPolicyVersion: canonicalParser.publicationPolicyVersion,
         },
         processing: {
           ...current.processing,
@@ -329,6 +376,7 @@ export function createProcessingRecord(datasetVersion, clock = () => new Date())
       ...datasetVersion,
       validationStatus: 'pending',
       publicationStatus: 'unpublished',
+      publicationProfile: null,
       status: 'processing',
       summary: emptySummary(),
     },
