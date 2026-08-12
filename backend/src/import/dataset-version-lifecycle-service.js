@@ -1,8 +1,24 @@
+import { createHash, randomUUID } from 'node:crypto'
 import { AppError } from '../errors.js'
 import {
+  buildCanonicalAssetIdentityMap,
   buildAssetIdentityMapFromRecord,
   createAssetIdentityResolver,
 } from '../domain/canonical-asset-identity.js'
+import {
+  buildIdentityIssues,
+  buildTopologyInputBundle,
+} from '../domain/parser-contract.js'
+import {
+  buildReadinessContract as buildPublicationReadinessContract,
+  isProfilePublishable,
+  normalizePublicationProfile,
+  publicationCapabilities,
+} from '../domain/publication-contract.js'
+import {
+  compareCanonicalDatasetVersions,
+  paginateDatasetDiff,
+} from '../domain/dataset-version-diff.js'
 import { normalizeTopologySummary } from '../topology/semantic-relation-engine.js'
 import { withTopologyGraphRevision } from '../topology/topology-graph-revision.js'
 
@@ -23,7 +39,10 @@ export class DatasetVersionLifecycleService {
     const candidate = await this.repository.get(datasetVersionId)
     const active = await this.repository.findActive(
       candidate.datasetVersion.datasetId,
-      { excludeId: datasetVersionId },
+      {
+        excludeId: datasetVersionId,
+        branchId: candidate.datasetVersion.branchId,
+      },
     )
     const comparison = compareDatasetVersions(candidate, active)
     return {
@@ -50,6 +69,14 @@ export class DatasetVersionLifecycleService {
       parserVersions: candidate.parserVersions ?? null,
       sourceSelection: candidate.sourceSelection ?? null,
       comparison,
+      comparisonSummary: comparison.summary,
+      publishableProfiles: candidate.readiness?.publishableProfiles ?? [],
+      publicationStatus: candidate.datasetVersion.publicationStatus ?? 'unpublished',
+      publicationProfile: candidate.datasetVersion.publicationProfile ?? null,
+      links: {
+        comparison: `/api/admin/imports/${encodeURIComponent(datasetVersionId)}/comparison`,
+        readiness: `/api/dataset-versions/${encodeURIComponent(datasetVersionId)}/readiness`,
+      },
       activeDatasetVersion: active
         ? {
           datasetVersion: withoutInternalStorage(active.datasetVersion),
@@ -62,6 +89,123 @@ export class DatasetVersionLifecycleService {
       canActivate: canActivate(candidate),
       readOnly: true,
     }
+  }
+
+  async getComparison(datasetVersionId, filters = {}) {
+    const candidate = await this.repository.get(datasetVersionId)
+    const active = await this.repository.findActive(
+      candidate.datasetVersion.datasetId,
+      {
+        excludeId: datasetVersionId,
+        branchId: candidate.datasetVersion.branchId,
+      },
+    )
+    return paginateDatasetDiff(
+      compareDatasetVersions(candidate, active),
+      filters,
+    )
+  }
+
+  async assignIdentityAssignments(datasetVersionId, actorId, {
+    assignments = [],
+    expectedRecordRevision,
+    idempotencyKey = null,
+    correlationId = null,
+  } = {}) {
+    const normalizedAssignments = normalizeIdentityAssignments(assignments)
+    const requestFingerprint = fingerprint(normalizedAssignments)
+    const current = await this.repository.get(datasetVersionId)
+    const existingReceipt = findIdentityAssignmentReceipt(
+      current.identityAssignmentReceipts,
+      idempotencyKey,
+    )
+    if (existingReceipt) {
+      if (existingReceipt.fingerprint !== requestFingerprint) {
+        throw new AppError('Idempotency key sudah digunakan untuk batch berbeda.', {
+          code: 'idempotency_key_reused',
+          statusCode: 409,
+          details: { idempotencyKey },
+        })
+      }
+      return structuredClone(existingReceipt.response)
+    }
+
+    validateIdentityAssignmentBatch(current, normalizedAssignments)
+    const auditEventId = randomUUID()
+    let committed = null
+    try {
+      committed = await this.repository.update(
+        datasetVersionId,
+        (record) => applyIdentityAssignmentBatch({
+          record,
+          assignments: normalizedAssignments,
+          actorId,
+          approvedAt: this.clock().toISOString(),
+          auditEventId,
+          idempotencyKey,
+          requestFingerprint,
+        }),
+        {
+          expectedRevision: expectedRecordRevision
+            ?? normalizeRecordRevision(current.recordRevision),
+        },
+      )
+    } catch (error) {
+      if (error.code === 'dataset_version_stale_revision') {
+        const latest = await this.repository.get(datasetVersionId)
+        const replay = findIdentityAssignmentReceipt(
+          latest.identityAssignmentReceipts,
+          idempotencyKey,
+        )
+        if (replay?.fingerprint === requestFingerprint) {
+          return structuredClone(replay.response)
+        }
+      }
+      await this.auditLog.record('dataset_version.identity_assignment_failed', {
+        actorId,
+        datasetVersionId,
+        branchId: current.datasetVersion.branchId,
+        correlationId,
+        outcome: 'failed',
+        details: {
+          auditEventId,
+          idempotencyKey,
+          errorCode: error.code ?? error.name,
+          assignmentCount: normalizedAssignments.length,
+        },
+      }).catch(() => {})
+      throw error
+    }
+
+    const audit = await this.auditLog.record('dataset_version.identity_assigned', {
+      eventId: auditEventId,
+      actorId,
+      datasetVersionId,
+      branchId: committed.datasetVersion.branchId,
+      correlationId,
+      outcome: 'committed',
+      details: {
+        auditEventId,
+        idempotencyKey,
+        assignmentCount: normalizedAssignments.length,
+        affectedSourceFeatureIds: normalizedAssignments.map(({ sourceFeatureId }) => sourceFeatureId),
+        recordRevision: committed.recordRevision,
+      },
+    }).catch(() => null)
+    const response = {
+      datasetVersionId,
+      recordRevision: committed.recordRevision,
+      state: 'updated',
+      affectedSourceFeatureIds: normalizedAssignments.map(({ sourceFeatureId }) => sourceFeatureId),
+      affectedAssetIds: affectedAssetIds(committed, normalizedAssignments),
+      identityRegistry: structuredClone(
+        committed.assetIdentityRegistry ?? committed.identityRegistry ?? [],
+      ),
+      identityCoverage: committed.readiness?.inventory?.coverage ?? {},
+      readiness: committed.readiness ?? null,
+      auditEventId: audit?.id ?? auditEventId,
+    }
+    return response
   }
 
   async getActiveDataset({ datasetId, branchId } = {}) {
@@ -164,6 +308,10 @@ export class DatasetVersionLifecycleService {
 
   async activate(datasetVersionId, actorId, {
     expectedActiveVersionId,
+    expectedRecordRevision,
+    expectedActivePointerRevision,
+    publicationProfile = 'map_only',
+    confirmBreakingChanges = false,
     allowArchived = false,
     operation = 'activate',
     correlationId = null,
@@ -172,13 +320,49 @@ export class DatasetVersionLifecycleService {
     const activatedAt = this.clock().toISOString()
     try {
       target = await this.repository.get(datasetVersionId)
+      const active = await this.repository.findActive(
+        target.datasetVersion.datasetId,
+        {
+          excludeId: datasetVersionId,
+          branchId: target.datasetVersion.branchId,
+        },
+      )
+      const comparison = compareDatasetVersions(target, active)
+      const normalizedProfile = normalizePublicationProfile(
+        publicationProfile ?? target.datasetVersion.publicationProfile ?? 'map_only',
+        { allowNull: false },
+      )
+      if (!normalizedProfile) {
+        throw new AppError('Publication profile tidak valid.', {
+          code: 'invalid_publication_profile',
+          statusCode: 400,
+        })
+      }
+      if (comparison.summary.requiresBreakingChangeConfirmation
+        && confirmBreakingChanges !== true) {
+        throw new AppError('Aktivasi memerlukan konfirmasi breaking change.', {
+          code: 'breaking_change_confirmation_required',
+          statusCode: 409,
+          details: {
+            comparisonRevision: comparison.comparisonRevision,
+            highRiskChangeCount: comparison.summary.byRisk?.high ?? 0,
+          },
+        })
+      }
       const transaction = await this.repository.activateVersionAtomically({
         datasetVersionId,
         actorId,
         activatedAt,
         expectedActiveVersionId,
+        expectedRecordRevision,
+        expectedActivePointerRevision,
+        publicationProfile: normalizedProfile,
+        archiveReason: operation === 'rollback' ? 'rollback' : 'superseded',
         validateTarget(record) {
-          if (!canActivate(record, { allowArchived })) {
+          if (!canActivate(record, {
+            allowArchived,
+            publicationProfile: normalizedProfile,
+          })) {
             throw new AppError(
               'Dataset version tidak dapat diaktifkan karena belum valid atau masih mempunyai blocking error.',
               {
@@ -217,7 +401,7 @@ export class DatasetVersionLifecycleService {
       const event = operation === 'rollback'
         ? 'dataset_version.rolled_back'
         : 'dataset_version.activated'
-      await this.auditLog.record(event, {
+      const auditEntry = await this.auditLog.record(event, {
         actorId,
         datasetVersionId,
         branchId: transaction.pointer.branchId,
@@ -234,8 +418,11 @@ export class DatasetVersionLifecycleService {
           result: 'committed',
           activePointerRevision: transaction.pointer.revision,
           operation,
+          publicationProfile: normalizedProfile,
+          comparisonRevision: comparison.comparisonRevision,
+          highRiskChangeCount: comparison.summary.byRisk?.high ?? 0,
         },
-      }).catch(() => {})
+      }).catch(() => null)
       return {
         operation,
         datasetVersion: withoutInternalStorage(transaction.activated.datasetVersion),
@@ -243,6 +430,14 @@ export class DatasetVersionLifecycleService {
           ? withoutInternalStorage(transaction.previous.datasetVersion)
           : null,
         activePointer: transaction.pointer,
+        datasetVersionId,
+        auditEventId: auditEntry?.id ?? null,
+        publicationProfile: normalizedProfile,
+        capabilities: publicationCapabilities(
+          transaction.activated,
+          normalizedProfile,
+        ),
+        comparisonRevision: comparison.comparisonRevision,
         cacheInvalidated,
         mapUrl: `/map?datasetId=${encodeURIComponent(transaction.pointer.datasetId)}`
           + `&branchId=${encodeURIComponent(transaction.pointer.branchId)}`,
@@ -294,16 +489,23 @@ export class DatasetVersionLifecycleService {
         },
       })
     }
+    const previous = await this.repository.get(previousVersionId)
     return this.activate(previousVersionId, actorId, {
       expectedActiveVersionId: expectedActiveVersionId
         ?? resolved.record.datasetVersion.id,
       allowArchived: true,
       operation: 'rollback',
+      confirmBreakingChanges: true,
+      publicationProfile: previous.datasetVersion.publicationProfile ?? 'map_only',
       correlationId,
     })
   }
 
-  async reject(datasetVersionId, actorId, { correlationId = null } = {}) {
+  async reject(datasetVersionId, actorId, {
+    reason,
+    correlationId = null,
+  } = {}) {
+    const normalizedReason = normalizeRejectionReason(reason)
     const current = await this.repository.get(datasetVersionId)
     if (current.datasetVersion.status === 'active') {
       throw new AppError('Dataset version aktif tidak dapat ditolak.', {
@@ -320,20 +522,94 @@ export class DatasetVersionLifecycleService {
         publicationStatus: 'archived',
         rejectedBy: actorId,
         rejectedAt,
+        archiveReason: 'rejected',
+        rejectionReason: normalizedReason,
       },
     }))
-    await this.auditLog.record('dataset_version.rejected', {
+    const auditEntry = await this.auditLog.record('dataset_version.rejected', {
       actorId,
       datasetVersionId,
       branchId: rejected.datasetVersion.branchId,
       correlationId,
       outcome: 'archived',
     })
-    return { datasetVersion: withoutInternalStorage(rejected.datasetVersion) }
+    return {
+      datasetVersionId,
+      datasetVersion: withoutInternalStorage(rejected.datasetVersion),
+      recordRevision: rejected.recordRevision,
+      auditEventId: auditEntry?.id ?? null,
+      state: 'archived',
+    }
   }
 }
 
+function normalizeRejectionReason(reason) {
+  const normalized = String(reason ?? '').trim()
+  if (!normalized || normalized.length > 1000
+    || /[ --]/.test(normalized)) {
+    throw new AppError('Alasan reject wajib diberikan.', {
+      code: 'rejection_reason_required',
+      statusCode: 400,
+    })
+  }
+  return normalized
+}
+
 export function compareDatasetVersions(candidate, active) {
+  const hasCanonicalEvidence = Boolean(
+    candidate?.classifiedObjects?.length
+      || active?.classifiedObjects?.length
+      || candidate?.sourceFeatures?.length
+      || active?.sourceFeatures?.length
+      || candidate?.sourceOverlays?.length
+      || active?.sourceOverlays?.length,
+  )
+  if (hasCanonicalEvidence) {
+    const comparison = compareCanonicalDatasetVersions(candidate, active)
+    const candidateAssets = candidate.assets ?? []
+    const activeAssets = active?.assets ?? []
+    const changesByAssetId = new Map(
+      comparison.items
+        .filter(({ assetId }) => assetId)
+        .map((item) => [item.assetId, item]),
+    )
+    const candidateIds = new Set(candidateAssets.map(stableAssetIdForAsset).filter(Boolean))
+    const activeIds = new Set(activeAssets.map(stableAssetIdForAsset).filter(Boolean))
+    const assetChanges = candidateAssets.map((asset) => {
+      const assetId = stableAssetIdForAsset(asset) ?? asset.assetId
+      const change = changesByAssetId.get(assetId)
+      return {
+        assetId,
+        status: change
+          ? change.changeType === 'asset_added' ? 'new' : 'updated'
+          : 'unchanged',
+        previousAssetId: activeIds.has(assetId) ? assetId : null,
+      }
+    })
+    const removedAssets = activeAssets
+      .filter((asset) => {
+        const assetId = stableAssetIdForAsset(asset)
+        return assetId && !candidateIds.has(assetId)
+      })
+      .map((asset) => ({
+        asset: structuredClone(asset),
+        geometries: structuredClone((active.geometries ?? []).filter((geometry) => (
+          geometry.assetNodeId === asset.id
+        ))),
+        status: 'removed',
+      }))
+    const unchangedAssets = assetChanges.filter(({ status }) => status === 'unchanged').length
+    return {
+      ...comparison,
+      assetChanges,
+      removedAssets,
+      summary: {
+        ...comparison.summary,
+        unchangedAssets,
+        removedAssets: removedAssets.length,
+      },
+    }
+  }
   const candidateAssets = candidate.assets ?? []
   const activeAssets = active?.assets ?? []
   const activeByAssetId = new Map(activeAssets.map((asset) => [asset.assetId, asset]))
@@ -725,7 +1001,22 @@ function buildReadinessContract(record, topologyGraph) {
     .filter((component) => (component.edgeIds ?? []).length > 0).length
   const nodeCount = topologyGraph.nodes.length
   const connectedDeviceCount = nodeCount - (topologyGraph.isolatedNodeIds ?? []).length
+  const canonicalReadiness = buildPublicationReadinessContract({
+    datasetVersion: record.datasetVersion,
+    issues: record.issues ?? [],
+    parserCoverage: record.parserCoverage ?? {},
+    sourceFeatures: record.sourceFeatures ?? [],
+    sourceGeometries: record.sourceGeometries ?? [],
+    sourceOverlays: record.sourceOverlays ?? [],
+    classifiedObjects: record.classifiedObjects ?? [],
+    topologyReadiness: record.topologyReadiness ?? null,
+    topologyGraph,
+    evaluatedAt: record.datasetVersion?.readinessEvaluatedAt
+      ?? record.datasetVersion?.importedAt
+      ?? null,
+  })
   return {
+    ...canonicalReadiness,
     mapReady: parserReadiness.mapReadiness ?? 'not_ready',
     inventoryReady: parserReadiness.inventoryReadiness ?? 'not_ready',
     topologyReady: topologyReady ? 'ready' : 'not_ready',
@@ -849,11 +1140,27 @@ function readAssetProperty(asset, key) {
     ?? asset.properties?.[key]
 }
 
-function canActivate(record, { allowArchived = false } = {}) {
+function canActivate(record, {
+  allowArchived = false,
+  publicationProfile = 'map_only',
+} = {}) {
   const statusValid = record.datasetVersion.status === 'valid'
     || (allowArchived && record.datasetVersion.status === 'archived')
-  return statusValid
-    && record.datasetVersion.validationStatus === 'valid'
+  if (!statusValid) return false
+  if (allowArchived
+    && record.datasetVersion.status === 'archived'
+    && record.datasetVersion.archiveReason
+    && !['superseded', 'rollback'].includes(record.datasetVersion.archiveReason)) {
+    return false
+  }
+  if (record.readiness?.publishableProfiles) {
+    return isProfilePublishable(record, publicationProfile)
+      && !(record.issues ?? []).some((issue) => (
+        Array.isArray(issue.blockingProfiles)
+          && issue.blockingProfiles.includes(publicationProfile)
+      ))
+  }
+  return record.datasetVersion.validationStatus === 'valid'
     && record.validation?.canActivate === true
     && !(record.issues ?? []).some((issue) => issue.canActivate === false)
 }
@@ -882,4 +1189,333 @@ function assetFingerprint(asset, geometries) {
       altitudeMode: geometry.altitudeMode ?? null,
     })),
   })
+}
+
+function stableAssetIdForAsset(asset = {}) {
+  if (asset.stableAssetId) return asset.stableAssetId
+  if (asset.identityResolutionStatus === 'stable_explicit'
+    || asset.identityResolutionStatus === 'stable_registry') {
+    return asset.assetId
+  }
+  if (asset.identityStatus === 'stable' && !asset.onboardingIdentity) return asset.assetId
+  return null
+}
+
+function normalizeIdentityAssignments(assignments) {
+  if (!Array.isArray(assignments) || assignments.length === 0 || assignments.length > 500) {
+    throw new AppError('Identity assignment harus berisi 1 sampai 500 item.', {
+      code: 'invalid_identity_assignment_batch',
+      statusCode: 400,
+    })
+  }
+  return assignments.map((assignment, index) => {
+    const sourceFeatureId = normalizeBoundedText(
+      assignment?.sourceFeatureId,
+      'sourceFeatureId',
+    )
+    const action = String(assignment?.action ?? '').trim().toLowerCase()
+    if (!['assign', 'mark_non_asset', 'reject_match'].includes(action)) {
+      throw new AppError(`Action identity assignment pada index ${index} tidak valid.`, {
+        code: 'invalid_identity_assignment_action',
+        statusCode: 400,
+      })
+    }
+    const reason = normalizeBoundedText(assignment?.reason, 'reason')
+    const assetId = assignment?.assetId === undefined || assignment?.assetId === null
+      ? null
+      : normalizeBoundedText(assignment.assetId, 'assetId')
+    const proposedAssetId = assignment?.proposedAssetId === undefined
+      || assignment?.proposedAssetId === null
+      ? null
+      : normalizeBoundedText(assignment.proposedAssetId, 'proposedAssetId')
+    if (action === 'assign' && !assetId) {
+      throw new AppError(`Asset ID wajib untuk assignment index ${index}.`, {
+        code: 'identity_assignment_asset_id_required',
+        statusCode: 400,
+      })
+    }
+    return {
+      sourceFeatureId,
+      action,
+      assetId,
+      proposedAssetId,
+      reason,
+      evidenceRefs: normalizeEvidenceRefs(assignment?.evidenceRefs),
+    }
+  })
+}
+
+function validateIdentityAssignmentBatch(record, assignments) {
+  const sourceFeatureIds = new Set(
+    (record.sourceFeatures ?? []).map(({ sourceFeatureId }) => sourceFeatureId),
+  )
+  const seenFeatures = new Set()
+  const knownAssetIds = new Set(
+    (record.assetIdentityRegistry ?? record.identityRegistry ?? [])
+      .filter(({ status }) => status === 'active')
+      .map(({ assetId }) => assetId),
+  )
+  assignments.forEach((assignment) => {
+    if (!sourceFeatureIds.has(assignment.sourceFeatureId)) {
+      throw new AppError('Source feature identity tidak ditemukan.', {
+        code: 'identity_source_feature_not_found',
+        statusCode: 404,
+        details: { sourceFeatureId: assignment.sourceFeatureId },
+      })
+    }
+    if (seenFeatures.has(assignment.sourceFeatureId)) {
+      throw new AppError('Satu source feature hanya boleh muncul sekali per batch.', {
+        code: 'duplicate_identity_assignment_source',
+        statusCode: 400,
+        details: { sourceFeatureId: assignment.sourceFeatureId },
+      })
+    }
+    seenFeatures.add(assignment.sourceFeatureId)
+    if (assignment.action === 'assign') {
+      if (knownAssetIds.has(assignment.assetId)) {
+        const previous = (record.assetIdentityRegistry ?? record.identityRegistry ?? [])
+          .find(({ assetId, status }) => assetId === assignment.assetId && status === 'active')
+        const sourceFeature = (record.sourceFeatures ?? []).find(({ sourceFeatureId }) => (
+          sourceFeatureId === assignment.sourceFeatureId
+        ))
+        const matchValue = sourceFeature?.sourceKmlId ?? assignment.sourceFeatureId
+        if (previous?.sourceMatchValue !== matchValue) {
+          throw new AppError('Asset ID sudah dipakai oleh source feature lain.', {
+            code: 'identity_asset_id_conflict',
+            statusCode: 409,
+            details: {
+              assetId: assignment.assetId,
+              sourceFeatureId: assignment.sourceFeatureId,
+            },
+          })
+        }
+      }
+      knownAssetIds.add(assignment.assetId)
+    }
+  })
+}
+
+function applyIdentityAssignmentBatch({
+  record,
+  assignments,
+  actorId,
+  approvedAt,
+  auditEventId,
+  idempotencyKey,
+  requestFingerprint,
+}) {
+  const sourceFeatures = structuredClone(record.sourceFeatures ?? [])
+  const classifiedObjects = structuredClone(record.classifiedObjects ?? [])
+  const featureById = new Map(sourceFeatures.map((feature) => [feature.sourceFeatureId, feature]))
+  const objectByFeature = new Map(
+    classifiedObjects.map((object) => [object.sourceFeatureId, object]),
+  )
+  const registry = structuredClone(record.assetIdentityRegistry ?? record.identityRegistry ?? [])
+    .map((entry, index) => ({
+      ...entry,
+      registryId: entry.registryId
+        ?? `identity-registry:legacy-${fingerprint([entry, index]).slice(0, 24)}`,
+    }))
+  const registryById = new Map(
+    registry.filter(({ registryId }) => registryId).map((entry) => [entry.registryId, entry]),
+  )
+  const registryBySource = new Map(
+    registry.map((entry) => [identityRegistryKey(entry.sourceMatchType, entry.sourceMatchValue), entry]),
+  )
+  assignments.forEach((assignment) => {
+    const feature = featureById.get(assignment.sourceFeatureId)
+    const object = objectByFeature.get(assignment.sourceFeatureId)
+    const sourceMatchType = feature?.sourceKmlId ? 'source_kml_id' : 'source_feature_id'
+    const sourceMatchValue = feature?.sourceKmlId ?? assignment.sourceFeatureId
+    const key = identityRegistryKey(sourceMatchType, sourceMatchValue)
+    const existing = registryBySource.get(key)
+    if (existing && assignment.action !== 'reject_match') {
+      existing.status = 'superseded'
+      existing.validToDatasetVersionId = record.datasetVersion.id
+    }
+    if (assignment.action === 'assign') {
+      const entry = {
+        registryId: `identity-registry:${randomUUID()}`,
+        datasetId: record.datasetVersion.datasetId,
+        branchId: record.datasetVersion.branchId,
+        assetId: assignment.assetId,
+        sourceMatchType,
+        sourceMatchValue,
+        validFromDatasetVersionId: record.datasetVersion.id,
+        validToDatasetVersionId: null,
+        status: 'active',
+        approvedBy: actorId,
+        approvedAt,
+        evidence: {
+          reason: assignment.reason,
+          evidenceRefs: assignment.evidenceRefs,
+        },
+        auditEventId,
+      }
+      registryById.set(entry.registryId, entry)
+      registryBySource.set(key, entry)
+      if (object) {
+        object.assetId = null
+        object.identityResolutionStatus = 'stable_registry'
+      }
+    } else if (assignment.action === 'mark_non_asset') {
+      registryBySource.delete(key)
+      if (object) {
+        object.objectRole = 'visual_only'
+        object.identityResolutionStatus = 'not_applicable'
+        object.identityReviewDecision = {
+          action: assignment.action,
+          reason: assignment.reason,
+          evidenceRefs: assignment.evidenceRefs,
+          decidedBy: actorId,
+          decidedAt: approvedAt,
+          auditEventId,
+        }
+      }
+    } else {
+      if (object) {
+        object.identityReviewDecision = {
+          action: assignment.action,
+          proposedAssetId: assignment.proposedAssetId,
+          reason: assignment.reason,
+          evidenceRefs: assignment.evidenceRefs,
+          decidedBy: actorId,
+          decidedAt: approvedAt,
+          auditEventId,
+        }
+      }
+    }
+  })
+  const identityRegistry = [...registryById.values()]
+    .sort((left, right) => (
+      String(left.sourceMatchValue).localeCompare(String(right.sourceMatchValue))
+    ))
+  const assetIdentityMap = buildCanonicalAssetIdentityMap({
+    datasetVersion: record.datasetVersion,
+    sourceFeatures,
+    classifiedObjects,
+    identityRegistry,
+  })
+  const identityByFeature = new Map(assetIdentityMap.items.map((item) => [
+    item.sourceFeatureId,
+    item,
+  ]))
+  const resolvedClassifiedObjects = classifiedObjects.map((object) => {
+    const identity = identityByFeature.get(object.sourceFeatureId)
+    if (!identity) return object
+    return {
+      ...object,
+      canonicalAssetId: identity.canonicalAssetId,
+      stableAssetId: identity.stableAssetId,
+      onboardingIdentity: identity.onboardingId,
+      legacyAssetId: identity.legacyId,
+      identityStatus: identity.identityStatus,
+      identityResolutionStatus: identity.identityResolutionStatus,
+      sourceMatchType: identity.sourceMatchType,
+      sourceMatchValue: identity.sourceMatchValue,
+      registryId: identity.registryId,
+      identityAliases: structuredClone(identity.aliases),
+    }
+  })
+  const issues = buildIdentityIssues(assetIdentityMap, resolvedClassifiedObjects)
+  const topologyInputBundle = record.topologyInputBundle
+    ? buildTopologyInputBundle({
+      datasetVersion: record.datasetVersion,
+      classifiedObjects: resolvedClassifiedObjects,
+      sourceFeatures,
+      sourceGeometries: record.sourceGeometries ?? [],
+      explicitRelationEvidence: record.canonicalParser?.explicitRelationEvidence ?? [],
+    })
+    : record.topologyInputBundle
+  const readiness = buildPublicationReadinessContract({
+    datasetVersion: record.datasetVersion,
+    issues: [...(record.issues ?? []), ...issues],
+    parserCoverage: record.parserCoverage ?? {},
+    sourceFeatures,
+    sourceGeometries: record.sourceGeometries ?? [],
+    sourceOverlays: record.sourceOverlays ?? [],
+    classifiedObjects: resolvedClassifiedObjects,
+    topologyReadiness: record.topologyReadiness ?? null,
+    topologyGraph: record.topologyGraph ?? null,
+    evaluatedAt: approvedAt,
+  })
+  const updated = {
+    ...record,
+    sourceFeatures,
+    classifiedObjects: resolvedClassifiedObjects,
+    assetIdentityMap,
+    assetIdentityRegistry: identityRegistry,
+    identityRegistry,
+    topologyInputBundle,
+    readiness,
+    identityAssignmentReceipts: [
+      ...(record.identityAssignmentReceipts ?? []),
+      ...(idempotencyKey ? [{
+        key: idempotencyKey,
+        fingerprint: requestFingerprint,
+        auditEventId,
+        response: {
+          datasetVersionId: record.datasetVersion.id,
+          recordRevision: normalizeRecordRevision(record.recordRevision) + 1,
+          state: 'updated',
+          affectedSourceFeatureIds: assignments.map(({ sourceFeatureId }) => sourceFeatureId),
+          affectedAssetIds: assignments
+            .filter(({ action, assetId }) => action === 'assign' && assetId)
+            .map(({ assetId }) => assetId),
+          identityCoverage: readiness.inventory?.coverage ?? {},
+          readiness,
+          auditEventId,
+        },
+      }] : []),
+    ],
+  }
+  return updated
+}
+
+function findIdentityAssignmentReceipt(receipts, idempotencyKey) {
+  if (!idempotencyKey) return null
+  return (receipts ?? []).find(({ key }) => key === idempotencyKey) ?? null
+}
+
+function affectedAssetIds(record, assignments) {
+  const byFeature = new Map(
+    (record.classifiedObjects ?? []).map((object) => [object.sourceFeatureId, object]),
+  )
+  return assignments.map(({ sourceFeatureId, assetId }) => (
+    assetId ?? byFeature.get(sourceFeatureId)?.stableAssetId ?? null
+  )).filter(Boolean)
+}
+
+function identityRegistryKey(type, value) {
+  return `${type ?? ''}:${value ?? ''}`
+}
+
+function normalizeEvidenceRefs(value) {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.map((item) => String(item).trim()).filter(Boolean))].slice(0, 50)
+}
+
+function normalizeBoundedText(value, field) {
+  const normalized = String(value ?? '').trim()
+  if (!normalized || normalized.length > 256 || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new AppError(`Field ${field} identity assignment tidak valid.`, {
+      code: 'invalid_identity_assignment_field',
+      statusCode: 400,
+      details: { field },
+    })
+  }
+  return normalized
+}
+
+function fingerprint(value) {
+  return createHash('sha256').update(stableStringify(value)).digest('hex')
+}
+
+function stableStringify(value) {
+  if (value === undefined) return '"__undefined__"'
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  return `{${Object.keys(value).sort().map((key) => (
+    `${JSON.stringify(key)}:${stableStringify(value[key])}`
+  )).join(',')}}`
 }

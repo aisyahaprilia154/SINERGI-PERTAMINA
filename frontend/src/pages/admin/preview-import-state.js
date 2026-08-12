@@ -63,6 +63,7 @@ export function createImportPreviewState(model) {
     actionStatus: 'idle',
     actionMessage: '',
     activeMapUrl: null,
+    confirmBreakingChanges: false,
   }
 }
 
