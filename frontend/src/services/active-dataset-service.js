@@ -216,7 +216,14 @@ export async function loadTopologyProjection({
   status = null,
   site = null,
   networkFamily = null,
+  candidateType = null,
+  proposalStatus = null,
   minScore = null,
+  maxScore = null,
+  minDistance = null,
+  maxDistance = null,
+  assetSearch = null,
+  requiredTopologyOnly = null,
   cursor = null,
   limit = null,
   token = getDefaultMapToken(),
@@ -232,7 +239,14 @@ export async function loadTopologyProjection({
     setTopologyQueryValue(query, 'status', status)
     setTopologyQueryValue(query, 'site', site)
     setTopologyQueryValue(query, 'networkFamily', networkFamily)
+    setTopologyQueryValue(query, 'candidateType', candidateType)
+    setTopologyQueryValue(query, 'proposalStatus', proposalStatus)
     setTopologyQueryValue(query, 'minScore', minScore)
+    setTopologyQueryValue(query, 'maxScore', maxScore)
+    setTopologyQueryValue(query, 'minDistance', minDistance)
+    setTopologyQueryValue(query, 'maxDistance', maxDistance)
+    setTopologyQueryValue(query, 'assetSearch', assetSearch)
+    setTopologyQueryValue(query, 'requiredTopologyOnly', requiredTopologyOnly)
     setTopologyQueryValue(query, 'cursor', cursor)
     setTopologyQueryValue(query, 'limit', limit)
   }
@@ -249,7 +263,14 @@ export async function loadAllTopologyCandidates({
   status = null,
   site = null,
   networkFamily = null,
+  candidateType = null,
+  proposalStatus = null,
   minScore = null,
+  maxScore = null,
+  minDistance = null,
+  maxDistance = null,
+  assetSearch = null,
+  requiredTopologyOnly = null,
   token = getDefaultMapToken(),
   signal,
   apiBase = '',
@@ -264,7 +285,14 @@ export async function loadAllTopologyCandidates({
         status,
         site,
         networkFamily,
+        candidateType,
+        proposalStatus,
         minScore,
+        maxScore,
+        minDistance,
+        maxDistance,
+        assetSearch,
+        requiredTopologyOnly,
         token,
         signal,
         apiBase,
@@ -278,12 +306,48 @@ export async function loadAllTopologyCandidates({
   }
 }
 
+export async function previewTopologyReview({
+  datasetVersionId,
+  candidateIds,
+  expectedGraphRevision,
+  expectedCandidateRevision,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
+  if (!Array.isArray(candidateIds) || candidateIds.length < 1) {
+    throw new TypeError('Minimal satu candidate harus dipilih.')
+  }
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + '/topology/review-preview',
+    {
+      token,
+      signal,
+      method: 'POST',
+      body: {
+        candidateIds,
+        ...(expectedGraphRevision !== undefined ? { expectedGraphRevision } : {}),
+        ...(expectedCandidateRevision !== undefined ? { expectedCandidateRevision } : {}),
+      },
+    },
+  )
+}
+
 async function loadAllTopologyCandidatesAtLimit({
   datasetVersionId,
   status,
   site,
   networkFamily,
+  candidateType,
+  proposalStatus,
   minScore,
+  maxScore,
+  minDistance,
+  maxDistance,
+  assetSearch,
+  requiredTopologyOnly,
   token,
   signal,
   apiBase,
@@ -300,7 +364,14 @@ async function loadAllTopologyCandidatesAtLimit({
       status,
       site,
       networkFamily,
+      candidateType,
+      proposalStatus,
       minScore,
+      maxScore,
+      minDistance,
+      maxDistance,
+      assetSearch,
+      requiredTopologyOnly,
       cursor,
       limit,
       token,
@@ -447,8 +518,12 @@ export async function createTopologyRelation({
   sourceAssetId,
   targetAssetId,
   relationType = 'connected-to',
+  relationKind,
   direction = 'undirected',
+  pathAssetIds,
+  sourceGeometryIds,
   reason,
+  evidenceRefs,
   expectedGraphRevision,
   expectedCandidateRevision,
   token = getDefaultMapToken(),
@@ -469,8 +544,12 @@ export async function createTopologyRelation({
         sourceAssetId,
         targetAssetId,
         relationType,
+        ...(relationKind !== undefined ? { relationKind } : {}),
         direction,
+        ...(pathAssetIds !== undefined ? { pathAssetIds } : {}),
+        ...(sourceGeometryIds !== undefined ? { sourceGeometryIds } : {}),
         reason: String(reason ?? '').trim() || undefined,
+        ...(evidenceRefs !== undefined ? { evidenceRefs } : {}),
         ...(expectedGraphRevision !== undefined ? { expectedGraphRevision } : {}),
         ...(expectedCandidateRevision !== undefined ? { expectedCandidateRevision } : {}),
       },

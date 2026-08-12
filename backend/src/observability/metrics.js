@@ -221,6 +221,7 @@ export function normalizeHttpRoute(pathname) {
     [/^\/api\/datasets\/[a-zA-Z0-9_-]+\/active\/assets\/[^/]+$/, '/api/datasets/:id/active/assets/:assetId'],
     [/^\/api\/dataset-versions\/[a-zA-Z0-9_-]+\/topology\/(summary|candidates|graph)$/, '/api/dataset-versions/:id/topology/:projection'],
     [/^\/api\/dataset-versions\/[a-zA-Z0-9_-]+\/topology\/trace$/, '/api/dataset-versions/:id/topology/trace'],
+    [/^\/api\/dataset-versions\/[a-zA-Z0-9_-]+\/topology\/review-preview$/, '/api/dataset-versions/:id/topology/review-preview'],
     [/^\/api\/dataset-versions\/[a-zA-Z0-9_-]+\/topology\/regenerate$/, '/api/dataset-versions/:id/topology/regenerate'],
     [/^\/api\/dataset-versions\/[a-zA-Z0-9_-]+\/topology\/(confirm-all|confirm-selected|confirm-line-labels|revoke-all)$/, '/api/dataset-versions/:id/topology/:action'],
     [/^\/api\/dataset-versions\/[a-zA-Z0-9_-]+\/source-file$/, '/api/dataset-versions/:id/source-file'],

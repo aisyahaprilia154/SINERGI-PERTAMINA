@@ -66,6 +66,37 @@ test('candidate query index applies status, site aliases, family, and score filt
   ])
 })
 
+test('candidate review queue applies type, proposal, distance, asset, and required filters', () => {
+  const index = new TopologyCandidateQueryIndex([
+    candidate('candidate-required', 0.92, {
+      candidateType: 'endpoint_device',
+      proposalStatus: 'recommended',
+      distanceMeters: 1.2,
+      sourcePathAssetId: 'CABLE-01',
+      targetAssetId: 'CAM-01',
+      topologyRequired: true,
+    }),
+    candidate('candidate-optional', 0.95, {
+      candidateType: 'inline_device',
+      proposalStatus: 'ambiguous',
+      distanceMeters: 0.5,
+      targetAssetId: 'CAM-02',
+      topologyRequired: false,
+    }),
+  ])
+  const page = paginateCandidates(index, {
+    candidateType: 'endpoint_device',
+    proposalStatus: 'recommended',
+    minDistance: 1,
+    maxDistance: 2,
+    assetSearch: 'cam-01',
+    requiredTopologyOnly: true,
+  })
+  assert.deepEqual(page.items.map(({ candidateId }) => candidateId), [
+    'candidate-required',
+  ])
+})
+
 test('candidate cursor is bound to its query and both topology snapshots', () => {
   const candidates = [candidate('candidate-a', 0.9), candidate('candidate-b', 0.8)]
   const first = paginateCandidates(candidates, {
@@ -111,7 +142,14 @@ test('candidate query normalization enforces bounded page size and score range',
     status: null,
     site: null,
     networkFamily: null,
+    candidateType: null,
+    proposalStatus: null,
     minScore: null,
+    maxScore: null,
+    minDistance: null,
+    maxDistance: null,
+    assetSearch: null,
+    requiredTopologyOnly: false,
     cursor: null,
     limit: 100,
   })

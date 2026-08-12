@@ -476,6 +476,82 @@ test('manual explicit device relation is confirmed and can override family compa
   assert.equal(result.validation.summary.errors, 0)
 })
 
+test('topology readiness blocks required nodes and endpoints until confirmed or excepted', () => {
+  const left = node('CAM-REQUIRED-A', 'cctv', 'CCTV Camera', [110, -7])
+  const right = node('CAM-REQUIRED-B', 'cctv', 'CCTV Camera', [110.001, -7])
+  const cable = pathObject('CBL-REQUIRED', 'cctv', 'CCTV Cable', [
+    [110, -7],
+    [110.001, -7],
+  ])
+  left.object.topologyRequired = true
+  right.object.topologyRequired = true
+  cable.object.topologyRequired = true
+
+  const blocked = generateRelationArtifacts(topologyBundle({
+    nodes: [left, right],
+    paths: [cable],
+  }))
+  assert.ok(blocked.readiness.blockingReasons.includes('topology_required_node_unresolved'))
+  assert.ok(blocked.readiness.blockingReasons.includes('topology_required_endpoint_unresolved'))
+  assert.equal(blocked.readiness.requiredTopology.unresolvedNodeCount, 2)
+  assert.equal(blocked.readiness.requiredTopology.unresolvedEndpointCount, 2)
+
+  const ready = generateRelationArtifacts(topologyBundle({
+    nodes: [left, right],
+    paths: [cable],
+  }), {
+    config: {
+      autoConfirmSpatialInference: true,
+      accuracyArtifact: approvedAccuracyArtifact('cctv'),
+      engineBuildSha: 'build-test',
+    },
+  })
+  assert.equal(ready.readiness.topologyReadiness, 'ready')
+  assert.equal(ready.readiness.requiredTopology.unresolvedNodeCount, 0)
+  assert.equal(ready.readiness.requiredTopology.unresolvedEndpointCount, 0)
+})
+
+test('regeneration reopens a review decision when the relevant geometry changes', () => {
+  const bundle = topologyBundle({
+    nodes: [node('CAM-CARRY', 'cctv', 'CCTV Camera', [110, -7])],
+    paths: [pathObject('CBL-CARRY', 'cctv', 'CCTV Cable', [
+      [110, -7],
+      [110.001, -7],
+    ])],
+  })
+  const initial = generateRelationArtifacts(bundle)
+  const reviewedCandidates = initial.candidates.map((candidate) => ({
+    ...candidate,
+    candidateStatus: 'confirmed',
+    proposalStatus: 'confirmed_by_admin',
+    review: {
+      actorId: 'admin-1',
+      reviewedAt: '2026-08-12T00:00:00.000Z',
+      reason: 'Review awal selesai.',
+    },
+  }))
+  const unchanged = generateRelationArtifacts(bundle, {
+    previousCandidates: reviewedCandidates,
+  })
+  assert.ok(unchanged.candidates.every(({ candidateStatus }) => candidateStatus === 'confirmed'))
+  assert.equal(unchanged.reopenedReviewHistory.length, 0)
+
+  const changed = structuredClone(bundle)
+  changed.geometries.find(({ geometryId }) => geometryId === 'geometry:CBL-CARRY')
+    .coordinates[1][1] = -6.9999
+  changed.geometries.find(({ geometryId }) => geometryId === 'geometry:CBL-CARRY')
+    .geometryFingerprint = 'fingerprint:CBL-CARRY:changed'
+  const regenerated = generateRelationArtifacts(changed, {
+    previousCandidates: reviewedCandidates,
+  })
+  assert.ok(regenerated.candidates.some(({ candidateStatus }) => candidateStatus !== 'confirmed'))
+  assert.equal(regenerated.reopenedReviewHistory.length, reviewedCandidates.length)
+  assert.equal(
+    regenerated.reopenedReviewHistory[0].supersededReason,
+    'topology_input_changed_review_reopened',
+  )
+})
+
 test('mixed dataset versions and invalid geometry references reject the whole bundle', () => {
   const bundle = topologyBundle({
     nodes: [node('SW-A', 'infrastructure', 'Switch', [110, -7])],
@@ -552,6 +628,7 @@ function topologyBundle({
   nodes = [],
   paths = [],
   explicitRelations = [],
+  topologyExceptions = [],
 } = {}) {
   const classifiedNodes = nodes.map(({ object }) => object)
   const classifiedPaths = paths.map(({ object }) => object)
@@ -566,6 +643,7 @@ function topologyBundle({
     classifiedPaths,
     geometries,
     explicitRelations,
+    topologyExceptions,
     semanticRuleSetVersion: 'semantic-classifier/1.0.0',
     topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
   }

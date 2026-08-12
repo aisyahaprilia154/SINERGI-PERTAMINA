@@ -867,6 +867,7 @@ export function buildTopologyInputBundle({
   sourceFeatures = [],
   sourceGeometries,
   explicitRelationEvidence,
+  topologyExceptions = [],
 }) {
   const geometriesByFeature = groupBy(sourceGeometries, 'sourceFeatureId')
   const sourceFeaturesById = new Map(
@@ -892,6 +893,9 @@ export function buildTopologyInputBundle({
     identityAliases: structuredClone(object.identityAliases ?? {}),
     sourceFeatureId: object.sourceFeatureId,
     siteId: object.siteId,
+    sourceStatus: object.sourceStatus ?? 'unknown',
+    topologyRequired: object.topologyRequired === true,
+    topologyRole: object.topologyRole ?? 'unknown',
     objectRole: object.objectRole,
     networkFamily: object.networkFamily,
     assetType: object.assetType,
@@ -917,9 +921,14 @@ export function buildTopologyInputBundle({
     classifiedNodes: eligible.filter(({ objectRole }) => objectRole === 'device_node').map(mapObject),
     classifiedPaths: eligible.filter(({ objectRole }) => objectRole === 'cable_path').map(mapObject),
     geometries: sourceGeometries.filter(({ geometryId }) => eligibleGeometryIds.has(geometryId)),
-    explicitRelations: structuredClone(explicitRelationEvidence.filter(({ sourceFeatureId }) => (
-      eligibleFeatureIds.has(sourceFeatureId)
+    explicitRelations: structuredClone(explicitRelationEvidence.filter((relation) => (
+      // Manual relations are durable review decisions rather than source
+      // feature declarations, so they intentionally do not have a
+      // sourceFeatureId and must survive bundle repair/regeneration.
+      relation.source === 'manual_admin'
+        || eligibleFeatureIds.has(relation.sourceFeatureId)
     ))),
+    topologyExceptions: structuredClone(topologyExceptions),
     semanticRuleSetVersion: CLASSIFICATION_RULE_SET_VERSION,
     topologyRuleSetVersion: null,
     topologyReady: false,
@@ -948,6 +957,7 @@ export function rebuildStoredTopologyInputBundle(record = {}) {
   const explicitRelationEvidence = record.topologyInputBundle?.explicitRelations
     ?? canonicalParser.explicitRelationEvidence
     ?? []
+  const topologyExceptions = record.topologyInputBundle?.topologyExceptions ?? []
   if (!datasetVersion?.id || !classifiedObjects.length || !sourceFeatures.length) {
     return {
       topologyInputBundle: record.topologyInputBundle ?? null,
@@ -1024,6 +1034,7 @@ export function rebuildStoredTopologyInputBundle(record = {}) {
     sourceFeatures,
     sourceGeometries,
     explicitRelationEvidence,
+    topologyExceptions,
   })
   return {
     topologyInputBundle,

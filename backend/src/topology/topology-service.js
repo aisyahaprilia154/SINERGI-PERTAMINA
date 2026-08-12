@@ -33,6 +33,7 @@ import {
 } from './topology-idempotency.js'
 
 const MAX_SELECTED_CANDIDATE_IDS = 5000
+const MAX_MANUAL_REFERENCE_IDS = 256
 
 export class TopologyService {
   constructor({
@@ -184,7 +185,14 @@ export class TopologyService {
         status: normalizedQuery.status,
         site: normalizedQuery.site,
         networkFamily: normalizedQuery.networkFamily,
+        candidateType: normalizedQuery.candidateType,
+        proposalStatus: normalizedQuery.proposalStatus,
         minScore: normalizedQuery.minScore,
+        maxScore: normalizedQuery.maxScore,
+        minDistance: normalizedQuery.minDistance,
+        maxDistance: normalizedQuery.maxDistance,
+        assetSearch: normalizedQuery.assetSearch,
+        requiredTopologyOnly: normalizedQuery.requiredTopologyOnly,
       },
       graphRevision: graph.graphRevision,
       candidateRevision,
@@ -195,6 +203,21 @@ export class TopologyService {
       runs: structuredClone(record.topologyRuns ?? []),
       recordRevision: recordRevision(record),
     }
+  }
+
+  async reviewPreview(datasetVersionId, {
+    candidateIds,
+    expectedGraphRevision,
+    expectedCandidateRevision,
+  } = {}) {
+    const normalizedCandidateIds = normalizeCandidateIds(candidateIds)
+    const record = await this.repository.get(datasetVersionId)
+    assertTopologyBundle(record)
+    assertReviewSnapshot(record, {
+      expectedGraphRevision,
+      expectedCandidateRevision,
+    })
+    return buildBulkReviewPreview(record, normalizedCandidateIds, this.config)
   }
 
   async getGraph(datasetVersionId) {
@@ -464,6 +487,7 @@ export class TopologyService {
       action: 'confirm_all',
       eventName: 'topology.candidates_bulk_confirmed',
       predicate: isBulkConfirmableCandidate,
+      requireSafePreview: true,
       expectedGraphRevision,
       expectedCandidateRevision,
       idempotencyKey,
@@ -483,8 +507,9 @@ export class TopologyService {
       reason,
       action: 'confirm_selected',
       eventName: 'topology.candidates_selected_bulk_confirmed',
-      predicate: isCandidateConfirmable,
+      predicate: isBulkConfirmableCandidate,
       selectedCandidateIds: normalizeCandidateIds(candidateIds),
+      requireSafePreview: true,
       expectedGraphRevision,
       expectedCandidateRevision,
       idempotencyKey,
@@ -504,6 +529,7 @@ export class TopologyService {
       action: 'confirm_line_labels',
       eventName: 'topology.line_label_connections_bulk_confirmed',
       predicate: isLineLabelConfirmableCandidate,
+      requireSafePreview: true,
       expectedGraphRevision,
       expectedCandidateRevision,
       idempotencyKey,
@@ -521,9 +547,10 @@ export class TopologyService {
     expectedCandidateRevision,
     idempotencyKey,
     correlationId,
+    requireSafePreview = false,
   }) {
     const normalizedIdempotencyKey = normalizeTopologyIdempotencyKey(idempotencyKey)
-    const normalizedReason = normalizeReason(reason, false)
+    const normalizedReason = normalizeReason(reason, true)
     const fingerprint = normalizedIdempotencyKey
       ? createTopologyMutationFingerprint({
         action,
@@ -589,6 +616,21 @@ export class TopologyService {
             projectionMode: 'topology-review',
           })
           return response
+        }
+        if (requireSafePreview) {
+          const previewCandidateIds = selectedCandidateIds
+            ?? confirmable.map(({ candidateId }) => candidateId)
+          const preview = buildBulkReviewPreview(current, previewCandidateIds, this.config)
+          if (!preview.safeToApply) {
+            throw new AppError(
+              'Bulk review ditolak karena preview topology tidak aman untuk diterapkan.',
+              {
+                code: 'topology_bulk_review_not_safe',
+                statusCode: 422,
+                details: preview,
+              },
+            )
+          }
         }
 
         const reviewedAt = this.clock().toISOString()
@@ -875,8 +917,12 @@ export class TopologyService {
     sourceAssetId,
     targetAssetId,
     relationType = 'connected-to',
+    relationKind,
     direction = 'undirected',
+    pathAssetIds,
+    sourceGeometryIds,
     reason,
+    evidenceRefs,
     expectedGraphRevision,
     expectedCandidateRevision,
     idempotencyKey,
@@ -891,8 +937,15 @@ export class TopologyService {
       'targetAssetId',
     )
     const normalizedRelationType = normalizeManualRelationType(relationType)
+    const normalizedRelationKind = normalizeManualRelationKind(relationKind)
     const normalizedDirection = normalizeManualDirection(direction)
+    const normalizedPathAssetIds = normalizeManualReferenceList(pathAssetIds, 'pathAssetIds')
+    const normalizedSourceGeometryIds = normalizeManualReferenceList(
+      sourceGeometryIds,
+      'sourceGeometryIds',
+    )
     const normalizedReason = normalizeReason(reason, true)
+    const normalizedEvidenceRefs = normalizeManualReferenceList(evidenceRefs, 'evidenceRefs')
     const normalizedIdempotencyKey = normalizeTopologyIdempotencyKey(idempotencyKey)
     const fingerprint = normalizedIdempotencyKey
       ? createTopologyMutationFingerprint({
@@ -903,8 +956,12 @@ export class TopologyService {
           sourceAssetId: normalizedSourceReference,
           targetAssetId: normalizedTargetReference,
           relationType: normalizedRelationType,
+          relationKind: normalizedRelationKind,
           direction: normalizedDirection,
+          pathAssetIds: normalizedPathAssetIds,
+          sourceGeometryIds: normalizedSourceGeometryIds,
           reason: normalizedReason,
+          evidenceRefs: normalizedEvidenceRefs,
           expectedGraphRevision: expectedGraphRevision ?? null,
           expectedCandidateRevision: expectedCandidateRevision ?? null,
         },
@@ -921,6 +978,12 @@ export class TopologyService {
     const initialTarget = resolveManualDevice(current, normalizedTargetReference, 'targetAssetId')
     assertDistinctManualDevices(initialSource, initialTarget)
     assertSameManualDeviceSite(initialSource, initialTarget)
+    assertManualEvidenceReferences(current, {
+      source: initialSource,
+      target: initialTarget,
+      pathAssetIds: normalizedPathAssetIds,
+      sourceGeometryIds: normalizedSourceGeometryIds,
+    })
     assertNoConfirmedManualDevicePair(current, initialSource, initialTarget)
 
     const createdAt = this.clock().toISOString()
@@ -932,6 +995,12 @@ export class TopologyService {
       const target = resolveManualDevice(record, normalizedTargetReference, 'targetAssetId')
       assertDistinctManualDevices(source, target)
       assertSameManualDeviceSite(source, target)
+      assertManualEvidenceReferences(record, {
+        source,
+        target,
+        pathAssetIds: normalizedPathAssetIds,
+        sourceGeometryIds: normalizedSourceGeometryIds,
+      })
       assertNoConfirmedManualDevicePair(record, source, target)
       event = await auditLog.record('topology.manual_device_relation_confirmed', {
         actorId,
@@ -946,8 +1015,12 @@ export class TopologyService {
           sourceTopologyAssetId: source.topologyAssetId,
           targetTopologyAssetId: target.topologyAssetId,
           relationType: normalizedRelationType,
+          relationKind: normalizedRelationKind,
           direction: normalizedDirection,
+          pathAssetIds: normalizedPathAssetIds,
+          sourceGeometryIds: normalizedSourceGeometryIds,
           reason: normalizedReason,
+          evidenceRefs: normalizedEvidenceRefs,
           explicitRelationEvidenceId,
         },
       })
@@ -961,7 +1034,11 @@ export class TopologyService {
           sourceReference: source.topologyAssetId,
           targetReference: target.topologyAssetId,
           relationType: normalizedRelationType,
+          ...(normalizedRelationKind ? { relationKind: normalizedRelationKind } : {}),
           direction: normalizedDirection,
+          pathAssetIds: structuredClone(normalizedPathAssetIds),
+          sourceGeometryIds: structuredClone(normalizedSourceGeometryIds),
+          evidenceRefs: structuredClone(normalizedEvidenceRefs),
           source: 'manual_admin',
           sourceKey: 'manual_device_connection',
           manualConfirmation: {
@@ -1652,6 +1729,7 @@ export function applyArtifacts(record, artifacts, {
     relationType: edge.relationType,
     direction: edge.direction,
     pathAssetId: edge.pathAssetId,
+    pathAssetIds: structuredClone(edge.pathAssetIds ?? []),
     sourceGeometryIds: structuredClone(edge.sourceGeometryIds),
     relationSource: edge.relationSource,
     relationKind: edge.relationKind ?? 'device_edge',
@@ -1761,7 +1839,11 @@ function reconcileCandidateHistory(record, artifacts, { eventId, generatedAt }) 
       supersededAt: generatedAt,
       supersededByRunId: eventId,
     }))
-  return [...(record.topologyCandidateHistory ?? []), ...superseded]
+  const reopened = (artifacts.reopenedReviewHistory ?? []).map((candidate) => ({
+    ...structuredClone(candidate),
+    supersededByRunId: eventId,
+  }))
+  return [...(record.topologyCandidateHistory ?? []), ...superseded, ...reopened]
 }
 
 function candidateReviewResponse(record, candidateId) {
@@ -1881,11 +1963,172 @@ function bulkReviewResponse(record, {
   }
 }
 
+function buildBulkReviewPreview(record, candidateIds, config = {}) {
+  const normalizedCandidateIds = [...candidateIds].map(String).sort()
+  const candidates = record.topologyCandidates ?? []
+  const byId = new Map(candidates.map((candidate) => [candidate.candidateId, candidate]))
+  const eligibleCandidateIds = []
+  const ineligible = []
+  normalizedCandidateIds.forEach((candidateId) => {
+    const candidate = byId.get(candidateId)
+    if (!candidate) {
+      ineligible.push({ candidateId, reason: 'candidate_not_found' })
+      return
+    }
+    if (candidate.candidateStatus !== 'candidate') {
+      ineligible.push({
+        candidateId,
+        reason: 'candidate_status_not_candidate',
+        currentStatus: candidate.candidateStatus ?? null,
+      })
+      return
+    }
+    if (candidate.proposalStatus !== 'recommended') {
+      ineligible.push({
+        candidateId,
+        reason: 'proposal_not_recommended',
+        currentProposalStatus: candidate.proposalStatus ?? null,
+      })
+      return
+    }
+    eligibleCandidateIds.push(candidateId)
+  })
+
+  const eligibleSet = new Set(eligibleCandidateIds)
+  const conflicts = []
+  const selectedByEndpoint = new Map()
+  eligibleCandidateIds.forEach((candidateId) => {
+    const candidate = byId.get(candidateId)
+    const endpoint = candidate.sourceEndpointId
+    if (!endpoint) return
+    const group = selectedByEndpoint.get(endpoint) ?? []
+    group.push(candidateId)
+    selectedByEndpoint.set(endpoint, group)
+  })
+  selectedByEndpoint.forEach((group, sourceEndpointId) => {
+    if (group.length < 2) return
+    conflicts.push({
+      reason: 'endpoint_conflict',
+      sourceEndpointId,
+      candidateIds: group,
+    })
+  })
+
+  const confirmedEndpointOwners = new Map()
+  candidates
+    .filter(({ candidateStatus, candidateId }) => (
+      candidateStatus === 'confirmed' && !eligibleSet.has(candidateId)
+    ))
+    .forEach((candidate) => {
+      if (!candidate.sourceEndpointId) return
+      confirmedEndpointOwners.set(candidate.sourceEndpointId, candidate.candidateId)
+    })
+  eligibleCandidateIds.forEach((candidateId) => {
+    const candidate = byId.get(candidateId)
+    const owner = confirmedEndpointOwners.get(candidate.sourceEndpointId)
+    if (!owner) return
+    conflicts.push({
+      reason: 'endpoint_already_confirmed',
+      sourceEndpointId: candidate.sourceEndpointId,
+      candidateIds: [candidateId, owner],
+    })
+  })
+
+  const beforeGraph = normalizeTraceGraph(record, buildAssetIdentityMapFromRecord(record))
+  let simulated = null
+  let simulationError = null
+  if (eligibleCandidateIds.length > 0 && record.topologyInputBundle) {
+    const nextCandidates = structuredClone(candidates)
+    nextCandidates.forEach((candidate) => {
+      if (!eligibleSet.has(candidate.candidateId)) return
+      candidate.candidateStatus = 'confirmed'
+      candidate.proposalStatus = 'confirmed_by_admin_bulk_preview'
+    })
+    try {
+      simulated = rebuildFromReviewedCandidates(
+        record,
+        nextCandidates,
+        config,
+        record.topologyGeneratedAt ?? new Date().toISOString(),
+        eligibleCandidateIds.flatMap((candidateId) => (
+          candidateAssetReferences(byId.get(candidateId))
+        )),
+      )
+    } catch (error) {
+      simulationError = error
+    }
+  }
+
+  const simulatedValidation = simulated?.topologyValidation ?? null
+  const validationIssues = [
+    ...(simulatedValidation?.issues ?? []),
+    ...conflicts.map((conflict) => ({
+      severity: 'error',
+      issueCode: conflict.reason,
+      entityReference: conflict.candidateIds.join('|'),
+      details: conflict,
+    })),
+  ]
+  if (simulationError) {
+    validationIssues.push({
+      severity: 'error',
+      issueCode: 'review_preview_build_failed',
+      message: simulationError.message,
+    })
+  } else if (eligibleCandidateIds.length > 0 && !simulated) {
+    validationIssues.push({
+      severity: 'error',
+      issueCode: 'review_preview_input_unavailable',
+      message: 'Topology input bundle belum tersedia untuk dry-run review.',
+    })
+  }
+  const validationSummary = {
+    errors: validationIssues.filter(({ severity }) => severity === 'error').length,
+    warnings: validationIssues.filter(({ severity }) => severity === 'warning').length,
+    total: validationIssues.length,
+  }
+  const beforeConfirmedRelationCount = (record.confirmedRelations ?? [])
+    .filter(({ verificationStatus }) => verificationStatus === 'confirmed').length
+  const afterConfirmedRelationCount = (simulated?.confirmedRelations ?? [])
+    .filter(({ verificationStatus }) => verificationStatus === 'confirmed').length
+  const predictedGraph = simulated?.topologyGraph ?? beforeGraph
+  return {
+    datasetVersionId: record.datasetVersion.id,
+    candidateIds: normalizedCandidateIds,
+    eligibleCandidateIds,
+    ineligible,
+    predictedSummary: {
+      confirmedRelationDelta: afterConfirmedRelationCount - beforeConfirmedRelationCount,
+      componentCountBefore: beforeGraph.components?.length ?? 0,
+      componentCountAfter: predictedGraph.components?.length ?? 0,
+      confirmedRelationCountBefore: beforeConfirmedRelationCount,
+      confirmedRelationCountAfter: afterConfirmedRelationCount,
+    },
+    validationPreview: {
+      status: validationSummary.errors > 0
+        ? 'invalid'
+        : validationSummary.warnings > 0 ? 'valid_with_warnings' : 'valid',
+      summary: validationSummary,
+      issues: validationIssues,
+    },
+    safeToApply: normalizedCandidateIds.length > 0
+      && ineligible.length === 0
+      && conflicts.length === 0
+      && !simulationError
+      && Boolean(simulated)
+      && validationSummary.errors === 0,
+    graphRevision: beforeGraph.graphRevision,
+    candidateRevision: createCandidateCollectionRevision(candidates),
+    recordRevision: recordRevision(record),
+  }
+}
+
 function candidateAssetReferences(candidate) {
   return [
     candidate?.sourcePathAssetId,
     candidate?.targetAssetId,
     candidate?.targetPathAssetId,
+    ...(candidate?.pathAssetIds ?? []),
     ...(candidate?.sourceGeometryIds ?? []),
   ].filter(Boolean)
 }
@@ -2053,6 +2296,42 @@ function normalizeManualRelationType(value) {
   return normalized
 }
 
+function normalizeManualRelationKind(value) {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (!normalized) return null
+  if (!['device_edge', 'service_link'].includes(normalized)) {
+    throw new AppError('Kind koneksi manual tidak didukung.', {
+      code: 'invalid_topology_manual_relation_kind',
+      statusCode: 400,
+      details: { supportedRelationKinds: ['device_edge', 'service_link'] },
+    })
+  }
+  return normalized
+}
+
+function normalizeManualReferenceList(value, field) {
+  if (value === undefined || value === null) return []
+  if (!Array.isArray(value) || value.length > MAX_MANUAL_REFERENCE_IDS) {
+    throw new AppError(`Daftar ${field} untuk koneksi manual tidak valid.`, {
+      code: `invalid_topology_manual_${field}`,
+      statusCode: 400,
+      details: { field, max: MAX_MANUAL_REFERENCE_IDS },
+    })
+  }
+  return uniqueValues(value.map((item) => {
+    const normalized = String(item ?? '').trim()
+    if (!normalized || normalized.length > 256
+      || /[\u0000-\u001f\u007f]/.test(normalized)) {
+      throw new AppError(`Referensi ${field} untuk koneksi manual tidak valid.`, {
+        code: `invalid_topology_manual_${field}`,
+        statusCode: 400,
+        details: { field },
+      })
+    }
+    return normalized
+  }))
+}
+
 function normalizeManualDirection(value) {
   const normalized = String(value ?? 'undirected').trim().toLowerCase()
   if (!['undirected', 'source_to_target', 'target_to_source', 'bidirectional']
@@ -2097,7 +2376,89 @@ function resolveManualDevice(record, reference, field) {
       details: { field, assetId: reference, objectRole: match.object.objectRole },
     })
   }
+  const identityStatus = String(
+    match.object.identityStatus ?? match.object.identityResolutionStatus ?? '',
+  ).trim().toLowerCase()
+  if ((!match.object.stableAssetId && !match.object.assetId)
+    || ['onboarding', 'onboarding_candidate', 'conflict'].includes(identityStatus)) {
+    throw new AppError('Koneksi manual membutuhkan device dengan stable Asset ID.', {
+      code: 'topology_manual_relation_stable_asset_required',
+      statusCode: 409,
+      details: { field, assetId: reference },
+    })
+  }
   return match
+}
+
+function assertManualEvidenceReferences(record, {
+  source,
+  target,
+  pathAssetIds = [],
+  sourceGeometryIds = [],
+}) {
+  const identityMap = buildAssetIdentityMapFromRecord(record)
+  const resolver = createAssetIdentityResolver(identityMap)
+  const objects = manualTopologyObjects(record, identityMap, resolver)
+  const sameSite = source.object.siteId
+  const resolveObject = (reference) => {
+    const canonicalReference = resolver.resolve(reference)
+    return objects.find((item) => (
+      item.canonicalAssetId === canonicalReference
+        || item.topologyAssetId === reference
+        || item.aliases.includes(reference)
+    ))
+  }
+
+  pathAssetIds.forEach((reference) => {
+    const match = resolveObject(reference)
+    if (!match || match.object.objectRole !== 'cable_path') {
+      throw new AppError('Path evidence untuk koneksi manual tidak ditemukan.', {
+        code: 'topology_manual_relation_path_not_found',
+        statusCode: 404,
+        details: { pathAssetId: reference },
+      })
+    }
+    if (match.object.siteId !== sameSite || match.object.siteId !== target.object.siteId) {
+      throw new AppError('Path evidence koneksi manual harus berada pada site yang sama.', {
+        code: 'topology_manual_relation_path_cross_site',
+        statusCode: 400,
+        details: { pathAssetId: reference, siteId: match.object.siteId },
+      })
+    }
+  })
+
+  const geometryById = new Map(
+    (record.topologyInputBundle?.geometries ?? []).map((geometry) => [
+      geometry.geometryId,
+      geometry,
+    ]),
+  )
+  sourceGeometryIds.forEach((reference) => {
+    const geometry = geometryById.get(reference)
+    const owner = geometry
+      ? objects.find(({ object }) => object.sourceFeatureId === geometry.sourceFeatureId)
+      : null
+    if (!geometry || !owner) {
+      throw new AppError('Geometry evidence untuk koneksi manual tidak ditemukan.', {
+        code: 'topology_manual_relation_geometry_not_found',
+        statusCode: 404,
+        details: { sourceGeometryId: reference },
+      })
+    }
+    if (geometry.datasetVersionId !== record.datasetVersion.id
+      || owner.object.siteId !== sameSite
+      || owner.object.siteId !== target.object.siteId) {
+      throw new AppError('Geometry evidence koneksi manual harus berada pada version/site yang sama.', {
+        code: 'topology_manual_relation_geometry_scope_invalid',
+        statusCode: 400,
+        details: {
+          sourceGeometryId: reference,
+          datasetVersionId: geometry.datasetVersionId,
+          siteId: owner.object.siteId,
+        },
+      })
+    }
+  })
 }
 
 function manualTopologyObjects(record, identityMap, resolver) {

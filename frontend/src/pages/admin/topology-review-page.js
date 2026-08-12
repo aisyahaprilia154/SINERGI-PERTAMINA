@@ -20,6 +20,7 @@ import {
   loadDatasetProjection,
   loadAllTopologyCandidates,
   loadTopologyProjection,
+  previewTopologyReview,
   createTopologyRelation,
   reviewTopologyBulk,
   reviewTopologyCandidate,
@@ -298,7 +299,7 @@ async function initializeReview(container, mapData) {
   function getSelectedConfirmableCandidates() {
     return projections.candidates.items.filter((candidate) => (
       state.selectedCandidateIds.has(candidate.candidateId)
-      && canConfirm(candidate)
+      && isBulkConfirmableCandidate(candidate)
     ))
   }
 
@@ -982,9 +983,9 @@ async function initializeReview(container, mapData) {
       event.preventDefault()
       const action = dialog.dataset.action
       const reason = dialog.querySelector('.bulk-review-reason').value.trim()
-      if (action === 'revoke-all' && reason.length < 3) {
+      if (reason.length < 3) {
         dialog.querySelector('.bulk-dialog-message').textContent =
-          'Alasan penghapusan konfirmasi minimal tiga karakter.'
+          'Alasan aksi bulk minimal tiga karakter.'
         return
       }
       await performBulkAction(action, reason)
@@ -1022,7 +1023,7 @@ async function initializeReview(container, mapData) {
         : 'Hanya kandidat berstatus recommended yang dikonfirmasi. Ambiguous, unresolved, rejected, dan revoked tidak ikut.'
     dialog.querySelector('.bulk-reason-label').textContent = destructive
       ? 'Alasan penghapusan konfirmasi'
-      : 'Catatan konfirmasi (opsional)'
+      : 'Alasan konfirmasi (wajib)'
     const submit = dialog.querySelector('.submit-bulk-action')
     submit.textContent = destructive
       ? 'Hapus semua konfirmasi'
@@ -1049,6 +1050,21 @@ async function initializeReview(container, mapData) {
         : null
       if (action === 'confirm-selected' && selectedCandidateIds.length < 1) {
         throw new Error('Pilih minimal satu koneksi yang bisa dikonfirmasi terlebih dahulu.')
+      }
+      if (action === 'confirm-selected') {
+        dialog.querySelector('.bulk-dialog-message').textContent =
+          'Memeriksa konflik endpoint dan dampak graph…'
+        const preview = await previewTopologyReview({
+          datasetVersionId,
+          candidateIds: selectedCandidateIds,
+          ...reviewSnapshotBody(),
+        })
+        if (!preview.safeToApply) {
+          const issue = preview.ineligible?.[0]?.reason
+            ?? preview.validationPreview?.issues?.[0]?.issueCode
+            ?? 'review_preview_not_safe'
+          throw new Error(`Review batch tidak aman untuk diterapkan (${issue}).`)
+        }
       }
       const result = await reviewTopologyBulk({
         datasetVersionId,
