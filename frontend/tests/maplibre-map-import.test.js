@@ -81,16 +81,41 @@ test('connection review keeps the decision beside a candidate-focused asset map'
   assert.match(mapSource, /selectedCandidateGeometryIds/)
   assert.match(mapSource, /selectedCandidateFocus/)
   assert.match(mapSource, /candidateContextDimmed/)
+  assert.match(mapSource, /candidateContext: Boolean\(selectedCandidate/)
+  assert.match(mapSource, /candidateEndpoint: focusedAssetIds\.has\(asset\.id\)/)
   assert.match(mapSource, /candidateFocused/)
   assert.match(mapSource, /candidateContextDimmed\s*\?\s*0\.16/)
   assert.match(mapSource, /focusCoordinates\(positions\)/)
   assert.match(mapSource, /map-selected-candidate-overlay/)
-  assert.match(mapSource, /Koneksi dipilih/)
+  assert.doesNotMatch(mapSource, /Koneksi dipilih/)
   assert.match(mapSource, /selected-map-endpoint source/)
   assert.match(mapSource, /selected-map-endpoint target/)
   assert.match(mapSource, /function geometryIdsForCandidate/)
   assert.match(mapSource, /!isolateCandidate \|\| trace/)
   assert.match(mapSource, /!isolateCandidate \|\| candidate\.candidateId === state\.selectedCandidateId/)
+})
+
+test('connection review separates one active review from bulk selection actions', async () => {
+  const reviewSource = await readFile(
+    new URL('../src/pages/admin/topology-review-page.js', import.meta.url),
+    'utf8',
+  )
+  const reviewStyles = await readFile(
+    new URL('../src/styles/topology-review.css', import.meta.url),
+    'utf8',
+  )
+
+  assert.match(reviewSource, /class="bulk-selection-bar"/)
+  assert.match(reviewSource, /class="queue-scroll-region"/)
+  assert.match(reviewSource, /function renderBulkSelectionBar\(\)/)
+  assert.match(reviewSource, /Hubungkan koneksi/)
+  assert.match(reviewSource, /Hubungkan \$\{selectedCount\}/)
+  assert.match(reviewSource, /Batalkan pilihan/)
+  assert.doesNotMatch(reviewSource, /Hubungkan pilihan \(\$\{selectedCount\}\)/)
+  assert.match(reviewStyles, /grid-template-columns:\s*[\s\S]*minmax\(320px, 360px\)[\s\S]*minmax\(0, 1fr\)[\s\S]*minmax\(360px, 420px\)/)
+  assert.match(reviewStyles, /\.bulk-selection-bar\s*\{[\s\S]*grid-column: 1 \/ -1/)
+  assert.match(reviewStyles, /\.queue-scroll-region\s*\{[\s\S]*overflow-y: auto/)
+  assert.match(reviewStyles, /\.queue-selection\s*\{[\s\S]*position: sticky/)
 })
 
 test('MapLibre basemap is environment-configured and operational data is fail-safe', async () => {

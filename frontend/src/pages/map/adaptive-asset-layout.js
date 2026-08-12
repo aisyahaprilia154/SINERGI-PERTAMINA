@@ -133,6 +133,8 @@ function createClusterMarker(items, point = centroid(items.map((item) => item.po
     coordinates: items.map(({ coordinate }) => coordinate).filter(validCoordinate),
     label: clusterLabel(items),
     networkFocused: items.some(({ networkFocused }) => networkFocused),
+    candidateEndpoint: items.some(({ candidateEndpoint }) => candidateEndpoint),
+    candidateContext: items.every(({ candidateContext }) => candidateContext),
     color: items.find(({ networkFocused }) => networkFocused)?.color,
   }
 }
