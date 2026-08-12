@@ -4,7 +4,10 @@ import {
   collectSelectedNetworkAssetIds,
   serializeActiveDatasetKml,
 } from '../src/pages/map/active-dataset-kml-export.js'
-import { renderMapDataTransferDialog } from '../src/pages/map/map-data-transfer-dialog.js'
+import {
+  renderMapDataTransferDialog,
+  resolveConfiguredImportTarget,
+} from '../src/pages/map/map-data-transfer-dialog.js'
 import {
   renderMapContextPill,
   renderMapFloatingControls,
@@ -40,6 +43,22 @@ const assets = [{
     coordinates: [[110.42, -6.99], [110.43, -7]],
   }],
 }]
+
+test('map import resolves stale display context to the canonical configured branch', () => {
+  const target = resolveConfiguredImportTarget({
+    branchId: 'Semarang',
+    branchName: 'Kantor Cabang Semarang',
+    datasetId: 'legacy-dataset-id',
+  }, {
+    branches: [{ id: 'semarang', name: 'Semarang', datasetId: 'dataset-semarang' }],
+  })
+
+  assert.deepEqual(target, {
+    id: 'semarang',
+    name: 'Semarang',
+    datasetId: 'dataset-semarang',
+  })
+})
 
 test('active dataset KML export preserves geographic coordinate order and metadata', () => {
   const kml = serializeActiveDatasetKml({ activeContext, assets })

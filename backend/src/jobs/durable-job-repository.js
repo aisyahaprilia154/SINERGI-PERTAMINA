@@ -101,12 +101,13 @@ export class JsonDurableJobRepository {
     return this.#withLock(this.#claimLockPath(), () => this.#getWithoutLock(jobId))
   }
 
-  async list({ statuses, jobType, datasetVersionId } = {}) {
-    return this.#withLock(this.#claimLockPath(), () => this.#listWithoutLock({
-      statuses,
-      jobType,
-      datasetVersionId,
-    }))
+  async list({ statuses, jobType, datasetVersionId, summary = false } = {}) {
+    const jobs = await this.#withLock(this.#claimLockPath(), () => (
+      this.#listWithoutLock({ statuses, jobType, datasetVersionId })
+    ))
+    return summary
+      ? jobs.map(({ jobType: type, status }) => ({ jobType: type, status }))
+      : jobs
   }
 
   async findByIdempotencyKey(idempotencyKey) {

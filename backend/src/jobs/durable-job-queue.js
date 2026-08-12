@@ -145,24 +145,41 @@ export class DurableJobQueue {
 
   async #pump() {
     while (this.started) {
-      while (this.running < this.concurrency) {
-        const job = await this.repository.claimNext({
-          workerId: this.workerId,
-          leaseMilliseconds: this.leaseMilliseconds,
-        })
-        if (!job) break
-        this.running += 1
-        this.#recordMetric('recordJobTransition', job)
-        this.#execute(job).finally(() => {
-          this.running -= 1
-        })
+      try {
+        while (this.running < this.concurrency) {
+          const job = await this.repository.claimNext({
+            workerId: this.workerId,
+            leaseMilliseconds: this.leaseMilliseconds,
+          })
+          if (!job) break
+          this.running += 1
+          this.#recordMetric('recordJobTransition', job)
+          this.#execute(job).finally(() => {
+            this.running -= 1
+          })
+        }
+
+        // A long-running import can hold a database transaction while the
+        // worker is still healthy. Repeated lease-recovery queries during that
+        // transaction only consume pool connections and can make the worker
+        // fail with a connection-timeout error. Recovery is safe to defer
+        // until this worker has no active jobs; startup recovery still handles
+        // leases left by a crashed process.
+        if (this.running === 0) {
+          const recovered = await this.repository.recoverExpiredLeases({
+            retryAvailableAt: this.clock().toISOString(),
+          })
+          for (const job of recovered) this.#recordMetric('recordJobTransition', job)
+        }
+      } catch (error) {
+        // Database/network interruptions must not terminate the queue loop.
+        // The next iteration retries claim/recovery after a short backoff;
+        // active handlers continue independently and persist their own result.
+        this.#recordMetric('recordJobQueueError', error)
+        await waitFor(Math.max(this.pollMilliseconds, 1000))
       }
 
       await waitFor(this.pollMilliseconds)
-      const recovered = await this.repository.recoverExpiredLeases({
-        retryAvailableAt: this.clock().toISOString(),
-      })
-      for (const job of recovered) this.#recordMetric('recordJobTransition', job)
     }
   }
 
@@ -239,7 +256,10 @@ export class DurableJobQueue {
       }
       if (typeof this.repository.list !== 'function'
         || typeof this.metrics.replaceGaugeFamily !== 'function') return
-      const jobs = await this.repository.list()
+      // Queue-depth metrics need only type/status. Avoid repeatedly loading
+      // completed parse results, which can contain multi-megabyte dataset
+      // aggregates, every metrics tick.
+      const jobs = await this.repository.list({ summary: true })
       const activeStatuses = ['queued', 'running', 'retry_wait']
       const jobTypes = new Set(jobs.map((job) => String(job.jobType)))
       const counts = new Map()

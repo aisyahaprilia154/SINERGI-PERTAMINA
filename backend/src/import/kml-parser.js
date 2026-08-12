@@ -15,6 +15,8 @@ const UNSUPPORTED_ELEMENTS = new Set([
 ])
 const CRITICAL_UNSUPPORTED_ELEMENTS = new Set([
   'NetworkLink',
+  'PhotoOverlay',
+  'ScreenOverlay',
   'Model',
   'Track',
   'MultiTrack',
@@ -90,56 +92,22 @@ export function parseKmlText(source, { folderMappings = [] } = {}) {
     })
   }
 
-  const documentNodes = children(kmlRoot, 'Document')
   collectStyles(kmlRoot, parserOutput)
-  children(kmlRoot, 'Placemark').forEach((placemark, index) => {
-    parserOutput.placemarks.push(parsePlacemark(placemark, '/', index, parserOutput.issues))
-  })
-  children(kmlRoot, 'GroundOverlay').forEach((overlay, index) => {
-    parserOutput.overlays.push(parseGroundOverlay(overlay, '/', index, parserOutput.issues))
-  })
-  children(kmlRoot, 'Folder').forEach((folder, index) => {
-    parserOutput.folders.push(parseFolder(
-      folder,
-      '/',
-      index,
-      parserOutput.issues,
-      folderMappings,
-    ))
-  })
-  documentNodes.forEach((documentNode) => {
-    children(documentNode, 'Placemark').forEach((placemark, placemarkIndex) => {
-      parserOutput.placemarks.push(parsePlacemark(
-        placemark,
-        '/',
-        placemarkIndex,
-        parserOutput.issues,
-      ))
-    })
-    children(documentNode, 'GroundOverlay').forEach((overlay, overlayIndex) => {
-      parserOutput.overlays.push(parseGroundOverlay(
-        overlay,
-        '/',
-        overlayIndex,
-        parserOutput.issues,
-      ))
-    })
-    children(documentNode, 'Folder').forEach((folder, folderIndex) => {
-      parserOutput.folders.push(parseFolder(
-        folder,
-        '/',
-        folderIndex,
-        parserOutput.issues,
-        folderMappings,
-      ))
-    })
-  })
+  const content = parseContainerContent(
+    kmlRoot,
+    '/',
+    parserOutput.issues,
+    folderMappings,
+  )
+  parserOutput.placemarks.push(...content.placemarks)
+  parserOutput.overlays.push(...content.overlays)
+  parserOutput.folders.push(...content.folders)
 
   collectUnsupportedElements(kmlRoot, parserOutput.unsupportedElements)
   resolveFeatureStyles(parserOutput)
   parserOutput.structure = {
     hasKmlRoot: true,
-    documentCount: documentNodes.length,
+    documentCount: countElements(kmlRoot, 'Document'),
     folderCount: countElements(kmlRoot, 'Folder'),
     placemarkCount: countElements(kmlRoot, 'Placemark'),
     overlayCount: countElements(kmlRoot, 'GroundOverlay'),
@@ -211,6 +179,12 @@ function parseFolder(folder, parentPath, index, issues, folderMappings) {
     })
   }
 
+  const content = parseContainerContent(
+    folder,
+    sourceFolderPath,
+    issues,
+    folderMappings,
+  )
   return {
     id: attribute(folder, 'id') || undefined,
     name,
@@ -218,32 +192,48 @@ function parseFolder(folder, parentPath, index, issues, folderMappings) {
     category,
     visibility: parseVisibility(firstChild(folder, 'visibility')),
     sourceStyleId: stripStyleReference(normalizedText(firstChild(folder, 'styleUrl'))) || undefined,
-    placemarks: children(folder, 'Placemark').map(
-      (placemark, placemarkIndex) => parsePlacemark(
-        placemark,
-        sourceFolderPath,
-        placemarkIndex,
-        issues,
-      ),
+    placemarks: content.placemarks,
+    overlays: content.overlays,
+    children: content.folders,
+  }
+}
+
+/**
+ * KML containers may legally contain other Document or Folder containers.
+ * Document is transparent to the inventory path while Folder contributes to
+ * sourceFolderPath. Traversing every nested Document here prevents a feature
+ * from being counted in structural coverage but silently omitted downstream.
+ */
+function parseContainerContent(container, sourceFolderPath, issues, folderMappings) {
+  const result = {
+    placemarks: children(container, 'Placemark').map(
+      (placemark, index) => parsePlacemark(placemark, sourceFolderPath, index, issues),
     ),
-    overlays: children(folder, 'GroundOverlay').map(
-      (overlay, overlayIndex) => parseGroundOverlay(
-        overlay,
-        sourceFolderPath,
-        overlayIndex,
-        issues,
-      ),
+    overlays: children(container, 'GroundOverlay').map(
+      (overlay, index) => parseGroundOverlay(overlay, sourceFolderPath, index, issues),
     ),
-    children: children(folder, 'Folder').map(
-      (child, childIndex) => parseFolder(
-        child,
+    folders: children(container, 'Folder').map(
+      (folder, index) => parseFolder(
+        folder,
         sourceFolderPath,
-        childIndex,
+        index,
         issues,
         folderMappings,
       ),
     ),
   }
+  children(container, 'Document').forEach((documentNode) => {
+    const nested = parseContainerContent(
+      documentNode,
+      sourceFolderPath,
+      issues,
+      folderMappings,
+    )
+    result.placemarks.push(...nested.placemarks)
+    result.overlays.push(...nested.overlays)
+    result.folders.push(...nested.folders)
+  })
+  return result
 }
 
 function parsePlacemark(placemark, sourceFolderPath, index, issues) {

@@ -428,7 +428,7 @@ test('KMZ import prioritizes doc.kml, records safe resources, and cleans its wor
       </GroundOverlay>
     </Document>`)
     const archive = createStoredZip([
-      { name: 'z-other.kml', content: INVALID_KML },
+      { name: 'z-other.kml', content: '<kml><Document /></kml>' },
       { name: 'doc.kml', content: kmlWithOverlay },
       { name: 'icons/camera.png', content: overlayImage },
       { name: 'payload.exe', content: 'ignored' },
@@ -499,6 +499,44 @@ test('KMZ import prioritizes doc.kml, records safe resources, and cleans its wor
     )
     assert.equal(restrictedCandidates.status, 403)
     assert.deepEqual(await readdir(path.join(fixture.dataRoot, 'workspaces')), [])
+  } finally {
+    await fixture.close()
+  }
+})
+
+test('KMZ import fails closed when an unselected KML contains source features', async () => {
+  const fixture = await createFixture()
+  try {
+    const secondKml = VALID_KML
+      .replace('SW-01', 'SW-02')
+      .replace('Switch Core', 'Switch Backup')
+      .replace('110.4,-6.9', '110.5,-6.9')
+    const archive = createStoredZip([
+      { name: 'doc.kml', content: VALID_KML },
+      { name: 'additional-assets.kml', content: secondKml },
+    ])
+    const accepted = await uploadFile(
+      fixture.origin,
+      archive,
+      'multiple-assets.kmz',
+      'application/vnd.google-earth.kmz',
+    )
+    assert.equal(accepted.response.status, 202)
+
+    await fixture.jobQueue.onIdle()
+    const response = await fetch(
+      `${fixture.origin}${accepted.body.statusUrl}`,
+      { headers: { authorization: 'Bearer admin-token' } },
+    )
+    const status = await response.json()
+
+    assert.equal(status.datasetVersion.status, 'invalid')
+    assert.equal(status.validation.canActivate, false)
+    assert.ok(status.issues.some((issue) => (
+      issue.issueCode === 'KML_UNSELECTED_FEATURES'
+      && issue.severity === 'error'
+      && issue.canActivate === false
+    )))
   } finally {
     await fixture.close()
   }

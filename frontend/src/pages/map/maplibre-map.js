@@ -86,11 +86,13 @@ export function createMapLibreSurface(element, {
   let layoutStatusSignature = ''
   let clusterLookup = new Map()
   const initialBounds = boundsForGeometries(geometries)
+  // Vite injects an empty string when Docker passes an unset build arg. Treat
+  // that the same as an omitted value so the same-origin proxy remains the
+  // safe default instead of rendering only the neutral canvas.
   const imageryTiles = String(import.meta.env.VITE_SINERGI_BASEMAP_TILES ?? '').trim()
   const vectorTiles = String(
-    import.meta.env.VITE_SINERGI_VECTOR_TILES_URL
-      ?? '/api/basemap/openfreemap/planet',
-  ).trim()
+    import.meta.env.VITE_SINERGI_VECTOR_TILES_URL ?? '',
+  ).trim() || '/api/basemap/openfreemap/planet'
   const basemapAttribution = String(import.meta.env.VITE_SINERGI_BASEMAP_ATTRIBUTION ?? '').trim()
   let basemapMode = vectorTiles ? 'street' : 'satellite'
   const loadedBasemapSourceIds = new Set()

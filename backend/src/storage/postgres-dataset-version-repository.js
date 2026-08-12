@@ -55,6 +55,9 @@ export class PostgresDatasetVersionRepository {
       repository: {
         get: (id) => this.#getWithExecutor(client, id, { forUpdate: true }),
         list: () => this.#listWithExecutor(client),
+        findTopologyMutationReceipt: (key) => (
+          findTopologyMutationReceiptWithExecutor(client, key)
+        ),
         update: (id, updater, options) => this.#updateWithExecutor(
           client,
           id,
@@ -90,13 +93,17 @@ export class PostgresDatasetVersionRepository {
     return this.#listWithExecutor(this.pool)
   }
 
-  async update(id, updater, { expectedRevision } = {}) {
+  async findTopologyMutationReceipt(key) {
+    return findTopologyMutationReceiptWithExecutor(this.pool, key)
+  }
+
+  async update(id, updater, { expectedRevision, projectionMode = 'full' } = {}) {
     assertSafeId(id)
     return this.#withTransaction((client) => this.#updateWithExecutor(
       client,
       id,
       updater,
-      { expectedRevision },
+      { expectedRevision, projectionMode },
     ))
   }
 
@@ -199,7 +206,10 @@ export class PostgresDatasetVersionRepository {
         // where no pointer row exists yet to lock with SELECT ... FOR UPDATE.
         await client.query(
           'SELECT pg_advisory_xact_lock(hashtext($1))',
-          [`${datasetId}\u0000${branchId}`],
+          // Dataset and branch IDs are restricted to letters, digits, `_`,
+          // and `-`, so `:` is an unambiguous separator and is valid in a
+          // PostgreSQL text parameter (unlike a NUL byte).
+          [`${datasetId}:${branchId}`],
         )
         const datasetRowsResult = await client.query(
           `SELECT payload
@@ -355,7 +365,10 @@ export class PostgresDatasetVersionRepository {
     return (result.rows ?? []).map(payloadFromRow)
   }
 
-  async #updateWithExecutor(executor, id, updater, { expectedRevision } = {}) {
+  async #updateWithExecutor(executor, id, updater, {
+    expectedRevision,
+    projectionMode = 'full',
+  } = {}) {
     assertSafeId(id)
     const currentResult = await executor.query(
       `${DATASET_VERSION_SELECT.trim()} FOR UPDATE`,
@@ -368,19 +381,31 @@ export class PostgresDatasetVersionRepository {
       throw staleRecordRevision(id, expectedRevision, currentRevision)
     }
     const next = typeof updater === 'function'
-      ? await updater(structuredClone(current))
+      ? await updater(updateDraft(current, projectionMode))
       : { ...current, ...updater }
     const normalized = assertRecord({
       ...next,
       recordRevision: currentRevision + 1,
-    }, id)
+    }, id, { clone: projectionMode !== 'topology-review' })
     try {
-      await updateDatasetVersion(executor, normalized, this.clock)
-      await replaceProjections(executor, normalized)
+      await updateDatasetVersion(executor, normalized, this.clock, {
+        topologyReview: projectionMode === 'topology-review',
+      })
+      if (projectionMode === 'topology-review') {
+        await replaceTopologyReviewProjections(executor, current, normalized)
+      } else {
+        await replaceProjections(executor, normalized)
+      }
     } catch (error) {
       throw mapDatabaseError(error)
     }
-    return structuredClone(normalized)
+    // Topology review callers immediately turn this aggregate into a compact
+    // response. Returning the transaction-owned object avoids another full
+    // clone of the immutable parser/source payload; it is no longer shared
+    // with the PostgreSQL result after the transaction completes.
+    return projectionMode === 'topology-review'
+      ? normalized
+      : structuredClone(normalized)
   }
 
   async #withTransaction(operation) {
@@ -414,7 +439,11 @@ async function insertDatasetVersion(client, record, clock) {
   )
 }
 
-async function updateDatasetVersion(client, record, clock) {
+async function updateDatasetVersion(client, record, clock, { topologyReview = false } = {}) {
+  const payload = topologyReview
+    ? JSON.stringify(topologyReviewPayloadPatch(record))
+    : JSON.stringify(record)
+  const payloadExpression = topologyReview ? 'payload || $14::jsonb' : '$14::jsonb'
   await client.query(
     `UPDATE dataset_versions
      SET dataset_id = $2,
@@ -429,11 +458,30 @@ async function updateDatasetVersion(client, record, clock) {
          publication_status = $11,
          status = $12,
          active_pointer_revision = $13,
-         payload = $14::jsonb,
+         payload = ${payloadExpression},
          updated_at = $15
      WHERE id = $1`,
-    datasetVersionValues(record, clock),
+    datasetVersionValues(record, clock, payload),
   )
+}
+
+async function findTopologyMutationReceiptWithExecutor(executor, key) {
+  const normalizedKey = String(key ?? '').trim()
+  if (!normalizedKey) return null
+  const result = await executor.query(
+    `SELECT receipt
+     FROM dataset_versions
+     CROSS JOIN LATERAL jsonb_array_elements(
+       CASE WHEN jsonb_typeof(payload->'topologyMutationReceipts') = 'array'
+         THEN payload->'topologyMutationReceipts'
+         ELSE '[]'::jsonb
+       END
+     ) AS receipt
+     WHERE receipt->>'key' = $1
+     LIMIT 1`,
+    [normalizedKey],
+  )
+  return result.rows?.[0]?.receipt ?? null
 }
 
 async function setGraphRevisionStatus(client, record, status) {
@@ -447,7 +495,7 @@ async function setGraphRevisionStatus(client, record, status) {
   )
 }
 
-function datasetVersionValues(record, clock) {
+function datasetVersionValues(record, clock, payload = JSON.stringify(record)) {
   const version = record.datasetVersion
   return [
     version.id,
@@ -463,9 +511,55 @@ function datasetVersionValues(record, clock) {
     version.publicationStatus ?? 'unpublished',
     version.status ?? 'processing',
     version.activePointerRevision ?? null,
-    JSON.stringify(record),
+    payload,
     clock().toISOString(),
   ]
+}
+
+/**
+ * Review mutations do not change the immutable parser/source payload. Send
+ * only the topology-derived keys to PostgreSQL so a reviewer action does not
+ * serialize and parse the complete 35MB+ aggregate on every write.
+ */
+function topologyReviewPayloadPatch(record) {
+  const patch = {
+    datasetVersion: record.datasetVersion,
+  }
+  for (const key of [
+    'recordRevision',
+    'topologyRuleSetVersion',
+    'topologyGeneratedAt',
+    'topologyInputBundle',
+    'topologyCandidates',
+    'confirmedRelations',
+    'topologyGraph',
+    'topologyValidation',
+    'topologyUnresolved',
+    'topologyEligibilityIssues',
+    'topologyLineworkIssues',
+    'topologySummary',
+    'topologyReadiness',
+    'topologyCandidateHistory',
+    'topologyRelationHistory',
+    'topologyRuns',
+    'topologyMutationReceipts',
+    'relations',
+    'readiness',
+  ]) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) patch[key] = record[key]
+  }
+  return patch
+}
+
+function updateDraft(current, projectionMode) {
+  if (projectionMode === 'topology-review') {
+    // Review mutations replace/clone their topology-derived collections and
+    // never mutate sourceFeatures, sourceGeometries, classifiedObjects, or
+    // canonicalParser in place. A shallow draft therefore preserves the
+    // aggregate isolation guarantee while avoiding a 35MB deep clone.
+    return { ...current }
+  }
+  return structuredClone(current)
 }
 
 async function replaceProjections(client, record) {
@@ -642,43 +736,245 @@ async function replaceProjections(client, record) {
   await insertGraphProjection(client, record)
 }
 
+/**
+ * Review mutations already carry a complete aggregate for correctness, but
+ * their indexed PostgreSQL projections only need the changed topology rows.
+ * Source features, geometries, and classified objects are immutable after
+ * import and must not be deleted/reinserted for every reviewer click.
+ */
+async function replaceTopologyReviewProjections(client, previous, record) {
+  const datasetVersionId = record.datasetVersion.id
+  const previousCandidates = new Map(asArray(previous.topologyCandidates).map((candidate) => (
+    [candidate.candidateId, candidate]
+  )))
+  const nextCandidates = new Map(asArray(record.topologyCandidates).map((candidate) => (
+    [candidate.candidateId, candidate]
+  )))
+  const previousRelations = new Map(asArray(previous.confirmedRelations).map((relation) => (
+    [relation.relationId ?? relation.id, relation]
+  )))
+  const nextRelations = new Map(asArray(record.confirmedRelations).map((relation) => (
+    [relation.relationId ?? relation.id, relation]
+  )))
+
+  for (const [relationId] of previousRelations) {
+    if (nextRelations.has(relationId)) continue
+    await client.query(
+      'DELETE FROM confirmed_relations WHERE dataset_version_id = $1 AND relation_id = $2',
+      [datasetVersionId, relationId],
+    )
+  }
+  for (const [candidateId, candidate] of nextCandidates) {
+    if (jsonValuesEqual(previousCandidates.get(candidateId), candidate)) continue
+    await upsertTopologyCandidate(client, datasetVersionId, candidate)
+  }
+  for (const [relationId, relation] of nextRelations) {
+    if (jsonValuesEqual(previousRelations.get(relationId), relation)) continue
+    await upsertConfirmedRelation(client, datasetVersionId, relation)
+  }
+  for (const [candidateId] of previousCandidates) {
+    if (nextCandidates.has(candidateId)) continue
+    await client.query(
+      'DELETE FROM topology_candidates WHERE dataset_version_id = $1 AND candidate_id = $2',
+      [datasetVersionId, candidateId],
+    )
+  }
+
+  const previousGraphRevision = previous.topologyGraph?.graphRevision
+  const nextGraphRevision = record.topologyGraph?.graphRevision
+  if (nextGraphRevision && nextGraphRevision !== previousGraphRevision) {
+    // The active graph revision is protected by a partial unique index. Mark
+    // the previous active revision as superseded before inserting the next
+    // one, otherwise PostgreSQL rejects the INSERT with a duplicate active
+    // dataset_version_id. Updating every active row also repairs a stale
+    // aggregate graphRevision without leaving two active projections behind.
+    await client.query(
+      `UPDATE graph_revisions
+       SET status = 'superseded'
+       WHERE dataset_version_id = $1
+         AND status = 'active'`,
+      [datasetVersionId],
+    )
+    await insertGraphProjection(client, record)
+  }
+}
+
+async function upsertTopologyCandidate(client, datasetVersionId, candidate) {
+  await client.query(
+    `INSERT INTO topology_candidates (
+       dataset_version_id, candidate_id, candidate_type, source_endpoint_id,
+       source_geometry_id, source_path_asset_id, target_asset_id,
+       target_endpoint_id, target_path_asset_id, site_id, network_family,
+       candidate_status, proposal_status, score, score_margin, evidence,
+       revision, payload
+     ) VALUES (
+       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+       $15, $16::jsonb, $17, $18::jsonb
+     )
+     ON CONFLICT (dataset_version_id, candidate_id) DO UPDATE SET
+       candidate_type = EXCLUDED.candidate_type,
+       source_endpoint_id = EXCLUDED.source_endpoint_id,
+       source_geometry_id = EXCLUDED.source_geometry_id,
+       source_path_asset_id = EXCLUDED.source_path_asset_id,
+       target_asset_id = EXCLUDED.target_asset_id,
+       target_endpoint_id = EXCLUDED.target_endpoint_id,
+       target_path_asset_id = EXCLUDED.target_path_asset_id,
+       site_id = EXCLUDED.site_id,
+       network_family = EXCLUDED.network_family,
+       candidate_status = EXCLUDED.candidate_status,
+       proposal_status = EXCLUDED.proposal_status,
+       score = EXCLUDED.score,
+       score_margin = EXCLUDED.score_margin,
+       evidence = EXCLUDED.evidence,
+       revision = EXCLUDED.revision,
+       payload = EXCLUDED.payload,
+       updated_at = now()` ,
+    [
+      datasetVersionId,
+      candidate.candidateId,
+      requiredText(candidate.candidateType, 'candidateType'),
+      candidate.sourceEndpointId ?? null,
+      candidate.sourceGeometryId ?? candidate.sourceGeometryIds?.[0] ?? null,
+      candidate.sourcePathAssetId ?? null,
+      candidate.targetAssetId ?? null,
+      candidate.targetEndpointId ?? null,
+      candidate.targetPathAssetId ?? null,
+      candidate.siteId ?? null,
+      candidate.networkFamily ?? null,
+      requiredText(candidate.candidateStatus, 'candidateStatus'),
+      requiredText(candidate.proposalStatus, 'proposalStatus'),
+      numberOrNull(candidate.score),
+      numberOrNull(candidate.scoreMargin),
+      JSON.stringify(candidate.evidence ?? []),
+      integerOrZero(candidate.revision),
+      JSON.stringify(candidate),
+    ],
+  )
+}
+
+async function upsertConfirmedRelation(client, datasetVersionId, relation) {
+  const relationId = requiredText(relation.relationId ?? relation.id, 'relationId')
+  await client.query(
+    `INSERT INTO confirmed_relations (
+       dataset_version_id, relation_id, candidate_id, source_asset_id,
+       target_asset_id, relation_type, relation_kind, direction, provenance,
+       verification_status, verified_by, verified_at, audit_event_id,
+       evidence, payload
+     ) VALUES (
+       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+       $14::jsonb, $15::jsonb
+     )
+     ON CONFLICT (dataset_version_id, relation_id) DO UPDATE SET
+       candidate_id = EXCLUDED.candidate_id,
+       source_asset_id = EXCLUDED.source_asset_id,
+       target_asset_id = EXCLUDED.target_asset_id,
+       relation_type = EXCLUDED.relation_type,
+       relation_kind = EXCLUDED.relation_kind,
+       direction = EXCLUDED.direction,
+       provenance = EXCLUDED.provenance,
+       verification_status = EXCLUDED.verification_status,
+       verified_by = EXCLUDED.verified_by,
+       verified_at = EXCLUDED.verified_at,
+       audit_event_id = EXCLUDED.audit_event_id,
+       evidence = EXCLUDED.evidence,
+       payload = EXCLUDED.payload,
+       updated_at = now()` ,
+    [
+      datasetVersionId,
+      relationId,
+      relation.candidateId ?? null,
+      requiredText(relation.sourceAssetId, 'sourceAssetId'),
+      requiredText(relation.targetAssetId, 'targetAssetId'),
+      relation.relationType ?? 'connected-to',
+      relation.relationKind ?? null,
+      relation.direction ?? 'undirected',
+      relation.provenance ?? 'unknown',
+      relation.verificationStatus ?? relation.relationStatus ?? 'confirmed',
+      relation.verifiedBy ?? null,
+      relation.verifiedAt ?? null,
+      relation.auditEventId ?? null,
+      JSON.stringify(relation.evidence ?? []),
+      JSON.stringify(relation),
+    ],
+  )
+}
+
+function jsonValuesEqual(left, right) {
+  return left === undefined && right === undefined
+    || JSON.stringify(left) === JSON.stringify(right)
+}
+
 async function insertGraphProjection(client, record) {
   const graph = record.topologyGraph
   if (!graph?.graphRevision) return
+  const status = record.datasetVersion.status === 'active' ? 'active' : 'validated'
   const revisionResult = await client.query(
     `INSERT INTO graph_revisions (
        dataset_version_id, revision, parent_revision, status, validation,
        node_count, edge_count, payload
-     ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb)
-     RETURNING graph_revision_id`,
+       ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb)
+       ON CONFLICT (dataset_version_id, revision) DO NOTHING
+       RETURNING graph_revision_id`,
     [
       record.datasetVersion.id,
       graph.graphRevision,
       record.topologyGraph.parentGraphRevision ?? null,
-      record.datasetVersion.status === 'active' ? 'active' : 'validated',
+      status,
       jsonValue(record.topologyValidation),
       asArray(graph.nodes).length,
       asArray(graph.edges).length,
       JSON.stringify(graph),
     ],
   )
-  const graphRevisionId = revisionResult.rows?.[0]?.graph_revision_id
+  let graphRevisionId = revisionResult.rows?.[0]?.graph_revision_id
+  if (graphRevisionId === undefined || graphRevisionId === null) {
+    const existing = await client.query(
+      `SELECT graph_revision_id
+       FROM graph_revisions
+       WHERE dataset_version_id = $1 AND revision = $2`,
+      [record.datasetVersion.id, graph.graphRevision],
+    )
+    graphRevisionId = existing.rows?.[0]?.graph_revision_id
+    if (graphRevisionId !== undefined && graphRevisionId !== null) {
+      await client.query(
+        `UPDATE graph_revisions
+         SET status = $3,
+             validation = $4::jsonb,
+             node_count = $5,
+             edge_count = $6,
+             payload = $7::jsonb
+         WHERE graph_revision_id = $1 AND dataset_version_id = $2`,
+        [
+          graphRevisionId,
+          record.datasetVersion.id,
+          status,
+          jsonValue(record.topologyValidation),
+          asArray(graph.nodes).length,
+          asArray(graph.edges).length,
+          JSON.stringify(graph),
+        ],
+      )
+      return graphRevisionId
+    }
+  }
   if (graphRevisionId === undefined || graphRevisionId === null) {
     throw new Error('PostgreSQL tidak mengembalikan graph_revision_id.')
   }
-  for (const node of asArray(graph.nodes)) {
-    const nodeId = requiredText(node.id ?? node.assetId, 'graphNodeId')
-    await client.query(
-      `INSERT INTO graph_nodes (
-         graph_revision_id, dataset_version_id, node_id, asset_id, site_id,
-         network_family, source_geometry_id, location, payload
-       ) VALUES (
-         $1, $2, $3, $4, $5, $6, $7,
-           CASE WHEN $8::text IS NULL THEN NULL
-             ELSE ST_SetSRID(ST_GeomFromGeoJSON($8::text), 4326) END,
-         $9::jsonb
-       )`,
-      [
+  await insertGraphNodesBatch(client, graphRevisionId, record, graph.nodes)
+  await insertGraphEdgesBatch(client, graphRevisionId, record, graph.edges)
+}
+
+const GRAPH_PROJECTION_BATCH_SIZE = 500
+
+async function insertGraphNodesBatch(client, graphRevisionId, record, nodes) {
+  const list = asArray(nodes)
+  for (let offset = 0; offset < list.length; offset += GRAPH_PROJECTION_BATCH_SIZE) {
+    const batch = list.slice(offset, offset + GRAPH_PROJECTION_BATCH_SIZE)
+    const values = []
+    const rows = batch.map((node, index) => {
+      const base = index * 9
+      const nodeId = requiredText(node.id ?? node.assetId, 'graphNodeId')
+      values.push(
         graphRevisionId,
         record.datasetVersion.id,
         nodeId,
@@ -688,19 +984,32 @@ async function insertGraphProjection(client, record) {
         node.sourceGeometryId ?? null,
         geoJsonForPoint(node.location),
         JSON.stringify(node),
-      ],
+      )
+      return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7},
+        CASE WHEN $${base + 8}::text IS NULL THEN NULL
+          ELSE ST_SetSRID(ST_GeomFromGeoJSON($${base + 8}::text), 4326) END,
+        $${base + 9}::jsonb)`
+    })
+    await client.query(
+      `INSERT INTO graph_nodes (
+         graph_revision_id, dataset_version_id, node_id, asset_id, site_id,
+         network_family, source_geometry_id, location, payload
+       ) VALUES ${rows.join(',\n')}`,
+      values,
     )
   }
-  for (const edge of asArray(graph.edges)) {
-    const edgeId = requiredText(edge.id ?? edge.edgeId, 'graphEdgeId')
-    const sourceRelationIds = asArray(edge.sourceRelationIds)
-    await client.query(
-      `INSERT INTO graph_edges (
-         graph_revision_id, dataset_version_id, edge_id, relation_id,
-         source_node_id, target_node_id, verification_status,
-         source_geometry_ids, payload
-       ) VALUES ($1, $2, $3, $4, $5, $6, 'confirmed', $7::jsonb, $8::jsonb)`,
-      [
+}
+
+async function insertGraphEdgesBatch(client, graphRevisionId, record, edges) {
+  const list = asArray(edges)
+  for (let offset = 0; offset < list.length; offset += GRAPH_PROJECTION_BATCH_SIZE) {
+    const batch = list.slice(offset, offset + GRAPH_PROJECTION_BATCH_SIZE)
+    const values = []
+    const rows = batch.map((edge, index) => {
+      const base = index * 8
+      const edgeId = requiredText(edge.id ?? edge.edgeId, 'graphEdgeId')
+      const sourceRelationIds = asArray(edge.sourceRelationIds)
+      values.push(
         graphRevisionId,
         record.datasetVersion.id,
         edgeId,
@@ -709,7 +1018,17 @@ async function insertGraphProjection(client, record) {
         requiredText(edge.targetNodeId ?? edge.targetAssetId, 'targetNodeId'),
         JSON.stringify(edge.sourceGeometryIds ?? []),
         JSON.stringify(edge),
-      ],
+      )
+      return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6},
+        'confirmed', $${base + 7}::jsonb, $${base + 8}::jsonb)`
+    })
+    await client.query(
+      `INSERT INTO graph_edges (
+         graph_revision_id, dataset_version_id, edge_id, relation_id,
+         source_node_id, target_node_id, verification_status,
+         source_geometry_ids, payload
+       ) VALUES ${rows.join(',\n')}`,
+      values,
     )
   }
 }
@@ -760,7 +1079,10 @@ function payloadFromRow(row) {
   const payload = typeof row.payload === 'string'
     ? JSON.parse(row.payload)
     : row.payload
-  return structuredClone(payload ?? {})
+  // A PostgreSQL JSONB result is freshly materialized for every query. Avoid
+  // cloning the full aggregate again here; topology-review mutations can carry
+  // 35MB+ payloads and the extra copy is multiplied by concurrent requests.
+  return payload ?? {}
 }
 
 function geoJsonForGeometry(geometry) {
@@ -774,7 +1096,12 @@ function geoJsonForGeometry(geometry) {
     Polygon: 'Polygon',
   }[geometry.geometryType ?? geometry.type]
   if (!type || geometry.coordinates === undefined) return null
-  return JSON.stringify({ type, coordinates: geometry.coordinates })
+  return JSON.stringify({
+    type,
+    // PostGIS indexes are intentionally 2D. The canonical JSON payload keeps
+    // the original KML altitude, while the spatial index uses lon/lat only.
+    coordinates: stripCoordinateAltitude(geometry.coordinates),
+  })
 }
 
 function geoJsonForPoint(location) {
@@ -785,8 +1112,19 @@ function geoJsonForPoint(location) {
   if (!coordinates.slice(0, 2).every((value) => Number.isFinite(Number(value)))) return null
   return JSON.stringify({
     type: 'Point',
-    coordinates: coordinates.slice(0, 2).map(Number),
+    coordinates: stripCoordinateAltitude(coordinates).slice(0, 2).map(Number),
   })
+}
+
+function stripCoordinateAltitude(value) {
+  if (!Array.isArray(value)) return value
+  const isPosition = value.length >= 2
+    && value.slice(0, 2).every((coordinate) => (
+      typeof coordinate === 'number' && Number.isFinite(coordinate)
+    ))
+  return isPosition
+    ? value.slice(0, 2)
+    : value.map(stripCoordinateAltitude)
 }
 
 function mapDatabaseError(error) {
@@ -846,7 +1184,7 @@ function staleRecordRevision(datasetVersionId, expectedRevision, currentRevision
   })
 }
 
-function assertRecord(record, expectedId = null) {
+function assertRecord(record, expectedId = null, { clone = true } = {}) {
   if (!record || typeof record !== 'object' || !record.datasetVersion?.id) {
     throw new TypeError('Record dataset version tidak valid.')
   }
@@ -857,7 +1195,7 @@ function assertRecord(record, expectedId = null) {
       statusCode: 409,
     })
   }
-  return structuredClone(record)
+  return clone ? structuredClone(record) : record
 }
 
 function assertSafeId(id) {

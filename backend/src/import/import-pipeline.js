@@ -271,19 +271,12 @@ async function selectKmlCandidate(kmlFiles, limits) {
   const issues = []
   let selected = null
   let parserOutput = null
-
-  if (ordered.length > 1) {
-    issues.push({
-      severity: 'warning',
-      issueCode: 'multiple_kml_candidates',
-      message: `KMZ berisi ${ordered.length} kandidat KML. Pemilihan dilakukan deterministik dengan prioritas doc.kml lalu path alfabetis.`,
-      canActivate: true,
-    })
-  }
+  const validCandidates = []
 
   for (const candidate of ordered) {
     try {
       const parsed = await parseKmlFile(candidate.absolutePath, limits)
+      validCandidates.push({ candidate, parserOutput: parsed })
       if (!selected) {
         selected = candidate
         parserOutput = parsed
@@ -304,6 +297,27 @@ async function selectKmlCandidate(kmlFiles, limits) {
       code: 'kmz_without_valid_kml',
       statusCode: 422,
     })
+  }
+  if (ordered.length > 1) {
+    const unselectedFeatureKmls = validCandidates.slice(1).filter(({ parserOutput: parsed }) => (
+      (parsed.structure?.placemarkCount ?? 0) > 0
+      || (parsed.structure?.overlayCount ?? 0) > 0
+    ))
+    if (unselectedFeatureKmls.length) {
+      issues.push({
+        severity: 'error',
+        issueCode: 'unselected_kml_features',
+        message: `KMZ memiliki feature pada KML lain yang tidak digabung: ${unselectedFeatureKmls.map(({ candidate }) => candidate.relativePath).join(', ')}. Pisahkan import atau gabungkan seluruh feature ke KML utama.`,
+        canActivate: false,
+      })
+    } else {
+      issues.push({
+        severity: 'warning',
+        issueCode: 'multiple_kml_candidates',
+        message: `KMZ berisi ${ordered.length} kandidat KML. Pemilihan dilakukan deterministik dengan prioritas doc.kml lalu path alfabetis; kandidat lain tidak memiliki feature yang dapat disimpan.`,
+        canActivate: true,
+      })
+    }
   }
   return { selected, parserOutput, issues }
 }
