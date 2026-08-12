@@ -40,6 +40,7 @@ const metrics = new MetricsRegistry()
 const lifecycleService = new DatasetVersionLifecycleService({
   repository,
   auditLog,
+  siteBoundaries: config.siteBoundaries,
 })
 const topologyService = new TopologyService({
   repository,

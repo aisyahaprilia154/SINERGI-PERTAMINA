@@ -8,6 +8,7 @@ import { createProcessingRecord } from './import/import-pipeline.js'
 import { readKmzResourceBuffer } from './import/kmz-extractor.js'
 import {
   requireAdministrator,
+  requireBranchAccess,
   requireDatasetSourceDownload,
 } from './security/authorization.js'
 import {
@@ -113,18 +114,101 @@ export function createApp({
           correlationId,
         })
       }
+      const activeAssetCollectionMatch = request.method === 'GET'
+        ? url.pathname.match(/^\/api\/datasets\/([a-zA-Z0-9_-]+)\/active\/assets$/)
+        : null
+      if (activeAssetCollectionMatch) {
+        const user = authenticator.authenticate(request)
+        const datasetId = activeAssetCollectionMatch[1]
+        const branchId = normalizeRequiredActiveBranch(url.searchParams.get('branchId'), config)
+        requireBranchAccess(user, { datasetId, branchId })
+        const siteId = normalizeRequiredActiveScopeId(url.searchParams.get('siteId'), 'Site ID')
+        const query = activeAssetQueryFromUrl(url.searchParams)
+        query.siteId = [siteId]
+        return sendJson(
+          response,
+          200,
+          await lifecycleService.getActiveAssetSearch({
+            datasetId,
+            branchId,
+            query,
+            isAdministrator: isAdministratorUser(user),
+            canViewSensitive: canReadSensitiveAsset(user),
+          }),
+        )
+      }
+      const activeSitesMatch = request.method === 'GET'
+        ? url.pathname.match(/^\/api\/datasets\/([a-zA-Z0-9_-]+)\/active\/sites$/)
+        : null
+      if (activeSitesMatch) {
+        const user = authenticator.authenticate(request)
+        const datasetId = activeSitesMatch[1]
+        const branchId = normalizeRequiredActiveBranch(url.searchParams.get('branchId'), config)
+        requireBranchAccess(user, { datasetId, branchId })
+        return sendJson(
+          response,
+          200,
+          await lifecycleService.getActiveSites({ datasetId, branchId }),
+        )
+      }
+      const activeOverlaysMatch = request.method === 'GET'
+        ? url.pathname.match(/^\/api\/datasets\/([a-zA-Z0-9_-]+)\/active\/overlays$/)
+        : null
+      if (activeOverlaysMatch) {
+        const user = authenticator.authenticate(request)
+        const datasetId = activeOverlaysMatch[1]
+        const branchId = normalizeRequiredActiveBranch(url.searchParams.get('branchId'), config)
+        requireBranchAccess(user, { datasetId, branchId })
+        const siteId = url.searchParams.has('siteId')
+          ? normalizeRequiredActiveScopeId(url.searchParams.get('siteId'), 'Site ID')
+          : null
+        return sendJson(
+          response,
+          200,
+          await lifecycleService.getActiveOverlays({ datasetId, branchId, siteId }),
+        )
+      }
+      const activeKmlExportMatch = request.method === 'POST'
+        ? url.pathname.match(/^\/api\/datasets\/([a-zA-Z0-9_-]+)\/active\/exports\/kml$/)
+        : null
+      if (activeKmlExportMatch) {
+        const user = authenticator.authenticate(request)
+        const datasetId = activeKmlExportMatch[1]
+        const body = await readJsonBody(request)
+        const branchId = normalizeRequiredActiveBranch(
+          body.branchId ?? url.searchParams.get('branchId'),
+          config,
+        )
+        requireBranchAccess(user, { datasetId, branchId })
+        const query = normalizeActiveExportBody(body)
+        const exported = await lifecycleService.exportActiveDatasetKml({
+          datasetId,
+          branchId,
+          query,
+          isAdministrator: isAdministratorUser(user),
+        })
+        return sendActiveKml(response, exported)
+      }
       const activeAssetMatch = request.method === 'GET'
         ? url.pathname.match(/^\/api\/datasets\/([a-zA-Z0-9_-]+)\/active\/assets\/([^/]+)$/)
         : null
       if (activeAssetMatch) {
-        authenticator.authenticate(request)
+        const user = authenticator.authenticate(request)
+        const datasetId = activeAssetMatch[1]
+        const branchId = normalizeRequiredActiveBranch(url.searchParams.get('branchId'), config)
+        requireBranchAccess(user, { datasetId, branchId })
         return sendJson(
           response,
           200,
           await lifecycleService.getActiveAssetDetail({
-            datasetId: activeAssetMatch[1],
-            branchId: normalizeActiveBranch(url.searchParams.get('branchId')),
+            datasetId,
+            branchId,
+            siteId: url.searchParams.has('siteId')
+              ? normalizeRequiredActiveScopeId(url.searchParams.get('siteId'), 'Site ID')
+              : null,
             assetId: normalizeAssetId(decodePathSegment(activeAssetMatch[2])),
+            isAdministrator: isAdministratorUser(user),
+            canViewSensitive: canReadSensitiveAsset(user),
           }),
         )
       }
@@ -132,11 +216,16 @@ export function createApp({
         ? url.pathname.match(/^\/api\/datasets\/([a-zA-Z0-9_-]+)\/active$/)
         : null
       if (activeDatasetMatch) {
-        authenticator.authenticate(request)
+        const user = authenticator.authenticate(request)
+        const datasetId = activeDatasetMatch[1]
         const context = {
-          datasetId: activeDatasetMatch[1],
-          branchId: normalizeActiveBranch(url.searchParams.get('branchId')),
+          datasetId,
+          branchId: normalizeRequiredActiveBranch(url.searchParams.get('branchId'), config),
+          siteId: url.searchParams.has('siteId')
+            ? normalizeRequiredActiveScopeId(url.searchParams.get('siteId'), 'Site ID')
+            : null,
         }
+        requireBranchAccess(user, context)
         return sendJson(
           response,
           200,
@@ -806,6 +895,115 @@ function normalizeActiveBranch(value) {
   return value
 }
 
+function normalizeRequiredActiveBranch(value, config = {}) {
+  if (value === null || value === undefined || value === '') {
+    if (!config?.allowedBranchIds?.length) return undefined
+    throw new AppError('Branch ID wajib untuk membaca dataset aktif.', {
+      code: 'branch_required',
+      statusCode: 400,
+    })
+  }
+  const branchId = normalizeActiveBranch(String(value))
+  if (config?.allowedBranchIds?.length && !config.allowedBranchIds.includes(branchId)) {
+    throw new AppError('Branch ID tidak diizinkan.', {
+      code: 'branch_not_allowed',
+      statusCode: 400,
+    })
+  }
+  return branchId
+}
+
+function normalizeRequiredActiveScopeId(value, label) {
+  const normalized = String(value ?? '').normalize('NFKC').trim()
+  if (!normalized || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(normalized)) {
+    throw new AppError(`${label} wajib dan tidak valid.`, {
+      code: 'invalid_active_scope',
+      statusCode: 400,
+    })
+  }
+  return normalized
+}
+
+function activeAssetQueryFromUrl(searchParams) {
+  const list = (key) => searchParams.getAll(key)
+    .flatMap((value) => value.split(','))
+    .map((value) => String(value).normalize('NFKC').trim())
+    .filter(Boolean)
+  const limit = searchParams.get('limit')
+  if (limit !== null && (!/^\d+$/.test(limit) || Number(limit) < 1 || Number(limit) > 200)) {
+    throw new AppError('Limit asset aktif tidak valid.', {
+      code: 'invalid_active_asset_limit',
+      statusCode: 400,
+    })
+  }
+  const boundsValue = searchParams.get('bounds')
+  const bounds = boundsValue
+    ? parseActiveBounds(boundsValue)
+    : parseActiveBoundsFromParts(searchParams)
+  return {
+    q: searchParams.get('q') ?? undefined,
+    siteId: list('siteId'),
+    networkFamily: list('networkFamily'),
+    category: list('category'),
+    assetType: list('assetType'),
+    sourceStatus: list('sourceStatus'),
+    identityStatus: list('identityStatus'),
+    topologyStatus: list('topologyStatus'),
+    bounds,
+    cursor: searchParams.get('cursor') ?? undefined,
+    limit: limit === null ? undefined : Number(limit),
+    includeVisualOnly: searchParams.get('includeVisualOnly') === 'true',
+    assetIds: list('assetId'),
+  }
+}
+
+function normalizeActiveExportBody(body = {}) {
+  const list = (value) => (Array.isArray(value) ? value : value === undefined ? [] : [value])
+    .flatMap((item) => String(item).split(','))
+    .map((item) => item.normalize('NFKC').trim())
+    .filter(Boolean)
+  return {
+    q: body.q,
+    siteId: list(body.siteId),
+    networkFamily: list(body.networkFamily),
+    category: list(body.category),
+    assetType: list(body.assetType),
+    sourceStatus: list(body.sourceStatus),
+    identityStatus: list(body.identityStatus),
+    topologyStatus: list(body.topologyStatus),
+    bounds: body.bounds ?? null,
+    assetIds: list(body.assetIds ?? body.assetId),
+    includeVisualOnly: body.includeVisualOnly === true,
+  }
+}
+
+function parseActiveBounds(value) {
+  const values = String(value).split(',').map(Number)
+  if (values.length !== 4 || values.some((item) => !Number.isFinite(item))) {
+    throw new AppError('Bounds geografis tidak valid.', {
+      code: 'invalid_active_bounds',
+      statusCode: 400,
+    })
+  }
+  return { west: values[0], south: values[1], east: values[2], north: values[3] }
+}
+
+function parseActiveBoundsFromParts(searchParams) {
+  const keys = ['west', 'south', 'east', 'north']
+  if (!keys.some((key) => searchParams.has(key))) return null
+  return parseActiveBounds(keys.map((key) => searchParams.get(key)).join(','))
+}
+
+function isAdministratorUser(user) {
+  return user?.role?.toLowerCase() === 'administrator'
+}
+
+function canReadSensitiveAsset(user) {
+  return isAdministratorUser(user)
+    || user?.permissions?.includes('asset:network:read')
+    || user?.permissions?.includes('dataset:network:read')
+}
+
 function normalizeAssetId(value) {
   if (!value || value.length > 256 || /[\u0000-\u001f\u007f]/.test(value)) {
     throw new AppError('Asset ID tidak valid.', {
@@ -1242,6 +1440,19 @@ function sendText(response, statusCode, body, {
     'content-type': contentType,
     'cache-control': cacheControl,
     'content-length': String(Buffer.byteLength(serialized)),
+  })
+  response.end(serialized)
+}
+
+function sendActiveKml(response, exported) {
+  const serialized = String(exported.content ?? '')
+  response.writeHead(200, {
+    'content-type': 'application/vnd.google-earth.kml+xml; charset=utf-8',
+    'content-disposition': contentDisposition(exported.filename),
+    'cache-control': 'private, no-store',
+    'content-length': String(Buffer.byteLength(serialized)),
+    'x-dataset-version-id': String(exported.datasetVersionId ?? ''),
+    'x-active-pointer-revision': String(exported.activePointerRevision ?? ''),
   })
   response.end(serialized)
 }

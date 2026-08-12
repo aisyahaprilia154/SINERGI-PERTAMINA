@@ -10,7 +10,11 @@ Spesifikasi acuan: [`docs/SPESIFIKASI-IMPLEMENTASI-FUNGSIONAL-FASE-1-5.md`](./SP
 
 Fase 1 sudah diimplementasikan dan lulus regresi otomatis. Fase 2–5 belum
 dieksekusi; checkpoint-nya dibuat sebagai kontrol dependensi dan backlog
-penerimaan, bukan sebagai klaim selesai.
+penerimaan, bukan sebagai klaim selesai. Fase 2 code implementation is now in place; pilot evidence is still pending. Detail checkpoint Fase 2 ada di [`docs/CHECKPOINT-FASE-2.md`](./CHECKPOINT-FASE-2.md).
+
+> Status Fase 2 pada paragraf legacy di atas telah disupersede oleh checkpoint
+> khusus [`CHECKPOINT-FASE-2.md`](./CHECKPOINT-FASE-2.md): automated gate lulus,
+> sedangkan pilot/usability gate masih pending.
 
 | Fase | Status | Bukti / dependency berikutnya |
 |---|---|---|
@@ -19,6 +23,10 @@ penerimaan, bukan sebagai klaim selesai.
 | Fase 3 — Pembangunan dan verifikasi topologi | **Pending** | Bergantung pada map contract Fase 2 dan identity/readiness Fase 1. |
 | Fase 4 — Tracing dan analisis dampak | **Pending** | Bergantung pada confirmed graph dan readiness Fase 3. |
 | Fase 5 — Diagram topologi cabang | **Pending** | Bergantung pada graph/revision dan trace/impact Fase 3–4. |
+
+> Current Fase 2 checkpoint: **Implemented + verified; pilot pending**. Lihat
+> [`docs/CHECKPOINT-FASE-2.md`](./CHECKPOINT-FASE-2.md) untuk deliverable dan
+> bukti automated acceptance terbaru.
 
 ## Checkpoint Fase 1
 
