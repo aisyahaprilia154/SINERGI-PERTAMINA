@@ -1,7 +1,32 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { generateRelationArtifacts } from '../src/topology/semantic-relation-engine.js'
-import { applyArtifacts, TopologyService } from '../src/topology/topology-service.js'
+import {
+  applyArtifacts,
+  classifyReviewValidationIssues,
+  TopologyService,
+} from '../src/topology/topology-service.js'
+
+test('bulk preview distinguishes baseline topology issues from errors introduced by review', () => {
+  const baseline = [{
+    issueId: 'topology-issue:existing-dangling-relation',
+    severity: 'error',
+    issueCode: 'dangling_confirmed_relation',
+    entityReference: 'relation:legacy',
+  }]
+  const classified = classifyReviewValidationIssues(baseline, [
+    { ...baseline[0] },
+    {
+      issueId: 'topology-issue:new-cross-site-edge',
+      severity: 'error',
+      issueCode: 'cross_site_edge',
+      entityReference: 'relation:new',
+    },
+  ])
+
+  assert.equal(classified[0].reviewImpact, 'baseline')
+  assert.equal(classified[1].reviewImpact, 'introduced')
+})
 
 test('candidate review is audited, materializes confirmed graph, and can be revoked/reconfirmed', async () => {
   const bundle = reviewBundle()
@@ -214,6 +239,61 @@ test('bulk review preview predicts graph changes and rejects endpoint conflicts'
       reason: 'Konflik endpoint harus ditolak oleh safe batch gate.',
     }),
     (error) => error.code === 'topology_bulk_review_not_safe',
+  )
+})
+
+test('stale onboarding candidates are blocked until identity assignment and regeneration', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const record = applyArtifacts(baseRecord(bundle), initial)
+  const onboardingId = (value) => value && !String(value).startsWith('onboarding-identity:')
+    ? `onboarding-identity:${value}`
+    : value
+  const onboardingObject = (object) => ({
+    ...object,
+    assetId: null,
+    canonicalAssetId: onboardingId(object.assetId),
+    stableAssetId: null,
+    onboardingIdentity: onboardingId(object.assetId),
+    identityStatus: 'onboarding',
+    identityResolutionStatus: 'onboarding_candidate',
+  })
+  record.topologyInputBundle = {
+    ...record.topologyInputBundle,
+    classifiedNodes: record.topologyInputBundle.classifiedNodes.map(onboardingObject),
+    classifiedPaths: record.topologyInputBundle.classifiedPaths.map(onboardingObject),
+  }
+  record.topologyCandidates = record.topologyCandidates.map((candidate) => ({
+    ...candidate,
+    sourcePathAssetId: onboardingId(candidate.sourcePathAssetId),
+    targetAssetId: onboardingId(candidate.targetAssetId),
+    targetPathAssetId: onboardingId(candidate.targetPathAssetId),
+  }))
+  const repository = new MemoryRepository([record])
+  const service = new TopologyService({
+    repository,
+    auditLog: new MemoryAuditLog(),
+  })
+  const candidate = (await service.getCandidates('dv-review')).items.find(({ proposalStatus }) => (
+    proposalStatus === 'recommended'
+  ))
+  assert.equal(candidate.reviewEligibility.identityReady, false)
+  assert.equal(candidate.reviewEligibility.confirmable, false)
+  assert.equal(candidate.reviewEligibility.code, 'missing_stable_asset_id')
+
+  const preview = await service.reviewPreview('dv-review', {
+    candidateIds: [candidate.candidateId],
+  })
+  assert.equal(preview.safeToApply, false)
+  assert.equal(preview.ineligible[0].reason, 'candidate_stable_asset_id_required')
+  assert.equal(preview.diagnostics.recommendation.code, 'assign_identity_and_regenerate')
+
+  await assert.rejects(
+    service.confirmCandidate(candidate.candidateId, 'admin-1', {
+      reason: 'Konfirmasi tidak boleh melewati identity gate.',
+    }),
+    (error) => error.code === 'topology_candidate_identity_required'
+      && error.statusCode === 422,
   )
 })
 

@@ -16,6 +16,10 @@ import {
 } from '../../domain/topology-review-category.js'
 import { prioritizeTopologyCandidates } from '../../domain/topology-view-model.js'
 import {
+  describeTopologyReviewFailure,
+  resolveTopologyReviewAvailability,
+} from '../../domain/topology-review-preview.js'
+import {
   loadActiveDataset,
   loadDatasetProjection,
   loadAllTopologyCandidates,
@@ -28,6 +32,7 @@ import {
 } from '../../services/active-dataset-service.js'
 import { bindUserAccountMenu, renderTopNavigation, scopeMapData } from '../map/map-page.js'
 import { createMapLibreSurface } from '../map/maplibre-map.js'
+import { escapeAttribute } from './import-view-utils.js'
 
 export async function renderTopologyReviewPage(container) {
   document.title = 'Konfirmasi Koneksi — SINERGI'
@@ -53,6 +58,7 @@ export async function renderTopologyReviewPage(container) {
 async function initializeReview(container, mapData) {
   const datasetVersionId = mapData.activeContext.datasetVersionId
   let projections = await loadReviewProjections(datasetVersionId, mapData.geometries)
+  const reviewAvailability = resolveTopologyReviewAvailability(projections.summary)
   const params = new URLSearchParams(window.location.search)
   const requestedStatus = params.get('status')
   const locationIndex = createReviewLocationIndex(mapData)
@@ -69,8 +75,8 @@ async function initializeReview(container, mapData) {
     search: params.get('q') ?? '',
     actionStatus: 'idle',
     actionMessage: '',
-    bulkStatus: 'idle',
-    bulkMessage: '',
+    bulkStatus: reviewAvailability.available ? 'idle' : 'error',
+    bulkMessage: reviewAvailability.message,
   }
   let decisionContext = null
   const requestedCandidate = projections.candidates.items.find(({ candidateId }) => (
@@ -353,10 +359,15 @@ async function initializeReview(container, mapData) {
     ).length
     const confirmedDeviceEdgeCount = projections.graph.graph?.edges?.length ?? 0
     const actions = container.querySelector('.review-bulk-actions')
+    const reviewEnabled = reviewAvailability.available
     actions.innerHTML = `
       <button class="button primary manual-relation-action" type="button"
-        ${manualRelationAssets.length >= 2 ? '' : 'disabled'}
-        title="${manualRelationAssets.length >= 2
+        ${manualRelationAssets.length >= 2
+          && reviewEnabled
+          && reviewAvailability.capabilities?.manualRelation === true ? '' : 'disabled'}
+        title="${!reviewEnabled
+          ? escapeHtml(reviewAvailability.message)
+          : manualRelationAssets.length >= 2
           ? 'Tambahkan koneksi langsung antar device'
           : 'Minimal dua device bertitik diperlukan'}">
         <span class="material-symbols-outlined" aria-hidden="true">add_link</span>
@@ -369,19 +380,19 @@ async function initializeReview(container, mapData) {
         </summary>
         <div>
           <button class="confirm-line-labels" type="button"
-            ${lineConfirmableCount ? '' : 'disabled'}>
+            ${lineConfirmableCount && reviewEnabled ? '' : 'disabled'}>
             <span class="material-symbols-outlined" aria-hidden="true">route</span>
             <span><strong>Konfirmasi koneksi dari garis</strong>
               <small>${lineConfirmableCount} garis punya endpoint terbaca</small></span>
           </button>
           <button class="confirm-all-candidates" type="button"
-            ${confirmableCount ? '' : 'disabled'}>
+            ${confirmableCount && reviewEnabled ? '' : 'disabled'}>
             <span class="material-symbols-outlined" aria-hidden="true">done_all</span>
             <span><strong>Konfirmasi rekomendasi</strong>
               <small>${confirmableCount} koneksi di seluruh dataset</small></span>
           </button>
           <button class="revoke-all-relations destructive" type="button"
-            ${confirmedCount ? '' : 'disabled'}>
+            ${confirmedCount && reviewEnabled ? '' : 'disabled'}>
             <span class="material-symbols-outlined" aria-hidden="true">delete_sweep</span>
             <span><strong>Hapus semua konfirmasi</strong>
               <small>${confirmedDeviceEdgeCount} device edge &middot; ${confirmedCount} relation/attachment</small></span>
@@ -468,7 +479,11 @@ async function initializeReview(container, mapData) {
       return `
       <div class="candidate-card-row${selectedForBulk ? ' selection-selected' : ''}" role="listitem">
         <label class="candidate-select-control${selectable ? '' : ' disabled'}"
-          title="${selectable ? 'Pilih koneksi ini' : 'Koneksi ini belum dapat dikonfirmasi'}">
+          title="${selectable
+            ? 'Pilih koneksi ini'
+            : isIdentityBlockedCandidate(candidate)
+              ? 'Asset ID belum ditetapkan; tetapkan identity lalu regenerate topology'
+              : 'Koneksi ini belum dapat dikonfirmasi'}">
           <input type="checkbox" data-candidate-select="${escapeHtml(candidate.candidateId)}"
             ${selectable ? '' : 'disabled'} ${selectedForBulk ? 'checked' : ''}
             aria-label="Pilih koneksi ${escapeHtml(sourceName)} ke ${escapeHtml(targetName)}">
@@ -631,6 +646,7 @@ async function initializeReview(container, mapData) {
           <strong>${Math.round((candidate.score ?? 0) * 100)}%</strong>
         </div>
       </header>
+      ${renderCandidateReviewGuard(candidate, datasetVersionId)}
       <section class="candidate-route" aria-label="Usulan koneksi">
         ${routeEndpoint('Dari', sourceName, shortReference(candidate.sourceEndpointId))}
         <div class="route-connector">
@@ -1060,10 +1076,10 @@ async function initializeReview(container, mapData) {
           ...reviewSnapshotBody(),
         })
         if (!preview.safeToApply) {
-          const issue = preview.ineligible?.[0]?.reason
-            ?? preview.validationPreview?.issues?.[0]?.issueCode
-            ?? 'review_preview_not_safe'
-          throw new Error(`Review batch tidak aman untuk diterapkan (${issue}).`)
+          const diagnosis = describeTopologyReviewFailure(preview)
+          const previewError = new Error(diagnosis.message)
+          previewError.code = diagnosis.code
+          throw previewError
         }
       }
       const result = await reviewTopologyBulk({
@@ -1091,9 +1107,10 @@ async function initializeReview(container, mapData) {
       dialog.close()
       renderAll()
     } catch (error) {
+      const diagnosis = describeTopologyReviewFailure(error)
       state.bulkStatus = 'error'
       state.bulkMessage = ''
-      dialog.querySelector('.bulk-dialog-message').textContent = error.message
+      dialog.querySelector('.bulk-dialog-message').textContent = diagnosis.message
     } finally {
       submit.disabled = false
       cancel.disabled = false
@@ -1189,7 +1206,7 @@ async function initializeReview(container, mapData) {
 
 async function loadReviewProjections(datasetVersionId, mapGeometries = []) {
   const [candidates, graph, summary, sourceFeaturePayload] = await Promise.all([
-    loadAllTopologyCandidates({ datasetVersionId }),
+    loadAllTopologyCandidates({ datasetVersionId, limit: 250 }),
     loadTopologyProjection({ datasetVersionId, projection: 'graph' }),
     loadTopologyProjection({ datasetVersionId, projection: 'summary' }),
     loadDatasetProjection({ datasetVersionId, projection: 'source-features' })
@@ -1337,6 +1354,7 @@ function validCoordinate(value) {
 }
 
 function statusLabel(candidate) {
+  if (isIdentityBlockedCandidate(candidate)) return 'Asset ID belum ditetapkan'
   if (isBulkConfirmableCandidate(candidate)) return 'Direkomendasikan'
   if (candidate.candidateStatus === 'candidate' && candidate.proposalStatus === 'not_selected') {
     return 'Alternatif tidak dipilih'
@@ -1349,6 +1367,35 @@ function statusLabel(candidate) {
     revoked: 'Dibatalkan',
     unresolved: 'Belum ada pasangan',
   }[candidate.candidateStatus] ?? candidate.candidateStatus
+}
+
+function isIdentityBlockedCandidate(candidate) {
+  return candidate?.reviewEligibility?.identityReady === false
+}
+
+function candidateReviewGuardMessage(candidate) {
+  const code = candidate?.reviewEligibility?.code
+  if (code === 'missing_stable_asset_id') {
+    return 'Tetapkan Asset ID resmi melalui identity review. Setelah disimpan, topology akan diregenerasi dan kandidat baru akan dibuat.'
+  }
+  if (code === 'topology_candidate_identity_stale') {
+    return 'Kandidat ini dibuat sebelum identity aset final. Kandidat lama ditutup oleh engine; gunakan hasil regenerasi topology.'
+  }
+  return candidate?.reviewEligibility?.message
+    || 'Kandidat tidak lagi sesuai dengan topology input terkini. Muat ulang setelah topology diregenerasi.'
+}
+
+function renderCandidateReviewGuard(candidate, datasetVersionId) {
+  if (!isIdentityBlockedCandidate(candidate)) return ''
+  const previewUrl = `/admin/datasets/import/${encodeURIComponent(datasetVersionId)}/preview`
+  return `<section class="candidate-review-guard" role="status">
+    <span class="material-symbols-outlined" aria-hidden="true">identity_platform</span>
+    <div>
+      <strong>Asset ID belum ditetapkan</strong>
+      <p>${escapeHtml(candidateReviewGuardMessage(candidate))}</p>
+      <a href="${escapeAttribute(previewUrl)}">Buka preview identity</a>
+    </div>
+  </section>`
 }
 
 function renderBulkDialog() {
@@ -1531,10 +1578,12 @@ function renderReadiness(summary, locationCandidates = null) {
 function isBulkConfirmableCandidate(candidate) {
   return candidate.candidateStatus === 'candidate'
     && candidate.proposalStatus === 'recommended'
+    && candidate.reviewEligibility?.confirmable !== false
 }
 
 function isReviewableCandidate(candidate) {
   return isBulkConfirmableCandidate(candidate)
+    || isIdentityBlockedCandidate(candidate)
     || ['ambiguous', 'unresolved'].includes(candidate.candidateStatus)
 }
 
@@ -1584,6 +1633,7 @@ function actionSuccessMessage(action) {
 
 function canConfirm(candidate) {
   return ['candidate', 'ambiguous', 'revoked'].includes(candidate?.candidateStatus)
+    && candidate?.reviewEligibility?.confirmable !== false
 }
 
 function canReject(candidate) {

@@ -557,6 +557,9 @@ export async function reviewTopologyBulk({
   if (action === 'confirm-selected' && (!Array.isArray(candidateIds) || candidateIds.length === 0)) {
     throw new TypeError('Minimal satu candidate harus dipilih.')
   }
+  if (Array.isArray(candidateIds) && candidateIds.length > 5000) {
+    throw new TypeError('Maksimal 5.000 candidate dapat diproses dalam satu batch.')
+  }
   return topologyRequest(
     `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
       + `/topology/${action}`,
@@ -660,12 +663,23 @@ async function topologyRequest(url, {
   })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
+    const missingReviewEndpoint = response.status === 404
+      && payload?.error?.code === 'not_found'
+      && /\/topology\/(review-preview|confirm-selected|confirm-all|confirm-line-labels|revoke-all|relations)$/.test(url)
     const error = new Error(
-      payload?.error?.message || `Layanan topology gagal (${response.status}).`,
+      missingReviewEndpoint
+        ? 'API relasi aset belum sinkron. Restart atau deploy ulang backend, lalu muat ulang halaman.'
+        : payload?.error?.message || `Layanan topology gagal (${response.status}).`,
     )
-    error.code = payload?.error?.code
+    error.code = missingReviewEndpoint
+      ? 'topology_review_api_unavailable'
+      : payload?.error?.code
     error.status = response.status
-    error.details = payload?.error?.details ?? null
+    error.details = {
+      ...(payload?.error?.details ?? {}),
+      ...(missingReviewEndpoint ? { requestUrl: url, requestMethod: method } : {}),
+      correlationId: response.headers.get('x-correlation-id'),
+    }
     error.payload = payload
     throw error
   }
