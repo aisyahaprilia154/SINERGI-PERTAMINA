@@ -153,6 +153,8 @@ export function createConfig(env = process.env, overrides = {}) {
     ?? parseJsonObject(env.SINERGI_BRANCH_DATASETS, {})
   const authTokens = overrides.authTokens
     ?? parseJsonObject(env.SINERGI_AUTH_TOKENS, {})
+  const siteBoundaries = overrides.siteBoundaries
+    ?? parseJsonObject(env.SINERGI_SITE_BOUNDARIES, {})
 
   return {
     port: numberFrom(env.SINERGI_PORT, overrides.port ?? 5000),
@@ -178,6 +180,7 @@ export function createConfig(env = process.env, overrides = {}) {
     allowedBranchIds,
     datasetIdsByBranch,
     authTokens,
+    siteBoundaries,
     upload: {
       maxFileSize: overrides.upload?.maxFileSize
         ?? numberFrom(env.SINERGI_MAX_UPLOAD_BYTES, 50 * MEBIBYTE),

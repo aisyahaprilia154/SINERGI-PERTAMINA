@@ -10,6 +10,7 @@ export function getDefaultMapToken() {
 export async function loadActiveDataset({
   datasetId,
   branchId,
+  siteId = null,
   token = getDefaultMapToken(),
   signal,
   apiBase = '',
@@ -17,6 +18,7 @@ export async function loadActiveDataset({
   if (!datasetId) throw new TypeError('datasetId wajib tersedia.')
   const query = new URLSearchParams({ view: 'map' })
   if (branchId) query.set('branchId', branchId)
+  if (siteId) query.set('siteId', siteId)
   const response = await fetch(
     `${apiBase}/api/datasets/${encodeURIComponent(datasetId)}/active?${query}`,
     {
@@ -66,6 +68,146 @@ export async function loadActiveAssetDetail({
     throw error
   }
   return body
+}
+
+export async function loadActiveAssets({
+  datasetId,
+  branchId,
+  siteId,
+  q = null,
+  networkFamily = [],
+  category = [],
+  assetType = [],
+  sourceStatus = [],
+  identityStatus = [],
+  topologyStatus = [],
+  bounds = null,
+  cursor = null,
+  limit = null,
+  includeVisualOnly = false,
+  assetIds = [],
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetId) throw new TypeError('datasetId wajib tersedia.')
+  if (!branchId) throw new TypeError('branchId wajib tersedia.')
+  if (!siteId) throw new TypeError('siteId wajib tersedia.')
+  const query = new URLSearchParams({ branchId, siteId })
+  setActiveQueryValue(query, 'q', q)
+  appendActiveQueryValues(query, 'networkFamily', networkFamily)
+  appendActiveQueryValues(query, 'category', category)
+  appendActiveQueryValues(query, 'assetType', assetType)
+  appendActiveQueryValues(query, 'sourceStatus', sourceStatus)
+  appendActiveQueryValues(query, 'identityStatus', identityStatus)
+  appendActiveQueryValues(query, 'topologyStatus', topologyStatus)
+  appendActiveQueryValues(query, 'assetId', assetIds)
+  setActiveQueryValue(query, 'bounds', bounds ? boundsToQuery(bounds) : null)
+  setActiveQueryValue(query, 'cursor', cursor)
+  setActiveQueryValue(query, 'limit', limit)
+  if (includeVisualOnly) query.set('includeVisualOnly', 'true')
+  return topologyRequest(
+    `${apiBase}/api/datasets/${encodeURIComponent(datasetId)}/active/assets?${query}`,
+    { token, signal },
+  )
+}
+
+export async function loadActiveSites({
+  datasetId,
+  branchId,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetId) throw new TypeError('datasetId wajib tersedia.')
+  if (!branchId) throw new TypeError('branchId wajib tersedia.')
+  const query = new URLSearchParams({ branchId })
+  return topologyRequest(
+    `${apiBase}/api/datasets/${encodeURIComponent(datasetId)}/active/sites?${query}`,
+    { token, signal },
+  )
+}
+
+export async function loadActiveOverlays({
+  datasetId,
+  branchId,
+  siteId = null,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetId) throw new TypeError('datasetId wajib tersedia.')
+  if (!branchId) throw new TypeError('branchId wajib tersedia.')
+  const query = new URLSearchParams({ branchId })
+  setActiveQueryValue(query, 'siteId', siteId)
+  return topologyRequest(
+    `${apiBase}/api/datasets/${encodeURIComponent(datasetId)}/active/overlays?${query}`,
+    { token, signal },
+  )
+}
+
+export async function exportActiveKml({
+  datasetId,
+  branchId,
+  siteId = null,
+  q = null,
+  networkFamily = [],
+  category = [],
+  assetType = [],
+  sourceStatus = [],
+  identityStatus = [],
+  topologyStatus = [],
+  bounds = null,
+  assetIds = [],
+  includeVisualOnly = false,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetId) throw new TypeError('datasetId wajib tersedia.')
+  if (!branchId) throw new TypeError('branchId wajib tersedia.')
+  const response = await fetch(
+    `${apiBase}/api/datasets/${encodeURIComponent(datasetId)}/active/exports/kml`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        branchId,
+        ...(siteId ? { siteId } : {}),
+        ...(q ? { q } : {}),
+        ...(networkFamily.length ? { networkFamily } : {}),
+        ...(category.length ? { category } : {}),
+        ...(assetType.length ? { assetType } : {}),
+        ...(sourceStatus.length ? { sourceStatus } : {}),
+        ...(identityStatus.length ? { identityStatus } : {}),
+        ...(topologyStatus.length ? { topologyStatus } : {}),
+        ...(bounds ? { bounds } : {}),
+        ...(assetIds.length ? { assetIds } : {}),
+        ...(includeVisualOnly ? { includeVisualOnly: true } : {}),
+      }),
+      signal,
+    },
+  )
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    const error = new Error(
+      body?.error?.message || `Export KML dataset aktif gagal (${response.status}).`,
+    )
+    error.code = body?.error?.code
+    error.status = response.status
+    error.details = body?.error?.details ?? null
+    throw error
+  }
+  return {
+    blob: await response.blob(),
+    filename: filenameFromContentDisposition(response.headers.get('content-disposition'))
+      || 'sinergi-active-dataset.kml',
+    datasetVersionId: response.headers.get('x-dataset-version-id'),
+    activePointerRevision: response.headers.get('x-active-pointer-revision'),
+  }
 }
 
 export async function loadTopologyProjection({
@@ -393,6 +535,36 @@ async function topologyRequest(url, {
 function setTopologyQueryValue(query, key, value) {
   if (value === undefined || value === null || value === '') return
   query.set(key, String(value))
+}
+
+function setActiveQueryValue(query, key, value) {
+  if (value === undefined || value === null || value === '') return
+  query.set(key, String(value))
+}
+
+function appendActiveQueryValues(query, key, values) {
+  const list = Array.isArray(values) ? values : values ? [values] : []
+  list.filter((value) => value !== undefined && value !== null && value !== '')
+    .forEach((value) => query.append(key, String(value)))
+}
+
+function boundsToQuery(bounds) {
+  return [bounds.west, bounds.south, bounds.east, bounds.north].join(',')
+}
+
+function filenameFromContentDisposition(header) {
+  const value = String(header ?? '')
+  const encoded = value.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded)
+    } catch {
+      return null
+    }
+  }
+  return value.match(/filename="([^"]+)"/i)?.[1]
+    ?? value.match(/filename=([^;]+)/i)?.[1]?.trim()
+    ?? null
 }
 
 function topologyCandidateSnapshotChanged() {
