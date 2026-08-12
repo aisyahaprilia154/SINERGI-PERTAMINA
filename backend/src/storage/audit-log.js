@@ -9,6 +9,7 @@ export class JsonLinesAuditLog {
   }
 
   async record(event, {
+    eventId = null,
     actorId = null,
     datasetVersionId = null,
     branchId = null,
@@ -18,7 +19,7 @@ export class JsonLinesAuditLog {
   } = {}) {
     await mkdir(path.dirname(this.filePath), { recursive: true })
     const entry = {
-      id: crypto.randomUUID(),
+      id: eventId ?? crypto.randomUUID(),
       event,
       actorId,
       datasetVersionId,
