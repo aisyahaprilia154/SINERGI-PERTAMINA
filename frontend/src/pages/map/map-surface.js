@@ -43,8 +43,11 @@ export function renderNetworkMapCanvas(activeContext, {
       </div>
       ${!traceAvailable ? `
         <div class="map-topology-readiness" id="topology-not-ready-message" role="status">
-          <strong>Topologi perlu diperiksa</strong>
-          <span>${escapeHtml(topologyMessage)}</span>
+          <span class="material-symbols-outlined" aria-hidden="true">warning</span>
+          <span>
+            <strong>Topologi perlu diperiksa</strong>
+            <span>${escapeHtml(topologyMessage)}</span>
+          </span>
         </div>
       ` : ''}
       <div class="map-asset-tooltip" id="map-asset-tooltip" role="tooltip" aria-live="polite" hidden></div>

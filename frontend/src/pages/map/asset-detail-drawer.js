@@ -62,8 +62,11 @@ export function renderAssetDetailDrawer({
 
       ${!traceAvailable ? `
         <section class="drawer-topology-readiness" role="status">
-          <strong>Topologi perlu diperiksa</strong>
-          <span>${escapeHtml(topologyMessage)}</span>
+          <span class="material-symbols-outlined" aria-hidden="true">warning</span>
+          <span>
+            <strong>Topologi perlu diperiksa</strong>
+            <span>${escapeHtml(topologyMessage)}</span>
+          </span>
         </section>
       ` : ''}
 
