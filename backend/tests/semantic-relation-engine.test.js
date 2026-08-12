@@ -40,6 +40,15 @@ test('spatial endpoint inference remains a candidate and never leaks into confir
     unresolvedCount: 1,
     componentCount: 1,
     isolatedNodeCount: 1,
+    totalTopologyObjectCount: 2,
+    deviceNodeCount: 1,
+    pathNodeCount: 1,
+    evidenceResolvedAssetCount: 0,
+    reviewAssetCount: 2,
+    unresolvedAssetCount: 0,
+    unresolvedAssetIds: [],
+    unmatchedPathCount: 0,
+    evidenceComponentCount: 0,
     falseComponentMergeCount: 0,
   })
 })

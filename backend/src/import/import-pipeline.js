@@ -8,6 +8,7 @@ import { applyArtifacts } from '../topology/topology-service.js'
 import { DatasetVersionValidationService } from './dataset-validation-service.js'
 import { extractKmzArchive, orderKmlCandidates } from './kmz-extractor.js'
 import { parseKmlFile } from './kml-parser.js'
+import { mergeKmlParserOutputs } from './kml-parser-output-merger.js'
 import { projectCanonicalImport } from './legacy-import-projection.js'
 
 export class ImportPipeline {
@@ -89,6 +90,7 @@ export class ImportPipeline {
         })
         selectedKmlPath = selection.selected.relativePath
         parserOutput = selection.parserOutput
+        packageInfo.mergedKmlPaths = selection.mergedKmlPaths
         parserOutput.issues = [
           ...parserOutput.issues,
           ...selection.issues,
@@ -317,7 +319,6 @@ async function selectKmlCandidate(kmlFiles, limits) {
   const ordered = orderKmlCandidates(kmlFiles)
   const issues = []
   let selected = null
-  let parserOutput = null
   const validCandidates = []
 
   for (const candidate of ordered) {
@@ -326,7 +327,6 @@ async function selectKmlCandidate(kmlFiles, limits) {
       validCandidates.push({ candidate, parserOutput: parsed })
       if (!selected) {
         selected = candidate
-        parserOutput = parsed
       }
     } catch (error) {
       if (error.code === 'unsafe_xml_declaration') throw error
@@ -345,28 +345,20 @@ async function selectKmlCandidate(kmlFiles, limits) {
       statusCode: 422,
     })
   }
-  if (ordered.length > 1) {
-    const unselectedFeatureKmls = validCandidates.slice(1).filter(({ parserOutput: parsed }) => (
-      (parsed.structure?.placemarkCount ?? 0) > 0
-      || (parsed.structure?.overlayCount ?? 0) > 0
-    ))
-    if (unselectedFeatureKmls.length) {
-      issues.push({
-        severity: 'error',
-        issueCode: 'unselected_kml_features',
-        message: `KMZ memiliki feature pada KML lain yang tidak digabung: ${unselectedFeatureKmls.map(({ candidate }) => candidate.relativePath).join(', ')}. Pisahkan import atau gabungkan seluruh feature ke KML utama.`,
-        canActivate: false,
-      })
-    } else {
-      issues.push({
-        severity: 'warning',
-        issueCode: 'multiple_kml_candidates',
-        message: `KMZ berisi ${ordered.length} kandidat KML. Pemilihan dilakukan deterministik dengan prioritas doc.kml lalu path alfabetis; kandidat lain tidak memiliki feature yang dapat disimpan.`,
-        canActivate: true,
-      })
-    }
+  const mergedKmlPaths = validCandidates.map(({ candidate }) => candidate.relativePath)
+  const parserOutput = mergeKmlParserOutputs(validCandidates.map(({ candidate, parserOutput: parsed }) => ({
+    relativePath: candidate.relativePath,
+    parserOutput: parsed,
+  })))
+  if (validCandidates.length > 1) {
+    issues.push({
+      severity: 'information',
+      issueCode: 'multiple_kml_documents_merged',
+      message: `${validCandidates.length} dokumen KML digabung deterministik: ${mergedKmlPaths.join(', ')}.`,
+      canActivate: true,
+    })
   }
-  return { selected, parserOutput, issues }
+  return { selected, parserOutput, issues, mergedKmlPaths }
 }
 
 export function createProcessingRecord(datasetVersion, clock = () => new Date()) {

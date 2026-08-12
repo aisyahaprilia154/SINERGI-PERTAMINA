@@ -17,6 +17,15 @@
     "unresolvedCount": 0,
     "componentCount": 1,
     "isolatedNodeCount": 0,
+    "totalTopologyObjectCount": 3,
+    "deviceNodeCount": 2,
+    "pathNodeCount": 1,
+    "evidenceResolvedAssetCount": 2,
+    "reviewAssetCount": 1,
+    "unresolvedAssetCount": 0,
+    "unresolvedAssetIds": [],
+    "unmatchedPathCount": 0,
+    "evidenceComponentCount": 1,
     "falseComponentMergeCount": 0
   },
   "candidates": [

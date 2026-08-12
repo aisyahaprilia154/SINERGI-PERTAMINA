@@ -19,9 +19,15 @@ export function openSchematicDialog({
           <h2 class="schematic-current-title">Seluruh aset</h2>
           <p class="schematic-current-meta"></p>
         </div>
-        <button class="icon-button close-schematic" type="button" aria-label="Tutup diagram">
-          <span class="material-symbols-outlined" aria-hidden="true">close</span>
-        </button>
+        <div class="schematic-header-actions">
+          <button class="icon-button diagram-fullscreen" type="button"
+            aria-label="Buka diagram layar penuh" aria-pressed="false">
+            <span class="material-symbols-outlined" aria-hidden="true">fullscreen</span>
+          </button>
+          <button class="icon-button close-schematic" type="button" aria-label="Tutup diagram">
+            <span class="material-symbols-outlined" aria-hidden="true">close</span>
+          </button>
+        </div>
       </header>
 
       <div class="schematic-mode-bar">
@@ -67,6 +73,13 @@ export function openSchematicDialog({
             <span class="material-symbols-outlined" aria-hidden="true">restart_alt</span>
             <span>Reset tampilan</span>
           </button>
+        </div>
+        <div class="schematic-search" role="search">
+          <span class="material-symbols-outlined" aria-hidden="true">search</span>
+          <input class="diagram-search-input" type="search"
+            placeholder="Cari ID atau nama aset" aria-label="Cari aset dalam diagram"
+            autocomplete="off">
+          <div class="diagram-search-results" role="listbox" hidden></div>
         </div>
         <span class="schematic-readonly">
           <span class="material-symbols-outlined" aria-hidden="true">lock</span>
@@ -118,7 +131,12 @@ function bindDialogEvents({
   onSelectAsset,
 }) {
   const board = dialog.querySelector('.schematic-board')
+  const content = dialog.querySelector('.schematic-content')
+  const summary = dialog.querySelector('.schematic-summary')
   const zoomLabel = dialog.querySelector('.diagram-zoom-level')
+  const fullscreenButton = dialog.querySelector('.diagram-fullscreen')
+  const searchInput = dialog.querySelector('.diagram-search-input')
+  const searchResults = dialog.querySelector('.diagram-search-results')
   const exportStatus = dialog.querySelector('.schematic-export-status')
   const exportSvgButton = dialog.querySelector('.export-svg')
   const exportPngButton = dialog.querySelector('.export-png')
@@ -132,6 +150,8 @@ function bindDialogEvents({
       : 'all-assets'
   let currentSelectedAssetId = selectedAssetId
   let zoom = 1
+  let fallbackFullscreen = false
+  let panState = null
 
   const getCurrentDiagram = () => diagrams[currentMode]
   const getCurrentSvg = () => board.querySelector('.schematic-svg')
@@ -171,10 +191,32 @@ function bindDialogEvents({
     board.scrollTo({ top: 0, left: 0 })
   }
 
+  const centerNode = (assetId) => {
+    const current = getCurrentDiagram()
+    const node = current?.layout?.nodes?.find((item) => item.id === assetId)
+    if (!node) return
+    // Hasil pencarian harus cukup besar untuk dikenali, terutama ketika
+    // keseluruhan diagram sedang dipasang ke viewport pada skala yang kecil.
+    zoom = Math.max(zoom, .75)
+    applyZoom()
+    const available = availableViewport()
+    const centerX = (node.diagram.x + node.diagram.width / 2) * zoom
+    const centerY = (node.diagram.y + node.diagram.height / 2) * zoom
+    board.scrollTo({
+      left: Math.max(0, centerX - available.width / 2),
+      top: Math.max(0, centerY - available.height / 2),
+      behavior: 'smooth',
+    })
+  }
+
   const positionAtFocus = () => {
     const current = getCurrentDiagram()
     const svg = getCurrentSvg()
     if (!current || !svg) return
+    if (current.graph.mode === 'all-assets') {
+      board.scrollTo({ top: 0, left: 0 })
+      return
+    }
     const focusId = current.layout.focusNodeId || current.graph.anchorAssetId
     const focus = current.layout.nodes.find((node) => node.id === focusId)
     if (!focus) return
@@ -196,6 +238,14 @@ function bindDialogEvents({
       .find((node) => node.dataset.assetId === assetId)
     selectedNode?.classList.add('selected')
     currentSelectedAssetId = assetId
+    const current = getCurrentDiagram()
+    if (current?.graph.status === 'ready') {
+      summary.innerHTML = renderDiagramSummary(
+        current.graph,
+        current.layout,
+        currentSelectedAssetId,
+      )
+    }
     onSelectAsset?.(assetId)
   }
 
@@ -232,8 +282,10 @@ function bindDialogEvents({
         </div>`
       : renderDiagramState(graph)
 
-    dialog.querySelector('.schematic-summary').innerHTML = ready
-      ? renderDiagramSummary(graph, current.layout)
+    content.dataset.schematicMode = graph.mode
+    summary.hidden = !ready
+    summary.innerHTML = ready
+      ? renderDiagramSummary(graph, current.layout, currentSelectedAssetId)
       : ''
 
     dialog.querySelectorAll('[data-schematic-mode]').forEach((button) => {
@@ -247,7 +299,9 @@ function bindDialogEvents({
     exportSvgButton.disabled = !ready
     exportPngButton.disabled = !ready
     exportStatus.textContent = ''
-    zoom = current.layout.defaultZoom ?? (graph.mode === 'selected' ? 1 : .62)
+    zoom = graph.mode === 'all-assets'
+      ? fitScale()
+      : current.layout.defaultZoom ?? (graph.mode === 'selected' ? 1 : .62)
     applyZoom()
     positionAtFocus()
     requestAnimationFrame(positionAtFocus)
@@ -263,11 +317,11 @@ function bindDialogEvents({
     })
   })
   dialog.querySelector('.diagram-zoom-in').addEventListener('click', () => {
-    zoom = Math.min(2, zoom + .2)
+    zoom = Math.min(2.5, zoom + .15)
     applyZoom()
   })
   dialog.querySelector('.diagram-zoom-out').addEventListener('click', () => {
-    zoom = Math.max(.6, zoom - .2)
+    zoom = Math.max(.2, zoom - .15)
     applyZoom()
   })
   dialog.querySelector('.diagram-zoom-level').addEventListener('click', fitDiagram)
@@ -293,6 +347,101 @@ function bindDialogEvents({
     selectDiagramAsset(node.dataset.assetId)
   })
 
+  board.addEventListener('wheel', (event) => {
+    if (!isCurrentReady()) return
+    event.preventDefault()
+    const rect = board.getBoundingClientRect()
+    const pointerX = event.clientX - rect.left
+    const pointerY = event.clientY - rect.top
+    const sourceX = (board.scrollLeft + pointerX) / zoom
+    const sourceY = (board.scrollTop + pointerY) / zoom
+    zoom = Math.max(.2, Math.min(2.5, zoom + (event.deltaY < 0 ? .1 : -.1)))
+    applyZoom()
+    board.scrollLeft = Math.max(0, sourceX * zoom - pointerX)
+    board.scrollTop = Math.max(0, sourceY * zoom - pointerY)
+  }, { passive: false })
+
+  board.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || event.target.closest('.diagram-node')) return
+    panState = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      left: board.scrollLeft,
+      top: board.scrollTop,
+    }
+    board.setPointerCapture(event.pointerId)
+    board.classList.add('is-panning')
+  })
+  board.addEventListener('pointermove', (event) => {
+    if (!panState || event.pointerId !== panState.pointerId) return
+    board.scrollLeft = panState.left - (event.clientX - panState.x)
+    board.scrollTop = panState.top - (event.clientY - panState.y)
+  })
+  const endPan = (event) => {
+    if (!panState || event.pointerId !== panState.pointerId) return
+    panState = null
+    board.classList.remove('is-panning')
+  }
+  board.addEventListener('pointerup', endPan)
+  board.addEventListener('pointercancel', endPan)
+
+  searchInput.addEventListener('input', () => {
+    renderSearchResults({
+      query: searchInput.value,
+      nodes: getCurrentDiagram()?.layout?.nodes ?? [],
+      container: searchResults,
+    })
+  })
+  searchInput.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return
+    const first = searchResults.querySelector('[data-search-asset-id]')
+    if (!first) return
+    event.preventDefault()
+    first.click()
+  })
+  searchResults.addEventListener('click', (event) => {
+    const option = event.target.closest('[data-search-asset-id]')
+    if (!option) return
+    const assetId = option.dataset.searchAssetId
+    selectDiagramAsset(assetId)
+    centerNode(assetId)
+    searchInput.value = option.dataset.searchLabel || searchInput.value
+    searchResults.hidden = true
+  })
+  searchInput.addEventListener('blur', () => {
+    window.setTimeout(() => { searchResults.hidden = true }, 120)
+  })
+
+  const syncFullscreenButton = () => {
+    const active = document.fullscreenElement === dialog || fallbackFullscreen
+    fullscreenButton.setAttribute('aria-pressed', String(active))
+    fullscreenButton.setAttribute(
+      'aria-label',
+      active ? 'Keluar dari layar penuh' : 'Buka diagram layar penuh',
+    )
+    fullscreenButton.querySelector('.material-symbols-outlined').textContent = active
+      ? 'fullscreen_exit'
+      : 'fullscreen'
+    requestAnimationFrame(fitDiagram)
+  }
+  fullscreenButton.addEventListener('click', async () => {
+    try {
+      if (document.fullscreenElement === dialog) await document.exitFullscreen()
+      else if (dialog.requestFullscreen) await dialog.requestFullscreen()
+      else {
+        fallbackFullscreen = !fallbackFullscreen
+        dialog.classList.toggle('schematic-dialog-fullscreen', fallbackFullscreen)
+        syncFullscreenButton()
+      }
+    } catch {
+      fallbackFullscreen = !fallbackFullscreen
+      dialog.classList.toggle('schematic-dialog-fullscreen', fallbackFullscreen)
+      syncFullscreenButton()
+    }
+  })
+  document.addEventListener('fullscreenchange', syncFullscreenButton)
+
   exportSvgButton.addEventListener('click', () => {
     const current = getCurrentDiagram()
     const svg = getCurrentSvg()
@@ -316,7 +465,11 @@ function bindDialogEvents({
     }
   })
 
-  dialog.addEventListener('close', () => dialog.remove())
+  dialog.addEventListener('close', () => {
+    document.removeEventListener('fullscreenchange', syncFullscreenButton)
+    if (document.fullscreenElement === dialog) document.exitFullscreen()?.catch?.(() => {})
+    dialog.remove()
+  })
   dialog.addEventListener('click', (event) => {
     if (event.target === dialog) dialog.close()
   })
@@ -338,13 +491,42 @@ function renderDiagramState(graph) {
   `
 }
 
-function renderDiagramSummary(graph, layout) {
+function renderSearchResults({ query, nodes, container }) {
+  const normalized = String(query || '').trim().toLowerCase()
+  if (!normalized) {
+    container.hidden = true
+    container.innerHTML = ''
+    return
+  }
+  const matches = nodes.filter((node) => (
+    `${node.id} ${node.name} ${node.type}`.toLowerCase().includes(normalized)
+  )).slice(0, 8)
+  container.innerHTML = matches.length
+    ? matches.map((node) => `
+      <button type="button" role="option" data-search-asset-id="${escapeHtml(node.id)}"
+        data-search-label="${escapeHtml(node.name || node.id)}">
+        <strong>${escapeHtml(node.name || node.id)}</strong>
+        <small>${escapeHtml(node.type || 'Aset')} · ${escapeHtml(resolutionText(node.resolutionStatus))}</small>
+      </button>
+    `).join('')
+    : '<p>Tidak ada aset yang cocok.</p>'
+  container.hidden = false
+}
+
+function renderDiagramSummary(graph, layout, selectedAssetId = null) {
   const counts = graph.categorySummary || layout.nodes.reduce((summary, node) => {
     const label = node.type || 'Aset lainnya'
     summary[label] = (summary[label] || 0) + 1
     return summary
   }, {})
   const isolatedCount = graph.isolatedNodeIds?.length || 0
+  const diagnostics = graph.diagnostics
+  const selectedNode = layout.nodes.find((node) => node.id === selectedAssetId)
+  const selectedEdges = selectedNode
+    ? graph.edges.filter((edge) => (
+      edge.sourceId === selectedNode.id || edge.targetId === selectedNode.id
+    ))
+    : []
   return `
     <section class="schematic-summary-card">
       <h3>Ringkasan aset</h3>
@@ -352,21 +534,73 @@ function renderDiagramSummary(graph, layout) {
         <li><span>${escapeHtml(label)}</span><strong>${count}</strong></li>
       `).join('')}</ul>
       <div class="schematic-summary-total"><span>Total aset</span><strong>${layout.nodes.length}</strong></div>
-      <div class="schematic-summary-total"><span>Total koneksi</span><strong>${graph.relationCount ?? layout.edges.length}</strong></div>
+      <div class="schematic-summary-total"><span>Total edge evidence</span><strong>${layout.edges.length}</strong></div>
     </section>
-    ${graph.mode === 'all-assets' ? `
+    ${diagnostics ? `
+      <section class="schematic-summary-card topology-diagnostics">
+        <h3>Diagnostik topologi</h3>
+        <ul>
+          <li><span>Evidence confirmed</span><strong>${diagnostics.confirmedNodeCount}</strong></li>
+          <li><span>Rekomendasi kuat</span><strong>${diagnostics.recommendedNodeCount}</strong></li>
+          <li><span>Perlu ditinjau</span><strong>${diagnostics.reviewNodeCount}</strong></li>
+          <li><span>Tanpa evidence</span><strong>${diagnostics.unresolvedNodeCount}</strong></li>
+          <li><span>Edge confirmed</span><strong>${diagnostics.confirmedEdgeCount}</strong></li>
+          <li><span>Edge rekomendasi</span><strong>${diagnostics.recommendedEdgeCount}</strong></li>
+        </ul>
+        ${diagnostics.candidateLoadError ? `
+          <p class="schematic-diagnostic-warning">Kandidat tidak dapat dimuat: ${escapeHtml(diagnostics.candidateLoadError)}</p>
+        ` : ''}
+      </section>
+    ` : ''}
+    ${selectedNode ? `
+      <section class="schematic-summary-card selected-evidence-card">
+        <h3>Evidence aset terpilih</h3>
+        <p><strong>${escapeHtml(selectedNode.name || selectedNode.id)}</strong><br>
+          ${escapeHtml(selectedNode.type || 'Aset')} · ${escapeHtml(resolutionText(selectedNode.resolutionStatus))}</p>
+        <ul>${selectedEdges.length ? selectedEdges.map((edge) => `
+          <li class="schematic-evidence-item">
+            <span>${escapeHtml(edge.relationType || 'Relasi')}<small>${escapeHtml(edge.relationSource || 'explicit')}</small></span>
+            <strong>${Number.isFinite(edge.confidence) ? `${Math.round(edge.confidence * 100)}%` : edge.relationStatus}</strong>
+          </li>
+        `).join('') : '<li><span>Belum ada edge yang dapat dipertanggungjawabkan.</span></li>'}</ul>
+      </section>
+    ` : ''}
+    ${diagnostics && (diagnostics.reviewNodes.length || diagnostics.unresolvedNodes.length) ? `
+      <section class="schematic-summary-card unresolved-detail-card">
+        <div class="schematic-summary-card-heading"><h3>Perlu tindak lanjut</h3><strong>${diagnostics.reviewNodes.length + diagnostics.unresolvedNodes.length}</strong></div>
+        <ul>
+          ${diagnostics.reviewNodes.map((node) => `
+            <li><span>${escapeHtml(node.name)}<small>Konfirmasi Koneksi · ${node.candidateCount} kandidat</small></span><strong>Review</strong></li>
+          `).join('')}
+          ${diagnostics.unresolvedNodes.map((node) => `
+            <li><span>${escapeHtml(node.name)}<small>${escapeHtml(node.type || 'Aset')}</small></span><strong>Unresolved</strong></li>
+          `).join('')}
+        </ul>
+      </section>
+    ` : graph.mode === 'all-assets' ? `
       <section class="schematic-summary-card ${isolatedCount ? '' : 'is-clear'}">
-        <div class="schematic-summary-card-heading"><h3>Aset tanpa relasi</h3><strong>${isolatedCount}</strong></div>
-        <p>${isolatedCount ? `${isolatedCount} aset tidak memiliki koneksi terkonfirmasi.` : 'Tidak ada aset tanpa relasi.'}</p>
+        <h3>Evidence lengkap</h3><p>Semua aset memiliki evidence topologi yang dapat dipertanggungjawabkan.</p>
       </section>
     ` : ''}
   `
+}
+
+function resolutionText(status) {
+  if (status === 'confirmed') return 'Evidence terkonfirmasi'
+  if (status === 'recommended') return 'Rekomendasi kuat'
+  if (status === 'review') return 'Perlu Konfirmasi Koneksi'
+  return 'Belum ada evidence'
 }
 
 function formatDiagramMeta(graph, layout, context) {
   if (graph.mode === 'selected') {
     return `${graph.neighborCount ?? Math.max(0, layout.nodes.length - 1)} aset terhubung langsung · `
       + `${context.branchName} · Dataset ${context.version} · Read-only`
+  }
+  if (graph.mode === 'all-assets' && graph.diagnostics) {
+    return `${layout.nodes.length} aset · ${graph.diagnostics.confirmedEdgeCount} edge evidence · `
+      + `${graph.diagnostics.recommendedEdgeCount} rekomendasi kuat · ${context.branchName} · `
+      + `Dataset ${context.version} · Read-only`
   }
   return `${layout.nodes.length} aset · ${graph.relationCount ?? layout.edges.length} `
     + `koneksi terkonfirmasi · ${context.branchName} · Dataset ${context.version} · Read-only`

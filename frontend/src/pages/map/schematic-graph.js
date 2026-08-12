@@ -10,6 +10,7 @@ export function buildSchematicGraph({
   assets,
   networks,
   topologyGraph = null,
+  topologyCandidates = [],
   selectedNetworkIds = [],
   focusedAssetId = null,
   tracePath = [],
@@ -42,6 +43,10 @@ export function buildSchematicGraph({
   )
   const topologyAssets = () => uniqueIds([...topologyNodeIds])
     .filter((assetId) => assetById.has(assetId))
+  const evidenceEdges = buildDiagramEvidenceEdges({
+    candidates: topologyCandidates,
+    assetById,
+  })
 
   let mode = 'network'
   let anchorAssetId = null
@@ -91,9 +96,10 @@ export function buildSchematicGraph({
   } else if (scope === 'all-assets') {
     mode = 'all-assets'
     nodeIds = uniqueIds(assets.map(({ id }) => id))
-    sourceEdges = hasTopology
-      ? topologyEdges
-      : networks.flatMap((network) =>
+    sourceEdges = [
+      ...(hasTopology
+        ? topologyEdges
+        : networks.flatMap((network) =>
         (network.edges || []).map(([sourceId, targetId], index) => ({
           sourceId,
           targetId,
@@ -102,7 +108,9 @@ export function buildSchematicGraph({
           relationSource: 'explicit',
           order: index,
         })),
-      )
+        )),
+      ...evidenceEdges,
+    ]
     anchorAssetId = chooseCoreAnchor(nodeIds, sourceEdges, assetById)
   } else if (scope === 'full-map') {
     mode = 'full-map'
@@ -190,11 +198,19 @@ export function buildSchematicGraph({
         sourceId: edge.sourceId,
         targetId: edge.targetId,
         networkId: edge.networkId || null,
-        networkName: network?.shortName || network?.name || 'Topologi terkonfirmasi',
-        networkColor: network?.color || null,
-        networkType: network?.type || 'Relasi',
+        networkName: edge.networkName
+          || network?.shortName
+          || network?.name
+          || 'Topologi terkonfirmasi',
+        networkColor: edge.networkColor || network?.color || null,
+        networkType: edge.networkType || network?.type || 'Relasi',
         relationType: edge.relationType || 'explicit-network-edge',
         relationSource: edge.relationSource || 'explicit',
+        relationStatus: edge.relationStatus || 'confirmed',
+        confidence: edge.confidence ?? null,
+        distanceMeters: edge.distanceMeters ?? null,
+        candidateId: edge.candidateId ?? null,
+        evidence: edge.evidence ?? [],
         sourceGeometryId: edge.sourceGeometryId,
         sourceGeometryIds: edge.sourceGeometryIds ?? [],
         pathAssetIds: edge.pathAssetIds ?? [],
@@ -202,8 +218,14 @@ export function buildSchematicGraph({
       }
     })
 
+  const evidenceByNode = buildNodeEvidenceIndex({
+    nodeIds,
+    edges,
+    candidates: topologyCandidates,
+  })
   const nodes = nodeIds.map((assetId, index) => {
     const asset = assetById.get(assetId)
+    const nodeEvidence = evidenceByNode.get(assetId)
     return {
       id: asset.id,
       assetId: asset.id,
@@ -217,10 +239,16 @@ export function buildSchematicGraph({
       sourcePosition: getSourceDisplayPosition(asset),
       isAnchor: asset.id === anchorAssetId,
       isConnector: isConnectorType(asset.type),
+      resolutionStatus: nodeEvidence?.resolutionStatus ?? 'unresolved',
+      evidenceCount: nodeEvidence?.evidenceCount ?? 0,
+      candidateCount: nodeEvidence?.candidateCount ?? 0,
       order: mode === 'trace' ? index : null,
     }
   })
 
+  const diagnostics = mode === 'all-assets'
+    ? buildDiagramDiagnostics(nodes, edges)
+    : null
   return {
     status: 'ready',
     mode,
@@ -236,8 +264,172 @@ export function buildSchematicGraph({
         edge.sourceId === node.id || edge.targetId === node.id
       ))).map((node) => node.id)
       : [],
+    ...(diagnostics ? { diagnostics } : {}),
     title: getDiagramTitle(mode, nodes, networkById, selectedIds),
   }
+}
+
+export function buildDiagramEvidenceEdges({ candidates = [], assetById = new Map() } = {}) {
+  const edges = []
+  candidates.forEach((candidate) => {
+    const relationStatus = diagramCandidateStatus(candidate)
+    if (!relationStatus) return
+    const shared = {
+      candidateId: candidate.candidateId,
+      networkId: candidate.networkFamily
+        ? `evidence:${candidate.networkFamily}`
+        : 'evidence:unknown',
+      networkName: networkFamilyLabel(candidate.networkFamily),
+      networkType: candidate.networkFamily || 'Relasi',
+      relationType: candidate.candidateType || candidate.relationKind || 'spatial-evidence',
+      relationSource: candidate.candidateType || 'spatial_inference',
+      relationStatus,
+      confidence: Number.isFinite(candidate.score) ? candidate.score : null,
+      distanceMeters: Number.isFinite(candidate.distanceMeters)
+        ? candidate.distanceMeters
+        : null,
+      sourceGeometryIds: candidate.sourceGeometryIds ?? [],
+      pathAssetIds: [candidate.sourcePathAssetId, candidate.targetPathAssetId].filter(Boolean),
+      evidence: candidate.evidence ?? [],
+    }
+
+    if (candidate.relationKind === 'device_edge') {
+      if (relationStatus !== 'recommended') return
+      addEvidenceEdge(edges, assetById, {
+        ...shared,
+        sourceId: candidate.sourceAssetId ?? candidate.sourcePathAssetId,
+        targetId: candidate.targetAssetId,
+      })
+      return
+    }
+
+    if (candidate.relationKind === 'path_continuation') {
+      addEvidenceEdge(edges, assetById, {
+        ...shared,
+        sourceId: candidate.sourcePathAssetId,
+        targetId: candidate.targetPathAssetId ?? candidate.targetAssetId,
+      })
+      return
+    }
+
+    if (candidate.relationKind === 'path_attachment') {
+      addEvidenceEdge(edges, assetById, {
+        ...shared,
+        sourceId: candidate.sourcePathAssetId,
+        targetId: candidate.targetAssetId,
+      })
+      if (candidate.targetPathAssetId) {
+        addEvidenceEdge(edges, assetById, {
+          ...shared,
+          idSuffix: 'target-path',
+          sourceId: candidate.targetPathAssetId,
+          targetId: candidate.targetAssetId,
+        })
+      }
+    }
+  })
+  return deduplicateEvidenceEdges(edges)
+}
+
+function addEvidenceEdge(edges, assetById, edge) {
+  if (!edge.sourceId || !edge.targetId || edge.sourceId === edge.targetId) return
+  if (!assetById.has(edge.sourceId) || !assetById.has(edge.targetId)) return
+  edges.push({
+    ...edge,
+    id: `${edge.candidateId || 'evidence'}:${edge.idSuffix || edges.length}`,
+  })
+}
+
+function diagramCandidateStatus(candidate) {
+  if (candidate.candidateStatus === 'confirmed') return 'confirmed'
+  if (candidate.candidateStatus === 'candidate' && candidate.proposalStatus === 'recommended') {
+    return 'recommended'
+  }
+  return null
+}
+
+function buildNodeEvidenceIndex({ nodeIds, edges, candidates }) {
+  const included = new Set(nodeIds)
+  const index = new Map(nodeIds.map((id) => [id, {
+    resolutionStatus: 'unresolved',
+    evidenceCount: 0,
+    candidateCount: 0,
+  }]))
+  edges.forEach((edge) => {
+    for (const id of [edge.sourceId, edge.targetId]) {
+      const item = index.get(id)
+      if (!item) continue
+      item.evidenceCount += Math.max(1, edge.evidence?.length ?? 0)
+      if (edge.relationStatus === 'confirmed') item.resolutionStatus = 'confirmed'
+      else if (item.resolutionStatus !== 'confirmed') item.resolutionStatus = 'recommended'
+    }
+  })
+  ;(candidates ?? []).forEach((candidate) => {
+    const ids = candidateAssetIds(candidate).filter((id) => included.has(id))
+    ids.forEach((id) => {
+      const item = index.get(id)
+      item.candidateCount += 1
+      if (item.resolutionStatus === 'unresolved') item.resolutionStatus = 'review'
+    })
+  })
+  return index
+}
+
+function candidateAssetIds(candidate) {
+  return uniqueIds([
+    candidate.sourceAssetId,
+    candidate.sourcePathAssetId,
+    candidate.targetAssetId,
+    candidate.targetPathAssetId,
+  ].filter(Boolean))
+}
+
+function buildDiagramDiagnostics(nodes, edges) {
+  const countStatus = (status) => nodes.filter((node) => node.resolutionStatus === status).length
+  const physicalEdges = edges.filter((edge) => edge.relationStatus === 'confirmed')
+  const recommendedEdges = edges.filter((edge) => edge.relationStatus === 'recommended')
+  const unresolvedNodes = nodes.filter((node) => node.resolutionStatus === 'unresolved')
+  const reviewNodes = nodes.filter((node) => node.resolutionStatus === 'review')
+  return {
+    totalAssetCount: nodes.length,
+    confirmedNodeCount: countStatus('confirmed'),
+    recommendedNodeCount: countStatus('recommended'),
+    reviewNodeCount: reviewNodes.length,
+    unresolvedNodeCount: unresolvedNodes.length,
+    confirmedEdgeCount: physicalEdges.length,
+    recommendedEdgeCount: recommendedEdges.length,
+    unresolvedNodes: unresolvedNodes.map((node) => ({
+      assetId: node.id,
+      name: node.name,
+      type: node.type,
+      reason: 'no_supported_evidence',
+    })),
+    reviewNodes: reviewNodes.map((node) => ({
+      assetId: node.id,
+      name: node.name,
+      type: node.type,
+      reason: 'candidate_requires_review',
+      candidateCount: node.candidateCount,
+    })),
+  }
+}
+
+function deduplicateEvidenceEdges(edges) {
+  const seen = new Set()
+  return edges.filter((edge) => {
+    const key = [edge.relationStatus, ...[edge.sourceId, edge.targetId].sort()].join('|')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function networkFamilyLabel(value) {
+  const normalized = String(value || '').toLowerCase()
+  if (normalized === 'fiber_optic') return 'Fiber Optic (evidence)'
+  if (normalized === 'lan') return 'LAN (evidence)'
+  if (normalized === 'cctv') return 'CCTV (evidence)'
+  return 'Evidence topologi'
 }
 
 function buildTraceEdges(tracePath, traceRelations, networks) {

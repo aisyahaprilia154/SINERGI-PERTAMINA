@@ -260,6 +260,76 @@ test('all-assets scope includes isolated assets outside the confirmed topology g
   assert.equal(graph.title, 'Seluruh aset')
 })
 
+test('all-assets evidence graph keeps path nodes, strong recommendations, review, and unresolved separate', () => {
+  const evidenceAssets = [
+    { id: 'device-confirmed', name: 'C-001', type: 'CCTV' },
+    { id: 'path-1', name: 'C-001_JB-001', type: 'Rekomendasi' },
+    { id: 'device-recommended', name: 'JB-001', type: 'Junction box' },
+    { id: 'device-review', name: 'C-002', type: 'CCTV' },
+    { id: 'device-unresolved', name: 'C-003', type: 'CCTV' },
+  ]
+  const graph = buildSchematicGraph({
+    assets: evidenceAssets,
+    networks: [],
+    topologyGraph: { nodes: [], edges: [] },
+    topologyCandidates: [
+      {
+        candidateId: 'confirmed-attachment',
+        sourcePathAssetId: 'path-1',
+        targetAssetId: 'device-confirmed',
+        relationKind: 'path_attachment',
+        candidateType: 'endpoint_device',
+        candidateStatus: 'confirmed',
+        proposalStatus: 'confirmed_by_admin',
+        score: .96,
+        evidence: [{ ruleId: 'endpoint.within-search-radius' }],
+      },
+      {
+        candidateId: 'recommended-attachment',
+        sourcePathAssetId: 'path-1',
+        targetAssetId: 'device-recommended',
+        relationKind: 'path_attachment',
+        candidateType: 'endpoint_device',
+        candidateStatus: 'candidate',
+        proposalStatus: 'recommended',
+        score: .91,
+        evidence: [{ ruleId: 'endpoint.within-search-radius' }],
+      },
+      {
+        candidateId: 'ambiguous-attachment',
+        sourcePathAssetId: 'path-1',
+        targetAssetId: 'device-review',
+        relationKind: 'path_attachment',
+        candidateType: 'endpoint_device',
+        candidateStatus: 'ambiguous',
+        proposalStatus: 'ambiguous',
+        score: .71,
+      },
+    ],
+    scope: 'all-assets',
+  })
+
+  assert.equal(graph.edges.length, 2)
+  assert.deepEqual(
+    graph.edges.map(({ relationStatus }) => relationStatus).sort(),
+    ['confirmed', 'recommended'],
+  )
+  assert.equal(graph.nodes.find(({ id }) => id === 'path-1').resolutionStatus, 'confirmed')
+  assert.equal(
+    graph.nodes.find(({ id }) => id === 'device-recommended').resolutionStatus,
+    'recommended',
+  )
+  assert.equal(graph.nodes.find(({ id }) => id === 'device-review').resolutionStatus, 'review')
+  assert.equal(
+    graph.nodes.find(({ id }) => id === 'device-unresolved').resolutionStatus,
+    'unresolved',
+  )
+  assert.equal(graph.diagnostics.unresolvedNodeCount, 1)
+  assert.equal(graph.diagnostics.reviewNodeCount, 1)
+  assert.equal(graph.diagnostics.confirmedEdgeCount, 1)
+  assert.equal(graph.diagnostics.recommendedEdgeCount, 1)
+})
+
 test('trace scope returns a clear empty state before tracing exists', () => {
   const graph = buildSchematicGraph({
     assets,
