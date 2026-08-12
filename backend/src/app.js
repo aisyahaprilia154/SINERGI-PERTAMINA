@@ -658,15 +658,37 @@ export function createApp({
       if (identityAssignmentsMatch) {
         const user = requireAdministrator(request, authenticator)
         const body = await readJsonBody(request)
-        return sendJson(
-          response,
-          200,
-          await lifecycleService.assignIdentityAssignments(identityAssignmentsMatch[1], user.id, {
+        const datasetVersionId = identityAssignmentsMatch[1]
+        const assignmentResult = await lifecycleService.assignIdentityAssignments(
+          datasetVersionId,
+          user.id,
+          {
             assignments: body.assignments,
             expectedRecordRevision: normalizeExpectedRecordRevision(body),
             idempotencyKey: request.headers['idempotency-key'] ?? null,
             correlationId,
-          }),
+          },
+        )
+        if (!topologyService || !jobQueue || assignmentResult?.state !== 'updated') {
+          return sendJson(response, 200, assignmentResult)
+        }
+        const topologyRegeneration = await queueIdentityDrivenTopologyRegeneration({
+          datasetVersionId,
+          actorId: user.id,
+          assignmentAuditEventId: assignmentResult.auditEventId,
+          correlationId,
+          repository,
+          auditLog,
+          jobQueue,
+          topologyService,
+        })
+        return sendJson(
+          response,
+          topologyRegeneration.deduplicated ? 200 : 202,
+          {
+            ...assignmentResult,
+            topologyRegeneration,
+          },
         )
       }
       const activationMatch = request.method === 'POST'
@@ -848,6 +870,80 @@ function assertDurableJobQueue(jobQueue) {
       code: 'durable_job_queue_unavailable',
       statusCode: 503,
     })
+  }
+}
+
+async function queueIdentityDrivenTopologyRegeneration({
+  datasetVersionId,
+  actorId,
+  assignmentAuditEventId,
+  correlationId,
+  repository,
+  auditLog,
+  jobQueue,
+  topologyService,
+}) {
+  assertTopologyService(topologyService)
+  assertDurableJobQueue(jobQueue)
+  const current = await repository.get(datasetVersionId)
+  const reason = normalizeTopologyRegenerationReason(
+    'Identity assignment disahkan; topology wajib diregenerasi sebelum review relasi dilanjutkan.',
+  )
+  const fingerprintInput = JSON.stringify({
+    datasetVersionId,
+    recordRevision: Number.isInteger(current.recordRevision)
+      ? current.recordRevision
+      : 0,
+    topologyGeneratedAt: current.topologyGeneratedAt ?? null,
+    reason,
+    assignmentAuditEventId: assignmentAuditEventId ?? null,
+  })
+  const inputFingerprint = `sha256:${createHash('sha256')
+    .update(fingerprintInput)
+    .digest('hex')}`
+  const idempotencyKey = `regenerate:identity:${createHash('sha256')
+    .update(`${assignmentAuditEventId ?? 'unknown'}|${inputFingerprint}`)
+    .digest('hex')}`
+  const queuedJob = await jobQueue.enqueue({
+    jobType: 'regenerate_full_topology',
+    datasetVersionId,
+    inputFingerprint,
+    ruleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+    idempotencyKey,
+    payload: {
+      actorId,
+      reason,
+      correlationId,
+      trigger: 'identity_assignment',
+      assignmentAuditEventId: assignmentAuditEventId ?? null,
+    },
+    handler: createFullTopologyRegenerationJobHandler(topologyService),
+  })
+  await auditLog.record('topology.regeneration_queued', {
+    actorId,
+    datasetVersionId,
+    branchId: current.datasetVersion?.branchId ?? null,
+    correlationId,
+    outcome: queuedJob.deduplicated ? 'deduplicated' : 'queued',
+    details: {
+      jobId: queuedJob.jobId,
+      jobType: queuedJob.jobType,
+      inputFingerprint,
+      idempotencyKey,
+      reason,
+      trigger: 'identity_assignment',
+      assignmentAuditEventId: assignmentAuditEventId ?? null,
+      graphRevision: current.topologyGraph?.graphRevision ?? null,
+    },
+  })
+  return {
+    status: 'queued',
+    deduplicated: queuedJob.deduplicated === true,
+    job: await jobQueue.getPublic(queuedJob.jobId),
+    statusUrl: `/api/admin/jobs/${queuedJob.jobId}`,
+    message: queuedJob.deduplicated
+      ? 'Regenerasi topology untuk identity assignment tersebut sudah berada di durable queue.'
+      : 'Identity assignment diterima; regenerasi topology otomatis diantrekan.',
   }
 }
 

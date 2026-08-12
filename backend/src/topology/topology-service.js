@@ -9,6 +9,8 @@ import {
 } from '../domain/parser-contract.js'
 import {
   createManualExplicitCandidate,
+  createTopologyCandidateEligibilityContext,
+  evaluateTopologyCandidateEligibility,
   generateRelationArtifacts,
   normalizeTopologySummary,
   rebuildConfirmedRelationArtifacts,
@@ -160,6 +162,16 @@ export class TopologyService {
       validation: record.topologyValidation ?? null,
       lastGeneratedAt: record.topologyGeneratedAt ?? null,
       graphRevision: graph.graphRevision,
+      reviewCapabilities: {
+        contractVersion: '2.0.0',
+        safePreview: true,
+        deltaValidation: true,
+        confirmSelected: true,
+        confirmAll: true,
+        confirmLineLabels: true,
+        manualRelation: true,
+        maxBatchSize: MAX_SELECTED_CANDIDATE_IDS,
+      },
       roots: verifiedRootNodes(graph).map(({ id, topologyRole }) => ({
         assetId: id,
         topologyRole: topologyRole ?? 'unknown',
@@ -186,19 +198,31 @@ export class TopologyService {
       })
     }
     const normalizedQuery = normalizeCandidateQuery(query ?? {})
+    const eligibilityContext = createTopologyCandidateEligibilityContext(
+      record.topologyInputBundle,
+    )
     const page = paginateCandidates(index, {
       ...normalizedQuery,
       graphRevision: graph.graphRevision,
       candidateRevision,
     })
+    const reviewItems = page.items.map((candidate) => (
+      annotateTopologyCandidateForReview(record, candidate, eligibilityContext)
+    ))
+    const filteredReviewCandidates = page.filteredCandidates.map((candidate) => (
+      annotateTopologyCandidateForReview(record, candidate, eligibilityContext)
+    ))
+    const reviewCandidates = candidates.map((candidate) => (
+      annotateTopologyCandidateForReview(record, candidate, eligibilityContext)
+    ))
     return {
       datasetVersionId,
       topologyRuleSetVersion: record.topologyRuleSetVersion ?? null,
-      items: page.items,
+      items: reviewItems,
       nextCursor: page.nextCursor,
       pageInfo: page.pageInfo,
-      summary: summarizeCandidates(page.filteredCandidates),
-      datasetSummary: summarizeCandidates(candidates),
+      summary: summarizeCandidates(filteredReviewCandidates),
+      datasetSummary: summarizeCandidates(reviewCandidates),
       query: {
         status: normalizedQuery.status,
         site: normalizedQuery.site,
@@ -1272,6 +1296,7 @@ export class TopologyService {
             id === selected.candidateId
           ))
           assertCurrentCandidateState(currentSelected, selected.candidateStatus)
+          assertCandidateTopologyEligible(record, currentSelected)
           event = await auditLog.record('topology.candidate_target_selected', {
             actorId,
             datasetVersionId: located.datasetVersionId,
@@ -1933,6 +1958,9 @@ export class TopologyService {
           const nextCandidates = structuredClone(record.topologyCandidates ?? [])
           const current = nextCandidates.find(({ candidateId: id }) => id === candidateId)
           if (!current) throw candidateNotFound(candidateId)
+          if (action === 'confirm') {
+            assertCandidateTopologyEligible(record, current)
+          }
           const targetStatus = {
             confirm: 'confirmed',
             reject: 'rejected',
@@ -2375,6 +2403,9 @@ function bulkReviewResponse(record, {
   candidateIds = [],
   auditEventId = null,
 }) {
+  const eligibilityContext = createTopologyCandidateEligibilityContext(
+    record.topologyInputBundle,
+  )
   const changedCandidateIds = new Set(candidateIds)
   return {
     datasetVersionId: record.datasetVersion.id,
@@ -2396,10 +2427,66 @@ function bulkReviewResponse(record, {
     confirmedPathAttachmentCount: record.topologySummary?.confirmedPathAttachmentCount ?? 0,
     confirmedPathContinuationCount: record.topologySummary?.confirmedPathContinuationCount ?? 0,
     remainingRecommendedCount: (record.topologyCandidates ?? [])
-      .filter(isBulkConfirmableCandidate).length,
+      .filter((candidate) => (
+        isBulkConfirmableCandidate(candidate)
+          && candidateReviewEligibility(record, candidate, eligibilityContext).eligible
+      )).length,
     remainingLineLabelCount: (record.topologyCandidates ?? [])
-      .filter(isLineLabelConfirmableCandidate).length,
+      .filter((candidate) => (
+        isLineLabelConfirmableCandidate(candidate)
+          && candidateReviewEligibility(record, candidate, eligibilityContext).eligible
+      )).length,
     ...reviewSnapshot(record),
+  }
+}
+
+function annotateTopologyCandidateForReview(record, candidate, eligibilityContext = null) {
+  const eligibility = evaluateTopologyCandidateEligibility(
+    record.topologyInputBundle,
+    candidate,
+    eligibilityContext,
+  )
+  return {
+    ...structuredClone(candidate),
+    reviewEligibility: {
+      identityReady: eligibility.eligible,
+      confirmable: eligibility.eligible && isCandidateConfirmable(candidate),
+      code: eligibility.code,
+      message: eligibility.message,
+      recommendedAction: eligibility.eligible
+        ? null
+        : 'assign_identity_and_regenerate',
+    },
+  }
+}
+
+function candidateReviewEligibility(record, candidate, eligibilityContext = null) {
+  return evaluateTopologyCandidateEligibility(
+    record.topologyInputBundle,
+    candidate,
+    eligibilityContext,
+  )
+}
+
+function candidateReviewEligibilityReason(eligibility) {
+  if (eligibility.issues.some(({ code }) => code === 'missing_stable_asset_id')) {
+    return 'candidate_stable_asset_id_required'
+  }
+  if (eligibility.issues.some(({ code }) => code === 'topology_candidate_identity_stale')) {
+    return 'candidate_topology_identity_stale'
+  }
+  if (eligibility.issues.some(({ code }) => code === 'topology_candidate_reference_not_found')) {
+    return 'candidate_topology_reference_not_found'
+  }
+  return 'candidate_topology_object_ineligible'
+}
+
+function candidateReviewEligibilityDetails(eligibility) {
+  return {
+    code: eligibility.code,
+    message: eligibility.message,
+    issues: structuredClone(eligibility.issues),
+    recommendedAction: 'assign_identity_and_regenerate',
   }
 }
 
@@ -2407,6 +2494,9 @@ function buildBulkReviewPreview(record, candidateIds, config = {}) {
   const normalizedCandidateIds = [...candidateIds].map(String).sort()
   const candidates = record.topologyCandidates ?? []
   const byId = new Map(candidates.map((candidate) => [candidate.candidateId, candidate]))
+  const eligibilityContext = createTopologyCandidateEligibilityContext(
+    record.topologyInputBundle,
+  )
   const eligibleCandidateIds = []
   const ineligible = []
   normalizedCandidateIds.forEach((candidateId) => {
@@ -2428,6 +2518,15 @@ function buildBulkReviewPreview(record, candidateIds, config = {}) {
         candidateId,
         reason: 'proposal_not_recommended',
         currentProposalStatus: candidate.proposalStatus ?? null,
+      })
+      return
+    }
+    const reviewEligibility = candidateReviewEligibility(record, candidate, eligibilityContext)
+    if (!reviewEligibility.eligible) {
+      ineligible.push({
+        candidateId,
+        reason: candidateReviewEligibilityReason(reviewEligibility),
+        reviewEligibility: candidateReviewEligibilityDetails(reviewEligibility),
       })
       return
     }
@@ -2505,13 +2604,19 @@ function buildBulkReviewPreview(record, candidateIds, config = {}) {
   }
 
   const simulatedValidation = simulated?.topologyValidation ?? null
+  const baselineValidationIssues = record.topologyValidation?.issues ?? []
+  const simulatedValidationIssues = classifyReviewValidationIssues(
+    baselineValidationIssues,
+    simulatedValidation?.issues ?? [],
+  )
   const validationIssues = [
-    ...(simulatedValidation?.issues ?? []),
+    ...simulatedValidationIssues,
     ...conflicts.map((conflict) => ({
       severity: 'error',
       issueCode: conflict.reason,
       entityReference: conflict.candidateIds.join('|'),
       details: conflict,
+      reviewImpact: 'introduced',
     })),
   ]
   if (simulationError) {
@@ -2519,24 +2624,47 @@ function buildBulkReviewPreview(record, candidateIds, config = {}) {
       severity: 'error',
       issueCode: 'review_preview_build_failed',
       message: simulationError.message,
+      reviewImpact: 'introduced',
     })
   } else if (eligibleCandidateIds.length > 0 && !simulated) {
     validationIssues.push({
       severity: 'error',
       issueCode: 'review_preview_input_unavailable',
       message: 'Topology input bundle belum tersedia untuk dry-run review.',
+      reviewImpact: 'introduced',
     })
   }
+  const blockingValidationIssues = validationIssues.filter(({ severity, reviewImpact }) => (
+    severity === 'error' && reviewImpact !== 'baseline'
+  ))
+  const baselineErrorCount = validationIssues.filter(({ severity, reviewImpact }) => (
+    severity === 'error' && reviewImpact === 'baseline'
+  )).length
+  const introducedWarningCount = validationIssues.filter(({ severity, reviewImpact }) => (
+    severity === 'warning' && reviewImpact !== 'baseline'
+  )).length
+  const baselineWarningCount = validationIssues.filter(({ severity, reviewImpact }) => (
+    severity === 'warning' && reviewImpact === 'baseline'
+  )).length
   const validationSummary = {
-    errors: validationIssues.filter(({ severity }) => severity === 'error').length,
+    errors: blockingValidationIssues.length,
     warnings: validationIssues.filter(({ severity }) => severity === 'warning').length,
     total: validationIssues.length,
+    introducedErrors: blockingValidationIssues.length,
+    introducedWarnings: introducedWarningCount,
+    baselineErrors: baselineErrorCount,
+    baselineWarnings: baselineWarningCount,
   }
   const beforeConfirmedRelationCount = (record.confirmedRelations ?? [])
     .filter(({ verificationStatus }) => verificationStatus === 'confirmed').length
   const afterConfirmedRelationCount = (simulated?.confirmedRelations ?? [])
     .filter(({ verificationStatus }) => verificationStatus === 'confirmed').length
   const predictedGraph = simulated?.topologyGraph ?? beforeGraph
+  const conflictingCandidateIds = new Set(conflicts.flatMap(({ candidateIds }) => candidateIds))
+  const blockingReasonCodes = [...new Set([
+    ...ineligible.map(({ reason }) => reason),
+    ...blockingValidationIssues.map(({ issueCode }) => issueCode),
+  ].filter(Boolean))]
   return {
     datasetVersionId: record.datasetVersion.id,
     candidateIds: normalizedCandidateIds,
@@ -2552,7 +2680,9 @@ function buildBulkReviewPreview(record, candidateIds, config = {}) {
     validationPreview: {
       status: validationSummary.errors > 0
         ? 'invalid'
-        : validationSummary.warnings > 0 ? 'valid_with_warnings' : 'valid',
+        : baselineErrorCount > 0
+          ? 'valid_with_baseline_issues'
+          : validationSummary.warnings > 0 ? 'valid_with_warnings' : 'valid',
       summary: validationSummary,
       issues: validationIssues,
     },
@@ -2562,9 +2692,93 @@ function buildBulkReviewPreview(record, candidateIds, config = {}) {
       && !simulationError
       && Boolean(simulated)
       && validationSummary.errors === 0,
+    diagnostics: {
+      blockingReasonCodes,
+      conflictCount: conflicts.length,
+      conflicts,
+      blockedCandidateIds: [...new Set([
+        ...ineligible.map(({ candidateId }) => candidateId),
+        ...conflictingCandidateIds,
+      ].filter(Boolean))].sort(),
+      baselineIssuesPreserved: baselineErrorCount + baselineWarningCount,
+      recommendation: reviewPreviewRecommendation({
+        ineligible,
+        conflicts,
+        blockingValidationIssues,
+      }),
+    },
     graphRevision: beforeGraph.graphRevision,
     candidateRevision: createCandidateCollectionRevision(candidates),
     recordRevision: recordRevision(record),
+  }
+}
+
+export function classifyReviewValidationIssues(baselineIssues = [], simulatedIssues = []) {
+  const baselineIds = new Set(baselineIssues.map(reviewValidationIssueIdentity))
+  return simulatedIssues.map((issue) => ({
+    ...issue,
+    reviewImpact: baselineIds.has(reviewValidationIssueIdentity(issue))
+      ? 'baseline'
+      : 'introduced',
+  }))
+}
+
+function reviewValidationIssueIdentity(issue) {
+  return issue?.issueId
+    ?? [issue?.issueCode, issue?.scope, issue?.entityReference, issue?.severity]
+      .map((value) => String(value ?? ''))
+      .join('|')
+}
+
+function reviewPreviewRecommendation({
+  ineligible,
+  conflicts,
+  blockingValidationIssues,
+}) {
+  if (ineligible.length > 0) {
+    const identityBlocked = ineligible.some(({ reason }) => (
+      ['candidate_stable_asset_id_required', 'candidate_topology_identity_stale']
+        .includes(reason)
+    ))
+    if (identityBlocked) {
+      return {
+        code: 'assign_identity_and_regenerate',
+        message: 'Tetapkan Asset ID resmi pada identity review; regenerasi topology akan membentuk kandidat baru yang dapat dikonfirmasi.',
+      }
+    }
+    return {
+      code: 'refresh_review_queue',
+      message: 'Muat ulang antrean karena sebagian kandidat sudah berubah atau tidak eligible.',
+    }
+  }
+  if (conflicts.length > 0) {
+    return {
+      code: 'resolve_endpoint_conflicts',
+      message: 'Pilih tepat satu kandidat untuk setiap endpoint yang konflik.',
+    }
+  }
+  const issueCodes = new Set(blockingValidationIssues.map(({ issueCode }) => issueCode))
+  if (issueCodes.has('review_preview_input_unavailable')) {
+    return {
+      code: 'regenerate_topology',
+      message: 'Regenerate topology untuk membangun input dry-run sebelum bulk review.',
+    }
+  }
+  if (issueCodes.has('review_preview_build_failed')) {
+    return {
+      code: 'inspect_preview_build_failure',
+      message: 'Periksa kegagalan rebuild preview sebelum menyimpan relasi.',
+    }
+  }
+  if (blockingValidationIssues.length > 0) {
+    return {
+      code: 'review_introduced_validation_errors',
+      message: 'Batch memperkenalkan validation error baru dan perlu dipecah atau diperiksa manual.',
+    }
+  }
+  return {
+    code: 'ready_to_apply',
+    message: 'Batch tidak memperkenalkan konflik atau validation error baru.',
   }
 }
 
@@ -2688,6 +2902,32 @@ function assertCurrentCandidateState(candidate, expectedStatus) {
       },
     })
   }
+}
+
+function assertCandidateTopologyEligible(record, candidate) {
+  const eligibility = candidateReviewEligibility(record, candidate)
+  if (eligibility.eligible) return
+  const reason = candidateReviewEligibilityReason(eligibility)
+  const identityBlocked = [
+    'candidate_stable_asset_id_required',
+    'candidate_topology_identity_stale',
+  ].includes(reason)
+  throw new AppError(
+    identityBlocked
+      ? 'Kandidat tidak dapat dikonfirmasi sebelum Asset ID resmi ditetapkan dan topology diregenerasi.'
+      : 'Kandidat tidak lagi eligible terhadap topology input terkini; muat ulang dan regenerate topology.',
+    {
+      code: identityBlocked
+        ? 'topology_candidate_identity_required'
+        : 'topology_candidate_not_eligible',
+      statusCode: 422,
+      details: {
+        candidateId: candidate.candidateId,
+        reason,
+        reviewEligibility: candidateReviewEligibilityDetails(eligibility),
+      },
+    },
+  )
 }
 
 function normalizeReason(value, required) {

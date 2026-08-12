@@ -582,6 +582,89 @@ function validateIdentityAliases(objects) {
   })
 }
 
+export function createTopologyCandidateEligibilityContext(bundle) {
+  const objects = [
+    ...asArray(bundle?.classifiedNodes),
+    ...asArray(bundle?.classifiedPaths),
+  ]
+  const objectByAlias = new Map()
+  objects.forEach((object) => {
+    const canonicalAssetId = objectIdentity(object)
+    const aliases = [
+      canonicalAssetId,
+      object.assetId,
+      object.stableAssetId,
+      object.onboardingIdentity,
+      object.legacyAssetId,
+      object.sourceFeatureId,
+      ...Object.values(object.identityAliases ?? {}).flat(),
+    ]
+    aliases.filter(Boolean).forEach((alias) => {
+      if (!objectByAlias.has(alias)) objectByAlias.set(alias, object)
+    })
+  })
+  return { objectByAlias }
+}
+
+export function evaluateTopologyCandidateEligibility(bundle, candidate, context = null) {
+  const objectByAlias = context?.objectByAlias
+    ? context.objectByAlias
+    : createTopologyCandidateEligibilityContext(bundle).objectByAlias
+
+  const references = [
+    candidate?.sourcePathAssetId,
+    candidate?.targetAssetId,
+    candidate?.targetPathAssetId,
+    ...asArray(candidate?.pathAssetIds),
+  ].filter(Boolean).map(String)
+  const issues = []
+  if (!references.length) {
+    issues.push({
+      code: 'topology_candidate_reference_missing',
+      message: 'Candidate tidak memiliki referensi topology yang dapat divalidasi.',
+    })
+  }
+  references.forEach((reference) => {
+    const object = objectByAlias.get(reference)
+    if (!object) {
+      issues.push({
+        code: 'topology_candidate_reference_not_found',
+        message: `Referensi topology ${reference} tidak ditemukan pada input terkini.`,
+        reference,
+      })
+      return
+    }
+    const eligibility = topologyObjectEligibility(object)
+    const currentAssetId = objectIdentity(object)
+    if (eligibility) {
+      issues.push({
+        ...eligibility,
+        reference,
+        currentAssetId,
+        sourceFeatureId: object.sourceFeatureId ?? null,
+      })
+      return
+    }
+    if (reference !== currentAssetId) {
+      issues.push({
+        code: 'topology_candidate_identity_stale',
+        message: `Candidate masih memakai identity ${reference}; identity terkini adalah ${currentAssetId}.`,
+        reference,
+        currentAssetId,
+        sourceFeatureId: object.sourceFeatureId ?? null,
+      })
+    }
+  })
+  const firstIssue = issues[0] ?? null
+  return {
+    eligible: issues.length === 0,
+    code: firstIssue?.code ?? null,
+    message: firstIssue?.message ?? null,
+    references,
+    issues,
+  }
+}
+
 function topologyObjectEligibility(object) {
   const identityStatus = String(
     object.identityStatus ?? object.identityResolutionStatus ?? '',

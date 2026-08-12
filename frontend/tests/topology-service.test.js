@@ -281,6 +281,37 @@ test('manual topology relation sends the selected device pair and audit reason',
   }
 })
 
+test('missing bulk route is reported as frontend/backend deployment skew', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    error: {
+      code: 'not_found',
+      message: 'Endpoint tidak ditemukan.',
+    },
+  }), {
+    status: 404,
+    headers: {
+      'content-type': 'application/json',
+      'x-correlation-id': 'corr-review-skew',
+    },
+  })
+  try {
+    await assert.rejects(
+      reviewTopologyBulk({
+        datasetVersionId: 'dv-1',
+        action: 'confirm-selected',
+        candidateIds: ['candidate-1'],
+        reason: 'Sudah diperiksa.',
+        token: 'admin',
+      }),
+      (error) => error.code === 'topology_review_api_unavailable'
+        && error.details.correlationId === 'corr-review-skew',
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('manual topology relation forwards optional graph evidence references', async () => {
   const originalFetch = globalThis.fetch
   let request
