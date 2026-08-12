@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   createTopologyRelation,
+  analyzeTopologyImpact,
   loadAllTopologyCandidates,
   loadTopologyProjection,
+  loadTopologyRoots,
   reviewTopologyBulk,
   reviewTopologyCandidate,
   traceTopology,
@@ -348,6 +350,82 @@ test('authoritative trace request includes source, target, direction, and graph 
       targetAssetId: 'asset-b',
       graphRevision: 'topology-graph:abc',
       direction: 'both',
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('fase 4 trace client adds explicit mode and bounded depth without changing legacy payloads', async () => {
+  const originalFetch = globalThis.fetch
+  let request
+  globalThis.fetch = async (url, options) => {
+    request = { url, options }
+    return new Response(JSON.stringify({ status: 'found' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    await traceTopology({
+      datasetVersionId: 'dv-1',
+      sourceAssetId: 'cam-1',
+      targetAssetId: 'core-1',
+      graphRevision: 'topology-graph:abc',
+      mode: 'point_to_point',
+      direction: 'upstream',
+      maxDepth: 25,
+      token: 'viewer',
+    })
+    assert.deepEqual(JSON.parse(request.options.body), {
+      sourceAssetId: 'cam-1',
+      targetAssetId: 'core-1',
+      graphRevision: 'topology-graph:abc',
+      direction: 'upstream',
+      mode: 'point_to_point',
+      maxDepth: 25,
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('fase 4 roots and impact clients use the versioned operational endpoints', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options })
+    return new Response(JSON.stringify({ status: 'completed' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    await loadTopologyRoots({
+      datasetVersionId: 'dv-1',
+      graphRevision: 'topology-graph:abc',
+      token: 'viewer',
+    })
+    await analyzeTopologyImpact({
+      datasetVersionId: 'dv-1',
+      failureType: 'relation',
+      failureId: 'relation-1',
+      graphRevision: 'topology-graph:abc',
+      rootAssetIds: ['core-1'],
+      networkFamily: 'cctv',
+      scopeAssetIds: ['core-1', 'switch-1'],
+      token: 'viewer',
+    })
+    assert.equal(requests[0].url,
+      '/api/dataset-versions/dv-1/topology/roots?graphRevision=topology-graph%3Aabc')
+    assert.equal(requests[1].url, '/api/dataset-versions/dv-1/topology/impact')
+    assert.deepEqual(JSON.parse(requests[1].options.body), {
+      failureType: 'relation',
+      failureId: 'relation-1',
+      graphRevision: 'topology-graph:abc',
+      rootAssetIds: ['core-1'],
+      networkFamily: 'cctv',
+      scopeAssetIds: ['core-1', 'switch-1'],
     })
   } finally {
     globalThis.fetch = originalFetch

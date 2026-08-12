@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { AppError } from '../errors.js'
 import {
   buildAssetIdentityMapFromRecord,
@@ -47,10 +47,23 @@ export class TopologyService {
     this.config = config
     this.clock = clock
     this.candidateQueryIndexes = new Map()
+    this.traceResultCache = new Map()
+    this.impactResultCache = new Map()
+    this.traceGraphCache = new Map()
+    this.traceGraphObjectCache = new WeakMap()
     // Bulk review rewrites a large aggregate and its indexed graph projection.
     // Keep one such mutation in flight per dataset so a browser retry cannot
     // multiply the 35MB+ JSONB working set until Node exhausts its heap.
     this.activeMutationDatasetIds = new Set()
+  }
+
+  normalizedTraceGraph(record, identityMap = buildAssetIdentityMapFromRecord(record)) {
+    return normalizedTraceGraphFromCache(
+      this.traceGraphCache,
+      this.traceGraphObjectCache,
+      record,
+      identityMap,
+    )
   }
 
   async regenerate(datasetVersionId, actorId, {
@@ -131,7 +144,7 @@ export class TopologyService {
 
   async getSummary(datasetVersionId) {
     const record = await this.repository.get(datasetVersionId)
-    const graph = normalizeTraceGraph(record, buildAssetIdentityMapFromRecord(record))
+    const graph = this.normalizedTraceGraph(record)
     return {
       datasetVersionId,
       topologyRuleSetVersion: record.topologyRuleSetVersion ?? null,
@@ -147,6 +160,11 @@ export class TopologyService {
       validation: record.topologyValidation ?? null,
       lastGeneratedAt: record.topologyGeneratedAt ?? null,
       graphRevision: graph.graphRevision,
+      roots: verifiedRootNodes(graph).map(({ id, topologyRole }) => ({
+        assetId: id,
+        topologyRole: topologyRole ?? 'unknown',
+      })),
+      directionCoverage: directionCoverageForGraph(graph),
       candidateRevision: createCandidateCollectionRevision(record.topologyCandidates ?? []),
       recordRevision: recordRevision(record),
     }
@@ -155,7 +173,7 @@ export class TopologyService {
   async getCandidates(datasetVersionId, query = {}) {
     const record = await this.repository.get(datasetVersionId)
     const candidates = record.topologyCandidates ?? []
-    const graph = normalizeTraceGraph(record, buildAssetIdentityMapFromRecord(record))
+    const graph = this.normalizedTraceGraph(record)
     const candidateRevision = createCandidateCollectionRevision(candidates)
     const cached = this.candidateQueryIndexes.get(datasetVersionId)
     const index = cached?.revision === candidateRevision
@@ -222,22 +240,29 @@ export class TopologyService {
 
   async getGraph(datasetVersionId) {
     const record = await this.repository.get(datasetVersionId)
-    const graph = normalizeTraceGraph(record, buildAssetIdentityMapFromRecord(record))
+    const graph = this.normalizedTraceGraph(record)
     return {
       datasetVersionId,
-      graph,
+      graph: structuredClone(graph),
       validation: structuredClone(record.topologyValidation ?? null),
       confirmedRelations: structuredClone(record.confirmedRelations ?? []),
     }
   }
 
-  async trace(datasetVersionId, request = {}, actorId = null, correlationId = null) {
+  async trace(
+    datasetVersionId,
+    request = {},
+    actorId = null,
+    correlationId = null,
+    traceContext = {},
+  ) {
+    const startedAt = Date.now()
     const normalized = normalizeTraceRequest(request)
     normalized.correlationId = correlationId
     const record = await this.repository.get(datasetVersionId)
     const identityMap = buildAssetIdentityMapFromRecord(record)
     const resolver = createAssetIdentityResolver(identityMap)
-    const graph = normalizeTraceGraph(record, identityMap)
+    const graph = this.normalizedTraceGraph(record, identityMap)
 
     if (normalized.graphRevision !== graph.graphRevision) {
       const error = new AppError(
@@ -257,6 +282,7 @@ export class TopologyService {
         datasetVersionId,
         request: normalized,
         result: { status: 'stale', graphRevision: graph.graphRevision },
+        durationMilliseconds: Date.now() - startedAt,
       })
       throw error
     }
@@ -280,8 +306,66 @@ export class TopologyService {
         datasetVersionId,
         request: normalized,
         result: { status: 'invalid', graphRevision: graph.graphRevision },
+        durationMilliseconds: Date.now() - startedAt,
       })
       throw error
+    }
+
+    const unavailablePublication = record.datasetVersion?.publicationProfile
+      && record.datasetVersion.publicationProfile !== 'operational_topology'
+    if (unavailablePublication && !isTopologyPreviewAllowed(traceContext)) {
+      const result = traceState({
+        datasetVersionId,
+        graphRevision: graph.graphRevision,
+        sourceAssetId: normalized.sourceAssetId,
+        targetAssetId: normalized.targetAssetId,
+        mode: normalized.mode,
+        direction: normalized.direction,
+        status: 'unavailable',
+        reason: 'topology_not_published',
+        message: traceMessageForReason('topology_not_published'),
+      })
+      await recordTraceAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result,
+        durationMilliseconds: Date.now() - startedAt,
+      })
+      return result
+    }
+
+    const cacheKey = topologyResultCacheKey(
+      'trace',
+      datasetVersionId,
+      graph.graphRevision,
+      normalized,
+    )
+    const cached = readTopologyResultCache(this.traceResultCache, cacheKey)
+    if (cached) {
+      await recordTraceAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result: cached,
+        durationMilliseconds: Date.now() - startedAt,
+        cacheHit: true,
+      })
+      return cached
+    }
+    const finalize = async (result) => {
+      const finalized = decorateTopologyPreviewResult(result, traceContext, record)
+      if (!isTopologyPreviewAllowed(traceContext)) {
+        writeTopologyResultCache(this.traceResultCache, cacheKey, finalized)
+      }
+      await recordTraceAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result: finalized,
+        durationMilliseconds: Date.now() - startedAt,
+      })
+      return finalized
     }
 
     const scopeNodeIds = normalized.scopeAssetIds === null
@@ -298,51 +382,105 @@ export class TopologyService {
       graph,
       normalized.sourceAssetId,
     )
-    if (!sourceAssetId || !nodeIds.has(sourceAssetId)) {
-      const result = traceState({
+    if (!sourceAssetId) {
+      return finalize(traceState({
         datasetVersionId,
         graphRevision: graph.graphRevision,
         sourceAssetId: normalized.sourceAssetId,
         targetAssetId: normalized.targetAssetId,
+        mode: normalized.mode,
+        direction: normalized.direction,
         status: 'invalid-source',
         reason: 'source_not_topology_node',
-        message: 'Aset ini belum terdaftar sebagai node topology.',
-      })
-      await recordTraceAudit(this.auditLog, {
-        actorId,
+        message: traceMessageForReason('source_not_topology_node'),
+      }))
+    }
+    if (!nodeIds.has(sourceAssetId)) {
+      return finalize(traceState({
         datasetVersionId,
-        request: normalized,
-        result,
-      })
-      return result
+        graphRevision: graph.graphRevision,
+        sourceAssetId,
+        targetAssetId: normalized.targetAssetId,
+        mode: normalized.mode,
+        direction: normalized.direction,
+        status: 'unreachable',
+        reason: 'scope_excludes_path',
+        message: traceMessageForReason('scope_excludes_path'),
+      }))
     }
 
     const targetAssetId = normalized.targetAssetId === null
       ? null
       : resolveTraceAssetId(resolver, graph, normalized.targetAssetId)
-    if (normalized.targetAssetId !== null && (!targetAssetId || !nodeIds.has(targetAssetId))) {
-      const result = traceState({
+    if (normalized.targetAssetId !== null && !targetAssetId) {
+      return finalize(traceState({
         datasetVersionId,
         graphRevision: graph.graphRevision,
         sourceAssetId,
         targetAssetId: normalized.targetAssetId,
+        mode: normalized.mode,
+        direction: normalized.direction,
         status: 'invalid-target',
         reason: 'target_not_topology_node',
-        message: 'Aset tujuan belum terdaftar sebagai node topology.',
-      })
-      await recordTraceAudit(this.auditLog, {
-        actorId,
+        message: traceMessageForReason('target_not_topology_node'),
+      }))
+    }
+    if (targetAssetId !== null && !nodeIds.has(targetAssetId)) {
+      return finalize(traceState({
         datasetVersionId,
-        request: normalized,
-        result,
-      })
-      return result
+        graphRevision: graph.graphRevision,
+        sourceAssetId,
+        targetAssetId,
+        mode: normalized.mode,
+        direction: normalized.direction,
+        status: 'unreachable',
+        reason: 'scope_excludes_path',
+        message: traceMessageForReason('scope_excludes_path'),
+      }))
     }
 
-    const adjacency = buildTraceAdjacency(traversalGraph)
+    const traversal = buildTraceTraversal(traversalGraph, normalized)
+    const adjacency = traversal.adjacency
+    const physicalAdjacency = buildTraceAdjacency(traversalGraph, {
+      mode: 'connectivity',
+      direction: 'both',
+    })
     const componentId = componentIdForNode(traversalGraph, sourceAssetId)
+    const availabilityReason = traceAvailabilityReason(
+      traversalGraph,
+      physicalAdjacency,
+      normalized,
+      sourceAssetId,
+    )
+    if (availabilityReason) {
+      return finalize(traceState({
+        datasetVersionId,
+        graphRevision: graph.graphRevision,
+        sourceAssetId,
+        targetAssetId,
+        componentId,
+        mode: normalized.mode,
+        direction: normalized.direction,
+        status: 'unreachable',
+        reason: availabilityReason,
+        message: traceMessageForReason(availabilityReason),
+      }))
+    }
+
     if (targetAssetId === null) {
-      const destinations = reachableDestinations(adjacency, sourceAssetId)
+      const traversalResult = reachableDestinations(
+        adjacency,
+        sourceAssetId,
+        normalized.maxDepth,
+      )
+      const destinations = traversalResult.destinations
+      const reason = destinations.length
+        ? null
+        : traversalResult.truncated
+          ? 'max_depth_reached'
+          : traversalGraph.degreeByNode?.[sourceAssetId] === 0
+            ? 'isolated_source'
+            : 'unreachable'
       const result = destinations.length
         ? {
           status: 'destinations',
@@ -350,8 +488,11 @@ export class TopologyService {
           graphRevision: graph.graphRevision,
           sourceAssetId,
           componentId,
-          destinations,
+          mode: normalized.mode,
           direction: normalized.direction,
+          maxDepth: normalized.maxDepth,
+          truncated: traversalResult.truncated,
+          destinations,
           explanation: 'Tujuan dihitung dari confirmed operational graph.',
         }
         : traceState({
@@ -359,24 +500,21 @@ export class TopologyService {
           graphRevision: graph.graphRevision,
           sourceAssetId,
           componentId,
+          mode: normalized.mode,
+          direction: normalized.direction,
           status: 'unreachable',
-          reason: 'isolated-source',
-          message: 'Belum ada koneksi terkonfirmasi dari aset ini.',
+          reason,
+          message: traceMessageForReason(reason),
         })
-      await recordTraceAudit(this.auditLog, {
-        actorId,
-        datasetVersionId,
-        request: normalized,
-        result,
-      })
-      return result
+      return finalize(result)
     }
 
     if (sourceAssetId === targetAssetId) {
-      const result = {
+      return finalize({
         status: 'found',
         datasetVersionId,
         graphRevision: graph.graphRevision,
+        mode: normalized.mode,
         componentId,
         sourceAssetId,
         targetAssetId,
@@ -386,74 +524,376 @@ export class TopologyService {
         totalLengthMeters: null,
         networkFamily: networkFamilyForNodes(traversalGraph, [sourceAssetId]),
         direction: normalized.direction,
+        maxDepth: normalized.maxDepth,
         verifiedAt: record.topologyGeneratedAt ?? null,
         explanation: 'Titik awal dan tujuan adalah aset yang sama.',
-      }
-      await recordTraceAudit(this.auditLog, {
-        actorId,
-        datasetVersionId,
-        request: normalized,
-        result,
       })
-      return result
     }
 
-    const path = findTracePath(adjacency, sourceAssetId, targetAssetId)
-    if (!path) {
+    const pathResult = findTracePath(
+      adjacency,
+      sourceAssetId,
+      targetAssetId,
+      normalized.maxDepth,
+    )
+    if (!pathResult.path) {
       const targetComponentId = componentIdForNode(traversalGraph, targetAssetId)
-      const reason = traversalGraph.degreeByNode?.[sourceAssetId] === 0
-        ? 'isolated-source'
-        : hasPendingCandidate(record, resolver, sourceAssetId, targetAssetId)
-          ? 'candidate_pending_review'
-          : componentId !== targetComponentId
-            ? 'different-component'
-            : 'unreachable'
-      const result = traceState({
+      const physicalPath = findTracePath(
+        physicalAdjacency,
+        sourceAssetId,
+        targetAssetId,
+        normalized.maxDepth,
+      )
+      const reason = pathResult.truncated
+        ? 'max_depth_reached'
+        : normalized.scopeAssetIds !== null
+          ? 'scope_excludes_path'
+          : hasUnavailableDirectionOnPhysicalPath(traversalGraph, physicalPath)
+            ? 'direction_not_available'
+            : traversalGraph.degreeByNode?.[sourceAssetId] === 0
+              ? 'isolated_source'
+              : hasPendingCandidate(record, resolver, sourceAssetId, targetAssetId)
+                ? 'candidate_pending_review'
+                : componentId !== targetComponentId
+                  ? 'different_component'
+                  : 'unreachable'
+      return finalize(traceState({
         datasetVersionId,
         graphRevision: graph.graphRevision,
         sourceAssetId,
         targetAssetId,
         componentId,
+        mode: normalized.mode,
+        direction: normalized.direction,
         status: 'unreachable',
         reason,
         message: traceMessageForReason(reason),
-      })
-      await recordTraceAudit(this.auditLog, {
-        actorId,
-        datasetVersionId,
-        request: normalized,
-        result,
-      })
-      return result
+      }))
     }
 
-    const edges = path.map(({ edge, source, target }) => traceEdge(edge, source, target))
-    const result = {
+    const edges = pathResult.path.map(({ edge, source, target }) => (
+      traceEdge(edge, source, target)
+    ))
+    return finalize({
       status: 'found',
       datasetVersionId,
       graphRevision: graph.graphRevision,
+      mode: normalized.mode,
       componentId,
       sourceAssetId,
       targetAssetId,
-      nodeIds: [sourceAssetId, ...path.map(({ target }) => target)],
+      nodeIds: [sourceAssetId, ...pathResult.path.map(({ target }) => target)],
       edges,
       hopCount: edges.length,
       totalLengthMeters: sumLength(edges),
       networkFamily: networkFamilyForNodes(traversalGraph, [
         sourceAssetId,
-        ...path.map(({ target }) => target),
+        ...pathResult.path.map(({ target }) => target),
       ]),
       direction: normalized.direction,
+      maxDepth: normalized.maxDepth,
       verifiedAt: record.topologyGeneratedAt ?? null,
       explanation: 'Jalur menggunakan confirmed operational graph.',
-    }
-    await recordTraceAudit(this.auditLog, {
-      actorId,
-      datasetVersionId,
-      request: normalized,
-      result,
     })
-    return result
+  }
+
+  async getRoots(datasetVersionId, request = {}) {
+    const graphRevision = request?.graphRevision === undefined
+      || request?.graphRevision === null
+      ? null
+      : normalizeTraceId(request.graphRevision, 'graphRevision', true)
+    const record = await this.repository.get(datasetVersionId)
+    const graph = this.normalizedTraceGraph(
+      record,
+      buildAssetIdentityMapFromRecord(record),
+    )
+    if (graphRevision !== null && graphRevision !== graph.graphRevision) {
+      throw new AppError(
+        'Graph topology berubah sejak root dimuat. Muat ulang dataset aktif.',
+        {
+          code: 'topology_graph_stale',
+          statusCode: 409,
+          details: {
+            requestedGraphRevision: graphRevision,
+            currentGraphRevision: graph.graphRevision,
+            datasetVersionId,
+          },
+        },
+      )
+    }
+    const validationErrors = graphValidationErrorCount(record.topologyValidation)
+    if (validationErrors > 0) {
+      throw new AppError('Root topology tidak dapat dibaca dari graph invalid.', {
+        code: 'topology_graph_invalid',
+        statusCode: 409,
+        details: {
+          datasetVersionId,
+          graphRevision: graph.graphRevision,
+          validationErrorCount: validationErrors,
+        },
+      })
+    }
+    const roots = verifiedRootNodes(graph).map((node) => ({
+      assetId: node.id,
+      topologyRole: node.topologyRole,
+      siteId: node.siteId ?? null,
+      networkFamily: node.networkFamily ?? null,
+      category: node.category ?? null,
+      componentId: componentIdForNode(graph, node.id),
+    }))
+    return {
+      datasetVersionId,
+      graphRevision: graph.graphRevision,
+      roots,
+      rootAssetIds: roots.map(({ assetId }) => assetId),
+      directionCoverage: directionCoverageForGraph(graph),
+      status: roots.length ? 'ready' : 'unavailable',
+      reason: roots.length ? null : 'root_not_defined',
+    }
+  }
+
+  async impact(
+    datasetVersionId,
+    request = {},
+    actorId = null,
+    correlationId = null,
+    impactContext = {},
+  ) {
+    const startedAt = Date.now()
+    const normalized = normalizeImpactRequest(request)
+    normalized.correlationId = correlationId
+    const record = await this.repository.get(datasetVersionId)
+    const identityMap = buildAssetIdentityMapFromRecord(record)
+    const resolver = createAssetIdentityResolver(identityMap)
+    const graph = this.normalizedTraceGraph(record, identityMap)
+
+    if (normalized.graphRevision !== graph.graphRevision) {
+      const error = new AppError(
+        'Graph topology berubah sejak peta dimuat. Muat ulang dataset aktif sebelum impact analysis.',
+        {
+          code: 'topology_graph_stale',
+          statusCode: 409,
+          details: {
+            requestedGraphRevision: normalized.graphRevision,
+            currentGraphRevision: graph.graphRevision,
+            datasetVersionId,
+          },
+        },
+      )
+      await recordImpactAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result: { status: 'stale', graphRevision: graph.graphRevision },
+        durationMilliseconds: Date.now() - startedAt,
+      })
+      throw error
+    }
+
+    const validationErrors = graphValidationErrorCount(record.topologyValidation)
+    if (validationErrors > 0) {
+      const error = new AppError(
+        'Impact analysis dihentikan karena confirmed graph tidak valid.',
+        {
+          code: 'topology_graph_invalid',
+          statusCode: 409,
+          details: {
+            datasetVersionId,
+            graphRevision: graph.graphRevision,
+            validationErrorCount: validationErrors,
+          },
+        },
+      )
+      await recordImpactAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result: { status: 'invalid', graphRevision: graph.graphRevision },
+        durationMilliseconds: Date.now() - startedAt,
+      })
+      throw error
+    }
+
+    const unavailablePublication = record.datasetVersion?.publicationProfile
+      && record.datasetVersion.publicationProfile !== 'operational_topology'
+    if (unavailablePublication && !isTopologyPreviewAllowed(impactContext)) {
+      const result = impactUnavailable({
+        datasetVersionId,
+        graphRevision: graph.graphRevision,
+        normalized,
+        reason: 'topology_not_published',
+        limitation: 'Impact analysis hanya tersedia pada profile operational_topology.',
+      })
+      await recordImpactAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result,
+        durationMilliseconds: Date.now() - startedAt,
+      })
+      return result
+    }
+
+    const cacheKey = topologyResultCacheKey(
+      'impact',
+      datasetVersionId,
+      graph.graphRevision,
+      normalized,
+    )
+    const cached = readTopologyResultCache(this.impactResultCache, cacheKey)
+    if (cached) {
+      await recordImpactAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result: cached,
+        durationMilliseconds: Date.now() - startedAt,
+        cacheHit: true,
+      })
+      return cached
+    }
+    const finalize = async (result) => {
+      const finalized = decorateTopologyPreviewResult(result, impactContext, record)
+      if (!isTopologyPreviewAllowed(impactContext)) {
+        writeTopologyResultCache(this.impactResultCache, cacheKey, finalized)
+      }
+      await recordImpactAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result: finalized,
+        durationMilliseconds: Date.now() - startedAt,
+      })
+      return finalized
+    }
+
+    let scopedGraph = graph
+    if (normalized.scopeAssetIds !== null) {
+      const scopeNodeIds = new Set(normalized.scopeAssetIds
+        .map((assetId) => resolveTraceAssetId(resolver, graph, assetId))
+        .filter(Boolean))
+      scopedGraph = restrictTraceGraph(graph, scopeNodeIds)
+    }
+    if (normalized.networkFamily !== null) {
+      const familyNodeIds = new Set(scopedGraph.nodes
+        .filter(({ networkFamily }) => networkFamily === normalized.networkFamily)
+        .map(({ id }) => id))
+      scopedGraph = restrictTraceGraph(scopedGraph, familyNodeIds)
+    }
+
+    const failure = resolveImpactFailure(scopedGraph, normalized, resolver)
+    if (!failure) {
+      return finalize(impactUnavailable({
+        datasetVersionId,
+        graphRevision: graph.graphRevision,
+        normalized,
+        reason: normalized.scopeAssetIds !== null
+          ? 'scope_excludes_path'
+          : 'failure_not_in_graph',
+        limitation: 'Failure ID tidak ditemukan pada confirmed graph yang dianalisis.',
+      }))
+    }
+
+    const roots = resolveImpactRoots(
+      scopedGraph,
+      resolver,
+      normalized.rootAssetIds,
+    )
+    if (!roots.length) {
+      return finalize(impactUnavailable({
+        datasetVersionId,
+        graphRevision: graph.graphRevision,
+        normalized,
+        failure,
+        reason: normalized.rootAssetIds ? 'root_not_defined' : 'root_not_defined',
+        limitation: 'Minimal satu verified root diperlukan untuk impact analysis.',
+      }))
+    }
+
+    const serviceAdjacency = buildTraceAdjacency(scopedGraph, {
+      mode: 'reachable',
+      direction: 'downstream',
+    })
+    const physicalAdjacency = buildTraceAdjacency(scopedGraph, {
+      mode: 'connectivity',
+      direction: 'both',
+    })
+    const baselineReachable = reachableSet(serviceAdjacency, roots.map(({ id }) => id))
+    const physicalReachable = reachableSet(physicalAdjacency, roots.map(({ id }) => id))
+    const incompleteDirectionNodes = reachableViaUndirectedEdge(
+      physicalAdjacency,
+      roots.map(({ id }) => id),
+    )
+    const simulatedGraph = simulateImpactFailure(scopedGraph, failure)
+    const afterAdjacency = buildTraceAdjacency(simulatedGraph, {
+      mode: 'reachable',
+      direction: 'downstream',
+    })
+    const remainingRoots = roots
+      .map(({ id }) => id)
+      .filter((id) => simulatedGraph.nodes.some((node) => node.id === id))
+    const afterReachable = reachableSet(afterAdjacency, remainingRoots)
+    const confirmedImpactedIds = [...baselineReachable]
+      .filter((id) => !afterReachable.has(id))
+      .sort()
+    const potentialIds = [...physicalReachable]
+      .filter((id) => !baselineReachable.has(id) && incompleteDirectionNodes.has(id))
+      .sort()
+    const confirmedImpacted = impactNodes(
+      scopedGraph,
+      confirmedImpactedIds,
+      'lost_root_reachability',
+    )
+    const potentiallyImpacted = impactNodes(
+      scopedGraph,
+      potentialIds,
+      'direction_incomplete',
+    )
+    const cutEdges = failure.edges.map((edge) => ({
+      ...traceEdge(edge, edge.sourceAssetId, edge.targetAssetId),
+      failureType: normalized.failureType,
+      failureId: normalized.failureId,
+    }))
+    const limitations = []
+    const incompleteDirection = hasIncompleteDirectionOnRootArea(
+      scopedGraph,
+      physicalReachable,
+      baselineReachable,
+      incompleteDirectionNodes,
+    )
+    if (incompleteDirection) {
+      limitations.push('Sebagian area hanya terhubung melalui edge undirected; potential impact dipisahkan.')
+    }
+    if (normalized.scopeAssetIds !== null) {
+      limitations.push('Analisis dibatasi oleh scopeAssetIds yang diminta.')
+    }
+    const result = {
+      status: incompleteDirection ? 'partial' : 'completed',
+      datasetVersionId,
+      graphRevision: graph.graphRevision,
+      failure: {
+        type: normalized.failureType,
+        id: normalized.failureId,
+        resolvedAssetId: failure.resolvedAssetId ?? null,
+      },
+      roots: roots.map(({ id }) => id),
+      confirmedImpacted,
+      potentiallyImpacted,
+      confirmedTopologyImpact: confirmedImpacted,
+      potentialTopologyImpact: potentiallyImpacted,
+      confirmedGroups: groupImpactItems(confirmedImpacted),
+      potentialGroups: groupImpactItems(potentiallyImpacted),
+      cutEdges,
+      summary: {
+        baselineReachable: baselineReachable.size,
+        reachableAfterFailure: afterReachable.size,
+        confirmedImpacted: confirmedImpacted.length,
+        potentiallyImpacted: potentiallyImpacted.length,
+      },
+      limitations,
+      computedAt: this.clock().toISOString(),
+    }
+    return finalize(result)
   }
 
   async confirmCandidate(candidateId, actorId, {
@@ -2034,7 +2474,12 @@ function buildBulkReviewPreview(record, candidateIds, config = {}) {
     })
   })
 
-  const beforeGraph = normalizeTraceGraph(record, buildAssetIdentityMapFromRecord(record))
+  const beforeGraph = normalizedTraceGraphFromCache(
+    new Map(),
+    new WeakMap(),
+    record,
+    buildAssetIdentityMapFromRecord(record),
+  )
   let simulated = null
   let simulationError = null
   if (eligibleCandidateIds.length > 0 && record.topologyInputBundle) {
@@ -2134,7 +2579,12 @@ function candidateAssetReferences(candidate) {
 }
 
 function reviewSnapshot(record) {
-  const graph = normalizeTraceGraph(record, buildAssetIdentityMapFromRecord(record))
+  const graph = normalizedTraceGraphFromCache(
+    new Map(),
+    new WeakMap(),
+    record,
+    buildAssetIdentityMapFromRecord(record),
+  )
   return {
     graphRevision: graph.graphRevision,
     candidateRevision: createCandidateCollectionRevision(record.topologyCandidates ?? []),
@@ -2527,7 +2977,12 @@ function assertSameManualDeviceSite(source, target) {
 
 function assertNoConfirmedManualDevicePair(record, source, target) {
   const identityMap = buildAssetIdentityMapFromRecord(record)
-  const graph = normalizeTraceGraph(record, identityMap)
+  const graph = normalizedTraceGraphFromCache(
+    new Map(),
+    new WeakMap(),
+    record,
+    identityMap,
+  )
   const hasGraphPair = graph.edges.some((edge) => sameUndirectedPair(
     edge.sourceAssetId,
     edge.targetAssetId,
@@ -2629,18 +3084,119 @@ function normalizeTraceRequest(request) {
   const scopeAssetIds = request.scopeAssetIds === undefined || request.scopeAssetIds === null
     ? null
     : normalizeTraceScope(request.scopeAssetIds)
-  const direction = String(request.direction ?? 'both').trim().toLowerCase()
-  if (direction !== 'both') {
-    throw new AppError(
-      'Tracing saat ini hanya mendukung physical connectivity dua arah.',
-      {
-        code: 'unsupported_topology_trace_direction',
-        statusCode: 400,
-        details: { direction, supportedDirections: ['both'] },
+  const requestedMode = request.mode === undefined || request.mode === null
+    ? null
+    : String(request.mode).trim().toLowerCase()
+  const mode = requestedMode ?? (targetAssetId === null ? 'reachable' : 'point_to_point')
+  if (!['connectivity', 'point_to_point', 'upstream', 'downstream', 'reachable'].includes(mode)) {
+    throw new AppError('Mode tracing tidak valid.', {
+      code: 'invalid_topology_trace_mode',
+      statusCode: 400,
+      details: {
+        mode,
+        supportedModes: ['connectivity', 'point_to_point', 'upstream', 'downstream', 'reachable'],
       },
-    )
+    })
   }
-  return { sourceAssetId, targetAssetId, graphRevision, direction, scopeAssetIds }
+  const requestedDirection = request.direction === undefined || request.direction === null
+    ? null
+    : String(request.direction).trim().toLowerCase()
+  let direction = requestedDirection ?? (
+    mode === 'upstream' ? 'upstream' : mode === 'downstream' ? 'downstream' : 'both'
+  )
+  if (!['upstream', 'downstream', 'both'].includes(direction)) {
+    throw new AppError('Direction tracing tidak valid.', {
+      code: 'unsupported_topology_trace_direction',
+      statusCode: 400,
+      details: {
+        direction,
+        supportedDirections: ['upstream', 'downstream', 'both'],
+      },
+    })
+  }
+  if (mode === 'connectivity' && direction !== 'both') {
+    throw new AppError('Mode connectivity hanya mendukung direction both.', {
+      code: 'unsupported_topology_trace_direction',
+      statusCode: 400,
+      details: { mode, direction, supportedDirections: ['both'] },
+    })
+  }
+  if (['upstream', 'downstream'].includes(mode) && direction === 'both') {
+    direction = mode
+  }
+  if (['upstream', 'downstream'].includes(mode) && direction !== mode) {
+    throw new AppError(`Mode ${mode} harus memakai direction ${mode}.`, {
+      code: 'unsupported_topology_trace_direction',
+      statusCode: 400,
+      details: { mode, direction, supportedDirections: [mode] },
+    })
+  }
+  if (mode === 'point_to_point' && targetAssetId === null) {
+    throw new AppError('Target asset wajib untuk mode point_to_point.', {
+      code: 'invalid_topology_trace_targetAssetId',
+      statusCode: 400,
+      details: { field: 'targetAssetId', mode },
+    })
+  }
+  const maxDepth = normalizeTraceMaxDepth(request.maxDepth)
+  return {
+    sourceAssetId,
+    targetAssetId: mode === 'point_to_point' ? targetAssetId : null,
+    mode,
+    direction,
+    graphRevision,
+    scopeAssetIds,
+    maxDepth,
+  }
+}
+
+function normalizeImpactRequest(request) {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) {
+    throw new AppError('Request impact analysis tidak valid.', {
+      code: 'invalid_topology_impact_request',
+      statusCode: 400,
+    })
+  }
+  const failureType = String(request.failureType ?? '').trim().toLowerCase()
+  if (!['asset', 'relation', 'path'].includes(failureType)) {
+    throw new AppError('Failure type impact tidak valid.', {
+      code: 'invalid_topology_impact_failure_type',
+      statusCode: 400,
+      details: { failureType, supportedFailureTypes: ['asset', 'relation', 'path'] },
+    })
+  }
+  const failureId = normalizeTraceId(request.failureId, 'failureId', true)
+  const graphRevision = normalizeTraceId(request.graphRevision, 'graphRevision', true)
+  const rootAssetIds = request.rootAssetIds === undefined || request.rootAssetIds === null
+    ? null
+    : normalizeTraceScope(request.rootAssetIds)
+  const scopeAssetIds = request.scopeAssetIds === undefined || request.scopeAssetIds === null
+    ? null
+    : normalizeTraceScope(request.scopeAssetIds)
+  const networkFamily = request.networkFamily === undefined || request.networkFamily === null
+    ? null
+    : normalizeTraceId(request.networkFamily, 'networkFamily', false)
+  return {
+    failureType,
+    failureId,
+    graphRevision,
+    rootAssetIds,
+    networkFamily,
+    scopeAssetIds,
+  }
+}
+
+function normalizeTraceMaxDepth(value) {
+  if (value === undefined || value === null || value === '') return 100
+  const maxDepth = Number(value)
+  if (!Number.isInteger(maxDepth) || maxDepth < 1 || maxDepth > 10000) {
+    throw new AppError('maxDepth tracing harus integer 1 sampai 10000.', {
+      code: 'invalid_topology_trace_max_depth',
+      statusCode: 400,
+      details: { maxDepth: value, minimum: 1, maximum: 10000 },
+    })
+  }
+  return maxDepth
 }
 
 function normalizeTraceScope(value) {
@@ -2664,6 +3220,29 @@ function normalizeTraceId(value, field, required) {
     })
   }
   return normalized || null
+}
+
+function normalizedTraceGraphFromCache(cache, objectCache, record, identityMap) {
+  const sourceGraph = record.topologyGraph
+  const datasetVersionId = record.datasetVersion?.id ?? 'unknown'
+  const sourceRevision = sourceGraph?.graphRevision ?? null
+  const cacheKey = sourceRevision ? `${datasetVersionId}:${sourceRevision}` : null
+  if (cacheKey && cache.has(cacheKey)) return cache.get(cacheKey)
+  const objectCached = sourceGraph && typeof sourceGraph === 'object'
+    ? objectCache.get(sourceGraph)
+    : null
+  if (objectCached && objectCached.sourceRevision === sourceRevision) {
+    return objectCached.graph
+  }
+  const graph = normalizeTraceGraph(record, identityMap)
+  if (cacheKey) {
+    cache.set(cacheKey, graph)
+    while (cache.size > 64) cache.delete(cache.keys().next().value)
+  }
+  if (sourceGraph && typeof sourceGraph === 'object') {
+    objectCache.set(sourceGraph, { sourceRevision, graph })
+  }
+  return graph
 }
 
 function normalizeTraceGraph(record, identityMap) {
@@ -2745,6 +3324,7 @@ function normalizeTraceGraph(record, identityMap) {
 }
 
 function normalizeTraceComponents(sourceComponents, resolveNodeId, nodeIds, edges) {
+  const edgeIds = new Set(edges.map(({ id }) => id).filter(Boolean))
   const components = (sourceComponents ?? []).map((component, index) => ({
     ...structuredClone(component),
     componentId: component.componentId ?? component.id ?? `component:${index + 1}`,
@@ -2752,7 +3332,7 @@ function normalizeTraceComponents(sourceComponents, resolveNodeId, nodeIds, edge
       .map(resolveNodeId)
       .filter((id) => nodeIds.has(id)))].sort(),
     edgeIds: (component.edgeIds ?? [])
-      .filter((edgeId) => edges.some((edge) => edge.id === edgeId))
+      .filter((edgeId) => edgeIds.has(edgeId))
       .sort(),
   })).filter(({ nodeIds: componentNodeIds }) => componentNodeIds.length)
   return components.length ? components : traceConnectedComponents(nodeIds, edges)
@@ -2836,18 +3416,44 @@ function restrictTraceGraph(graph, nodeIds) {
   }
 }
 
-function buildTraceAdjacency(graph) {
+function buildTraceTraversal(graph, normalized) {
+  return {
+    adjacency: buildTraceAdjacency(graph, normalized),
+    directionCoverage: directionCoverageForGraph(graph),
+  }
+}
+
+function buildTraceAdjacency(graph, {
+  mode = 'connectivity',
+  direction = 'both',
+} = {}) {
   const adjacency = new Map(graph.nodes.map(({ id }) => [id, []]))
+  const usePhysical = mode === 'connectivity' || direction === 'both'
+  const add = (source, target, edge) => {
+    if (!adjacency.has(source) || !adjacency.has(target)) return
+    adjacency.get(source).push({ target, edge })
+  }
   graph.edges.forEach((edge) => {
-    if (!adjacency.has(edge.sourceAssetId) || !adjacency.has(edge.targetAssetId)) return
-    adjacency.get(edge.sourceAssetId).push({
-      target: edge.targetAssetId,
-      edge,
-    })
-    adjacency.get(edge.targetAssetId).push({
-      target: edge.sourceAssetId,
-      edge,
-    })
+    const source = edge.sourceAssetId
+    const target = edge.targetAssetId
+    if (!adjacency.has(source) || !adjacency.has(target)) return
+    if (usePhysical) {
+      add(source, target, edge)
+      add(target, source, edge)
+      return
+    }
+    const serviceDirection = normalizeRelationDirection(edge.direction)
+    const serviceForward = serviceDirection === 'source_to_target'
+      || serviceDirection === 'bidirectional'
+    const serviceReverse = serviceDirection === 'target_to_source'
+      || serviceDirection === 'bidirectional'
+    if (direction === 'downstream') {
+      if (serviceForward) add(source, target, edge)
+      if (serviceReverse) add(target, source, edge)
+    } else if (direction === 'upstream') {
+      if (serviceForward) add(target, source, edge)
+      if (serviceReverse) add(source, target, edge)
+    }
   })
   adjacency.forEach((relations) => relations.sort((left, right) => (
     String(left.edge.id ?? '').localeCompare(String(right.edge.id ?? ''))
@@ -2856,34 +3462,51 @@ function buildTraceAdjacency(graph) {
   return adjacency
 }
 
-function reachableDestinations(adjacency, sourceAssetId) {
-  if (!adjacency.has(sourceAssetId)) return []
+function reachableDestinations(adjacency, sourceAssetId, maxDepth = 100) {
+  if (!adjacency.has(sourceAssetId)) return { destinations: [], truncated: false }
   const visited = new Set([sourceAssetId])
   const queue = [{ assetId: sourceAssetId, distance: 0 }]
   const destinations = []
-  while (queue.length) {
-    const current = queue.shift()
-    for (const relation of adjacency.get(current.assetId) ?? []) {
+  let cursor = 0
+  let truncated = false
+  while (cursor < queue.length) {
+    const current = queue[cursor]
+    cursor += 1
+    const relations = adjacency.get(current.assetId) ?? []
+    if (current.distance >= maxDepth) {
+      if (relations.some(({ target }) => !visited.has(target))) truncated = true
+      continue
+    }
+    for (const relation of relations) {
       if (visited.has(relation.target)) continue
       visited.add(relation.target)
       destinations.push({ assetId: relation.target, distance: current.distance + 1 })
       queue.push({ assetId: relation.target, distance: current.distance + 1 })
     }
   }
-  return destinations
+  return { destinations, truncated }
 }
 
-function findTracePath(adjacency, sourceAssetId, targetAssetId) {
+function findTracePath(adjacency, sourceAssetId, targetAssetId, maxDepth = 100) {
+  if (!adjacency.has(sourceAssetId)) return { path: null, truncated: false }
   const visited = new Set([sourceAssetId])
-  const queue = [sourceAssetId]
+  const queue = [{ assetId: sourceAssetId, distance: 0 }]
   const predecessor = new Map()
-  while (queue.length) {
-    const current = queue.shift()
-    for (const relation of adjacency.get(current) ?? []) {
+  let cursor = 0
+  let truncated = false
+  while (cursor < queue.length) {
+    const current = queue[cursor]
+    cursor += 1
+    const relations = adjacency.get(current.assetId) ?? []
+    if (current.distance >= maxDepth) {
+      if (relations.some(({ target }) => !visited.has(target))) truncated = true
+      continue
+    }
+    for (const relation of relations) {
       if (visited.has(relation.target)) continue
       visited.add(relation.target)
       predecessor.set(relation.target, {
-        source: current,
+        source: current.assetId,
         edge: relation.edge,
       })
       if (relation.target === targetAssetId) {
@@ -2891,16 +3514,284 @@ function findTracePath(adjacency, sourceAssetId, targetAssetId) {
         let target = targetAssetId
         while (target !== sourceAssetId) {
           const previous = predecessor.get(target)
-          if (!previous) return null
+          if (!previous) return { path: null, truncated }
           path.unshift({ source: previous.source, target, edge: previous.edge })
           target = previous.source
         }
-        return path
+        return { path, truncated }
       }
+      queue.push({ assetId: relation.target, distance: current.distance + 1 })
+    }
+  }
+  return { path: null, truncated }
+}
+
+function reachableSet(adjacency, sourceAssetIds) {
+  const visited = new Set()
+  const queue = [...new Set(sourceAssetIds)].filter((id) => adjacency.has(id))
+  queue.forEach((id) => visited.add(id))
+  let cursor = 0
+  while (cursor < queue.length) {
+    const current = queue[cursor]
+    cursor += 1
+    for (const relation of adjacency.get(current) ?? []) {
+      if (visited.has(relation.target)) continue
+      visited.add(relation.target)
       queue.push(relation.target)
     }
   }
-  return null
+  return visited
+}
+
+function normalizeRelationDirection(value) {
+  const normalized = String(value ?? 'undirected').trim().toLowerCase()
+    .replaceAll('-', '_')
+  return ['source_to_target', 'target_to_source', 'bidirectional', 'undirected']
+    .includes(normalized)
+    ? normalized
+    : 'undirected'
+}
+
+function directionCoverageForGraph(graph) {
+  const edges = graph.edges ?? []
+  const undirectedEdgeCount = edges.filter(({ direction }) => (
+    normalizeRelationDirection(direction) === 'undirected'
+  )).length
+  const directedEdgeCount = edges.length - undirectedEdgeCount
+  return {
+    confirmedEdgeCount: edges.length,
+    directedEdgeCount,
+    undirectedEdgeCount,
+    coverageStatus: edges.length === 0
+      ? 'none'
+      : undirectedEdgeCount === 0 ? 'complete' : directedEdgeCount === 0 ? 'none' : 'partial',
+  }
+}
+
+function verifiedRootNodes(graph) {
+  return graph.nodes.filter((node) => (
+    ['root', 'core'].includes(
+      String(node.topologyRole ?? '').trim().toLowerCase(),
+    )
+  ))
+}
+
+function traceAvailabilityReason(graph, physicalAdjacency, normalized, sourceAssetId) {
+  const directionalMode = ['upstream', 'downstream'].includes(normalized.mode)
+    || (['point_to_point', 'reachable'].includes(normalized.mode)
+      && normalized.direction !== 'both')
+  if (!directionalMode) return null
+  if (!verifiedRootNodes(graph).length) return 'root_not_defined'
+  const physicalComponent = reachableSet(physicalAdjacency, [sourceAssetId])
+  if (physicalComponent.size <= 1) return null
+  const hasServiceEdge = graph.edges.some((edge) => (
+    physicalComponent.has(edge.sourceAssetId)
+      && physicalComponent.has(edge.targetAssetId)
+      && normalizeRelationDirection(edge.direction) !== 'undirected'
+  ))
+  return hasServiceEdge ? null : 'direction_not_available'
+}
+
+function hasUnavailableDirectionOnPhysicalPath(graph, physicalPathResult) {
+  return Boolean(physicalPathResult?.path?.some(({ edge }) => (
+    normalizeRelationDirection(edge.direction) === 'undirected'
+  )))
+}
+
+function hasIncompleteDirectionOnRootArea(
+  graph,
+  physicalReachable,
+  baselineReachable,
+  incompleteDirectionNodes,
+) {
+  if ([...incompleteDirectionNodes].some((id) => !baselineReachable.has(id))) return true
+  return graph.edges.some((edge) => (
+    physicalReachable.has(edge.sourceAssetId)
+      && physicalReachable.has(edge.targetAssetId)
+      && normalizeRelationDirection(edge.direction) === 'undirected'
+  ))
+}
+
+function reachableViaUndirectedEdge(adjacency, sourceAssetIds) {
+  const incomplete = new Set()
+  const bestState = new Map()
+  const queue = [...new Set(sourceAssetIds)]
+    .filter((id) => adjacency.has(id))
+    .map((assetId) => ({ assetId, incomplete: false }))
+  queue.forEach(({ assetId }) => bestState.set(assetId, false))
+  let cursor = 0
+  while (cursor < queue.length) {
+    const current = queue[cursor]
+    cursor += 1
+    if (current.incomplete) incomplete.add(current.assetId)
+    for (const relation of adjacency.get(current.assetId) ?? []) {
+      const nextIncomplete = current.incomplete
+        || normalizeRelationDirection(relation.edge.direction) === 'undirected'
+      const previous = bestState.get(relation.target)
+      if (previous === true || (previous === false && !nextIncomplete)) continue
+      bestState.set(relation.target, nextIncomplete)
+      queue.push({ assetId: relation.target, incomplete: nextIncomplete })
+    }
+  }
+  return incomplete
+}
+
+function resolveImpactFailure(graph, normalized, resolver = null) {
+  if (normalized.failureType === 'asset') {
+    const resolvedAssetId = resolver?.resolve(normalized.failureId) ?? normalized.failureId
+    const node = graph.nodes.find(({ id }) => id === resolvedAssetId)
+    return node
+      ? {
+        type: 'asset',
+        id: normalized.failureId,
+        resolvedAssetId: node.id,
+        edges: graph.edges.filter((edge) => (
+          edge.sourceAssetId === node.id || edge.targetAssetId === node.id
+        )),
+      }
+      : null
+  }
+  const matches = graph.edges.filter((edge) => {
+    const identifiers = [
+      edge.id,
+      edge.relationId,
+      edge.candidateId,
+      ...(edge.sourceRelationIds ?? []),
+    ].filter(Boolean)
+    if (normalized.failureType === 'relation') return identifiers.includes(normalized.failureId)
+    return [
+      edge.pathAssetId,
+      ...(edge.pathAssetIds ?? []),
+      ...(edge.sourceGeometryIds ?? []),
+    ].filter(Boolean).includes(normalized.failureId)
+  })
+  return matches.length
+    ? { type: normalized.failureType, id: normalized.failureId, edges: matches }
+    : null
+}
+
+function resolveImpactRoots(graph, resolver, requestedRootAssetIds) {
+  const rootIds = requestedRootAssetIds === null
+    ? verifiedRootNodes(graph).map(({ id }) => id)
+    : requestedRootAssetIds
+      .map((assetId) => resolver.resolve(assetId) ?? assetId)
+  return graph.nodes
+    .filter(({ id }) => rootIds.includes(id))
+    .filter((node, index, nodes) => nodes.findIndex(({ id }) => id === node.id) === index)
+    .sort((left, right) => left.id.localeCompare(right.id))
+}
+
+function simulateImpactFailure(graph, failure) {
+  const failedNodeIds = failure.type === 'asset'
+    ? new Set([failure.resolvedAssetId])
+    : new Set()
+  const failedEdgeIds = new Set(failure.edges.map(({ id }) => id).filter(Boolean))
+  const nodes = graph.nodes.filter(({ id }) => !failedNodeIds.has(id))
+  const nodeIds = new Set(nodes.map(({ id }) => id))
+  const edges = graph.edges.filter((edge) => (
+    !failedEdgeIds.has(edge.id)
+      && nodeIds.has(edge.sourceAssetId)
+      && nodeIds.has(edge.targetAssetId)
+  ))
+  return restrictTraceGraph({ ...graph, nodes, edges }, nodeIds)
+}
+
+function impactNodes(graph, ids, reason) {
+  return ids.map((assetId) => {
+    const node = graph.nodes.find(({ id }) => id === assetId)
+    return {
+      assetId,
+      siteId: node?.siteId ?? null,
+      category: node?.category ?? node?.networkFamily ?? null,
+      networkFamily: node?.networkFamily ?? null,
+      topologyRole: node?.topologyRole ?? 'unknown',
+      componentId: componentIdForNode(graph, assetId),
+      reason,
+    }
+  })
+}
+
+function impactUnavailable({
+  datasetVersionId,
+  graphRevision,
+  normalized,
+  failure = null,
+  reason,
+  limitation,
+}) {
+  const empty = []
+  return {
+    status: 'unavailable',
+    datasetVersionId,
+    graphRevision,
+    failure: failure
+      ? {
+        type: normalized.failureType,
+        id: normalized.failureId,
+        resolvedAssetId: failure.resolvedAssetId ?? null,
+      }
+      : {
+        type: normalized.failureType,
+        id: normalized.failureId,
+        resolvedAssetId: null,
+      },
+    roots: [],
+    confirmedImpacted: empty,
+    potentiallyImpacted: empty,
+    confirmedTopologyImpact: empty,
+    potentialTopologyImpact: empty,
+    confirmedGroups: [],
+    potentialGroups: [],
+    cutEdges: [],
+    summary: {
+      baselineReachable: 0,
+      reachableAfterFailure: 0,
+      confirmedImpacted: 0,
+      potentiallyImpacted: 0,
+    },
+    reason,
+    limitations: [limitation],
+    computedAt: new Date().toISOString(),
+  }
+}
+
+function isTopologyPreviewAllowed(context) {
+  return context?.preview === true
+    && String(context.actorRole ?? '').toLowerCase() === 'administrator'
+}
+
+function decorateTopologyPreviewResult(result, context, record) {
+  if (!isTopologyPreviewAllowed(context)) return result
+  return {
+    ...result,
+    preview: true,
+    publicationStatus: record.datasetVersion?.publicationStatus ?? 'unpublished',
+    publicationProfile: record.datasetVersion?.publicationProfile ?? null,
+  }
+}
+
+function groupImpactItems(items) {
+  const groups = new Map()
+  items.forEach((item) => {
+    const key = [item.siteId ?? '', item.category ?? '', item.componentId ?? ''].join('|')
+    const group = groups.get(key) ?? {
+      siteId: item.siteId ?? null,
+      category: item.category ?? null,
+      componentId: item.componentId ?? null,
+      assetIds: [],
+      count: 0,
+    }
+    group.assetIds.push(item.assetId)
+    group.count += 1
+    groups.set(key, group)
+  })
+  return [...groups.values()]
+    .map((group) => ({ ...group, assetIds: group.assetIds.sort() }))
+    .sort((left, right) => (
+      String(left.siteId ?? '').localeCompare(String(right.siteId ?? ''))
+        || String(left.category ?? '').localeCompare(String(right.category ?? ''))
+        || String(left.componentId ?? '').localeCompare(String(right.componentId ?? ''))
+    ))
 }
 
 function traceEdge(edge, sourceAssetId, targetAssetId) {
@@ -2912,12 +3803,15 @@ function traceEdge(edge, sourceAssetId, targetAssetId) {
     : edge.pathAssetId ? [edge.pathAssetId] : []
   return {
     edgeId: edge.id,
+    relationId: edge.relationId ?? edge.sourceRelationIds?.[0] ?? null,
     sourceAssetId,
     targetAssetId,
     pathAssetIds: uniqueValues(pathAssetIds),
     sourceGeometryIds: uniqueValues(sourceGeometryIds),
     relationType: edge.relationType ?? 'connected-via-path',
-    direction: edge.direction ?? 'undirected',
+    direction: orientedTraceDirection(edge, sourceAssetId, targetAssetId),
+    relationDirection: normalizeRelationDirection(edge.direction),
+    provenance: edge.provenance ?? edge.relationSource ?? 'manual_review',
     relationSource: edge.relationSource ?? edge.provenance ?? 'manual_review',
     verificationStatus: 'confirmed',
     networkFamily: edge.networkFamily ?? null,
@@ -2966,10 +3860,19 @@ function hasPendingCandidate(record, resolver, sourceAssetId, targetAssetId) {
 
 function traceMessageForReason(reason) {
   return {
+    source_not_topology_node: 'Aset ini belum terdaftar sebagai node topology.',
+    target_not_topology_node: 'Aset tujuan belum terdaftar sebagai node topology.',
+    isolated_source: 'Belum ada koneksi terkonfirmasi dari aset ini.',
     'isolated-source': 'Belum ada koneksi terkonfirmasi dari aset ini.',
+    different_component: 'Target berada di luar komponen yang sudah diverifikasi.',
     'different-component': 'Target berada di luar komponen yang sudah diverifikasi.',
     candidate_pending_review: 'Jalur mungkin tersedia tetapi masih menunggu review topology.',
+    direction_not_available: 'Direction service belum cukup terverifikasi; lengkapi review arah relation.',
+    root_not_defined: 'Verified root/core belum ditetapkan untuk directional traversal.',
+    scope_excludes_path: 'Scope yang diminta mengecualikan sebagian jalur topology.',
+    max_depth_reached: 'Batas kedalaman traversal tercapai; naikkan maxDepth atau gunakan scope yang lebih tepat.',
     unreachable: 'Tidak ada jalur topologi terkonfirmasi antara aset awal dan tujuan.',
+    topology_not_published: 'Topology trace/impact belum dipublikasikan pada profile dataset aktif.',
   }[reason] ?? 'Jalur topologi tidak dapat ditemukan.'
 }
 
@@ -2979,6 +3882,8 @@ function traceState({
   sourceAssetId,
   targetAssetId = null,
   componentId = null,
+  mode = null,
+  direction = null,
   status,
   reason = null,
   message,
@@ -2990,6 +3895,8 @@ function traceState({
     sourceAssetId,
     targetAssetId,
     componentId,
+    mode,
+    direction,
     reason,
     message,
     nodeIds: [],
@@ -3004,6 +3911,8 @@ async function recordTraceAudit(auditLog, {
   datasetVersionId,
   request,
   result,
+  durationMilliseconds = null,
+  cacheHit = false,
 }) {
   if (!auditLog?.record) return
   try {
@@ -3015,16 +3924,97 @@ async function recordTraceAudit(auditLog, {
       details: {
         sourceAssetId: request.sourceAssetId,
         targetAssetId: request.targetAssetId,
+        mode: request.mode,
         direction: request.direction,
         requestedGraphRevision: request.graphRevision,
         graphRevision: result.graphRevision ?? null,
         resultStatus: result.status,
         reason: result.reason ?? null,
         hopCount: result.hopCount ?? null,
+        impactCount: null,
+        durationMilliseconds,
+        cacheHit,
       },
     })
   } catch {
     // Tracing must remain available if telemetry storage is temporarily down.
+  }
+}
+
+function orientedTraceDirection(edge, sourceAssetId, targetAssetId) {
+  const relationDirection = normalizeRelationDirection(edge.direction)
+  if (relationDirection === 'bidirectional' || relationDirection === 'undirected') {
+    return relationDirection
+  }
+  const followsStoredOrientation = sourceAssetId === edge.sourceAssetId
+    && targetAssetId === edge.targetAssetId
+  if (followsStoredOrientation) return relationDirection
+  return relationDirection === 'source_to_target'
+    ? 'target_to_source'
+    : 'source_to_target'
+}
+
+async function recordImpactAudit(auditLog, {
+  actorId,
+  datasetVersionId,
+  request,
+  result,
+  durationMilliseconds = null,
+  cacheHit = false,
+}) {
+  if (!auditLog?.record) return
+  try {
+    await auditLog.record('topology.impact_requested', {
+      actorId,
+      datasetVersionId,
+      correlationId: request.correlationId ?? null,
+      outcome: result.status,
+      details: {
+        failureType: request.failureType,
+        failureId: request.failureId,
+        requestedGraphRevision: request.graphRevision,
+        graphRevision: result.graphRevision ?? null,
+        resultStatus: result.status,
+        reason: result.reason ?? null,
+        impactCount: result.summary?.confirmedImpacted ?? null,
+        potentialImpactCount: result.summary?.potentiallyImpacted ?? null,
+        durationMilliseconds,
+        cacheHit,
+      },
+    })
+  } catch {
+    // Impact calculation remains available if audit storage is temporarily down.
+  }
+}
+
+function topologyResultCacheKey(kind, datasetVersionId, graphRevision, request) {
+  const normalizedRequest = canonicalizeTopologyRequest(request)
+  const requestHash = createHash('sha256')
+    .update(JSON.stringify(normalizedRequest))
+    .digest('hex')
+  return `${kind}:${datasetVersionId}:${graphRevision}:${requestHash}`
+}
+
+function canonicalizeTopologyRequest(request) {
+  return Object.fromEntries(Object.entries(request ?? {})
+    .filter(([key]) => key !== 'correlationId')
+    .map(([key, value]) => [
+      key,
+      Array.isArray(value) ? [...new Set(value)].sort() : value,
+    ])
+    .sort(([left], [right]) => left.localeCompare(right)))
+}
+
+function readTopologyResultCache(cache, key) {
+  const value = cache.get(key)
+  return value ? structuredClone(value) : null
+}
+
+function writeTopologyResultCache(cache, key, value) {
+  cache.set(key, structuredClone(value))
+  while (cache.size > 256) {
+    const oldestKey = cache.keys().next().value
+    cache.delete(oldestKey)
   }
 }
 

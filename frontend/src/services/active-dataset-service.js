@@ -416,6 +416,8 @@ export async function traceTopology({
   targetAssetId = null,
   graphRevision,
   direction = 'both',
+  mode = null,
+  maxDepth = null,
   scopeAssetIds = null,
   token = getDefaultMapToken(),
   signal,
@@ -435,12 +437,71 @@ export async function traceTopology({
         sourceAssetId,
         graphRevision,
         direction,
+        ...(mode ? { mode } : {}),
+        ...(maxDepth !== null && maxDepth !== undefined ? { maxDepth } : {}),
         ...(Array.isArray(scopeAssetIds) ? { scopeAssetIds } : {}),
         ...(targetAssetId ? { targetAssetId } : {}),
       },
     },
   )
 }
+
+export async function loadTopologyRoots({
+  datasetVersionId,
+  graphRevision = null,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('datasetVersionId wajib tersedia.')
+  const query = graphRevision
+    ? `?graphRevision=${encodeURIComponent(graphRevision)}`
+    : ''
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + `/topology/roots${query}`,
+    { token, signal },
+  )
+}
+
+export async function analyzeTopologyImpact({
+  datasetVersionId,
+  failureType,
+  failureId,
+  graphRevision,
+  rootAssetIds = null,
+  networkFamily = null,
+  scopeAssetIds = null,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('datasetVersionId wajib tersedia.')
+  if (!['asset', 'relation', 'path'].includes(failureType)) {
+    throw new TypeError('failureType impact tidak valid.')
+  }
+  if (!failureId) throw new TypeError('failureId wajib tersedia.')
+  if (!graphRevision) throw new TypeError('Graph revision wajib tersedia.')
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + '/topology/impact',
+    {
+      token,
+      signal,
+      method: 'POST',
+      body: {
+        failureType,
+        failureId,
+        graphRevision,
+        ...(Array.isArray(rootAssetIds) ? { rootAssetIds } : {}),
+        ...(networkFamily ? { networkFamily } : {}),
+        ...(Array.isArray(scopeAssetIds) ? { scopeAssetIds } : {}),
+      },
+    },
+  )
+}
+
+export const impactTopology = analyzeTopologyImpact
 
 export async function loadDatasetProjection({
   datasetVersionId,

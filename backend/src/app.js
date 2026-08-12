@@ -341,19 +341,80 @@ export function createApp({
           },
         })
       }
+      const topologyRootsMatch = request.method === 'GET'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/roots$/,
+        )
+        : null
+      if (topologyRootsMatch) {
+        const preview = url.searchParams.get('preview') === 'true'
+        const user = preview
+          ? requireAdministrator(request, authenticator)
+          : authenticator.authenticate(request)
+        assertTopologyService(topologyService)
+        await assertTopologyVersionAccess(
+          repository,
+          user,
+          topologyRootsMatch[1],
+          { preview },
+        )
+        const roots = await topologyService.getRoots(topologyRootsMatch[1], {
+          graphRevision: url.searchParams.get('graphRevision'),
+        })
+        return sendJson(response, 200, preview
+          ? { ...roots, preview: true, publicationStatus: 'unpublished' }
+          : roots)
+      }
       const topologyTraceMatch = request.method === 'POST'
         ? url.pathname.match(
           /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/trace$/,
         )
         : null
       if (topologyTraceMatch) {
-        const user = authenticator.authenticate(request)
+        const preview = url.searchParams.get('preview') === 'true'
+        const user = preview
+          ? requireAdministrator(request, authenticator)
+          : authenticator.authenticate(request)
         assertTopologyService(topologyService)
+        await assertTopologyVersionAccess(
+          repository,
+          user,
+          topologyTraceMatch[1],
+          { preview },
+        )
         const body = await readJsonBody(request)
+        const traceArgs = [topologyTraceMatch[1], body, user.id, correlationId]
+        if (preview) traceArgs.push({ preview: true, actorRole: user.role })
         return sendJson(
           response,
           200,
-          await topologyService.trace(topologyTraceMatch[1], body, user.id, correlationId),
+          await topologyService.trace(...traceArgs),
+        )
+      }
+      const topologyImpactMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/impact$/,
+        )
+        : null
+      if (topologyImpactMatch) {
+        const preview = url.searchParams.get('preview') === 'true'
+        const user = preview
+          ? requireAdministrator(request, authenticator)
+          : authenticator.authenticate(request)
+        assertTopologyService(topologyService)
+        await assertTopologyVersionAccess(
+          repository,
+          user,
+          topologyImpactMatch[1],
+          { preview },
+        )
+        const body = await readJsonBody(request)
+        const impactArgs = [topologyImpactMatch[1], body, user.id, correlationId]
+        if (preview) impactArgs.push({ preview: true, actorRole: user.role })
+        return sendJson(
+          response,
+          200,
+          await topologyService.impact(...impactArgs),
         )
       }
       const topologyReviewPreviewMatch = request.method === 'POST'
@@ -746,6 +807,35 @@ function assertTopologyService(topologyService) {
     throw new AppError('Topology service belum dikonfigurasi.', {
       code: 'topology_service_unavailable',
       statusCode: 503,
+    })
+  }
+}
+
+async function assertTopologyVersionAccess(
+  repository,
+  user,
+  datasetVersionId,
+  { preview = false } = {},
+) {
+  if (preview || !repository?.get) return
+  const record = await repository.get(datasetVersionId)
+  requireBranchAccess(user, {
+    datasetId: record.datasetVersion?.datasetId,
+    branchId: record.datasetVersion?.branchId,
+  })
+  if (typeof repository.resolveActiveVersion !== 'function') return
+  const active = await repository.resolveActiveVersion({
+    datasetId: record.datasetVersion?.datasetId,
+    branchId: record.datasetVersion?.branchId,
+  })
+  if (!active || active.record?.datasetVersion?.id !== datasetVersionId) {
+    throw new AppError('Topology viewer hanya dapat membaca dataset version aktif.', {
+      code: 'topology_version_not_active',
+      statusCode: 409,
+      details: {
+        datasetVersionId,
+        activeDatasetVersionId: active?.record?.datasetVersion?.id ?? null,
+      },
     })
   }
 }
