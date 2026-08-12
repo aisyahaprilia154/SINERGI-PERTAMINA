@@ -36,12 +36,17 @@ export function projectCanonicalImport({
       severity: issue.severity ?? 'warning',
       issueCode: issue.issueCode ?? 'projection_issue',
       message: issue.message ?? 'Projection issue tidak memiliki pesan.',
-      canActivate: issue.canActivate ?? issue.severity !== 'error',
+      canActivate: issue.canActivate ?? canActivateForProjectionIssue(issue),
       ...compact({
+        sourceFeatureId: issue.sourceFeatureId,
         sourceFolderPath: issue.sourceFolderPath,
         sourcePlacemarkName: issue.sourcePlacemarkName,
         assetId: issue.assetId,
         geometryReference: issue.geometryReference,
+        readinessDimension: issue.readinessDimension,
+        blockingProfiles: issue.blockingProfiles,
+        recommendedAction: issue.recommendedAction,
+        details: issue.details,
       }),
     })
   }
@@ -140,6 +145,23 @@ export function projectCanonicalImport({
         }
       }
     }
+    if (!assetId
+      && identity?.canonicalAssetId
+      && classification
+      && ['device_node', 'cable_path'].includes(classification.objectRole)
+      && feature.sourceFolderPath !== '/') {
+      // Keep map projection usable for onboarding candidates while leaving
+      // stableAssetId empty so inventory/topology readiness remains blocked.
+      assetId = identity.canonicalAssetId
+      sourceIdentity = {
+        strategy: 'onboarding-candidate',
+        sourceFolderPath: feature.sourceFolderPath,
+        sourcePlacemarkName: feature.sourceName,
+        canonicalAssetId: identity.canonicalAssetId,
+        onboardingId: identity.onboardingId,
+        legacyId: identity.legacyId,
+      }
+    }
     if (!assetId) {
       addIssue({
         severity: 'error',
@@ -190,15 +212,24 @@ export function projectCanonicalImport({
       onboardingIdentity: identity?.onboardingId ?? classification?.onboardingIdentity ?? null,
       legacyAssetId: identity?.legacyId ?? assetId,
       identityStatus: identity?.identityStatus ?? (assetId ? 'stable' : 'unresolved'),
+      identityResolutionStatus: identity?.identityResolutionStatus
+        ?? classification?.identityResolutionStatus
+        ?? (sourceIdentity ? 'onboarding_candidate' : assetId ? 'stable_explicit' : 'onboarding_candidate'),
+      sourceMatchType: identity?.sourceMatchType ?? null,
+      sourceMatchValue: identity?.sourceMatchValue ?? null,
+      registryId: identity?.registryId ?? null,
       identityAliases: structuredClone(identity?.aliases ?? {}),
       sourceFeatureId: feature.sourceFeatureId,
-      name: metadata.assetName ?? feature.sourceName ?? `Placemark ${index + 1}`,
+      name: metadata.assetName ?? classification?.assetName ?? feature.sourceName ?? `Placemark ${index + 1}`,
       category: metadata.category ?? layer.category ?? classification?.category ?? 'uncategorized',
       type: metadata.assetType
         ?? layer.name
         ?? classification?.assetType
         ?? 'unknown',
       branchId: datasetVersion.branchId,
+      objectRole: classification?.objectRole ?? 'unknown',
+      networkFamily: classification?.networkFamily ?? 'unknown',
+      sourceStatus: classification?.sourceStatus ?? 'unknown',
       properties: {
         ...sourceProperties,
         extendedData: structuredClone(metadata.raw),
@@ -288,6 +319,12 @@ export function projectCanonicalImport({
     geometryReference: element.geometryReference,
     canActivate: element.canActivate,
   }))
+  ;(canonicalParser.issues ?? [])
+    .filter((issue) => canonicalParserOnlyIssue(issue))
+    .forEach((issue) => addIssue({
+      ...issue,
+      canActivate: issue.canActivate ?? canActivateForProjectionIssue(issue),
+    }))
 
   const geometryCounts = countValues(geometries.map(({ geometryType }) => geometryType))
   const hasBlocking = issues.some(({ canActivate }) => canActivate === false)
@@ -323,6 +360,33 @@ export function projectCanonicalImport({
       styleMaps: structuredClone(parserOutput.styleMaps ?? []),
     },
   }
+}
+
+const CANONICAL_ONLY_ISSUE_CODES = new Set([
+  'external_overlay_resource_not_fetched',
+  'unsafe_overlay_resource_path',
+  'ground_overlay_resource_missing',
+  'parser_placemark_coverage_mismatch',
+  'parser_overlay_coverage_mismatch',
+  'duplicate_asset_identity_alias',
+  'duplicate_canonical_asset_id',
+  'canonical_identity_source_feature_missing',
+  'missing_stable_asset_id',
+  'identity_conflict',
+  'missing_required_metadata',
+  'invalid_vocabulary_value',
+])
+
+function canonicalParserOnlyIssue(issue = {}) {
+  return CANONICAL_ONLY_ISSUE_CODES.has(String(issue.issueCode ?? ''))
+}
+
+function canActivateForProjectionIssue(issue = {}) {
+  if (Array.isArray(issue.blockingProfiles)) {
+    return !issue.blockingProfiles.includes('map_only')
+  }
+  if (issue.canPublish === false) return false
+  return issue.severity !== 'error'
 }
 
 function createFeatureQueues(canonicalParser) {
