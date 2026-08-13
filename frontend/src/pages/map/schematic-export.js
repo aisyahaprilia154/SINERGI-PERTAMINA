@@ -16,12 +16,33 @@ export function downloadSchematicSvg(svgElement, filename) {
   downloadBlob(new Blob([serializedSvg], { type: 'image/svg+xml;charset=utf-8' }), filename)
 }
 
-export async function downloadSchematicPng(svgElement, filename, scale = 2) {
+export function calculateSafePngScale({
+  width,
+  height,
+  requestedScale = 2,
+  maxDimension = 8192,
+  maxPixelCount = 40_000_000,
+}) {
+  if (!(width > 0) || !(height > 0)) return 1
+  return Math.max(.1, Math.min(
+    requestedScale,
+    maxDimension / width,
+    maxDimension / height,
+    Math.sqrt(maxPixelCount / (width * height)),
+  ))
+}
+
+export async function downloadSchematicPng(svgElement, filename, requestedScale = 2) {
   const serializedSvg = serializeSchematicSvg(svgElement)
   const sourceUrl = URL.createObjectURL(new Blob([serializedSvg], { type: 'image/svg+xml' }))
   try {
     const image = await loadImage(sourceUrl)
     const viewBox = svgElement.viewBox.baseVal
+    const scale = calculateSafePngScale({
+      width: viewBox.width,
+      height: viewBox.height,
+      requestedScale,
+    })
     const canvas = document.createElement('canvas')
     canvas.width = Math.ceil(viewBox.width * scale)
     canvas.height = Math.ceil(viewBox.height * scale)

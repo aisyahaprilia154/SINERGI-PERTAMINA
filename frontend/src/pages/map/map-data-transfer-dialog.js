@@ -40,6 +40,8 @@ export function openMapDataTransferDialog({
     uploadPercent: null,
     status: null,
     error: null,
+    requiresBreakingChangeConfirmation: false,
+    confirmBreakingChanges: false,
     controller: null,
   }
 
@@ -128,6 +130,14 @@ export function openMapDataTransferDialog({
     dialog.querySelector('[name="mapOfficialSource"]')?.addEventListener('change', (event) => {
       state.officialSourceConfirmed = event.target.checked
       render()
+    })
+    dialog.querySelector('[name="mapConfirmBreakingChanges"]')?.addEventListener('change', (event) => {
+      state.confirmBreakingChanges = event.target.checked
+      render()
+    })
+    dialog.querySelector('.confirm-map-breaking-change')?.addEventListener('click', () => {
+      if (!state.confirmBreakingChanges || !state.status?.datasetVersion?.id) return
+      activate(state.status.datasetVersion.id)
     })
     dialog.querySelector('.start-map-import')?.addEventListener('click', startImport)
     dialog.querySelector('.retry-map-import')?.addEventListener('click', resetImport)
@@ -231,6 +241,13 @@ export function openMapDataTransferDialog({
         return
       }
       if (status.datasetVersion.status === 'valid' && status.canActivate) {
+        state.requiresBreakingChangeConfirmation = status.comparisonSummary
+          ?.requiresBreakingChangeConfirmation === true
+        if (state.requiresBreakingChangeConfirmation) {
+          state.phase = 'awaiting-confirmation'
+          render()
+          return
+        }
         await activate(status.datasetVersion.id)
         return
       }
@@ -246,6 +263,7 @@ export function openMapDataTransferDialog({
       token: getDefaultAdminToken(),
       datasetVersionId,
       expectedActiveVersionId: activeContext.datasetVersionId ?? null,
+      confirmBreakingChanges: state.confirmBreakingChanges,
       signal: state.controller.signal,
     })
     state.phase = 'active'
@@ -415,6 +433,7 @@ function renderImportPanel(activeContext, state) {
   if (['uploading', 'processing', 'activating', 'active'].includes(state.phase)) {
     return renderCompactProgress(state)
   }
+  if (state.phase === 'awaiting-confirmation') return renderBreakingChangeConfirmation(state)
   if (state.phase === 'invalid') return renderInvalidResult(state)
 
   const fileError = state.fileValidation?.valid === false
@@ -524,6 +543,34 @@ function renderCompactProgress(state) {
         <i style="${Number.isFinite(progress) ? `width:${progress}%` : ''}"></i>
       </div>
       <small>${Number.isFinite(progress) ? `${Math.round(progress)}%` : 'Sedang diproses oleh server'}</small>
+    </section>
+  `
+}
+
+function renderBreakingChangeConfirmation(state) {
+  const summary = state.status?.comparisonSummary ?? {}
+  const highRiskCount = summary.byRisk?.high ?? 0
+  return `
+    <section class="map-import-confirm-breaking" role="alert">
+      <span class="material-symbols-outlined" aria-hidden="true">warning</span>
+      <h3>Perubahan perlu dikonfirmasi</h3>
+      <p>File KMZ berhasil divalidasi. Versi baru memiliki ${highRiskCount} perubahan berisiko tinggi dan belum menggantikan dataset aktif.</p>
+      <label class="map-import-confirmation">
+        <input name="mapConfirmBreakingChanges" type="checkbox"
+          ${state.confirmBreakingChanges ? 'checked' : ''} />
+        <span>
+          <strong>Saya sudah meninjau perubahan ini.</strong>
+          <small>Setujui pengarsipan dataset aktif dan tampilkan versi KMZ baru di peta.</small>
+        </span>
+      </label>
+      <footer class="map-transfer-actions">
+        <button class="button secondary close-map-transfer" type="button">Batal</button>
+        <button class="button primary confirm-map-breaking-change" type="button"
+          ${state.confirmBreakingChanges ? '' : 'disabled'}>
+          <span class="material-symbols-outlined" aria-hidden="true">publish</span>
+          Konfirmasi dan tampilkan di peta
+        </button>
+      </footer>
     </section>
   `
 }

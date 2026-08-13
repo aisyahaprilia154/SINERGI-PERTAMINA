@@ -3,6 +3,7 @@ import {
   isConfirmedTopologyEdge,
   normalizeTopologyEdge,
 } from './selected-asset-relation-graph.js'
+import { validateSchematicProjection } from './schematic-validation.js'
 
 export { buildSelectedAssetRelationGraph }
 
@@ -242,12 +243,26 @@ export function buildSchematicGraph({
       resolutionStatus: nodeEvidence?.resolutionStatus ?? 'unresolved',
       evidenceCount: nodeEvidence?.evidenceCount ?? 0,
       candidateCount: nodeEvidence?.candidateCount ?? 0,
+      candidates: nodeEvidence?.candidates ?? [],
+      sourceFeatureId: asset.sourceFeatureId ?? asset.featureId ?? asset.id,
+      networkIds: networks.filter((network) => network.nodeIds?.includes(asset.id))
+        .map((network) => network.id),
       order: mode === 'trace' ? index : null,
     }
   })
 
+  const validation = mode === 'all-assets'
+    ? validateSchematicProjection({
+      sourceAssets: assets,
+      sourceConfirmedEdges: hasTopology ? topologyEdges : sourceEdges
+        .filter((edge) => edge.relationStatus !== 'recommended'),
+      diagramNodes: nodes,
+      diagramEdges: edges,
+      candidates: topologyCandidates,
+    })
+    : null
   const diagnostics = mode === 'all-assets'
-    ? buildDiagramDiagnostics(nodes, edges)
+    ? buildDiagramDiagnostics(nodes, edges, validation)
     : null
   return {
     status: 'ready',
@@ -341,7 +356,6 @@ function addEvidenceEdge(edges, assetById, edge) {
 }
 
 function diagramCandidateStatus(candidate) {
-  if (candidate.candidateStatus === 'confirmed') return 'confirmed'
   if (candidate.candidateStatus === 'candidate' && candidate.proposalStatus === 'recommended') {
     return 'recommended'
   }
@@ -354,6 +368,7 @@ function buildNodeEvidenceIndex({ nodeIds, edges, candidates }) {
     resolutionStatus: 'unresolved',
     evidenceCount: 0,
     candidateCount: 0,
+    candidates: [],
   }]))
   edges.forEach((edge) => {
     for (const id of [edge.sourceId, edge.targetId]) {
@@ -365,10 +380,15 @@ function buildNodeEvidenceIndex({ nodeIds, edges, candidates }) {
     }
   })
   ;(candidates ?? []).forEach((candidate) => {
+    if (!['candidate', 'ambiguous'].includes(candidate.candidateStatus)) return
+    if (['rejected', 'revoked'].includes(candidate.proposalStatus)) return
     const ids = candidateAssetIds(candidate).filter((id) => included.has(id))
     ids.forEach((id) => {
       const item = index.get(id)
       item.candidateCount += 1
+      if (['candidate', 'ambiguous'].includes(candidate.candidateStatus)) {
+        item.candidates.push(candidate)
+      }
       if (item.resolutionStatus === 'unresolved') item.resolutionStatus = 'review'
     })
   })
@@ -384,7 +404,7 @@ function candidateAssetIds(candidate) {
   ].filter(Boolean))
 }
 
-function buildDiagramDiagnostics(nodes, edges) {
+function buildDiagramDiagnostics(nodes, edges, validation) {
   const countStatus = (status) => nodes.filter((node) => node.resolutionStatus === status).length
   const physicalEdges = edges.filter((edge) => edge.relationStatus === 'confirmed')
   const recommendedEdges = edges.filter((edge) => edge.relationStatus === 'recommended')
@@ -398,6 +418,7 @@ function buildDiagramDiagnostics(nodes, edges) {
     unresolvedNodeCount: unresolvedNodes.length,
     confirmedEdgeCount: physicalEdges.length,
     recommendedEdgeCount: recommendedEdges.length,
+    validation,
     unresolvedNodes: unresolvedNodes.map((node) => ({
       assetId: node.id,
       name: node.name,
@@ -410,6 +431,7 @@ function buildDiagramDiagnostics(nodes, edges) {
       type: node.type,
       reason: 'candidate_requires_review',
       candidateCount: node.candidateCount,
+      candidates: node.candidates,
     })),
   }
 }

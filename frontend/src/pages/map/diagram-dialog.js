@@ -1,5 +1,10 @@
 import { downloadSchematicPng, downloadSchematicSvg } from './schematic-export.js'
 import { renderSchematicSvg } from './schematic-svg.js'
+import {
+  ALL_ASSET_FIT_MIN_ZOOM,
+  calculateSchematicFitScale,
+  MIN_SCHEMATIC_ZOOM,
+} from './schematic-viewport.js'
 
 export function openSchematicDialog({
   diagrams,
@@ -7,6 +12,8 @@ export function openSchematicDialog({
   selectedAssetId = null,
   initialMode = 'all-assets',
   onSelectAsset,
+  onReviewCandidate,
+  onNoValidRelation,
 }) {
   const dialog = document.createElement('dialog')
   dialog.className = 'schematic-dialog'
@@ -20,10 +27,6 @@ export function openSchematicDialog({
           <p class="schematic-current-meta"></p>
         </div>
         <div class="schematic-header-actions">
-          <button class="icon-button diagram-fullscreen" type="button"
-            aria-label="Buka diagram layar penuh" aria-pressed="false">
-            <span class="material-symbols-outlined" aria-hidden="true">fullscreen</span>
-          </button>
           <button class="icon-button close-schematic" type="button" aria-label="Tutup diagram">
             <span class="material-symbols-outlined" aria-hidden="true">close</span>
           </button>
@@ -73,6 +76,11 @@ export function openSchematicDialog({
             <span class="material-symbols-outlined" aria-hidden="true">restart_alt</span>
             <span>Reset tampilan</span>
           </button>
+          <button class="tool-button diagram-fullscreen" type="button"
+            aria-label="Buka ruang kerja diagram layar penuh" aria-pressed="false">
+            <span class="material-symbols-outlined" aria-hidden="true">fullscreen</span>
+            <span class="diagram-fullscreen-label">Fullscreen</span>
+          </button>
         </div>
         <div class="schematic-search" role="search">
           <span class="material-symbols-outlined" aria-hidden="true">search</span>
@@ -119,6 +127,8 @@ export function openSchematicDialog({
     selectedAssetId,
     initialMode,
     onSelectAsset,
+    onReviewCandidate,
+    onNoValidRelation,
   })
 }
 
@@ -129,12 +139,15 @@ function bindDialogEvents({
   selectedAssetId,
   initialMode,
   onSelectAsset,
+  onReviewCandidate,
+  onNoValidRelation,
 }) {
   const board = dialog.querySelector('.schematic-board')
   const content = dialog.querySelector('.schematic-content')
   const summary = dialog.querySelector('.schematic-summary')
   const zoomLabel = dialog.querySelector('.diagram-zoom-level')
   const fullscreenButton = dialog.querySelector('.diagram-fullscreen')
+  const shell = dialog.querySelector('.schematic-shell')
   const searchInput = dialog.querySelector('.diagram-search-input')
   const searchResults = dialog.querySelector('.diagram-search-results')
   const exportStatus = dialog.querySelector('.schematic-export-status')
@@ -152,6 +165,8 @@ function bindDialogEvents({
   let zoom = 1
   let fallbackFullscreen = false
   let panState = null
+  let reviewBusy = false
+  let isAutoFit = true
 
   const getCurrentDiagram = () => diagrams[currentMode]
   const getCurrentSvg = () => board.querySelector('.schematic-svg')
@@ -170,7 +185,16 @@ function bindDialogEvents({
     if (!svg) return 1
     const viewBox = svg.viewBox.baseVal
     const available = availableViewport()
-    return Math.min(1, available.width / viewBox.width, available.height / viewBox.height)
+    const isAllAssets = getCurrentDiagram()?.graph?.mode === 'all-assets'
+    return calculateSchematicFitScale({
+      viewBoxWidth: viewBox.width,
+      viewBoxHeight: viewBox.height,
+      viewportWidth: available.width,
+      viewportHeight: available.height,
+      minZoom: isAllAssets ? ALL_ASSET_FIT_MIN_ZOOM : MIN_SCHEMATIC_ZOOM,
+      // Full asset diagrams remain vertically scrollable so their nodes stay readable.
+      preferWidth: isAllAssets,
+    })
   }
 
   const applyZoom = () => {
@@ -178,7 +202,7 @@ function bindDialogEvents({
     if (!svg) return
     const viewBox = svg.viewBox.baseVal
     const available = availableViewport()
-    const scale = Math.max(.1, zoom)
+    const scale = Math.max(MIN_SCHEMATIC_ZOOM, zoom)
     svg.style.width = `${Math.max(1, Math.round(viewBox.width * scale))}px`
     svg.style.height = `${Math.max(1, Math.round(viewBox.height * scale))}px`
     svg.style.margin = viewBox.width * scale <= available.width ? '0 auto' : '0'
@@ -186,6 +210,7 @@ function bindDialogEvents({
   }
 
   const fitDiagram = () => {
+    isAutoFit = true
     zoom = fitScale()
     applyZoom()
     board.scrollTo({ top: 0, left: 0 })
@@ -197,6 +222,7 @@ function bindDialogEvents({
     if (!node) return
     // Hasil pencarian harus cukup besar untuk dikenali, terutama ketika
     // keseluruhan diagram sedang dipasang ke viewport pada skala yang kecil.
+    isAutoFit = false
     zoom = Math.max(zoom, .75)
     applyZoom()
     const available = availableViewport()
@@ -317,11 +343,13 @@ function bindDialogEvents({
     })
   })
   dialog.querySelector('.diagram-zoom-in').addEventListener('click', () => {
+    isAutoFit = false
     zoom = Math.min(2.5, zoom + .15)
     applyZoom()
   })
   dialog.querySelector('.diagram-zoom-out').addEventListener('click', () => {
-    zoom = Math.max(.2, zoom - .15)
+    isAutoFit = false
+    zoom = Math.max(MIN_SCHEMATIC_ZOOM, zoom - .15)
     applyZoom()
   })
   dialog.querySelector('.diagram-zoom-level').addEventListener('click', fitDiagram)
@@ -329,6 +357,7 @@ function bindDialogEvents({
   dialog.querySelector('.diagram-reset').addEventListener('click', () => {
     const current = getCurrentDiagram()
     const graph = current?.graph
+    isAutoFit = false
     zoom = current?.layout?.defaultZoom ?? (graph?.mode === 'selected' ? 1 : .62)
     applyZoom()
     positionAtFocus()
@@ -347,6 +376,38 @@ function bindDialogEvents({
     selectDiagramAsset(node.dataset.assetId)
   })
 
+  summary.addEventListener('click', async (event) => {
+    const selectButton = event.target.closest('[data-review-asset-id]')
+    if (selectButton) {
+      selectDiagramAsset(selectButton.dataset.reviewAssetId)
+      centerNode(selectButton.dataset.reviewAssetId)
+      return
+    }
+    const actionButton = event.target.closest('[data-candidate-action]')
+    const unresolvedButton = event.target.closest('[data-no-valid-relation]')
+    if (reviewBusy || (!actionButton && !unresolvedButton)) return
+    reviewBusy = true
+    summary.querySelectorAll('button').forEach((button) => { button.disabled = true })
+    try {
+      if (actionButton) {
+        await onReviewCandidate?.({
+          candidateId: actionButton.dataset.candidateId,
+          action: actionButton.dataset.candidateAction,
+          assetId: currentSelectedAssetId,
+        })
+      } else {
+        const node = getCurrentDiagram()?.graph.nodes
+          .find((item) => item.id === unresolvedButton.dataset.noValidRelation)
+        await onNoValidRelation?.({ assetId: node?.id, candidates: node?.candidates ?? [] })
+      }
+    } catch (error) {
+      const status = summary.querySelector('.schematic-review-status')
+      if (status) status.textContent = error.message
+    } finally {
+      reviewBusy = false
+    }
+  })
+
   board.addEventListener('wheel', (event) => {
     if (!isCurrentReady()) return
     event.preventDefault()
@@ -355,7 +416,8 @@ function bindDialogEvents({
     const pointerY = event.clientY - rect.top
     const sourceX = (board.scrollLeft + pointerX) / zoom
     const sourceY = (board.scrollTop + pointerY) / zoom
-    zoom = Math.max(.2, Math.min(2.5, zoom + (event.deltaY < 0 ? .1 : -.1)))
+    isAutoFit = false
+    zoom = Math.max(MIN_SCHEMATIC_ZOOM, Math.min(2.5, zoom + (event.deltaY < 0 ? .1 : -.1)))
     applyZoom()
     board.scrollLeft = Math.max(0, sourceX * zoom - pointerX)
     board.scrollTop = Math.max(0, sourceY * zoom - pointerY)
@@ -413,8 +475,20 @@ function bindDialogEvents({
     window.setTimeout(() => { searchResults.hidden = true }, 120)
   })
 
+  const viewportSnapshot = () => ({
+    x: (board.scrollLeft + board.clientWidth / 2) / zoom,
+    y: (board.scrollTop + board.clientHeight / 2) / zoom,
+    zoom,
+  })
+  let fullscreenViewport = null
+  const restoreViewport = (snapshot) => requestAnimationFrame(() => {
+    zoom = snapshot.zoom
+    applyZoom()
+    board.scrollLeft = Math.max(0, snapshot.x * zoom - board.clientWidth / 2)
+    board.scrollTop = Math.max(0, snapshot.y * zoom - board.clientHeight / 2)
+  })
   const syncFullscreenButton = () => {
-    const active = document.fullscreenElement === dialog || fallbackFullscreen
+    const active = document.fullscreenElement === shell || fallbackFullscreen
     fullscreenButton.setAttribute('aria-pressed', String(active))
     fullscreenButton.setAttribute(
       'aria-label',
@@ -423,20 +497,40 @@ function bindDialogEvents({
     fullscreenButton.querySelector('.material-symbols-outlined').textContent = active
       ? 'fullscreen_exit'
       : 'fullscreen'
-    requestAnimationFrame(fitDiagram)
+    fullscreenButton.querySelector('.diagram-fullscreen-label').textContent = active
+      ? 'Keluar fullscreen'
+      : 'Fullscreen'
+    if (fullscreenViewport) {
+      if (isAutoFit) requestAnimationFrame(fitDiagram)
+      else restoreViewport(fullscreenViewport)
+      fullscreenViewport = null
+    }
   }
   fullscreenButton.addEventListener('click', async () => {
+    fullscreenViewport = viewportSnapshot()
     try {
-      if (document.fullscreenElement === dialog) await document.exitFullscreen()
-      else if (dialog.requestFullscreen) await dialog.requestFullscreen()
+      if (fallbackFullscreen) {
+        fallbackFullscreen = false
+        shell.classList.remove('schematic-shell-fullscreen')
+        syncFullscreenButton()
+      } else if (document.fullscreenElement === shell) await document.exitFullscreen()
+      else if (shell.requestFullscreen) {
+        await shell.requestFullscreen()
+        window.setTimeout(() => {
+          if (document.fullscreenElement === shell || fallbackFullscreen || !dialog.open) return
+          fallbackFullscreen = true
+          shell.classList.add('schematic-shell-fullscreen')
+          syncFullscreenButton()
+        }, 200)
+      }
       else {
         fallbackFullscreen = !fallbackFullscreen
-        dialog.classList.toggle('schematic-dialog-fullscreen', fallbackFullscreen)
+        shell.classList.toggle('schematic-shell-fullscreen', fallbackFullscreen)
         syncFullscreenButton()
       }
     } catch {
       fallbackFullscreen = !fallbackFullscreen
-      dialog.classList.toggle('schematic-dialog-fullscreen', fallbackFullscreen)
+      shell.classList.toggle('schematic-shell-fullscreen', fallbackFullscreen)
       syncFullscreenButton()
     }
   })
@@ -467,7 +561,7 @@ function bindDialogEvents({
 
   dialog.addEventListener('close', () => {
     document.removeEventListener('fullscreenchange', syncFullscreenButton)
-    if (document.fullscreenElement === dialog) document.exitFullscreen()?.catch?.(() => {})
+    if (document.fullscreenElement === shell) document.exitFullscreen()?.catch?.(() => {})
     dialog.remove()
   })
   dialog.addEventListener('click', (event) => {
@@ -546,6 +640,10 @@ function renderDiagramSummary(graph, layout, selectedAssetId = null) {
           <li><span>Tanpa evidence</span><strong>${diagnostics.unresolvedNodeCount}</strong></li>
           <li><span>Edge confirmed</span><strong>${diagnostics.confirmedEdgeCount}</strong></li>
           <li><span>Edge rekomendasi</span><strong>${diagnostics.recommendedEdgeCount}</strong></li>
+          <li><span>Cakupan node sumber</span><strong>${diagnostics.validation.coveragePercent}%</strong></li>
+          <li><span>Node hilang</span><strong>${diagnostics.validation.missingAssetIds.length}</strong></li>
+          <li><span>Endpoint invalid</span><strong>${diagnostics.validation.invalidEndpoints.length}</strong></li>
+          <li><span>Edge confirmed tidak sinkron</span><strong>${diagnostics.validation.missingConfirmedEdgeKeys.length + diagnostics.validation.unexpectedConfirmedEdgeKeys.length}</strong></li>
         </ul>
         ${diagnostics.candidateLoadError ? `
           <p class="schematic-diagnostic-warning">Kandidat tidak dapat dimuat: ${escapeHtml(diagnostics.candidateLoadError)}</p>
@@ -570,7 +668,8 @@ function renderDiagramSummary(graph, layout, selectedAssetId = null) {
         <div class="schematic-summary-card-heading"><h3>Perlu tindak lanjut</h3><strong>${diagnostics.reviewNodes.length + diagnostics.unresolvedNodes.length}</strong></div>
         <ul>
           ${diagnostics.reviewNodes.map((node) => `
-            <li><span>${escapeHtml(node.name)}<small>Konfirmasi Koneksi · ${node.candidateCount} kandidat</small></span><strong>Review</strong></li>
+            <li><span>${escapeHtml(node.name)}<small>Konfirmasi Koneksi · ${node.candidateCount} kandidat</small></span>
+              <button class="button compact" type="button" data-review-asset-id="${escapeHtml(node.assetId)}">Review</button></li>
           `).join('')}
           ${diagnostics.unresolvedNodes.map((node) => `
             <li><span>${escapeHtml(node.name)}<small>${escapeHtml(node.type || 'Aset')}</small></span><strong>Unresolved</strong></li>
@@ -580,6 +679,27 @@ function renderDiagramSummary(graph, layout, selectedAssetId = null) {
     ` : graph.mode === 'all-assets' ? `
       <section class="schematic-summary-card ${isolatedCount ? '' : 'is-clear'}">
         <h3>Evidence lengkap</h3><p>Semua aset memiliki evidence topologi yang dapat dipertanggungjawabkan.</p>
+      </section>
+    ` : ''}
+    ${selectedNode?.candidates?.length ? `
+      <section class="schematic-summary-card schematic-review-card">
+        <h3>Kandidat untuk ${escapeHtml(selectedNode.name || selectedNode.id)}</h3>
+        <p class="schematic-review-status" role="status" aria-live="polite"></p>
+        <ul>${selectedNode.candidates.map((candidate) => `
+          <li class="schematic-candidate-card">
+            <span><strong>${escapeHtml(candidate.targetAssetId || candidate.targetPathAssetId || 'Target belum tersedia')}</strong>
+              <small>${escapeHtml(candidate.candidateType || candidate.relationKind || 'Evidence spasial')}
+              ${Number.isFinite(candidate.distanceMeters) ? ` · ${candidate.distanceMeters.toFixed(2)} m` : ''}
+              ${Number.isFinite(candidate.score) ? ` · ${Math.round(candidate.score * 100)}%` : ''}</small></span>
+            <div class="schematic-candidate-actions">
+              <button type="button" data-candidate-id="${escapeHtml(candidate.candidateId)}" data-candidate-action="confirm">Konfirmasi</button>
+              <button type="button" data-candidate-id="${escapeHtml(candidate.candidateId)}" data-candidate-action="reject">Tolak</button>
+              <button type="button" data-candidate-id="${escapeHtml(candidate.candidateId)}" data-candidate-action="skip">Lewati</button>
+            </div>
+          </li>
+        `).join('')}</ul>
+        <button class="button secondary schematic-no-relation" type="button"
+          data-no-valid-relation="${escapeHtml(selectedNode.id)}">Tidak ada relasi yang valid</button>
       </section>
     ` : ''}
   `
@@ -599,7 +719,8 @@ function formatDiagramMeta(graph, layout, context) {
   }
   if (graph.mode === 'all-assets' && graph.diagnostics) {
     return `${layout.nodes.length} aset · ${graph.diagnostics.confirmedEdgeCount} edge evidence · `
-      + `${graph.diagnostics.recommendedEdgeCount} rekomendasi kuat · ${context.branchName} · `
+      + `${graph.diagnostics.reviewNodeCount} perlu ditinjau · ${graph.diagnostics.unresolvedNodeCount} tanpa evidence · `
+      + `${graph.diagnostics.validation.coveragePercent}% tercakup · ${context.branchName} · `
       + `Dataset ${context.version} · Read-only`
   }
   return `${layout.nodes.length} aset · ${graph.relationCount ?? layout.edges.length} `
