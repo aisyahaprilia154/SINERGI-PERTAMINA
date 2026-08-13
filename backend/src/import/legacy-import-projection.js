@@ -253,6 +253,10 @@ export function projectCanonicalImport({
               : null,
         }),
         sourceFeatureId: feature.sourceFeatureId,
+        ...compact({
+          resolvedStyleId: feature.resolvedStyleId,
+          sourceIconHref: feature.sourceIconHref,
+        }),
         classification: classification ? structuredClone(classification) : null,
       },
       ...compact({ sourcePlacemarkId: feature.sourceKmlId }),

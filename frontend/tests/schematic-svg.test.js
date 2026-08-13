@@ -74,6 +74,35 @@ test('SVG renderer includes context, asset identity, legend, and schematic discl
   assert.match(svg, /Diagram skematik mengikuti posisi relatif tampilan peta dan tidak menunjukkan skala geografis\./)
 })
 
+test('SVG renderer uses the preloaded source icon from the KMZ style when available', () => {
+  const iconUrl = '/api/dataset-versions/version-1/source-resources/resource-camera'
+  const iconGraph = {
+    status: 'ready',
+    mode: 'selected',
+    title: 'Relasi kamera',
+    anchorAssetId: 'cam',
+    nodes: [{
+      id: 'cam',
+      name: 'C-001',
+      type: 'CCTV',
+      category: 'cctv',
+      sourceIconUrl: iconUrl,
+      isAnchor: true,
+    }],
+    edges: [],
+  }
+  const layout = calculateSchematicLayout(iconGraph)
+  const svg = renderSchematicSvg({
+    graph: iconGraph,
+    layout,
+    context: { branchName: 'Semarang', version: 'v14' },
+    sourceIconDataByUrl: new Map([[iconUrl, 'data:image/png;base64,Y2FtZXJh']]),
+  })
+
+  assert.match(svg, /class="node-source-icon"/)
+  assert.match(svg, /data:image\/png;base64,Y2FtZXJh/)
+})
+
 test('SVG renderer draws every selected node and confirmed edge without clipping', () => {
   const selectedGraph = {
     status: 'ready',

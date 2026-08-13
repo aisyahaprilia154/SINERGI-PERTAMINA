@@ -1,5 +1,6 @@
 import { downloadSchematicPng, downloadSchematicSvg } from './schematic-export.js'
 import { renderSchematicSvg } from './schematic-svg.js'
+import { getDefaultMapToken } from '../../services/active-dataset-service.js'
 import {
   ALL_ASSET_FIT_MIN_ZOOM,
   calculateSchematicFitScale,
@@ -167,6 +168,9 @@ function bindDialogEvents({
   let panState = null
   let reviewBusy = false
   let isAutoFit = true
+  let renderSequence = 0
+  const sourceIconDataByUrl = new Map()
+  const sourceIconPromises = new Map()
 
   const getCurrentDiagram = () => diagrams[currentMode]
   const getCurrentSvg = () => board.querySelector('.schematic-svg')
@@ -275,7 +279,49 @@ function bindDialogEvents({
     onSelectAsset?.(assetId)
   }
 
-  const renderCurrentDiagram = () => {
+  const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.addEventListener('load', () => resolve(reader.result))
+    reader.addEventListener('error', () => reject(reader.error || new Error('Ikon aset gagal dibaca.')))
+    reader.readAsDataURL(blob)
+  })
+
+  const loadSourceIcon = (url) => {
+    if (!url) return Promise.resolve(null)
+    if (sourceIconDataByUrl.has(url)) return Promise.resolve(sourceIconDataByUrl.get(url))
+    if (sourceIconPromises.has(url)) return sourceIconPromises.get(url)
+    const promise = (async () => {
+      try {
+        const token = getDefaultMapToken()
+        const response = await fetch(url, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        })
+        if (!response.ok) return null
+        const dataUrl = await blobToDataUrl(await response.blob())
+        sourceIconDataByUrl.set(url, dataUrl)
+        return dataUrl
+      } catch {
+        return null
+      } finally {
+        sourceIconPromises.delete(url)
+      }
+    })()
+    sourceIconPromises.set(url, promise)
+    return promise
+  }
+
+  const preloadSourceIcons = async (diagram, sequence) => {
+    const urls = [...new Set(
+      (diagram?.layout?.nodes ?? []).map((node) => node.sourceIconUrl).filter(Boolean),
+    )]
+    if (!urls.length) return
+    await Promise.all(urls.map(loadSourceIcon))
+    if (sequence !== renderSequence || diagram !== getCurrentDiagram()) return
+    renderCurrentDiagram({ preload: false })
+  }
+
+  const renderCurrentDiagram = ({ preload = true } = {}) => {
+    const currentRenderSequence = ++renderSequence
     const current = getCurrentDiagram()
     const ready = isCurrentReady()
     const graph = current?.graph || {
@@ -304,6 +350,7 @@ function bindDialogEvents({
             layout: current.layout,
             context: activeContext,
             selectedAssetId: currentSelectedAssetId,
+            sourceIconDataByUrl,
           })}
         </div>`
       : renderDiagramState(graph)
@@ -331,6 +378,7 @@ function bindDialogEvents({
     applyZoom()
     positionAtFocus()
     requestAnimationFrame(positionAtFocus)
+    if (ready && preload) void preloadSourceIcons(current, currentRenderSequence)
   }
 
   dialog.querySelectorAll('.close-schematic')
