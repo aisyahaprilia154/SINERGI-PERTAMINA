@@ -378,6 +378,18 @@ async function selectKmlCandidate(kmlFiles, limits) {
   return { selected, parserOutput, issues }
 }
 
+export function summarizeImportJobResult(record) {
+  return {
+    datasetVersionId: record?.datasetVersion?.id ?? null,
+    status: record?.datasetVersion?.status ?? null,
+    validationStatus: record?.datasetVersion?.validationStatus ?? null,
+    publicationStatus: record?.datasetVersion?.publicationStatus ?? null,
+    summary: structuredClone(record?.datasetVersion?.summary ?? null),
+    graphRevision: record?.topologyGraph?.graphRevision ?? null,
+    recordRevision: Number.isInteger(record?.recordRevision) ? record.recordRevision : 0,
+  }
+}
+
 export function createProcessingRecord(datasetVersion, clock = () => new Date()) {
   return {
     contractVersion: '1.0.0',

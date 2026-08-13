@@ -4,7 +4,7 @@ import { createApp } from './app.js'
 import { createConfig } from './config.js'
 import { DatasetVersionValidationService } from './import/dataset-validation-service.js'
 import { DatasetVersionLifecycleService } from './import/dataset-version-lifecycle-service.js'
-import { ImportPipeline } from './import/import-pipeline.js'
+import { ImportPipeline, summarizeImportJobResult } from './import/import-pipeline.js'
 import { createDatasetVersionRepositoryRuntime } from './database/repository-runtime.js'
 import { DurableJobQueue } from './jobs/durable-job-queue.js'
 import { JsonDurableJobRepository } from './jobs/durable-job-repository.js'
@@ -74,11 +74,10 @@ jobQueue.registerHandler(
   'regenerate_full_topology',
   createFullTopologyRegenerationJobHandler(topologyService),
 )
-jobQueue.registerHandler('parse_source', (
+jobQueue.registerHandler('parse_source', async (
   { sourceStorageKey, extension, actorId, correlationId },
   { job, updateProgress },
-) => (
-  importPipeline.process({
+) => summarizeImportJobResult(await importPipeline.process({
     datasetVersionId: job.datasetVersionId,
     sourcePath: fileStore.resolveOriginalPath(sourceStorageKey),
     extension,
@@ -86,11 +85,9 @@ jobQueue.registerHandler('parse_source', (
     correlationId,
     jobId: job.jobId,
     progressReporter: updateProgress,
-  })
-))
+  })))
 
 await fileStore.initialize()
-await jobQueue.start()
 const app = createApp({
   config,
   authenticator,
@@ -119,3 +116,10 @@ async function shutdown() {
 
 process.once('SIGINT', () => void shutdown())
 process.once('SIGTERM', () => void shutdown())
+
+try {
+  await jobQueue.start()
+} catch (error) {
+  await shutdown()
+  throw error
+}

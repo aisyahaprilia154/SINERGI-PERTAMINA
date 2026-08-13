@@ -35,6 +35,7 @@ const services = [
       SINERGI_AUTH_TOKENS: authTokens,
       SINERGI_BRANCH_IDS: branchIds,
       SINERGI_BRANCH_DATASETS: branchDatasets,
+      SINERGI_JOB_LOCK_STALE_MS: process.env.SINERGI_JOB_LOCK_STALE_MS ?? '5000',
     },
   },
   {

@@ -4,7 +4,10 @@ import path from 'node:path'
 import { AppError, asAppError } from './errors.js'
 import { receiveImportUpload } from './http/multipart-upload.js'
 import { createOpenFreeMapProxy } from './http/openfreemap-proxy.js'
-import { createProcessingRecord } from './import/import-pipeline.js'
+import {
+  createProcessingRecord,
+  summarizeImportJobResult,
+} from './import/import-pipeline.js'
 import { readKmzResourceBuffer } from './import/kmz-extractor.js'
 import {
   requireAdministrator,
@@ -1389,10 +1392,10 @@ async function handleCreateImport({
           actorId: user.id,
           correlationId,
         },
-        handler: ({ sourceStorageKey, extension, actorId, correlationId: jobCorrelationId }, {
+        handler: async ({ sourceStorageKey, extension, actorId, correlationId: jobCorrelationId }, {
           job,
           updateProgress,
-        }) => importPipeline.process({
+        }) => summarizeImportJobResult(await importPipeline.process({
           datasetVersionId,
           sourcePath: fileStore.resolveOriginalPath(sourceStorageKey),
           extension,
@@ -1400,7 +1403,7 @@ async function handleCreateImport({
           correlationId: jobCorrelationId,
           jobId: job.jobId,
           progressReporter: updateProgress,
-        }),
+        })),
       })
     } catch (error) {
       await repository.update(datasetVersionId, (record) => ({

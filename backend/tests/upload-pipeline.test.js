@@ -7,7 +7,10 @@ import { createApp } from '../src/app.js'
 import { createConfig } from '../src/config.js'
 import { DatasetVersionValidationService } from '../src/import/dataset-validation-service.js'
 import { DatasetVersionLifecycleService } from '../src/import/dataset-version-lifecycle-service.js'
-import { ImportPipeline } from '../src/import/import-pipeline.js'
+import {
+  ImportPipeline,
+  summarizeImportJobResult,
+} from '../src/import/import-pipeline.js'
 import { BackgroundJobQueue } from '../src/jobs/background-job-queue.js'
 import { TokenAuthenticator } from '../src/security/authorization.js'
 import { JsonLinesAuditLog } from '../src/storage/audit-log.js'
@@ -62,6 +65,35 @@ const SOURCE_NAME_FALLBACK_KML = `<?xml version="1.0" encoding="UTF-8"?>
     </Folder>
   </Document>
 </kml>`
+
+test('parse job persists a bounded summary instead of the full dataset aggregate', () => {
+  const result = summarizeImportJobResult({
+    datasetVersion: {
+      id: 'dv-summary',
+      status: 'valid',
+      validationStatus: 'valid',
+      publicationStatus: 'unpublished',
+      summary: { assetCount: 1359 },
+    },
+    topologyGraph: {
+      graphRevision: 'topology-graph:summary',
+      nodes: Array.from({ length: 100 }, () => ({ large: 'payload' })),
+    },
+    sourceFeatures: Array.from({ length: 100 }, () => ({ large: 'payload' })),
+    recordRevision: 7,
+  })
+
+  assert.deepEqual(result, {
+    datasetVersionId: 'dv-summary',
+    status: 'valid',
+    validationStatus: 'valid',
+    publicationStatus: 'unpublished',
+    summary: { assetCount: 1359 },
+    graphRevision: 'topology-graph:summary',
+    recordRevision: 7,
+  })
+  assert.ok(Buffer.byteLength(JSON.stringify(result)) < 1024)
+})
 
 test('Administrator upload is queued, persisted as a non-active version, and exposes progress', async () => {
   const fixture = await createFixture()
