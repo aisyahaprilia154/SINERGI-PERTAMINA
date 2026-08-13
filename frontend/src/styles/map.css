@@ -3791,6 +3791,31 @@
   overflow: hidden;
 }
 
+.map-import-confirm-breaking {
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-3);
+  color: var(--color-text-primary);
+}
+
+.map-import-confirm-breaking > .material-symbols-outlined {
+  align-self: center;
+  color: var(--color-warning);
+  font-size: 36px;
+}
+
+.map-import-confirm-breaking h3,
+.map-import-confirm-breaking p {
+  margin: 0;
+  text-align: center;
+}
+
+.map-import-confirm-breaking p {
+  color: var(--color-text-secondary);
+}
+
 .schematic-dialog:fullscreen,
 .schematic-dialog.schematic-dialog-fullscreen {
   width: 100vw;
@@ -3812,6 +3837,43 @@
   height: 100%;
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  background: var(--color-surface);
+}
+
+.schematic-shell:fullscreen,
+.schematic-shell.schematic-shell-fullscreen {
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.schematic-shell.schematic-shell-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+}
+
+.schematic-shell:fullscreen .schematic-mode-bar,
+.schematic-shell.schematic-shell-fullscreen .schematic-mode-bar,
+.schematic-shell:fullscreen .schematic-summary,
+.schematic-shell.schematic-shell-fullscreen .schematic-summary {
+  display: none;
+}
+
+.schematic-shell:fullscreen .schematic-content,
+.schematic-shell.schematic-shell-fullscreen .schematic-content {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.schematic-shell:fullscreen .schematic-board,
+.schematic-shell.schematic-shell-fullscreen .schematic-board {
+  padding: var(--space-5);
 }
 
 .schematic-header {
@@ -4064,7 +4126,7 @@
 }
 
 .schematic-content[data-schematic-mode="all-assets"] {
-  grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-columns: minmax(0, 1fr) 244px;
 }
 
 .schematic-content > .schematic-board {
@@ -4156,6 +4218,40 @@
   max-height: 360px;
   overflow: auto;
   padding-right: 4px;
+}
+
+.unresolved-detail-card .button.compact {
+  min-height: 28px;
+  padding: 4px 9px;
+  font-size: var(--font-size-micro);
+}
+
+.schematic-candidate-card {
+  display: grid !important;
+  gap: 8px !important;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.schematic-candidate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.schematic-candidate-actions button {
+  min-height: 28px;
+  padding: 4px 8px;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.schematic-no-relation {
+  width: 100%;
+  margin-top: 8px;
 }
 
 .schematic-diagnostic-warning {
@@ -5876,4 +5972,24 @@
     opacity: 0;
     pointer-events: none;
   }
+}
+.review-map-unavailable {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: .5rem;
+  height: 100%;
+  min-height: 20rem;
+  padding: 2rem;
+  color: var(--text-muted, #64748b);
+  text-align: center;
+  background: #f8fafc;
+}
+
+.review-map-unavailable strong {
+  color: var(--text-primary, #1e293b);
+}
+
+.review-map-unavailable p {
+  margin: 0;
 }

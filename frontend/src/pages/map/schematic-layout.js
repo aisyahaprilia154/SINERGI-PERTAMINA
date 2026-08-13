@@ -19,7 +19,7 @@ export function calculateSchematicLayout(graph, options = {}) {
 
   const settings = { ...DEFAULT_OPTIONS, ...options }
   if (graph.mode === 'all-assets') {
-    return calculateSingleCanvasEvidenceLayout(graph, settings)
+    return calculateFullGraphLayout(graph, settings)
   }
   if (graph.mode === 'full-map') {
     return calculateCategorySectionLayout(graph, settings)
@@ -156,16 +156,18 @@ function calculateSelectedRelationLayout(graph, settings) {
 
 function calculateFullGraphLayout(graph, settings) {
   const allAssetSettings = { ...settings, headerHeight: Math.max(settings.headerHeight, 122) }
-  const connectedNodeIds = new Set(graph.edges.flatMap((edge) => [edge.sourceId, edge.targetId]))
+  const confirmedEdges = graph.edges.filter((edge) => edge.relationStatus !== 'recommended')
+  const topologyOnlyGraph = { ...graph, edges: confirmedEdges }
+  const connectedNodeIds = new Set(confirmedEdges.flatMap((edge) => [edge.sourceId, edge.targetId]))
   const isolated = graph.nodes.filter((node) => !connectedNodeIds.has(node.id))
-  const components = connectedComponents(graph)
+  const components = connectedComponents(topologyOnlyGraph)
     .filter((component) => component.length > 1)
     .sort((left, right) => left[0].localeCompare(right[0], 'id'))
   const nodeById = new Map()
   const componentGap = Math.max(allAssetSettings.rowGap * 2, 48)
   const componentSpecs = components.map((component, componentIndex) => {
     const componentNodes = graph.nodes.filter((node) => component.includes(node.id))
-    const componentEdges = graph.edges.filter((edge) => component.includes(edge.sourceId)
+    const componentEdges = confirmedEdges.filter((edge) => component.includes(edge.sourceId)
       && component.includes(edge.targetId))
     const root = chooseComponentRoot(componentNodes, componentEdges, graph.anchorAssetId)
     const depths = calculateComponentDepths(root, componentNodes, componentEdges)
@@ -331,7 +333,7 @@ function calculateFullGraphLayout(graph, settings) {
 
   return finalizeLayout({
     status: 'ready',
-    strategy: 'graph-hierarchy',
+    strategy: 'component-hierarchy',
     width: layoutWidth,
     height: sectionY + allAssetSettings.footerHeight,
     options: allAssetSettings,
@@ -343,9 +345,8 @@ function calculateFullGraphLayout(graph, settings) {
       connectedCount: connectedNodeIds.size,
       isolatedCount: isolated.length,
       componentCount: components.length,
-      coveragePercent: graph.nodes.length
-        ? Math.round((nodeById.size / graph.nodes.length) * 100)
-        : 100,
+      coveragePercent: graph.diagnostics?.validation?.coveragePercent
+        ?? (graph.nodes.length ? Math.round((nodeById.size / graph.nodes.length) * 100) : 100),
     },
     defaultZoom: .78,
     focusNodeId: graph.anchorAssetId || components[0]?.[0] || isolated[0]?.id || null,

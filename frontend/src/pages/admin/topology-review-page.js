@@ -221,31 +221,40 @@ async function initializeReview(container, mapData) {
   `
 
   bindUserAccountMenu()
-  const reviewMap = createMapLibreSurface(container.querySelector('#review-map'), {
-    assets: scopedMapData.assets,
-    networks: scopedMapData.networks,
-    geometries: scopedMapData.geometries,
-    topologyGraph: scopedMapData.topologyGraph,
-    candidates: initialLocationCandidates,
-    onSelectCandidate: (candidateId) => {
-      if (!candidatesForLocation().some((item) => item.candidateId === candidateId)) return
-      state.selectedCandidateId = candidateId
-      state.actionStatus = 'idle'
-      state.actionMessage = ''
-      renderAll()
-    },
-    onBasemapStatus: (status) => {
-      const label = container.querySelector('.review-map-status-label')
-      const indicator = container.querySelector('.review-map-status')
-      if (!label || !indicator) return
-      label.textContent = {
-        available: 'Peta tersedia',
-        loading: 'Memuat peta',
-        unavailable: 'Data aset tetap tersedia',
-      }[status] ?? 'Status peta'
-      indicator.dataset.status = status
-    },
-  })
+  let reviewMap
+  try {
+    if (!isWebGL2Available()) {
+      throw new Error('WebGL2 tidak tersedia')
+    }
+    reviewMap = createMapLibreSurface(container.querySelector('#review-map'), {
+      assets: scopedMapData.assets,
+      networks: scopedMapData.networks,
+      geometries: scopedMapData.geometries,
+      topologyGraph: scopedMapData.topologyGraph,
+      candidates: initialLocationCandidates,
+      onSelectCandidate: (candidateId) => {
+        if (!candidatesForLocation().some((item) => item.candidateId === candidateId)) return
+        state.selectedCandidateId = candidateId
+        state.actionStatus = 'idle'
+        state.actionMessage = ''
+        renderAll()
+      },
+      onBasemapStatus: (status) => {
+        const label = container.querySelector('.review-map-status-label')
+        const indicator = container.querySelector('.review-map-status')
+        if (!label || !indicator) return
+        label.textContent = {
+          available: 'Peta tersedia',
+          loading: 'Memuat peta',
+          unavailable: 'Data aset tetap tersedia',
+        }[status] ?? 'Status peta'
+        indicator.dataset.status = status
+      },
+    })
+  } catch (error) {
+    // WebGL yang tidak tersedia tidak boleh menghalangi review berbasis daftar.
+    reviewMap = createUnavailableReviewMap(container.querySelector('#review-map'), error)
+  }
   reviewMap.setState({
     selectedNetworkIds: scopedMapData.networks.map(({ id }) => id),
     dimOthers: true,
@@ -1228,13 +1237,22 @@ async function initializeReview(container, mapData) {
 }
 
 async function loadReviewProjections(datasetVersionId, mapGeometries = []) {
-  const [candidates, graph, summary, sourceFeaturePayload] = await Promise.all([
-    loadAllTopologyCandidates({ datasetVersionId }),
-    loadTopologyProjection({ datasetVersionId, projection: 'graph' }),
-    loadTopologyProjection({ datasetVersionId, projection: 'summary' }),
-    loadDatasetProjection({ datasetVersionId, projection: 'source-features' })
-      .catch(() => ({ items: [] })),
-  ])
+  let projections
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      projections = await Promise.all([
+        loadAllTopologyCandidates({ datasetVersionId }),
+        loadTopologyProjection({ datasetVersionId, projection: 'graph' }),
+        loadTopologyProjection({ datasetVersionId, projection: 'summary' }),
+        loadDatasetProjection({ datasetVersionId, projection: 'source-features' })
+          .catch(() => ({ items: [] })),
+      ])
+      break
+    } catch (error) {
+      if (error?.code !== 'topology_candidate_cursor_stale' || attempt === 1) throw error
+    }
+  }
+  const [candidates, graph, summary, sourceFeaturePayload] = projections
   candidates.items = [
     ...(candidates.items ?? []),
     ...(candidates.unresolved ?? []).map((item) => ({
@@ -1277,6 +1295,35 @@ async function loadReviewProjections(datasetVersionId, mapGeometries = []) {
   })
   candidates.items = attachCandidateMapGeometryIds(candidates.items, mapGeometries)
   return { candidates, graph, summary, sourceFeatures: sourceFeaturePayload.items ?? [] }
+}
+
+function createUnavailableReviewMap(element, error) {
+  if (element) {
+    element.innerHTML = `
+      <div class="review-map-unavailable" role="status">
+        <span class="material-symbols-outlined" aria-hidden="true">map</span>
+        <strong>Peta tidak tersedia di perangkat ini</strong>
+        <p>Daftar koneksi tetap dapat diperiksa dan dikonfirmasi.</p>
+      </div>
+    `
+    element.dataset.mapError = error?.message ?? 'map_unavailable'
+  }
+  return {
+    setState() {},
+    setCandidates() {},
+    setTopologyGraph() {},
+    focusCoordinates() {},
+    focusAssetBounds() {},
+    destroy() {},
+  }
+}
+
+function isWebGL2Available() {
+  if (typeof document === 'undefined' || typeof WebGL2RenderingContext === 'undefined') {
+    return false
+  }
+  const canvas = document.createElement('canvas')
+  return Boolean(canvas.getContext('webgl2'))
 }
 
 function filterCandidates(items, state, { ignoreCategory = false } = {}) {

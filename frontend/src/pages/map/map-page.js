@@ -9,6 +9,7 @@ import {
   loadAllTopologyCandidates,
   loadDatasetProjection,
   loadTopologyProjection,
+  reviewTopologyCandidate,
   traceTopology,
 } from '../../services/active-dataset-service.js'
 import { renderAssetDetailDrawer } from './asset-detail-drawer.js'
@@ -807,13 +808,20 @@ export async function renderMapPage(container) {
       trigger.setAttribute('aria-busy', 'true')
     }
     let topologyCandidates = []
+    let candidateProjection = null
     let candidateLoadError = null
     try {
-      diagramCandidateProjectionPromise ??= loadAllTopologyCandidates({
-        datasetVersionId: activeContext.datasetVersionId,
-      })
-      const projection = await diagramCandidateProjectionPromise
-      topologyCandidates = projection.items ?? []
+      diagramCandidateProjectionPromise ??= Promise.all(
+        ['candidate', 'ambiguous'].map((status) => loadAllTopologyCandidates({
+          datasetVersionId: activeContext.datasetVersionId,
+          status,
+        })),
+      ).then(([candidatePage, ambiguousPage]) => ({
+        ...candidatePage,
+        items: [...(candidatePage.items ?? []), ...(ambiguousPage.items ?? [])],
+      }))
+      candidateProjection = await diagramCandidateProjectionPromise
+      topologyCandidates = candidateProjection.items ?? []
     } catch (error) {
       diagramCandidateProjectionPromise = null
       candidateLoadError = error.message
@@ -886,6 +894,35 @@ export async function renderMapPage(container) {
           ? 'selected'
           : 'all-assets',
       onSelectAsset: selectAssetFromDiagram,
+      onReviewCandidate: async ({ candidateId, action }) => {
+        await reviewTopologyCandidate({
+          candidateId,
+          action,
+          body: {
+            datasetVersionId: activeContext.datasetVersionId,
+            ...(candidateProjection?.graphRevision !== undefined
+              ? { expectedGraphRevision: candidateProjection.graphRevision } : {}),
+            ...(candidateProjection?.candidateRevision !== undefined
+              ? { expectedCandidateRevision: candidateProjection.candidateRevision } : {}),
+            reason: action === 'reject' ? 'Ditolak dari Diagram Skematik 2D.' : '',
+          },
+        })
+        window.location.reload()
+      },
+      onNoValidRelation: async ({ candidates }) => {
+        const activeCandidates = candidates.filter((candidate) => candidate.candidateId)
+        for (const candidate of activeCandidates) {
+          await reviewTopologyCandidate({
+            candidateId: candidate.candidateId,
+            action: 'reject',
+            body: {
+              datasetVersionId: activeContext.datasetVersionId,
+              reason: 'Tidak ada relasi valid berdasarkan review Diagram Skematik 2D.',
+            },
+          })
+        }
+        window.location.reload()
+      },
     })
   }
 

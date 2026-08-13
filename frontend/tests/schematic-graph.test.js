@@ -271,7 +271,16 @@ test('all-assets evidence graph keeps path nodes, strong recommendations, review
   const graph = buildSchematicGraph({
     assets: evidenceAssets,
     networks: [],
-    topologyGraph: { nodes: [], edges: [] },
+    topologyGraph: {
+      nodes: [{ id: 'path-1' }, { id: 'device-confirmed' }],
+      edges: [{
+        id: 'confirmed-attachment',
+        sourceAssetId: 'path-1',
+        targetAssetId: 'device-confirmed',
+        status: 'confirmed',
+        relationStatus: 'confirmed',
+      }],
+    },
     topologyCandidates: [
       {
         candidateId: 'confirmed-attachment',
@@ -328,6 +337,8 @@ test('all-assets evidence graph keeps path nodes, strong recommendations, review
   assert.equal(graph.diagnostics.reviewNodeCount, 1)
   assert.equal(graph.diagnostics.confirmedEdgeCount, 1)
   assert.equal(graph.diagnostics.recommendedEdgeCount, 1)
+  assert.equal(graph.diagnostics.validation.isCompleteCoverage, true)
+  assert.equal(graph.diagnostics.validation.isConfirmedTopologyConsistent, true)
 })
 
 test('trace scope returns a clear empty state before tracing exists', () => {

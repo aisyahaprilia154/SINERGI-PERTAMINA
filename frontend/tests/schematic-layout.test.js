@@ -157,22 +157,19 @@ test('full graph layout keeps every connected and isolated node available', () =
 
   assert.equal(layout.nodes.length, 98)
   assert.equal(layout.edges.length, 46)
-  assert.equal(layout.strategy, 'single-evidence-canvas')
-  assert.deepEqual(layout.sections, [])
-  assert.equal(layout.nodes.filter((node) => node.presentation === 'compact').length, 98)
+  assert.equal(layout.strategy, 'component-hierarchy')
+  assert.ok(layout.sections.some((section) => section.kind === 'connected-overview'))
+  assert.ok(layout.sections.some((section) => section.kind === 'isolated'))
+  assert.equal(layout.nodes.filter((node) => node.presentation === 'compact').length, 51)
   assert.deepEqual(layout.summary, {
     totalCount: 98,
     connectedCount: 47,
     isolatedCount: 51,
-    confirmedCount: 47,
-    recommendedCount: 0,
-    reviewCount: 0,
-    unresolvedCount: 51,
     componentCount: 1,
     coveragePercent: 100,
   })
   assert.ok(layout.width > layout.options.minWidth)
-  assert.equal(layout.defaultZoom, .55)
+  assert.equal(layout.defaultZoom, .78)
   layout.nodes.forEach((node, index) => {
     layout.nodes.slice(index + 1).forEach((other) => {
       assert.equal(rectanglesOverlap(node.diagram, other.diagram), false)
