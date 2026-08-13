@@ -1925,16 +1925,30 @@ function affectedAssetIds(record, assignments) {
 }
 
 function identitySourceMatches(feature, sourceFeatureId) {
-  const primary = feature?.sourceKmlId
-    ? { sourceMatchType: 'source_kml_id', sourceMatchValue: feature.sourceKmlId }
-    : feature?.sourceIdentityKey
-      ? { sourceMatchType: 'source_feature_key', sourceMatchValue: feature.sourceIdentityKey }
+  const sourceKmlId = String(feature?.sourceKmlId ?? '').trim()
+  const sourceIdentityKey = stableSourceIdentityKey(feature)
+  const primary = sourceKmlId
+    ? { sourceMatchType: 'source_kml_id', sourceMatchValue: sourceKmlId }
+    : sourceIdentityKey
+      ? { sourceMatchType: 'source_feature_key', sourceMatchValue: sourceIdentityKey }
       : { sourceMatchType: 'source_feature_id', sourceMatchValue: sourceFeatureId }
   if (primary.sourceMatchType === 'source_feature_id') return [primary]
   return [
     primary,
     { sourceMatchType: 'source_feature_id', sourceMatchValue: sourceFeatureId },
   ]
+}
+
+function stableSourceIdentityKey(feature) {
+  const explicit = String(feature?.sourceIdentityKey ?? '').trim()
+  if (explicit) return explicit
+  const sourceName = String(feature?.sourceName ?? '').trim()
+  if (!sourceName) return null
+  return [
+    String(feature?.sourceFolderPath ?? '/').trim().toLowerCase(),
+    sourceName.toLowerCase(),
+    String(feature?.sourceElementType ?? 'Placemark').trim().toLowerCase(),
+  ].join('|')
 }
 
 function identityRegistryKey(type, value) {
