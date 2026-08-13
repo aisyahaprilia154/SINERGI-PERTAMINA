@@ -21,6 +21,7 @@ import {
 } from '../../domain/topology-review-preview.js'
 import {
   autoAssignUniqueIdentityAssignments,
+  getDefaultAdminToken,
   loadImportStatus,
 } from '../../services/import-dataset-service.js'
 import {
@@ -1382,7 +1383,8 @@ function statusLabel(candidate) {
 
 async function synchronizeAutomaticIdentity(datasetVersionId, container) {
   if (!datasetVersionId) return null
-  const result = await autoAssignUniqueIdentityAssignments({ datasetVersionId })
+  const token = getDefaultAdminToken()
+  const result = await autoAssignUniqueIdentityAssignments({ datasetVersionId, token })
   if (result?.state !== 'updated' || !result.topologyRegeneration?.statusUrl) return result
   container.innerHTML = reviewState(
     'progress_activity',
@@ -1390,7 +1392,7 @@ async function synchronizeAutomaticIdentity(datasetVersionId, container) {
     'Asset ID internal yang unik sedang dibuat dan topology sedang diregenerasi.',
     true,
   )
-  const job = await waitForRegeneration(result.topologyRegeneration.statusUrl)
+  const job = await waitForRegeneration(result.topologyRegeneration.statusUrl, token)
   if (job.status !== 'succeeded') {
     throw new Error(
       'Identitas aset sudah disimpan, tetapi regenerasi topology belum berhasil. Coba muat ulang beberapa saat lagi.',
@@ -1399,9 +1401,9 @@ async function synchronizeAutomaticIdentity(datasetVersionId, container) {
   return result
 }
 
-async function waitForRegeneration(statusUrl) {
+async function waitForRegeneration(statusUrl, token) {
   for (let attempt = 0; attempt < 60; attempt += 1) {
-    const response = await loadImportStatus({ statusUrl })
+    const response = await loadImportStatus({ statusUrl, token })
     const job = response.job ?? response
     if (['succeeded', 'failed', 'dead_letter', 'cancelled'].includes(job.status)) return job
     await new Promise((resolve) => setTimeout(resolve, 1000))

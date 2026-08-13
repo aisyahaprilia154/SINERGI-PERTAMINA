@@ -706,12 +706,12 @@ function prepareNodes(bundle, issues) {
     const eligibility = topologyObjectEligibility(object)
     if (eligibility) {
       issues.push(topologyIssue(bundle, {
-        severity: 'error',
+        severity: eligibility.code === 'missing_stable_asset_id' ? 'warning' : 'error',
         issueCode: eligibility.code,
         scope: 'eligibility',
         message: eligibility.message,
         entityReference: object.sourceFeatureId,
-        readinessImpact: 'blocking',
+        readinessImpact: eligibility.code === 'missing_stable_asset_id' ? 'warning' : 'blocking',
       }))
       return []
     }
@@ -770,12 +770,12 @@ function preparePaths(bundle, issues, lineworkIssues) {
     const eligibility = topologyObjectEligibility(object)
     if (eligibility) {
       issues.push(topologyIssue(bundle, {
-        severity: 'error',
+        severity: eligibility.code === 'missing_stable_asset_id' ? 'warning' : 'error',
         issueCode: eligibility.code,
         scope: 'eligibility',
         message: eligibility.message,
         entityReference: object.sourceFeatureId,
-        readinessImpact: 'blocking',
+        readinessImpact: eligibility.code === 'missing_stable_asset_id' ? 'warning' : 'blocking',
       }))
       return []
     }

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { autoAssignUniqueIdentityAssignments } from '../src/services/import-dataset-service.js'
+import {
+  autoAssignUniqueIdentityAssignments,
+  loadImportStatus,
+} from '../src/services/import-dataset-service.js'
 import {
   createTopologyRelation,
   analyzeTopologyImpact,
@@ -300,6 +303,28 @@ test('automatic identity assignment uses the admin lifecycle endpoint', async ()
     assert.equal(request.url, '/api/admin/imports/dv-auto/identity-assignments/auto')
     assert.equal(request.options.method, 'POST')
     assert.deepEqual(JSON.parse(request.options.body), {})
+    assert.equal(request.options.headers.Authorization, 'Bearer admin')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('identity regeneration polling keeps the admin authorization header', async () => {
+  const originalFetch = globalThis.fetch
+  let request
+  globalThis.fetch = async (url, options) => {
+    request = { url, options }
+    return new Response(JSON.stringify({ job: { status: 'succeeded' } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    await loadImportStatus({
+      statusUrl: '/api/admin/jobs/job-auto-1',
+      token: 'admin',
+    })
+    assert.equal(request.url, '/api/admin/jobs/job-auto-1')
     assert.equal(request.options.headers.Authorization, 'Bearer admin')
   } finally {
     globalThis.fetch = originalFetch

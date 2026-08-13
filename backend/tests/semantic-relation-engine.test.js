@@ -44,6 +44,40 @@ test('spatial endpoint inference remains a candidate and never leaks into confir
   })
 })
 
+test('onboarding objects are omitted with identity warnings while topology remains not ready', () => {
+  const bundle = topologyBundle({
+    nodes: [node('CAM-ONBOARDING', 'cctv', 'CCTV Camera', [110, -7])],
+    paths: [pathObject('CBL-ONBOARDING', 'cctv', 'CCTV Cable', [
+      [110, -7],
+      [110.001, -7],
+    ])],
+  })
+  const onboardingObject = (object) => ({
+    ...object,
+    assetId: null,
+    canonicalAssetId: `onboarding-identity:${object.assetId}`,
+    stableAssetId: null,
+    onboardingIdentity: `onboarding-identity:${object.assetId}`,
+    identityStatus: 'onboarding',
+    identityResolutionStatus: 'onboarding_candidate',
+  })
+  bundle.classifiedNodes = bundle.classifiedNodes.map(onboardingObject)
+  bundle.classifiedPaths = bundle.classifiedPaths.map(onboardingObject)
+
+  const result = generateRelationArtifacts(bundle)
+
+  assert.equal(result.validation.summary.errors, 0)
+  assert.equal(result.candidates.length, 0)
+  assert.equal(result.confirmedRelations.length, 0)
+  assert.equal(result.readiness.topologyReadiness, 'not_ready')
+  assert.equal(result.eligibilityIssues.filter(({ issueCode }) => (
+    issueCode === 'missing_stable_asset_id'
+  )).length, 2)
+  assert.ok(result.eligibilityIssues.every(({ issueCode, severity }) => (
+    issueCode !== 'missing_stable_asset_id' || severity === 'warning'
+  )))
+})
+
 test('spatial auto-confirm requires explicit policy and an approved accuracy artifact', () => {
   const bundle = topologyBundle({
     nodes: [node('CAM-01', 'cctv', 'CCTV Camera', [110, -7])],

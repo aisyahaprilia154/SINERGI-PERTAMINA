@@ -246,8 +246,7 @@ test('automatic identity assignment persists source feature mapping and is idemp
     record.sourceFeatures = [{
       sourceFeatureId,
       datasetVersionId: record.datasetVersion.id,
-      sourceKmlId: 'kml-auto-01',
-      sourceIdentityKey: '/root|asset auto|placemark',
+      sourceName: 'Asset Auto',
       sourceFeatureKey: 'feature-key-auto',
       sourceElementType: 'Placemark',
       sourceFolderPath: '/root',
@@ -298,7 +297,7 @@ test('automatic identity assignment persists source feature mapping and is idemp
       ]).sort(),
       [
         ['source_feature_id', sourceFeatureId],
-        ['source_kml_id', 'kml-auto-01'],
+        ['source_feature_key', '/root|asset auto|placemark'],
       ],
     )
 
