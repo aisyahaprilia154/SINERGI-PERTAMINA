@@ -274,7 +274,7 @@ export async function loadAllTopologyCandidates({
   token = getDefaultMapToken(),
   signal,
   apiBase = '',
-  limit = 500,
+  limit = 250,
 } = {}) {
   if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
   let pageLimit = limit
@@ -356,6 +356,7 @@ async function loadAllTopologyCandidatesAtLimit({
   let cursor = null
   let firstPage = null
   const items = []
+  const history = []
   let pageCount = 0
   do {
     const page = await loadTopologyProjection({
@@ -385,6 +386,7 @@ async function loadAllTopologyCandidatesAtLimit({
       throw topologyCandidateSnapshotChanged()
     }
     items.push(...(page.items ?? []))
+    history.push(...(page.history ?? []))
     cursor = page.nextCursor ?? null
     pageCount += 1
     if (pageCount > 10000) throw new Error('Pagination candidate melebihi batas aman.')
@@ -393,6 +395,7 @@ async function loadAllTopologyCandidatesAtLimit({
   return {
     ...firstPage,
     items,
+    history,
     nextCursor: null,
     pageInfo: {
       ...(firstPage?.pageInfo ?? {}),
