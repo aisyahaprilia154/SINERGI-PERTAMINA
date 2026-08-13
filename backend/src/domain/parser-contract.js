@@ -206,6 +206,8 @@ export function buildCanonicalParserResult({
         sourceKmlId: placemark.id,
         sourceDocumentPath: placemark.sourceDocumentPath,
         sourceStyleUrl: placemark.properties?.styleUrl,
+        resolvedStyleId: placemark.resolvedStyle?.resolvedStyleId,
+        sourceIconHref: placemark.resolvedStyle?.resolvedIconHref,
       }),
       visibility: placemark.properties?.visibility !== false,
       rawProperties: structuredClone(placemark.properties ?? {}),

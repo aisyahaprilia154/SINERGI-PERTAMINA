@@ -8,6 +8,7 @@ export function renderSchematicSvg({
   layout,
   context,
   selectedAssetId = null,
+  sourceIconDataByUrl = null,
 }) {
   if (graph.status !== 'ready' || layout.status !== 'ready') return ''
 
@@ -55,6 +56,7 @@ export function renderSchematicSvg({
           .diagram-node.anchor .node-halo{opacity:.18}
           .diagram-node.selected .node-halo,.diagram-node:focus .node-halo{opacity:1}
           .node-icon-backdrop{stroke:none}
+          .node-source-icon{pointer-events:none}
           .node-ring{fill:${SVG_THEME.background};stroke-width:2.5}
           .diagram-node.connector .node-ring{stroke-width:3}
           .node-glyph{font:700 8px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.text};letter-spacing:-.02em}
@@ -87,7 +89,11 @@ export function renderSchematicSvg({
       </g>
 
       <g class="diagram-nodes" aria-label="Aset">
-        ${layout.nodes.map((node) => renderNode(node, selectedAssetId)).join('')}
+        ${layout.nodes.map((node) => renderNode(
+          node,
+          selectedAssetId,
+          sourceIconDataByUrl,
+        )).join('')}
       </g>
 
       <line class="diagram-divider" x1="32" y1="${diagramBottom + 8}"
@@ -118,8 +124,10 @@ function renderEdge(edge, mode) {
   `
 }
 
-function renderNode(node, selectedAssetId) {
-  if (node.presentation === 'compact') return renderCompactNode(node, selectedAssetId)
+function renderNode(node, selectedAssetId, sourceIconDataByUrl) {
+  if (node.presentation === 'compact') {
+    return renderCompactNode(node, selectedAssetId, sourceIconDataByUrl)
+  }
   const categoryStyle = CATEGORY_STYLES[node.category] || CATEGORY_STYLES.infrastructure
   const { x, y, width, height } = node.diagram
   const nodeX = x + 25
@@ -135,6 +143,7 @@ function renderNode(node, selectedAssetId) {
   ].filter(Boolean).join(' ')
   const detailLabel = shortenType(node.type)
   const displayName = shortenNodeLabel(node.name || 'Aset tanpa nama')
+  const sourceIcon = sourceIconDataByUrl?.get?.(node.sourceIconUrl) ?? null
 
   return `
     <g class="${classes}" data-asset-id="${escapeAttribute(node.id)}" tabindex="0"
@@ -144,10 +153,12 @@ function renderNode(node, selectedAssetId) {
       <rect class="node-card" x="${x}" y="${y}" width="${width}" height="${height}" rx="12"/>
       <rect class="node-icon-backdrop" x="${nodeX - 19}" y="${nodeY - 19}" width="38" height="38" rx="10"
         fill="${categoryStyle.color}" fill-opacity=".14"/>
-      ${renderNodeShape(node, nodeX, nodeY, radius, categoryStyle.color)}
-      <text class="node-glyph" x="${nodeX}" y="${nodeY + 2.5}" text-anchor="middle">
-        ${escapeXml(nodeGlyph(node.type))}
-      </text>
+      ${sourceIcon
+        ? renderSourceIcon(sourceIcon, nodeX, nodeY, 30)
+        : `${renderNodeShape(node, nodeX, nodeY, radius, categoryStyle.color)}
+          <text class="node-glyph" x="${nodeX}" y="${nodeY + 2.5}" text-anchor="middle">
+            ${escapeXml(nodeGlyph(node.type))}
+          </text>`}
       ${Number.isInteger(node.order) ? `
         <circle class="sequence-badge" cx="${nodeX + radius + 5}" cy="${nodeY - radius - 3}" r="6"/>
         <text class="sequence-text" x="${nodeX + radius + 5}" y="${nodeY - radius - .5}"
@@ -165,12 +176,13 @@ function renderNode(node, selectedAssetId) {
   `
 }
 
-function renderCompactNode(node, selectedAssetId) {
+function renderCompactNode(node, selectedAssetId, sourceIconDataByUrl) {
   const categoryStyle = CATEGORY_STYLES[node.category] || CATEGORY_STYLES.infrastructure
   const { x, y, width, height } = node.diagram
   const nodeX = x + 20
   const nodeY = y + height / 2
   const labelX = x + 39
+  const sourceIcon = sourceIconDataByUrl?.get?.(node.sourceIconUrl) ?? null
   const classes = [
     'diagram-node',
     'compact',
@@ -184,16 +196,25 @@ function renderCompactNode(node, selectedAssetId) {
       <title>${escapeXml(node.id)} · ${escapeXml(node.name)} · ${escapeXml(node.type)} · ${escapeXml(node.location)} · ${escapeXml(resolutionLabel(node.resolutionStatus))}</title>
       <rect class="node-halo" x="${x - 4}" y="${y - 4}" width="${width + 8}" height="${height + 8}" rx="12"/>
       <rect class="node-card" x="${x}" y="${y}" width="${width}" height="${height}" rx="10"/>
-      ${renderNodeShape(node, nodeX, nodeY, 9, categoryStyle.color)}
-      <text class="node-glyph" x="${nodeX}" y="${nodeY + 2.5}" text-anchor="middle">
-        ${escapeXml(nodeGlyph(node.type))}
-      </text>
+      ${sourceIcon
+        ? renderSourceIcon(sourceIcon, nodeX, nodeY, 20)
+        : `${renderNodeShape(node, nodeX, nodeY, 9, categoryStyle.color)}
+          <text class="node-glyph" x="${nodeX}" y="${nodeY + 2.5}" text-anchor="middle">
+            ${escapeXml(nodeGlyph(node.type))}
+          </text>`}
       <text class="node-id" x="${labelX}" y="${nodeY + 4}" text-anchor="start">
         ${escapeXml(shortenCompactLabel(node.name || node.id))}
       </text>
       ${renderResolutionBadge(node, x + width - 12, nodeY)}
     </g>
   `
+}
+
+function renderSourceIcon(sourceIcon, x, y, size) {
+  const half = size / 2
+  return `<image class="node-source-icon" x="${x - half}" y="${y - half}"
+    width="${size}" height="${size}" href="${escapeAttribute(sourceIcon)}"
+    preserveAspectRatio="xMidYMid meet" aria-hidden="true"/>`
 }
 
 function renderNodeShape(node, x, y, radius, color) {

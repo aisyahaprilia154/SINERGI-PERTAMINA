@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import path from 'node:path'
 import { AppError } from '../errors.js'
 import {
   buildCanonicalAssetIdentityMap,
@@ -663,6 +664,7 @@ function toActiveMapDataset(resolved) {
   const renderableGeometries = (record.geometries ?? []).filter(isRenderableGeometry)
   const renderableNodeIds = new Set(renderableGeometries.map(({ assetNodeId }) => assetNodeId))
   const relations = filterResolvedRelations(record, resolver)
+  const sourceIconIndex = buildSourceIconIndex(record)
   const readinessContract = buildReadinessContract(record, topology.graph)
   return {
     mapView: true,
@@ -680,6 +682,11 @@ function toActiveMapDataset(resolved) {
     })),
     assets: (record.assets ?? []).map((asset) => {
       const identity = identityForAsset(asset, assetIdentityMap, resolver)
+      const sourceIcon = resolveAssetSourceIcon(asset, sourceIconIndex)
+      const sourceIconUrl = sourceIcon?.resource?.resourceId
+        ? `/api/dataset-versions/${encodeURIComponent(record.datasetVersion.id)}`
+          + `/source-resources/${encodeURIComponent(sourceIcon.resource.resourceId)}`
+        : null
       return {
         id: asset.id,
         datasetVersionId: asset.datasetVersionId,
@@ -692,6 +699,10 @@ function toActiveMapDataset(resolved) {
         identityStatus: identity?.identityStatus ?? asset.identityStatus ?? 'legacy',
         identityAliases: structuredClone(identity?.aliases ?? asset.identityAliases ?? {}),
         sourceFeatureId: asset.sourceFeatureId ?? asset.properties?.sourceFeatureId,
+        sourceStyleId: sourceIcon?.styleId ?? null,
+        sourceIconHref: sourceIcon?.href ?? null,
+        sourceIconResourceId: sourceIcon?.resource?.resourceId ?? null,
+        sourceIconUrl,
         name: asset.name,
         category: asset.category,
         type: asset.type,
@@ -765,6 +776,108 @@ function toActiveMapDataset(resolved) {
         + topology.identity.unresolvedEdgeCount,
     },
   }
+}
+
+function buildSourceIconIndex(record) {
+  const sourceFeatures = new Map(
+    (record.sourceFeatures ?? []).map((feature) => [feature.sourceFeatureId, feature]),
+  )
+  const styles = new Map()
+  const styleMaps = new Map()
+  ;(record.sourceStyles?.styles ?? []).forEach((style) => {
+    for (const id of [style.id, style.sourceKmlStyleId, style.sourceStyleId]) {
+      if (id) styles.set(normalizeStyleReference(id), style)
+    }
+  })
+  ;(record.sourceStyles?.styleMaps ?? []).forEach((styleMap) => {
+    for (const id of [styleMap.id, styleMap.sourceKmlStyleMapId, styleMap.sourceStyleMapId]) {
+      if (id) styleMaps.set(normalizeStyleReference(id), styleMap)
+    }
+  })
+  const selectedKmlPath = record.sourceSelection?.selectedKmlPath
+    ?? record.canonicalParser?.sourceSelection?.selectedKmlPath
+    ?? 'doc.kml'
+  const resources = record.sourceResources ?? []
+  return {
+    sourceFeatures,
+    styles,
+    styleMaps,
+    selectedKmlPath,
+    resources,
+  }
+}
+
+function resolveAssetSourceIcon(asset, index) {
+  const sourceFeatureId = asset.sourceFeatureId ?? asset.properties?.sourceFeatureId
+  const sourceFeature = index.sourceFeatures.get(sourceFeatureId)
+  const directHref = readAssetProperty(asset, 'sourceIconHref')
+    ?? sourceFeature?.sourceIconHref
+  const resolved = directHref
+    ? { href: directHref, styleId: sourceFeature?.sourceStyleId ?? null }
+    : resolveStyleIcon(
+      sourceFeature?.sourceStyleUrl
+        ?? sourceFeature?.rawProperties?.styleUrl
+        ?? sourceFeature?.rawProperties?.sourceStyleId,
+      index,
+    )
+  if (!resolved?.href) return null
+  const resourcePath = resolvePackageResourcePath(resolved.href, index.selectedKmlPath)
+  const resource = resourcePath
+    ? index.resources.find((candidate) => (
+      (candidate.relativePaths ?? [candidate.relativePath])
+        .some((relativePath) => normalizePackagePath(relativePath).toLowerCase() === resourcePath)
+    ))
+    : null
+  return {
+    ...resolved,
+    resource: resource ?? null,
+  }
+}
+
+function resolveStyleIcon(styleReference, index, visited = new Set()) {
+  const styleId = normalizeStyleReference(styleReference)
+  if (!styleId || visited.has(styleId)) return null
+  visited.add(styleId)
+  const style = index.styles.get(styleId)
+  const href = iconHrefFromStyle(style)
+  if (href) return { href, styleId }
+  const styleMap = index.styleMaps.get(styleId)
+  const pair = (styleMap?.pairs ?? []).find(({ key }) => key === 'normal')
+    ?? styleMap?.pairs?.[0]
+  return pair?.styleUrl ? resolveStyleIcon(pair.styleUrl, index, visited) : null
+}
+
+function iconHrefFromStyle(style) {
+  return style?.parsedStyle?.iconStyle?.iconHref
+    ?? style?.iconStyle?.iconHref
+    ?? style?.rawStyle?.iconStyle?.iconHref
+    ?? style?.rawStyle?.IconStyle?.Icon?.href
+    ?? null
+}
+
+function normalizeStyleReference(value) {
+  const text = String(value ?? '').trim()
+  if (!text || /^[a-z][a-z0-9+.-]*:/i.test(text)) return ''
+  return text.replace(/^#/, '')
+}
+
+function normalizePackagePath(value) {
+  return String(value ?? '')
+    .replaceAll('\\', '/')
+    .replace(/^\/+/, '')
+    .replace(/^\.\//, '')
+    .toLowerCase()
+}
+
+function resolvePackageResourcePath(href, selectedKmlPath) {
+  const text = String(href ?? '').trim().replaceAll('\\', '/')
+  if (!text || /^[a-z][a-z0-9+.-]*:/i.test(text) || text.startsWith('//')) return ''
+  const selected = normalizePackagePath(selectedKmlPath) || 'doc.kml'
+  const normalized = path.posix.normalize(path.posix.join(path.posix.dirname(selected), text))
+  if (!normalized || normalized === '..' || normalized.startsWith('../') || normalized.startsWith('/')) {
+    return ''
+  }
+  return normalized.replace(/^\.\//, '').toLowerCase()
 }
 
 function identityForAsset(asset, identityMap, resolver) {
