@@ -516,6 +516,31 @@ test('regeneration reconciles decisions and records topology runs without deleti
   assert.ok(auditLog.entries.some(({ event }) => event === 'topology.candidates_regenerated'))
 })
 
+test('candidate projection returns only history for the current page', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const record = applyArtifacts(baseRecord(bundle), initial)
+  const pageCandidate = initial.candidates
+    .slice()
+    .sort((left, right) => right.score - left.score || left.candidateId.localeCompare(right.candidateId))[0]
+  record.topologyCandidateHistory = [
+    { candidateId: 'historical-candidate', evidence: [{ explanation: 'large' }] },
+    { candidateId: pageCandidate.candidateId, supersededAt: '2026-08-13T00:00:00.000Z' },
+  ]
+  const service = new TopologyService({
+    repository: new MemoryRepository([record]),
+    auditLog: new MemoryAuditLog(),
+  })
+
+  const projection = await service.getCandidates('dv-review', { limit: 1 })
+
+  assert.deepEqual(projection.history, [{
+    candidateId: pageCandidate.candidateId,
+    supersededAt: '2026-08-13T00:00:00.000Z',
+    supersededByRunId: null,
+  }])
+})
+
 test('regeneration keeps the previous graph active when the new artifact is invalid', async () => {
   const bundle = reviewBundle()
   const initial = generateRelationArtifacts(bundle)

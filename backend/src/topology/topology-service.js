@@ -241,7 +241,10 @@ export class TopologyService {
       unresolved: structuredClone(record.topologyUnresolved ?? []),
       eligibilityIssues: structuredClone(record.topologyEligibilityIssues ?? []),
       lineworkIssues: structuredClone(record.topologyLineworkIssues ?? []),
-      history: structuredClone(record.topologyCandidateHistory ?? []),
+      history: projectCandidateHistory(
+        record.topologyCandidateHistory ?? [],
+        new Set(page.items.map(({ candidateId }) => candidateId)),
+      ),
       runs: structuredClone(record.topologyRuns ?? []),
       recordRevision: recordRevision(record),
     }
@@ -2458,6 +2461,24 @@ function annotateTopologyCandidateForReview(record, candidate, eligibilityContex
         : 'assign_identity_and_regenerate',
     },
   }
+}
+
+function projectCandidateHistory(history = [], candidateIds = null) {
+  return history
+    .filter(({ candidateId }) => !candidateIds || candidateIds.has(candidateId))
+    .map((item) => ({
+      candidateId: item.candidateId ?? null,
+      supersededAt: item.supersededAt ?? null,
+      supersededByRunId: item.supersededByRunId ?? null,
+      ...(item.review ? {
+        review: {
+          actorId: item.review.actorId ?? null,
+          reviewedAt: item.review.reviewedAt ?? null,
+          reason: item.review.reason ?? null,
+          action: item.review.action ?? null,
+        },
+      } : {}),
+    }))
 }
 
 function candidateReviewEligibility(record, candidate, eligibilityContext = null) {

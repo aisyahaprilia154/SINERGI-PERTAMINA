@@ -131,6 +131,39 @@ test('candidate API rejects a page that exceeds its response byte budget', async
   }
 })
 
+test('candidate API keeps large historical evidence out of every page response', async () => {
+  const record = candidateRecord()
+  record.topologyCandidateHistory = Array.from({ length: 40 }, (_, index) => ({
+    ...candidate(`history-${index}`, 0.9),
+    supersededAt: '2026-08-13T00:00:00.000Z',
+    supersededByRunId: 'run-history',
+    evidence: [{ explanation: 'e'.repeat(100000) }],
+    review: {
+      actorId: 'admin-1',
+      reviewedAt: '2026-08-13T00:00:00.000Z',
+      reason: 'History evidence.',
+      action: 'confirm',
+    },
+  }))
+  const repository = new MemoryRepository([record])
+  const app = createCandidateApp(repository)
+  await listen(app)
+  const origin = `http://127.0.0.1:${app.address().port}`
+
+  try {
+    const response = await fetch(
+      `${origin}/api/dataset-versions/dv-candidates/topology/candidates?limit=1`,
+      { headers: { authorization: 'Bearer admin-token' } },
+    )
+    const body = await response.json()
+    assert.equal(response.status, 200)
+    assert.deepEqual(body.history, [])
+    assert.ok(Number(response.headers.get('content-length')) <= MAX_CANDIDATE_RESPONSE_BYTES)
+  } finally {
+    await close(app)
+  }
+})
+
 function candidateRecord() {
   return {
     datasetVersion: {

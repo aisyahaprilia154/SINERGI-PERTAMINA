@@ -83,6 +83,7 @@ test('all candidate pages are combined only when their revisions remain stable',
         nextCursor: 'next-page',
         graphRevision: 'topology-graph:one',
         candidateRevision: 'topology-candidates:one',
+        history: [{ candidateId: 'candidate-a', supersededAt: '2026-08-13T00:00:00.000Z' }],
         pageInfo: { total: 3 },
       }
       : {
@@ -90,6 +91,7 @@ test('all candidate pages are combined only when their revisions remain stable',
         nextCursor: null,
         graphRevision: 'topology-graph:one',
         candidateRevision: 'topology-candidates:one',
+        history: [{ candidateId: 'candidate-c', supersededAt: '2026-08-13T00:01:00.000Z' }],
         pageInfo: { total: 3 },
       }
     return new Response(JSON.stringify(page), {
@@ -109,8 +111,12 @@ test('all candidate pages are combined only when their revisions remain stable',
     ])
     assert.equal(result.pageInfo.hasNextPage, false)
     assert.equal(result.pageInfo.total, 3)
-    assert.match(requests[0].url, /[?]limit=500$/)
-    assert.match(requests[1].url, /[?]cursor=next-page&limit=500$/)
+    assert.deepEqual(result.history, [
+      { candidateId: 'candidate-a', supersededAt: '2026-08-13T00:00:00.000Z' },
+      { candidateId: 'candidate-c', supersededAt: '2026-08-13T00:01:00.000Z' },
+    ])
+    assert.match(requests[0].url, /[?]limit=250$/)
+    assert.match(requests[1].url, /[?]cursor=next-page&limit=250$/)
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -121,7 +127,7 @@ test('all candidate pages reduce their limit when a response exceeds the byte bu
   const requests = []
   globalThis.fetch = async (url) => {
     requests.push(url)
-    if (url.endsWith('limit=500')) {
+    if (url.endsWith('limit=250')) {
       return new Response(JSON.stringify({
         error: {
           code: 'topology_candidate_response_too_large',
@@ -149,8 +155,8 @@ test('all candidate pages reduce their limit when a response exceeds the byte bu
       token: 'admin',
     })
     assert.deepEqual(result.items.map(({ candidateId }) => candidateId), ['candidate-a'])
-    assert.match(requests[0], /[?]limit=500$/)
-    assert.match(requests[1], /[?]limit=250$/)
+    assert.match(requests[0], /[?]limit=250$/)
+    assert.match(requests[1], /[?]limit=125$/)
   } finally {
     globalThis.fetch = originalFetch
   }
