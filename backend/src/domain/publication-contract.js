@@ -699,7 +699,7 @@ function isPosition(value) {
 }
 
 function defaultRecommendedAction(issueCode) {
-  if (issueCode === 'missing_stable_asset_id') return 'Tetapkan Asset ID resmi melalui identity review.'
+  if (issueCode === 'missing_stable_asset_id') return 'Sistem sudah mencoba membuat Asset ID internal. Tinjau identity ambigu atau duplikat; isi Asset ID resmi hanya bila aset wajib mengikuti nomor perusahaan.'
   if (issueCode === 'duplicate_asset_id') return 'Resolusi duplicate Asset ID sebelum publikasi topology.'
   if (issueCode === 'unknown_site') return 'Tetapkan site canonical dari konfigurasi pilot.'
   if (issueCode === 'required_overlay_unresolved') return 'Perbaiki resource GroundOverlay pada source package.'

@@ -650,6 +650,45 @@ export function createApp({
           }),
         )
       }
+      const automaticIdentityAssignmentsMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/admin\/imports\/([a-zA-Z0-9_-]+)\/identity-assignments\/auto$/,
+        )
+        : null
+      if (automaticIdentityAssignmentsMatch) {
+        const user = requireAdministrator(request, authenticator)
+        const body = await readJsonBody(request)
+        const datasetVersionId = automaticIdentityAssignmentsMatch[1]
+        const assignmentResult = await lifecycleService.autoAssignUniqueIdentityAssignments(
+          datasetVersionId,
+          {
+            expectedRecordRevision: normalizeExpectedRecordRevision(body),
+            idempotencyKey: request.headers['idempotency-key'] ?? null,
+            correlationId,
+          },
+        )
+        if (!topologyService || !jobQueue || assignmentResult?.state !== 'updated') {
+          return sendJson(response, 200, assignmentResult)
+        }
+        const topologyRegeneration = await queueIdentityDrivenTopologyRegeneration({
+          datasetVersionId,
+          actorId: user.id,
+          assignmentAuditEventId: assignmentResult.auditEventId,
+          correlationId,
+          repository,
+          auditLog,
+          jobQueue,
+          topologyService,
+        })
+        return sendJson(
+          response,
+          topologyRegeneration.deduplicated ? 200 : 202,
+          {
+            ...assignmentResult,
+            topologyRegeneration,
+          },
+        )
+      }
       const identityAssignmentsMatch = request.method === 'POST'
         ? url.pathname.match(
           /^\/api\/admin\/imports\/([a-zA-Z0-9_-]+)\/identity-assignments$/,

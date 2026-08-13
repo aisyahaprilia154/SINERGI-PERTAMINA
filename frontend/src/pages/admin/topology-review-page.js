@@ -20,6 +20,10 @@ import {
   resolveTopologyReviewAvailability,
 } from '../../domain/topology-review-preview.js'
 import {
+  autoAssignUniqueIdentityAssignments,
+  loadImportStatus,
+} from '../../services/import-dataset-service.js'
+import {
   loadActiveDataset,
   loadDatasetProjection,
   loadAllTopologyCandidates,
@@ -44,7 +48,14 @@ export async function renderTopologyReviewPage(container) {
   const requested = readContext()
   try {
     const activePayload = await loadActiveDataset(requested)
-    const mapData = adaptActiveDatasetForMap(activePayload)
+    const identitySync = await synchronizeAutomaticIdentity(
+      activePayload.datasetVersion?.id,
+      container,
+    )
+    const syncedPayload = identitySync?.state === 'updated'
+      ? await loadActiveDataset(requested)
+      : activePayload
+    const mapData = adaptActiveDatasetForMap(syncedPayload)
     await initializeReview(container, mapData)
   } catch (error) {
     container.innerHTML = reviewState('error', 'Konfirmasi koneksi tidak dapat dimuat', error.message)
@@ -1369,14 +1380,43 @@ function statusLabel(candidate) {
   }[candidate.candidateStatus] ?? candidate.candidateStatus
 }
 
+async function synchronizeAutomaticIdentity(datasetVersionId, container) {
+  if (!datasetVersionId) return null
+  const result = await autoAssignUniqueIdentityAssignments({ datasetVersionId })
+  if (result?.state !== 'updated' || !result.topologyRegeneration?.statusUrl) return result
+  container.innerHTML = reviewState(
+    'progress_activity',
+    'Menyiapkan identitas aset',
+    'Asset ID internal yang unik sedang dibuat dan topology sedang diregenerasi.',
+    true,
+  )
+  const job = await waitForRegeneration(result.topologyRegeneration.statusUrl)
+  if (job.status !== 'succeeded') {
+    throw new Error(
+      'Identitas aset sudah disimpan, tetapi regenerasi topology belum berhasil. Coba muat ulang beberapa saat lagi.',
+    )
+  }
+  return result
+}
+
+async function waitForRegeneration(statusUrl) {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const response = await loadImportStatus({ statusUrl })
+    const job = response.job ?? response
+    if (['succeeded', 'failed', 'dead_letter', 'cancelled'].includes(job.status)) return job
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+  }
+  throw new Error('Regenerasi topology masih berjalan. Muat ulang halaman setelah proses selesai.')
+}
+
 function isIdentityBlockedCandidate(candidate) {
   return candidate?.reviewEligibility?.identityReady === false
 }
 
 function candidateReviewGuardMessage(candidate) {
   const code = candidate?.reviewEligibility?.code
-  if (code === 'missing_stable_asset_id') {
-    return 'Tetapkan Asset ID resmi melalui identity review. Setelah disimpan, topology akan diregenerasi dan kandidat baru akan dibuat.'
+  if (['missing_stable_asset_id', 'candidate_stable_asset_id_required'].includes(code)) {
+    return 'Sistem sudah mencoba membuat Asset ID internal. Tinjau identity ambigu atau duplikat; isi Asset ID resmi hanya bila aset wajib mengikuti nomor perusahaan.'
   }
   if (code === 'topology_candidate_identity_stale') {
     return 'Kandidat ini dibuat sebelum identity aset final. Kandidat lama ditutup oleh engine; gunakan hasil regenerasi topology.'

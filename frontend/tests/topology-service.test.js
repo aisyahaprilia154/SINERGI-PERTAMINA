@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { autoAssignUniqueIdentityAssignments } from '../src/services/import-dataset-service.js'
 import {
   createTopologyRelation,
   analyzeTopologyImpact,
@@ -276,6 +277,30 @@ test('manual topology relation sends the selected device pair and audit reason',
       direction: 'undirected',
       reason: 'Diverifikasi dari dokumentasi lapangan.',
     })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('automatic identity assignment uses the admin lifecycle endpoint', async () => {
+  const originalFetch = globalThis.fetch
+  let request
+  globalThis.fetch = async (url, options) => {
+    request = { url, options }
+    return new Response(JSON.stringify({ state: 'no_changes' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    await autoAssignUniqueIdentityAssignments({
+      datasetVersionId: 'dv-auto',
+      token: 'admin',
+    })
+    assert.equal(request.url, '/api/admin/imports/dv-auto/identity-assignments/auto')
+    assert.equal(request.options.method, 'POST')
+    assert.deepEqual(JSON.parse(request.options.body), {})
+    assert.equal(request.options.headers.Authorization, 'Bearer admin')
   } finally {
     globalThis.fetch = originalFetch
   }

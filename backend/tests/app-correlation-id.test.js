@@ -155,3 +155,83 @@ test('identity assignment automatically queues topology regeneration', async () 
     }
   }
 })
+
+test('automatic identity assignment endpoint queues regeneration without manual Asset IDs', async () => {
+  const queued = []
+  const app = createApp({
+    config: {},
+    authenticator: new TokenAuthenticator({
+      'admin-token': { id: 'admin-1', role: 'Administrator' },
+    }),
+    repository: {
+      async get() {
+        return {
+          recordRevision: 6,
+          datasetVersion: {
+            id: 'dv-auto-identity',
+            datasetId: 'dataset-1',
+            branchId: 'semarang',
+          },
+          topologyGeneratedAt: null,
+          topologyGraph: { graphRevision: 'topology-graph:1' },
+        }
+      },
+    },
+    fileStore: {},
+    auditLog: { async record(event) { return { id: `audit-${event}` } } },
+    jobQueue: {
+      async enqueue(input) {
+        queued.push(input)
+        return {
+          jobId: 'job-auto-identity',
+          jobType: input.jobType,
+          deduplicated: false,
+        }
+      },
+      async getPublic(jobId) {
+        return { jobId, status: 'queued' }
+      },
+    },
+    importPipeline: {},
+    lifecycleService: {
+      async autoAssignUniqueIdentityAssignments() {
+        return {
+          datasetVersionId: 'dv-auto-identity',
+          recordRevision: 7,
+          state: 'updated',
+          auditEventId: 'audit-auto-identity',
+          automaticIdentity: { generatedCount: 3, skipped: [] },
+        }
+      },
+    },
+    topologyService: { async regenerate() {} },
+  })
+  let listening = false
+  try {
+    await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve))
+    listening = true
+    const address = app.address()
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/api/admin/imports/dv-auto-identity/identity-assignments/auto`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer admin-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      },
+    )
+    const body = await response.json()
+    assert.equal(response.status, 202)
+    assert.equal(body.automaticIdentity.generatedCount, 3)
+    assert.equal(body.topologyRegeneration.job.jobId, 'job-auto-identity')
+    assert.equal(queued[0].payload.trigger, 'identity_assignment')
+  } finally {
+    if (listening) {
+      await new Promise((resolve, reject) => {
+        app.close((error) => error ? reject(error) : resolve())
+      })
+    }
+  }
+})

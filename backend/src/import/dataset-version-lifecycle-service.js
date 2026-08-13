@@ -1,14 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { AppError } from '../errors.js'
 import {
+  AUTOMATIC_IDENTITY_ACTOR,
   buildCanonicalAssetIdentityMap,
   buildAssetIdentityMapFromRecord,
   createAssetIdentityResolver,
+  createAutomaticIdentityRegistry,
 } from '../domain/canonical-asset-identity.js'
 import {
   buildIdentityIssues,
   buildTopologyInputBundle,
 } from '../domain/parser-contract.js'
+
 import {
   buildReadinessContract as buildPublicationReadinessContract,
   isProfilePublishable,
@@ -33,6 +36,8 @@ import {
   safeActiveKmlFilename,
   serializeActiveDatasetKml,
 } from '../domain/active-dataset-kml.js'
+
+const AUTOMATIC_IDENTITY_ASSIGNMENT_LIMIT = 5000
 
 export class DatasetVersionLifecycleService {
   constructor({
@@ -125,8 +130,9 @@ export class DatasetVersionLifecycleService {
     expectedRecordRevision,
     idempotencyKey = null,
     correlationId = null,
+    maxItems = 500,
   } = {}) {
-    const normalizedAssignments = normalizeIdentityAssignments(assignments)
+    const normalizedAssignments = normalizeIdentityAssignments(assignments, { maxItems })
     const requestFingerprint = fingerprint(normalizedAssignments)
     const current = await this.repository.get(datasetVersionId)
     const existingReceipt = findIdentityAssignmentReceipt(
@@ -220,6 +226,65 @@ export class DatasetVersionLifecycleService {
       auditEventId: audit?.id ?? auditEventId,
     }
     return response
+  }
+
+  async autoAssignUniqueIdentityAssignments(datasetVersionId, {
+    expectedRecordRevision,
+    idempotencyKey = null,
+    correlationId = null,
+  } = {}) {
+    const current = await this.repository.get(datasetVersionId)
+    const proposal = createAutomaticIdentityRegistry({
+      datasetVersion: current.datasetVersion,
+      sourceFeatures: current.sourceFeatures ?? [],
+      classifiedObjects: current.classifiedObjects ?? [],
+      identityRegistry: current.assetIdentityRegistry ?? current.identityRegistry ?? [],
+    })
+    const assignments = [
+      ...proposal.assignments,
+      ...proposal.linkedAssignments,
+      ...proposal.backfillAssignments,
+    ]
+    if (!assignments.length) {
+      return {
+        datasetVersionId,
+        recordRevision: normalizeRecordRevision(current.recordRevision),
+        state: 'no_changes',
+        automaticIdentity: {
+          generatedCount: 0,
+          linkedCount: 0,
+          backfilledCount: 0,
+          skipped: structuredClone(proposal.skipped),
+        },
+        identityCoverage: current.readiness?.inventory?.coverage ?? {},
+        readiness: current.readiness ?? null,
+      }
+    }
+    const requestKey = idempotencyKey
+      ?? `identity-auto:${datasetVersionId}:${normalizeRecordRevision(current.recordRevision)}:${fingerprint(
+        assignments,
+      )}`
+    const result = await this.assignIdentityAssignments(
+      datasetVersionId,
+      AUTOMATIC_IDENTITY_ACTOR,
+      {
+        assignments,
+        expectedRecordRevision: expectedRecordRevision
+          ?? normalizeRecordRevision(current.recordRevision),
+        idempotencyKey: requestKey,
+        correlationId,
+        maxItems: AUTOMATIC_IDENTITY_ASSIGNMENT_LIMIT,
+      },
+    )
+    return {
+      ...result,
+      automaticIdentity: {
+        generatedCount: proposal.assignments.length,
+        linkedCount: proposal.linkedAssignments.length,
+        backfilledCount: proposal.backfillAssignments.length,
+        skipped: structuredClone(proposal.skipped),
+      },
+    }
   }
 
   async getActiveDataset({ datasetId, branchId } = {}) {
@@ -1561,9 +1626,9 @@ function stableAssetIdForAsset(asset = {}) {
   return null
 }
 
-function normalizeIdentityAssignments(assignments) {
-  if (!Array.isArray(assignments) || assignments.length === 0 || assignments.length > 500) {
-    throw new AppError('Identity assignment harus berisi 1 sampai 500 item.', {
+function normalizeIdentityAssignments(assignments, { maxItems = 500 } = {}) {
+  if (!Array.isArray(assignments) || assignments.length === 0 || assignments.length > maxItems) {
+    throw new AppError(`Identity assignment harus berisi 1 sampai ${maxItems} item.`, {
       code: 'invalid_identity_assignment_batch',
       statusCode: 400,
     })
@@ -1633,13 +1698,20 @@ function validateIdentityAssignmentBatch(record, assignments) {
     seenFeatures.add(assignment.sourceFeatureId)
     if (assignment.action === 'assign') {
       if (knownAssetIds.has(assignment.assetId)) {
-        const previous = (record.assetIdentityRegistry ?? record.identityRegistry ?? [])
-          .find(({ assetId, status }) => assetId === assignment.assetId && status === 'active')
         const sourceFeature = (record.sourceFeatures ?? []).find(({ sourceFeatureId }) => (
           sourceFeatureId === assignment.sourceFeatureId
         ))
-        const matchValue = sourceFeature?.sourceKmlId ?? assignment.sourceFeatureId
-        if (previous?.sourceMatchValue !== matchValue) {
+        const sourceMatchValues = identitySourceMatches(
+          sourceFeature,
+          assignment.sourceFeatureId,
+        ).map(({ sourceMatchValue }) => sourceMatchValue)
+        const previous = (record.assetIdentityRegistry ?? record.identityRegistry ?? [])
+          .find(({ assetId, status, sourceMatchValue }) => (
+            assetId === assignment.assetId
+              && status === 'active'
+              && sourceMatchValues.includes(sourceMatchValue)
+          ))
+        if (!previous) {
           throw new AppError('Asset ID sudah dipakai oleh source feature lain.', {
             code: 'identity_asset_id_conflict',
             statusCode: 409,
@@ -1685,35 +1757,41 @@ function applyIdentityAssignmentBatch({
   assignments.forEach((assignment) => {
     const feature = featureById.get(assignment.sourceFeatureId)
     const object = objectByFeature.get(assignment.sourceFeatureId)
-    const sourceMatchType = feature?.sourceKmlId ? 'source_kml_id' : 'source_feature_id'
-    const sourceMatchValue = feature?.sourceKmlId ?? assignment.sourceFeatureId
-    const key = identityRegistryKey(sourceMatchType, sourceMatchValue)
-    const existing = registryBySource.get(key)
-    if (existing && assignment.action !== 'reject_match') {
-      existing.status = 'superseded'
-      existing.validToDatasetVersionId = record.datasetVersion.id
-    }
-    if (assignment.action === 'assign') {
-      const entry = {
-        registryId: `identity-registry:${randomUUID()}`,
-        datasetId: record.datasetVersion.datasetId,
-        branchId: record.datasetVersion.branchId,
-        assetId: assignment.assetId,
-        sourceMatchType,
-        sourceMatchValue,
-        validFromDatasetVersionId: record.datasetVersion.id,
-        validToDatasetVersionId: null,
-        status: 'active',
-        approvedBy: actorId,
-        approvedAt,
-        evidence: {
-          reason: assignment.reason,
-          evidenceRefs: assignment.evidenceRefs,
-        },
-        auditEventId,
+    const sourceMatches = identitySourceMatches(feature, assignment.sourceFeatureId)
+    sourceMatches.forEach(({ sourceMatchType, sourceMatchValue }) => {
+      const key = identityRegistryKey(sourceMatchType, sourceMatchValue)
+      const existing = registryBySource.get(key)
+      if (existing && assignment.action !== 'reject_match') {
+        existing.status = 'superseded'
+        existing.validToDatasetVersionId = record.datasetVersion.id
       }
-      registryById.set(entry.registryId, entry)
-      registryBySource.set(key, entry)
+      if (assignment.action === 'assign') {
+        const entry = {
+          registryId: `identity-registry:${randomUUID()}`,
+          datasetId: record.datasetVersion.datasetId,
+          branchId: record.datasetVersion.branchId,
+          assetId: assignment.assetId,
+          sourceMatchType,
+          sourceMatchValue,
+          validFromDatasetVersionId: record.datasetVersion.id,
+          validToDatasetVersionId: null,
+          status: 'active',
+          approvedBy: actorId,
+          approvedAt,
+          evidence: {
+            reason: assignment.reason,
+            evidenceRefs: assignment.evidenceRefs,
+            sourceFeatureId: assignment.sourceFeatureId,
+          },
+          auditEventId,
+        }
+        registryById.set(entry.registryId, entry)
+        registryBySource.set(key, entry)
+      } else if (assignment.action === 'mark_non_asset') {
+        registryBySource.delete(key)
+      }
+    })
+    if (assignment.action === 'assign') {
       if (object) {
         object.assetId = null
         object.identityResolutionStatus = 'stable_registry'
@@ -1846,8 +1924,26 @@ function affectedAssetIds(record, assignments) {
   )).filter(Boolean)
 }
 
+function identitySourceMatches(feature, sourceFeatureId) {
+  const primary = feature?.sourceKmlId
+    ? { sourceMatchType: 'source_kml_id', sourceMatchValue: feature.sourceKmlId }
+    : feature?.sourceIdentityKey
+      ? { sourceMatchType: 'source_feature_key', sourceMatchValue: feature.sourceIdentityKey }
+      : { sourceMatchType: 'source_feature_id', sourceMatchValue: sourceFeatureId }
+  if (primary.sourceMatchType === 'source_feature_id') return [primary]
+  return [
+    primary,
+    { sourceMatchType: 'source_feature_id', sourceMatchValue: sourceFeatureId },
+  ]
+}
+
 function identityRegistryKey(type, value) {
   return `${type ?? ''}:${value ?? ''}`
+}
+
+function normalizeRecordRevision(value) {
+  const revision = Number(value)
+  return Number.isInteger(revision) && revision >= 0 ? revision : 0
 }
 
 function normalizeEvidenceRefs(value) {
