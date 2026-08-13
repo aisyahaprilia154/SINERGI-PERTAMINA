@@ -20,6 +20,12 @@ import {
   resolveTopologyReviewAvailability,
 } from '../../domain/topology-review-preview.js'
 import {
+  isStaleTopologyReviewError,
+  topologyCandidateRequiresTargetSelection,
+  topologyCandidateSupportsBulkReview,
+  topologyReviewDecisionCandidates,
+} from '../../domain/topology-review-decision.js'
+import {
   autoAssignUniqueIdentityAssignments,
   getDefaultAdminToken,
   loadImportStatus,
@@ -306,7 +312,7 @@ async function initializeReview(container, mapData) {
 
   function pruneSelectedCandidates() {
     const confirmableIds = new Set(
-      projections.candidates.items.filter(canConfirm)
+      projections.candidates.items.filter(topologyCandidateSupportsBulkReview)
         .map(({ candidateId }) => candidateId),
     )
     state.selectedCandidateIds.forEach((candidateId) => {
@@ -317,7 +323,7 @@ async function initializeReview(container, mapData) {
   function getSelectedConfirmableCandidates() {
     return projections.candidates.items.filter((candidate) => (
       state.selectedCandidateIds.has(candidate.candidateId)
-      && isBulkConfirmableCandidate(candidate)
+      && topologyCandidateSupportsBulkReview(candidate)
     ))
   }
 
@@ -431,7 +437,7 @@ async function initializeReview(container, mapData) {
 
   function renderQueue(items) {
     const locationCandidates = candidatesForLocation()
-    const selectableItems = items.filter(canConfirm)
+    const selectableItems = items.filter(topologyCandidateSupportsBulkReview)
     const selectedVisibleCount = selectableItems.filter(({ candidateId }) => (
       state.selectedCandidateIds.has(candidateId)
     )).length
@@ -484,7 +490,7 @@ async function initializeReview(container, mapData) {
       return
     }
     list.innerHTML = items.map((candidate) => {
-      const selectable = canConfirm(candidate)
+      const selectable = topologyCandidateSupportsBulkReview(candidate)
       const selectedForBulk = state.selectedCandidateIds.has(candidate.candidateId)
       const sourceName = endpointName(candidate, 'source', projections.sourceFeatures)
       const targetName = endpointName(candidate, 'target', projections.sourceFeatures)
@@ -495,7 +501,9 @@ async function initializeReview(container, mapData) {
             ? 'Pilih koneksi ini'
             : isIdentityBlockedCandidate(candidate)
               ? 'Asset ID belum ditetapkan; tetapkan identity lalu regenerate topology'
-              : 'Koneksi ini belum dapat dikonfirmasi'}">
+              : candidate.candidateStatus === 'ambiguous'
+                ? 'Pilih tepat satu target dari panel detail'
+                : 'Koneksi ini belum dapat dikonfirmasi'}">
           <input type="checkbox" data-candidate-select="${escapeHtml(candidate.candidateId)}"
             ${selectable ? '' : 'disabled'} ${selectedForBulk ? 'checked' : ''}
             aria-label="Pilih koneksi ${escapeHtml(sourceName)} ke ${escapeHtml(targetName)}">
@@ -632,11 +640,17 @@ async function initializeReview(container, mapData) {
       </div>`
       return
     }
-    const alternatives = candidatesForLocation().filter((item) => (
-      item.sourceEndpointId === candidate.sourceEndpointId
-      && item.candidateId !== candidate.candidateId
-      && ['candidate', 'ambiguous', 'revoked'].includes(item.candidateStatus)
+    const decisionCandidates = topologyReviewDecisionCandidates(
+      candidatesForLocation(),
+      candidate,
+    )
+    const alternatives = decisionCandidates.filter(({ candidateId }) => (
+      candidateId !== candidate.candidateId
     ))
+    const requiresTargetSelection = topologyCandidateRequiresTargetSelection(
+      candidate,
+      decisionCandidates,
+    )
     const relation = projections.graph.confirmedRelations.find(({ candidateId }) => (
       candidate.candidateId === candidateId
     ))
@@ -717,11 +731,15 @@ async function initializeReview(container, mapData) {
             selectedCount || canConfirm(candidate) ? '' : ' disabled'
           } title="${selectedCount
             ? `Hubungkan ${selectedCount} koneksi yang dipilih`
-            : canConfirm(candidate) ? 'Hubungkan koneksi ini' : 'Koneksi ini belum dapat dihubungkan'
-          }">${selectedCount ? `Hubungkan pilihan (${selectedCount})` : 'Hubungkan'}</button>
+            : requiresTargetSelection
+              ? 'Pilih tepat satu target untuk endpoint ini'
+              : canConfirm(candidate) ? 'Hubungkan koneksi ini' : 'Koneksi ini belum dapat dihubungkan'
+          }">${selectedCount
+            ? `Hubungkan pilihan (${selectedCount})`
+            : requiresTargetSelection ? 'Pilih target' : 'Hubungkan'}</button>
           <button class="button secondary select-alternative" type="button"${
             alternatives.length ? '' : ' disabled'
-          }>Pilih target lain</button>
+          }>Bandingkan target</button>
           <details class="decision-more">
             <summary class="button secondary">Opsi lain</summary>
             <div>
@@ -750,6 +768,18 @@ async function initializeReview(container, mapData) {
         openBulkDialog('confirm-selected', selectedCount)
         return
       }
+      const decisionCandidates = topologyReviewDecisionCandidates(
+        candidatesForLocation(),
+        candidate,
+      )
+      if (topologyCandidateRequiresTargetSelection(candidate, decisionCandidates)) {
+        openDecisionDialog('select-target', {
+          candidate,
+          relation,
+          alternatives: decisionCandidates,
+        })
+        return
+      }
       performCandidateAction(candidate, 'confirm')
     })
     panel.querySelector('.reject-candidate')?.addEventListener('click', () => {
@@ -759,11 +789,10 @@ async function initializeReview(container, mapData) {
       performCandidateAction(candidate, 'skip')
     ))
     panel.querySelector('.select-alternative')?.addEventListener('click', () => {
-      const alternatives = candidatesForLocation().filter((item) => (
-        item.sourceEndpointId === candidate.sourceEndpointId
-        && item.candidateId !== candidate.candidateId
-        && ['candidate', 'ambiguous', 'revoked'].includes(item.candidateStatus)
-      ))
+      const alternatives = topologyReviewDecisionCandidates(
+        candidatesForLocation(),
+        candidate,
+      )
       openDecisionDialog('select-target', { candidate, relation, alternatives })
     })
     panel.querySelector('.revoke-relation')?.addEventListener('click', () => {
@@ -787,7 +816,15 @@ async function initializeReview(container, mapData) {
     state.actionMessage = 'Menyimpan keputusan dan memperbarui confirmed graph…'
     renderDetail()
     try {
-      const result = await mutation()
+      let result
+      try {
+        result = await mutation()
+      } catch (error) {
+        if (!isStaleTopologyReviewError(error)) throw error
+        projections = await loadReviewProjections(datasetVersionId, mapData.geometries)
+        state.selectedCandidateIds.clear()
+        result = await mutation()
+      }
       projections = applyReviewMutationResult(projections, result)
       state.actionStatus = 'success'
       state.actionMessage = successMessage
@@ -1618,9 +1655,7 @@ function renderReadiness(summary, locationCandidates = null) {
 }
 
 function isBulkConfirmableCandidate(candidate) {
-  return candidate.candidateStatus === 'candidate'
-    && candidate.proposalStatus === 'recommended'
-    && candidate.reviewEligibility?.confirmable !== false
+  return topologyCandidateSupportsBulkReview(candidate)
 }
 
 function isReviewableCandidate(candidate) {

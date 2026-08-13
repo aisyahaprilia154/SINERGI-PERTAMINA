@@ -497,6 +497,10 @@ test('select-target confirms only an alternative from the same endpoint', async 
   )
   assert.equal(selected.candidate.candidateId, candidates[1].candidateId)
   assert.equal(selected.candidate.candidateStatus, 'confirmed')
+  assert.deepEqual(
+    selected.updatedCandidates.map(({ candidateStatus }) => candidateStatus).sort(),
+    ['confirmed', 'rejected'],
+  )
   const record = await repository.get('dv-review')
   assert.equal(
     record.topologyCandidates.find(({ candidateId }) => (
@@ -676,6 +680,40 @@ test('manual device relation is audited, materialized, and retained across regen
       reason: 'Percobaan relasi duplikat.',
     }),
     (error) => error.code === 'topology_manual_relation_exists',
+  )
+})
+
+test('ambiguous endpoint requires selecting exactly one target', async () => {
+  const bundle = reviewBundle({ secondNode: true })
+  const initial = generateRelationArtifacts(bundle)
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const service = new TopologyService({
+    repository,
+    auditLog: new MemoryAuditLog(),
+  })
+  const candidates = initial.candidates.filter(({ sourceEndpointId }) => (
+    sourceEndpointId === 'endpoint:geometry:CBL-01:start'
+  ))
+  assert.equal(candidates.length, 2)
+  assert.equal(candidates[0].candidateStatus, 'ambiguous')
+
+  await assert.rejects(
+    service.confirmCandidate(candidates[0].candidateId, 'admin-1', {
+      reason: 'Mencoba konfirmasi tanpa memilih target.',
+    }),
+    (error) => error.code === 'topology_candidate_target_selection_required',
+  )
+
+  const selected = await service.selectTarget(candidates[0].candidateId, 'admin-1', {
+    targetCandidateId: candidates[0].candidateId,
+    reason: 'Target pertama cocok dengan bukti lapangan.',
+  })
+  assert.equal(selected.candidate.candidateStatus, 'confirmed')
+  assert.equal(
+    selected.updatedCandidates.find(({ candidateId }) => (
+      candidateId === candidates[1].candidateId
+    )).candidateStatus,
+    'rejected',
   )
 })
 

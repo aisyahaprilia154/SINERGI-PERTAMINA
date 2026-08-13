@@ -27,6 +27,7 @@ import {
 } from './topology-candidate-pagination.js'
 import {
   findTopologyCandidateConflicts,
+  topologyCandidateCardinality,
   topologyCandidateDecisionKey,
 } from './topology-cardinality.js'
 import {
@@ -1307,8 +1308,17 @@ export class TopologyService {
           const currentSelected = nextCandidates.find(({ candidateId: id }) => (
             id === selected.candidateId
           ))
+          assertCurrentCandidateState(currentOriginal, original.candidateStatus)
           assertCurrentCandidateState(currentSelected, selected.candidateStatus)
           assertCandidateTopologyEligible(record, currentSelected)
+          const currentDecisionCandidates = nextCandidates.filter((candidate) => (
+            topologyCandidateDecisionKey(candidate) === originalDecisionKey
+          ))
+          const candidatesToClose = currentDecisionCandidates.filter((candidate) => (
+            candidate.candidateId !== currentSelected.candidateId
+              && ['candidate', 'ambiguous', 'revoked', 'confirmed']
+                .includes(candidate.candidateStatus)
+          ))
           event = await auditLog.record('topology.candidate_target_selected', {
             actorId,
             datasetVersionId: located.datasetVersionId,
@@ -1321,30 +1331,29 @@ export class TopologyService {
               after: candidateAuditSnapshot(currentSelected, 'confirmed'),
               reason: normalizedReason,
               candidateEvidence: currentSelected.evidence,
+              closedCandidateIds: candidatesToClose.map(({ candidateId: id }) => id),
               topologyRuleSetVersion: currentSelected.topologyRuleSetVersion,
             },
           })
-          currentOriginal.candidateStatus = 'rejected'
-          currentOriginal.proposalStatus = 'target_replaced'
-          currentOriginal.review = reviewRecord({
-            actorId,
-            reviewedAt,
-            reason: normalizedReason,
-            action: 'select_target_replaced',
-            auditEventId: event.id,
-            before: original.candidateStatus,
-            after: 'rejected',
-          })
-          currentSelected.candidateStatus = 'confirmed'
-          currentSelected.proposalStatus = 'selected_by_admin'
-          currentSelected.review = reviewRecord({
-            actorId,
-            reviewedAt,
-            reason: normalizedReason,
-            action: 'select_target',
-            auditEventId: event.id,
-            before: selected.candidateStatus,
-            after: 'confirmed',
+          currentDecisionCandidates.forEach((candidate) => {
+            const selectedForDecision = candidate.candidateId === currentSelected.candidateId
+            if (!selectedForDecision && !candidatesToClose.some(({ candidateId }) => (
+              candidateId === candidate.candidateId
+            ))) return
+            const before = candidate.candidateStatus
+            candidate.candidateStatus = selectedForDecision ? 'confirmed' : 'rejected'
+            candidate.proposalStatus = selectedForDecision
+              ? 'selected_by_admin'
+              : 'target_replaced'
+            candidate.review = reviewRecord({
+              actorId,
+              reviewedAt,
+              reason: normalizedReason,
+              action: selectedForDecision ? 'select_target' : 'select_target_replaced',
+              auditEventId: event.id,
+              before,
+              after: selectedForDecision ? 'confirmed' : 'rejected',
+            })
           })
           const rebuilt = rebuildFromReviewedCandidates(
             record,
@@ -1352,15 +1361,14 @@ export class TopologyService {
             this.config,
             reviewedAt,
             [
-              ...candidateAssetReferences(original),
-              ...candidateAssetReferences(selected),
+              ...currentDecisionCandidates.flatMap(candidateAssetReferences),
             ],
           )
           if (!normalizedIdempotencyKey) return rebuilt
           const response = candidateReviewResponse({
             ...rebuilt,
             recordRevision: recordRevision(record) + 1,
-          }, selected.candidateId)
+          }, selected.candidateId, { decisionKey: originalDecisionKey })
           return appendTopologyMutationReceipt(rebuilt, {
             key: normalizedIdempotencyKey,
             fingerprint,
@@ -1378,7 +1386,9 @@ export class TopologyService {
           const receipt = findTopologyMutationReceipt(updated, normalizedIdempotencyKey)
           if (receipt) return structuredClone(receipt.response)
         }
-        return candidateReviewResponse(updated, selected.candidateId)
+        return candidateReviewResponse(updated, selected.candidateId, {
+          decisionKey: originalDecisionKey,
+        })
       })
     } catch (error) {
       if (!normalizedIdempotencyKey || error?.code !== 'dataset_version_stale_revision') {
@@ -1972,6 +1982,7 @@ export class TopologyService {
           if (!current) throw candidateNotFound(candidateId)
           if (action === 'confirm') {
             assertCandidateTopologyEligible(record, current)
+            assertTargetSelectionNotRequired(nextCandidates, current)
             assertNoConfirmedCandidateConflict(nextCandidates, current)
           }
           const targetStatus = {
@@ -2327,16 +2338,23 @@ function reconcileCandidateHistory(record, artifacts, { eventId, generatedAt }) 
   return [...(record.topologyCandidateHistory ?? []), ...superseded, ...reopened]
 }
 
-function candidateReviewResponse(record, candidateId) {
+function candidateReviewResponse(record, candidateId, { decisionKey = null } = {}) {
   return canonicalizeJsonValue({
     datasetVersionId: record.datasetVersion.id,
     candidate: structuredClone(
-      record.topologyCandidates.find(({ candidateId: id }) => id === candidateId),
+      (record.topologyCandidates ?? []).find(({ candidateId: id }) => id === candidateId),
     ),
     confirmedRelations: structuredClone(record.confirmedRelations ?? []),
     graph: structuredClone(record.topologyGraph),
     summary: structuredClone(record.topologySummary ?? emptySummary()),
     readiness: structuredClone(record.topologyReadiness),
+    ...(decisionKey ? {
+      updatedCandidates: structuredClone(
+        (record.topologyCandidates ?? []).filter((candidate) => (
+          topologyCandidateDecisionKey(candidate) === decisionKey
+        )),
+      ),
+    } : {}),
     ...reviewSnapshot(record),
   })
 }
@@ -2461,6 +2479,7 @@ function annotateTopologyCandidateForReview(record, candidate, eligibilityContex
   )
   return {
     ...structuredClone(candidate),
+    reviewCardinality: topologyCandidateCardinality(candidate),
     reviewEligibility: {
       identityReady: eligibility.eligible,
       confirmable: eligibility.eligible && isCandidateConfirmable(candidate),
@@ -2968,6 +2987,29 @@ function assertNoConfirmedCandidateConflict(candidates, candidate) {
         sourceEndpointId: candidate.sourceEndpointId ?? null,
         candidateId: candidate.candidateId,
         ownerCandidateId: owner.candidateId,
+      },
+    },
+  )
+}
+
+function assertTargetSelectionNotRequired(candidates, candidate) {
+  if (candidate.candidateStatus !== 'ambiguous') return
+  const decisionKey = topologyCandidateDecisionKey(candidate)
+  const alternatives = candidates.filter((other) => (
+    other.candidateId !== candidate.candidateId
+      && ['candidate', 'ambiguous', 'revoked'].includes(other.candidateStatus)
+      && topologyCandidateDecisionKey(other) === decisionKey
+  ))
+  if (!alternatives.length) return
+  throw new AppError(
+    'Kandidat ini memiliki beberapa target yang mungkin. Pilih tepat satu target.',
+    {
+      code: 'topology_candidate_target_selection_required',
+      statusCode: 409,
+      details: {
+        decisionKey,
+        candidateId: candidate.candidateId,
+        alternativeCandidateIds: alternatives.map(({ candidateId }) => candidateId),
       },
     },
   )
