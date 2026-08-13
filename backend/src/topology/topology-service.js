@@ -2743,7 +2743,7 @@ function reviewPreviewRecommendation({
     if (identityBlocked) {
       return {
         code: 'assign_identity_and_regenerate',
-        message: 'Tetapkan Asset ID resmi pada identity review; regenerasi topology akan membentuk kandidat baru yang dapat dikonfirmasi.',
+        message: 'Sistem sudah mencoba membuat Asset ID internal. Tinjau identity ambigu atau duplikat; isi Asset ID resmi hanya bila aset wajib mengikuti nomor perusahaan.',
       }
     }
     return {
@@ -2914,7 +2914,7 @@ function assertCandidateTopologyEligible(record, candidate) {
   ].includes(reason)
   throw new AppError(
     identityBlocked
-      ? 'Kandidat tidak dapat dikonfirmasi sebelum Asset ID resmi ditetapkan dan topology diregenerasi.'
+      ? 'Kandidat tidak dapat dikonfirmasi karena identity aset belum stabil atau ambigu. Tinjau identity; isi Asset ID resmi hanya jika diperlukan, lalu regenerasi topology.'
       : 'Kandidat tidak lagi eligible terhadap topology input terkini; muat ulang dan regenerate topology.',
     {
       code: identityBlocked

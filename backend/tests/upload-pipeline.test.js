@@ -36,9 +36,13 @@ const VALID_KML = `<?xml version="1.0" encoding="UTF-8"?>
 const INVALID_KML = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
-    <Placemark id="missing-asset-id">
+    <Placemark>
       <name>Unknown Camera</name>
       <Point><coordinates>110.4,-6.9</coordinates></Point>
+    </Placemark>
+    <Placemark>
+      <name>Unknown Camera</name>
+      <Point><coordinates>110.5,-6.9</coordinates></Point>
     </Placemark>
   </Document>
 </kml>`
@@ -384,7 +388,7 @@ test('validation failure produces an invalid version and never activates it', as
   }
 })
 
-test('structured Google Earth KML can use recorded folder and Placemark identity', async () => {
+test('structured Google Earth KML receives an automatic internal identity', async () => {
   const fixture = await createFixture()
   try {
     const accepted = await uploadKml(
@@ -400,15 +404,22 @@ test('structured Google Earth KML can use recorded folder and Placemark identity
     assert.equal(record.datasetVersion.status, 'valid')
     assert.equal(record.validation.canActivate, true)
     assert.equal(record.assets.length, 1)
-    assert.equal(
-      record.assets[0].assetId,
-      'src:cctv-camera-fix-dome-indoor:cam-05',
-    )
+    assert.match(record.assets[0].assetId, /^AUTO-[A-F0-9]{24}$/)
+    assert.equal(record.assets[0].stableAssetId, record.assets[0].assetId)
+    assert.equal(record.assets[0].identityResolutionStatus, 'stable_registry')
+    assert.equal(record.canonicalParser.identityAutomation.generatedCount, 1)
+    assert.equal(record.canonicalParser.identityAutomation.generatedRegistryEntryCount, 2)
+    assert.ok(record.assetIdentityRegistry.some((entry) => (
+      entry.assetId === record.assets[0].assetId
+        && entry.sourceMatchType === 'source_feature_id'
+        && entry.sourceMatchValue === record.assets[0].sourceFeatureId
+        && entry.status === 'active'
+    )))
     assert.equal(record.assets[0].category, 'CCTV')
     assert.equal(record.assets[0].type, 'Camera Fix Dome Indoor')
-    assert.ok(record.issues.some(
+    assert.equal(record.issues.some(
       (issue) => issue.issueCode === 'SOURCE_IDENTITY_FALLBACK_APPLIED',
-    ))
+    ), false)
   } finally {
     await fixture.close()
   }

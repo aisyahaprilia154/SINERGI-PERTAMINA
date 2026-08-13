@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto'
 import path from 'node:path'
-import { buildCanonicalAssetIdentityMap } from './canonical-asset-identity.js'
+import {
+  buildCanonicalAssetIdentityMap,
+  createAutomaticIdentityRegistry,
+} from './canonical-asset-identity.js'
 import {
   buildReadinessContract,
   canonicalVocabularyValue,
@@ -103,6 +106,7 @@ export function buildCanonicalParserResult({
   metadataAliases = {},
   resources = sourceSelection.resources ?? [],
   identityRegistry = [],
+  autoAssignOnboarding = false,
   publicationPolicyVersion = PUBLICATION_POLICY_VERSION,
 } = {}) {
   if (!parserOutput || typeof parserOutput !== 'object') {
@@ -180,6 +184,11 @@ export function buildCanonicalParserResult({
       'Placemark',
       geometryFingerprint,
     ].join('|')
+    const sourceIdentityKey = stableSourceIdentityKey({
+      sourceFolderPath,
+      sourceName: placemark.name,
+      sourceElementType: 'Placemark',
+    })
     const sourceFingerprint = fingerprint({
       sourceFeatureKey,
       extendedData: placemark.extendedData ?? null,
@@ -198,6 +207,7 @@ export function buildCanonicalParserResult({
       sourceFeatureId,
       datasetVersionId,
       sourceFeatureKey,
+      sourceIdentityKey,
       sourceElementType: 'Placemark',
       sourceFolderPath,
       sourceName: placemark.name,
@@ -404,11 +414,28 @@ export function buildCanonicalParserResult({
   ;(parserOutput.folders ?? []).forEach(visitFolder)
 
   const styles = canonicalizeStyles(parserOutput, datasetVersionId)
+  const automaticIdentity = autoAssignOnboarding
+    ? createAutomaticIdentityRegistry({
+      datasetVersion,
+      sourceFeatures,
+      classifiedObjects,
+      identityRegistry,
+    })
+    : {
+      identityRegistry,
+      generatedEntries: [],
+      assignments: [],
+      linkedEntries: [],
+      linkedAssignments: [],
+      backfilledEntries: [],
+      backfillAssignments: [],
+      skipped: [],
+    }
   const assetIdentityMap = buildCanonicalAssetIdentityMap({
     datasetVersion,
     sourceFeatures,
     classifiedObjects,
-    identityRegistry,
+    identityRegistry: automaticIdentity.identityRegistry,
   })
   const identityByFeature = new Map(assetIdentityMap.items.map((item) => [
     item.sourceFeatureId,
@@ -517,6 +544,15 @@ export function buildCanonicalParserResult({
     classifiedObjects: identityClassifiedObjects,
     assetIdentityMap,
     identityRegistry: structuredClone(assetIdentityMap.identityRegistry ?? identityRegistry),
+    identityAutomation: {
+      mode: autoAssignOnboarding ? 'automatic_unique_onboarding' : 'disabled',
+      generatedCount: automaticIdentity.assignments.length,
+      generatedRegistryEntryCount: automaticIdentity.generatedEntries.length,
+      linkedCount: automaticIdentity.linkedAssignments.length,
+      backfilledCount: automaticIdentity.backfillAssignments.length,
+      generatedSourceFeatureIds: automaticIdentity.assignments.map((item) => item.sourceFeatureId),
+      skipped: structuredClone(automaticIdentity.skipped),
+    },
     explicitRelationEvidence,
     topologyInputBundle,
     coverage,
@@ -548,6 +584,16 @@ function canonicalizeMetadata(extendedData, { datasetVersionId, sourceFeatureId,
     }
   })
   return { entries, semanticValues }
+}
+
+function stableSourceIdentityKey({ sourceFolderPath, sourceName, sourceElementType }) {
+  const normalizedName = String(sourceName ?? '').trim().toLowerCase()
+  if (!normalizedName) return null
+  return [
+    String(sourceFolderPath ?? '/').trim().toLowerCase(),
+    normalizedName,
+    String(sourceElementType ?? 'Placemark').trim().toLowerCase(),
+  ].join('|')
 }
 
 function normalizeAliases(configured) {
@@ -1133,7 +1179,7 @@ function identityIssues(identityMap, classifiedObjects = []) {
           blockingProfiles: ['operational_topology'],
           sourceFeatureId: object.sourceFeatureId,
           focusReference: object.canonicalAssetId,
-          recommendedAction: 'Tetapkan Asset ID resmi melalui identity review.',
+          recommendedAction: 'Sistem sudah mencoba membuat Asset ID internal. Tinjau identity ambigu atau duplikat; isi Asset ID resmi hanya bila aset wajib mengikuti nomor perusahaan.',
         })
       }
       if (object.identityResolutionStatus === 'conflict') {

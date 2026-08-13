@@ -103,6 +103,27 @@ export async function loadImportPreview({
   )
 }
 
+export async function autoAssignUniqueIdentityAssignments({
+  token = getDefaultAdminToken(),
+  datasetVersionId,
+  expectedRecordRevision,
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
+  return requestJson(
+    `${apiBase}/api/admin/imports/${encodeURIComponent(datasetVersionId)}/identity-assignments/auto`,
+    {
+      token,
+      signal,
+      method: 'POST',
+      body: {
+        ...(expectedRecordRevision !== undefined ? { expectedRecordRevision } : {}),
+      },
+    },
+  )
+}
+
 export async function activateDatasetVersion({
   token,
   datasetVersionId,

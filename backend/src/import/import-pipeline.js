@@ -1,4 +1,7 @@
 import path from 'node:path'
+import {
+  hydrateIdentityRegistrySourceAliases,
+} from '../domain/canonical-asset-identity.js'
 import { buildCanonicalParserResult } from '../domain/parser-contract.js'
 import { compareCanonicalDatasetVersions } from '../domain/dataset-version-diff.js'
 import { buildReadinessContract } from '../domain/publication-contract.js'
@@ -134,9 +137,15 @@ export class ImportPipeline {
         sourceSelection,
         metadataAliases: this.metadataAliases,
         resources,
-        identityRegistry: activeRecord?.assetIdentityRegistry
-          ?? activeRecord?.identityRegistry
-          ?? [],
+        identityRegistry: hydrateIdentityRegistrySourceAliases({
+          datasetVersion: current.datasetVersion,
+          sourceFeatures: activeRecord?.sourceFeatures ?? [],
+          classifiedObjects: activeRecord?.classifiedObjects ?? [],
+          identityRegistry: activeRecord?.assetIdentityRegistry
+            ?? activeRecord?.identityRegistry
+            ?? [],
+        }).identityRegistry,
+        autoAssignOnboarding: true,
         ...(this.publicationPolicyVersion
           ? { publicationPolicyVersion: this.publicationPolicyVersion }
           : {}),
