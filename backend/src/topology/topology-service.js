@@ -26,6 +26,10 @@ import {
   TopologyCandidateQueryIndex,
 } from './topology-candidate-pagination.js'
 import {
+  findTopologyCandidateConflicts,
+  topologyCandidateDecisionKey,
+} from './topology-cardinality.js'
+import {
   appendTopologyMutationReceipt,
   assertTopologyMutationFingerprint,
   canonicalizeJsonValue,
@@ -1084,6 +1088,10 @@ export class TopologyService {
           })
           return response
         }
+        const selectedConflicts = findTopologyCandidateConflicts(confirmable)
+        if (selectedConflicts.length > 0) {
+          throw bulkReviewConflictError(selectedConflicts)
+        }
         if (requireSafePreview) {
           const previewCandidateIds = selectedCandidateIds
             ?? confirmable.map(({ candidateId }) => candidateId)
@@ -1268,10 +1276,11 @@ export class TopologyService {
         assertReviewSnapshot(located.record, { expectedGraphRevision, expectedCandidateRevision })
         const candidates = located.record.topologyCandidates ?? []
         const original = candidates.find((candidate) => candidate.candidateId === candidateId)
+        const originalDecisionKey = topologyCandidateDecisionKey(original)
         const selected = targetCandidateId
           ? candidates.find((candidate) => candidate.candidateId === targetCandidateId)
           : candidates.find((candidate) => (
-            candidate.sourceEndpointId === original.sourceEndpointId
+            topologyCandidateDecisionKey(candidate) === originalDecisionKey
             && candidate.targetAssetId === targetAssetId
           ))
         if (!selected) {
@@ -1280,8 +1289,8 @@ export class TopologyService {
             statusCode: 404,
           })
         }
-        if (selected.sourceEndpointId !== original.sourceEndpointId) {
-          throw new AppError('Candidate target bukan milik endpoint yang sama.', {
+        if (topologyCandidateDecisionKey(selected) !== originalDecisionKey) {
+          throw new AppError('Candidate target bukan bagian dari slot topology yang sama.', {
             code: 'topology_target_candidate_mismatch',
             statusCode: 409,
           })
@@ -1963,6 +1972,7 @@ export class TopologyService {
           if (!current) throw candidateNotFound(candidateId)
           if (action === 'confirm') {
             assertCandidateTopologyEligible(record, current)
+            assertNoConfirmedCandidateConflict(nextCandidates, current)
           }
           const targetStatus = {
             confirm: 'confirmed',
@@ -2555,40 +2565,29 @@ function buildBulkReviewPreview(record, candidateIds, config = {}) {
   })
 
   const eligibleSet = new Set(eligibleCandidateIds)
-  const conflicts = []
-  const selectedByEndpoint = new Map()
-  eligibleCandidateIds.forEach((candidateId) => {
-    const candidate = byId.get(candidateId)
-    const endpoint = candidate.sourceEndpointId
-    if (!endpoint) return
-    const group = selectedByEndpoint.get(endpoint) ?? []
-    group.push(candidateId)
-    selectedByEndpoint.set(endpoint, group)
-  })
-  selectedByEndpoint.forEach((group, sourceEndpointId) => {
-    if (group.length < 2) return
-    conflicts.push({
-      reason: 'endpoint_conflict',
-      sourceEndpointId,
-      candidateIds: group,
-    })
-  })
+  const conflicts = findTopologyCandidateConflicts(
+    eligibleCandidateIds.map((candidateId) => byId.get(candidateId)),
+  )
 
-  const confirmedEndpointOwners = new Map()
+  const confirmedDecisionOwners = new Map()
   candidates
     .filter(({ candidateStatus, candidateId }) => (
       candidateStatus === 'confirmed' && !eligibleSet.has(candidateId)
     ))
     .forEach((candidate) => {
-      if (!candidate.sourceEndpointId) return
-      confirmedEndpointOwners.set(candidate.sourceEndpointId, candidate.candidateId)
+      confirmedDecisionOwners.set(
+        topologyCandidateDecisionKey(candidate),
+        candidate.candidateId,
+      )
     })
   eligibleCandidateIds.forEach((candidateId) => {
     const candidate = byId.get(candidateId)
-    const owner = confirmedEndpointOwners.get(candidate.sourceEndpointId)
+    const decisionKey = topologyCandidateDecisionKey(candidate)
+    const owner = confirmedDecisionOwners.get(decisionKey)
     if (!owner) return
     conflicts.push({
       reason: 'endpoint_already_confirmed',
+      decisionKey,
       sourceEndpointId: candidate.sourceEndpointId,
       candidateIds: [candidateId, owner],
     })
@@ -2946,6 +2945,51 @@ function assertCandidateTopologyEligible(record, candidate) {
         candidateId: candidate.candidateId,
         reason,
         reviewEligibility: candidateReviewEligibilityDetails(eligibility),
+      },
+    },
+  )
+}
+
+function assertNoConfirmedCandidateConflict(candidates, candidate) {
+  const decisionKey = topologyCandidateDecisionKey(candidate)
+  const owner = candidates.find((other) => (
+    other.candidateId !== candidate.candidateId
+      && other.candidateStatus === 'confirmed'
+      && topologyCandidateDecisionKey(other) === decisionKey
+  ))
+  if (!owner) return
+  throw new AppError(
+    'Koneksi tidak dapat dikonfirmasi karena slot topology sudah dimiliki kandidat lain.',
+    {
+      code: 'topology_candidate_conflict',
+      statusCode: 409,
+      details: {
+        decisionKey,
+        sourceEndpointId: candidate.sourceEndpointId ?? null,
+        candidateId: candidate.candidateId,
+        ownerCandidateId: owner.candidateId,
+      },
+    },
+  )
+}
+
+function bulkReviewConflictError(conflicts) {
+  return new AppError(
+    'Bulk review ditolak karena beberapa kandidat memakai slot topology yang sama.',
+    {
+      code: 'topology_bulk_review_not_safe',
+      statusCode: 422,
+      details: {
+        safeToApply: false,
+        diagnostics: {
+          conflictCount: conflicts.length,
+          conflicts,
+          blockingReasonCodes: ['endpoint_conflict'],
+          recommendation: {
+            code: 'resolve_endpoint_conflicts',
+            message: 'Pilih tepat satu kandidat untuk setiap slot topology yang konflik.',
+          },
+        },
       },
     },
   )

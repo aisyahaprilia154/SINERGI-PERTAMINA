@@ -27,6 +27,9 @@ import {
 import { MAX_CANDIDATE_RESPONSE_BYTES } from './topology/topology-candidate-pagination.js'
 import { MetricsRegistry, normalizeHttpRoute } from './observability/metrics.js'
 
+// 5,000 candidate IDs plus the review snapshot fit within this bounded body.
+const MAX_JSON_BODY_BYTES = 256 * 1024
+
 export function createApp({
   config,
   authenticator,
@@ -1743,7 +1746,7 @@ async function readJsonBody(request) {
   let size = 0
   for await (const chunk of request) {
     size += chunk.length
-    if (size > 16 * 1024) {
+    if (size > MAX_JSON_BODY_BYTES) {
       throw new AppError('Request body terlalu besar.', {
         code: 'request_too_large',
         statusCode: 413,

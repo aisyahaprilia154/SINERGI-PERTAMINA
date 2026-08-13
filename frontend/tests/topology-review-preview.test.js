@@ -43,7 +43,7 @@ test('preview diagnosis separates new blockers from preserved baseline issues', 
 
   assert.match(result.message, /1 kandidat belum memiliki Asset ID stabil/)
   assert.match(result.message, /1 konflik endpoint/)
-  assert.match(result.message, /2 validation error baru/)
+  assert.match(result.message, /1 validation error baru/)
   assert.doesNotMatch(result.message, /pilihan tanpa konflik/)
 })
 

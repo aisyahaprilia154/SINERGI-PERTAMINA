@@ -4,6 +4,7 @@ import {
   generateRelationArtifacts,
   TOPOLOGY_RULE_SET_VERSION,
 } from '../src/topology/semantic-relation-engine.js'
+import { topologyCandidateDecisionKey } from '../src/topology/topology-cardinality.js'
 
 test('spatial endpoint inference remains a candidate and never leaks into confirmed graph', () => {
   const bundle = topologyBundle({
@@ -233,6 +234,7 @@ test('tiang can be reviewed as an inline anchor on every nearby compatible path'
   assert.ok(inlineCandidates.every(({ candidateStatus, proposalStatus }) => (
     candidateStatus === 'candidate' && proposalStatus === 'recommended'
   )))
+  assert.equal(new Set(inlineCandidates.map(topologyCandidateDecisionKey)).size, 2)
 })
 
 test('nearly equal endpoint-device scores become ambiguous', () => {

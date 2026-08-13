@@ -242,6 +242,53 @@ test('bulk review preview predicts graph changes and rejects endpoint conflicts'
   )
 })
 
+test('bulk review allows one inline device to anchor multiple paths', async () => {
+  const bundle = inlineReviewBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const inlineCandidates = initial.candidates.filter(({ candidateType }) => (
+    candidateType === 'inline_device'
+  ))
+  assert.equal(inlineCandidates.length, 2)
+  assert.ok(inlineCandidates.every(({ candidateStatus, proposalStatus }) => (
+    candidateStatus === 'candidate' && proposalStatus === 'recommended'
+  )))
+
+  const singleRepository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const singleService = new TopologyService({
+    repository: singleRepository,
+    auditLog: new MemoryAuditLog(),
+  })
+  await singleService.confirmCandidate(inlineCandidates[0].candidateId, 'admin-1', {
+    reason: 'Anchor inline pertama diverifikasi.',
+  })
+  const secondSingleConfirmation = await singleService.confirmCandidate(
+    inlineCandidates[1].candidateId,
+    'admin-1',
+    { reason: 'Anchor inline kedua diverifikasi pada jalur berbeda.' },
+  )
+  assert.equal(secondSingleConfirmation.confirmedRelations.length, 2)
+
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const service = new TopologyService({
+    repository,
+    auditLog: new MemoryAuditLog(),
+  })
+  const preview = await service.reviewPreview('dv-inline-review', {
+    candidateIds: inlineCandidates.map(({ candidateId }) => candidateId),
+  })
+
+  assert.equal(preview.safeToApply, true)
+  assert.equal(preview.diagnostics.conflictCount, 0)
+  assert.equal(preview.validationPreview.summary.errors, 0)
+
+  const confirmed = await service.confirmSelectedCandidates('dv-inline-review', 'admin-1', {
+    candidateIds: inlineCandidates.map(({ candidateId }) => candidateId),
+    reason: 'Tiang T-021 diverifikasi menjadi anchor untuk dua jalur berbeda.',
+  })
+  assert.equal(confirmed.affectedCount, 2)
+  assert.equal(confirmed.confirmedRelations.length, 2)
+})
+
 test('stale onboarding candidates are blocked until identity assignment and regeneration', async () => {
   const bundle = reviewBundle()
   const initial = generateRelationArtifacts(bundle)
@@ -995,6 +1042,77 @@ function reviewBundle({ secondNode = false } = {}) {
     classifiedNodes: nodes.map(({ object }) => object),
     classifiedPaths: [path.object],
     geometries: [...nodes.map(({ geometry }) => geometry), path.geometry],
+    explicitRelations: [],
+    semanticRuleSetVersion: 'semantic-classifier/1.0.0',
+    topologyRuleSetVersion: null,
+  }
+}
+
+function inlineReviewBundle() {
+  const node = {
+    assetId: 'T-021',
+    sourceFeatureId: 'feature:T-021',
+    siteId: 'site-1',
+    objectRole: 'device_node',
+    networkFamily: 'fiber_optic',
+    assetType: 'Tiang',
+    category: 'infrastructure',
+    classificationStatus: 'classified',
+    classificationEvidence: [],
+    geometryIds: ['geometry:T-021'],
+  }
+  const nodeGeometry = {
+    geometryId: 'geometry:T-021',
+    datasetVersionId: 'dv-inline-review',
+    sourceFeatureId: 'feature:T-021',
+    geometryType: 'Point',
+    coordinates: [110.00005, -7],
+    valid: true,
+  }
+  const paths = [
+    {
+      assetId: 'FO-JB-011',
+      sourceFeatureId: 'feature:FO-JB-011',
+      geometryId: 'geometry:FO-JB-011',
+      coordinates: [[110, -7], [110.00005, -7], [110.001, -7]],
+    },
+    {
+      assetId: 'FO-JB-011.1',
+      sourceFeatureId: 'feature:FO-JB-011.1',
+      geometryId: 'geometry:FO-JB-011.1',
+      coordinates: [[110.00005, -7.001], [110.00005, -7], [110.00005, -6.999]],
+    },
+  ]
+  return {
+    datasetVersion: {
+      id: 'dv-inline-review',
+      sourceChecksum: `sha256:${'d'.repeat(64)}`,
+    },
+    site: 'site-1',
+    classifiedNodes: [node],
+    classifiedPaths: paths.map((path) => ({
+      assetId: path.assetId,
+      sourceFeatureId: path.sourceFeatureId,
+      siteId: 'site-1',
+      objectRole: 'cable_path',
+      networkFamily: 'fiber_optic',
+      assetType: 'Fiber Optic',
+      category: 'fiber_optic',
+      classificationStatus: 'classified',
+      classificationEvidence: [],
+      geometryIds: [path.geometryId],
+    })),
+    geometries: [
+      nodeGeometry,
+      ...paths.map((path) => ({
+        geometryId: path.geometryId,
+        datasetVersionId: 'dv-inline-review',
+        sourceFeatureId: path.sourceFeatureId,
+        geometryType: 'LineString',
+        coordinates: path.coordinates,
+        valid: true,
+      })),
+    ],
     explicitRelations: [],
     semanticRuleSetVersion: 'semantic-classifier/1.0.0',
     topologyRuleSetVersion: null,
