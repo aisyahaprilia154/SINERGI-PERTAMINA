@@ -4,6 +4,7 @@ import {
   evaluateAccuracyGate,
   MINIMUM_HELD_OUT_SAMPLE_SIZE,
 } from './topology-accuracy.js'
+import { topologyCandidateDecisionKey } from './topology-cardinality.js'
 
 const EARTH_RADIUS_METERS = 6371008.8
 
@@ -1624,7 +1625,7 @@ function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, dataset
     }
   })
 
-  const groups = groupBy(candidates, candidateGroupKey)
+  const groups = groupBy(candidates, topologyCandidateDecisionKey)
   groups.forEach((group) => {
     group.sort((left, right) => right.score - left.score || compareCandidate(left, right))
     const best = group[0]
@@ -3024,13 +3025,6 @@ function connectedComponents(nodes, edges) {
     })
   })
   return components
-}
-
-function candidateGroupKey(candidate) {
-  if (candidate.candidateType === 'inline_device') {
-    return `inline:${candidate.targetAssetId}|${candidate.sourcePathAssetId}`
-  }
-  return candidate.sourceEndpointId
 }
 
 function isLineLabelCandidate(candidate) {

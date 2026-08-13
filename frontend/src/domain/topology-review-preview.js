@@ -37,7 +37,10 @@ export function describeTopologyReviewFailure(errorOrPreview) {
   const validation = preview.validationPreview?.summary ?? {}
   const conflictCount = Number(diagnostics.conflictCount ?? 0)
   const ineligibleCount = Array.isArray(preview.ineligible) ? preview.ineligible.length : 0
-  const introducedErrors = Number(validation.introducedErrors ?? validation.errors ?? 0)
+  const rawIntroducedErrors = Number(validation.introducedErrors ?? validation.errors ?? 0)
+  // Endpoint conflicts are already reported above. Do not present the same
+  // blocking issue a second time as a generic validation error.
+  const introducedErrors = Math.max(0, rawIntroducedErrors - conflictCount)
   const baselineIssues = Number(diagnostics.baselineIssuesPreserved ?? 0)
   const parts = []
   const identityBlockedCount = (preview.ineligible ?? []).filter(({ reason }) => (
