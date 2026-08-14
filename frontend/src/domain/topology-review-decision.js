@@ -1,5 +1,23 @@
 export function topologyReviewDecisionKey(candidate = {}) {
   if (candidate.reviewCardinality?.key) return candidate.reviewCardinality.key
+  if (candidate.candidateType === 'mounting_attachment') {
+    return `mounting:${JSON.stringify([
+      String(candidate.sourcePathAssetId ?? candidate.childAssetId ?? ''),
+      String(candidate.mountingRole ?? 'default'),
+    ])}`
+  }
+  if (candidate.candidateType === 'jb_internal_connection') {
+    return `internal:${JSON.stringify([
+      String(candidate.sourceInterfaceId ?? ''),
+      String(candidate.serviceDomain ?? 'unknown'),
+    ])}`
+  }
+  if (candidate.candidateType === 'path_continuation') {
+    return `path-continuation:${JSON.stringify([
+      String(candidate.sourceEndpointId ?? ''),
+      String(candidate.targetEndpointId ?? candidate.targetPathAssetId ?? ''),
+    ].sort())}`
+  }
   if (candidate.candidateType === 'inline_device'
     && candidate.targetAssetId
     && candidate.sourcePathAssetId) {

@@ -10,13 +10,13 @@ const MATRIX = {
   cctv: {
     cctv: { nodeType: 'CCTV Camera', compatible: true },
     fiber_optic: { nodeType: 'OTB Junction', compatible: false },
-    lan: { nodeType: 'Switch', compatible: false },
+    lan: { nodeType: 'Switch', compatible: true },
     infrastructure: { nodeType: 'Switch', compatible: true },
   },
   fiber_optic: {
     cctv: { nodeType: 'OTB Junction', compatible: true },
     fiber_optic: { nodeType: 'OTB Junction', compatible: true },
-    lan: { nodeType: 'Switch', compatible: false },
+    lan: { nodeType: 'Switch', compatible: true },
     infrastructure: { nodeType: 'Switch', compatible: true },
   },
   lan: {
@@ -29,7 +29,7 @@ const MATRIX = {
     cctv: { nodeType: 'CCTV Camera', compatible: false },
     fiber_optic: { nodeType: 'OTB Junction', compatible: false },
     lan: { nodeType: 'Switch', compatible: false },
-    infrastructure: { nodeType: 'Switch', compatible: true },
+    infrastructure: { nodeType: 'Switch', compatible: false },
   },
 }
 
@@ -43,7 +43,7 @@ test('representative network-family compatibility matrix is enforced', () => {
         expected.nodeType,
       ))
       const compatible = result.candidates.some(({ candidateType }) => (
-        candidateType === 'endpoint_device'
+        candidateType === 'cable_termination'
       ))
       assert.equal(
         compatible,

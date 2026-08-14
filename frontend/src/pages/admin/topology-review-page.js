@@ -26,6 +26,14 @@ import {
   topologyReviewDecisionCandidates,
 } from '../../domain/topology-review-decision.js'
 import {
+  humanReviewReasons,
+  isDataIssueCandidate,
+  normalizeReviewQueue,
+  REVIEW_QUEUES,
+  reviewProgress,
+  reviewQueueForCandidate,
+} from '../../domain/topology-review-workflow.js'
+import {
   autoAssignUniqueIdentityAssignments,
   getDefaultAdminToken,
   loadImportStatus,
@@ -43,13 +51,12 @@ import {
 } from '../../services/active-dataset-service.js'
 import { bindUserAccountMenu, renderTopNavigation, scopeMapData } from '../map/map-page.js'
 import { createMapLibreSurface } from '../map/maplibre-map.js'
-import { escapeAttribute } from './import-view-utils.js'
 
 export async function renderTopologyReviewPage(container) {
   document.title = 'Konfirmasi Koneksi — SINERGI'
   document.body.className = 'map-body topology-review-body'
-  container.innerHTML = reviewState('progress_activity', 'Memuat konfirmasi koneksi',
-    'Daftar koneksi sedang disiapkan.', true)
+  container.innerHTML = reviewState('progress_activity', 'Menyiapkan usulan sambungan',
+    'Sistem sedang menyelaraskan identitas aset dan memperbarui koneksi.', true)
   bindUserAccountMenu()
 
   const requested = readContext()
@@ -76,15 +83,55 @@ export async function renderTopologyReviewPage(container) {
 async function initializeReview(container, mapData) {
   const datasetVersionId = mapData.activeContext.datasetVersionId
   let projections = await loadReviewProjections(datasetVersionId, mapData.geometries)
+  if (projections.summary.status === 'preparing') {
+    container.innerHTML = reviewState(
+      'sync',
+      'Menyiapkan usulan sambungan',
+      projections.summary.userMessage
+        || 'Sistem sedang menyelaraskan identitas aset dan memperbarui koneksi.',
+      true,
+    )
+    bindUserAccountMenu()
+    window.setTimeout(() => {
+      if (document.body.classList.contains('topology-review-body')) {
+        initializeReview(container, mapData).catch((error) => {
+          container.innerHTML = reviewState(
+            'error',
+            'Usulan sambungan belum tersedia',
+            error.message,
+          )
+          bindUserAccountMenu()
+        })
+      }
+    }, 1800)
+    return
+  }
   const reviewAvailability = resolveTopologyReviewAvailability(projections.summary)
   const params = new URLSearchParams(window.location.search)
   const requestedStatus = params.get('status')
+  const requestedQueue = params.get('queue') ?? (
+    ['open', 'needs-review', 'candidate', 'ambiguous', 'unresolved'].includes(requestedStatus)
+      ? requestedStatus
+      : null
+  )
+  const legacyCandidateStatus = [
+    'all',
+    'candidate',
+    'ambiguous',
+    'confirmed',
+    'rejected',
+    'revoked',
+    'unresolved',
+  ].includes(requestedStatus) && !requestedQueue
+    ? requestedStatus
+    : 'all'
   const locationIndex = createReviewLocationIndex(mapData)
   const requestedCategory = params.get('category')
   const state = {
     selectedCandidateId: params.get('reviewCandidateId'),
     selectedCandidateIds: new Set(),
-    status: requestedStatus === 'open' ? 'needs-review' : requestedStatus ?? 'needs-review',
+    status: normalizeReviewQueue(requestedQueue ?? 'ready'),
+    candidateStatus: params.get('candidateStatus') ?? legacyCandidateStatus,
     category: isRelationCategoryId(requestedCategory) ? requestedCategory : 'all',
     family: params.get('family') ?? 'all',
     type: params.get('type') ?? 'all',
@@ -95,8 +142,10 @@ async function initializeReview(container, mapData) {
     actionMessage: '',
     bulkStatus: reviewAvailability.available ? 'idle' : 'error',
     bulkMessage: reviewAvailability.message,
+    undo: null,
   }
   let decisionContext = null
+  let toastTimer = null
   const requestedCandidate = projections.candidates.items.find(({ candidateId }) => (
     candidateId === state.selectedCandidateId
   )) ?? null
@@ -139,7 +188,7 @@ async function initializeReview(container, mapData) {
       })}
       <header class="review-header">
         <div class="review-title">
-          <h1>Konfirmasi koneksi</h1>
+          <h1>Periksa sambungan</h1>
           <p>${escapeHtml(formatLocationName(selectedArea?.name ?? 'Semua lokasi'))} · ${
             escapeHtml(mapData.activeContext.version)
           }</p>
@@ -175,6 +224,7 @@ async function initializeReview(container, mapData) {
       </header>
       <main class="review-workspace">
         <aside class="candidate-queue" aria-label="Candidate queue">
+          <div class="review-queue-tabs" role="tablist" aria-label="Antrean review"></div>
           <div class="queue-summary"></div>
           <div class="queue-filters">
             <div class="primary-filters">
@@ -238,6 +288,7 @@ async function initializeReview(container, mapData) {
       ${renderBulkDialog()}
       ${renderDecisionDialog()}
       ${renderManualRelationDialog(manualRelationAssets)}
+      <div class="review-snackbar" role="status" aria-live="polite"></div>
     </div>
   `
 
@@ -279,6 +330,7 @@ async function initializeReview(container, mapData) {
   bindBulkDialog()
   bindDecisionDialog()
   bindManualRelationDialog()
+  bindReviewShortcuts()
   renderAll()
 
   function bindSitePicker() {
@@ -303,6 +355,7 @@ async function initializeReview(container, mapData) {
       state.selectedCandidateId = items[0]?.candidateId ?? null
     }
     renderHeaderActions()
+    renderQueueTabs(candidatesForLocation())
     renderRelationCategories(candidatesForLocation())
     renderQueue(items)
     renderDetail()
@@ -333,6 +386,35 @@ async function initializeReview(container, mapData) {
       state.area,
       locationIndex,
     )
+  }
+
+  function renderQueueTabs(locationCandidates) {
+    const tabs = container.querySelector('.review-queue-tabs')
+    if (!tabs) return
+    tabs.innerHTML = REVIEW_QUEUES.map((queue) => {
+      const count = locationCandidates.filter((candidate) => (
+        reviewQueueForCandidate(candidate) === queue.id
+      )).length
+      const selected = state.status === queue.id
+      return `<button type="button" role="tab"
+        class="review-queue-tab${selected ? ' selected' : ''}"
+        aria-selected="${selected}" data-review-queue="${queue.id}">
+        <span>${escapeHtml(queue.label)}</span>
+        <strong>${count}</strong>
+        <small>${escapeHtml(queue.description)}</small>
+      </button>`
+    }).join('')
+    tabs.querySelectorAll('[data-review-queue]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const queue = normalizeReviewQueue(button.dataset.reviewQueue)
+        if (queue === state.status) return
+        state.status = queue
+        state.selectedCandidateId = null
+        state.actionStatus = 'idle'
+        state.actionMessage = ''
+        renderAll()
+      })
+    })
   }
 
   function focusCandidateOnMap() {
@@ -369,6 +451,12 @@ async function initializeReview(container, mapData) {
     const confirmableCount = projections.candidates.items.filter(
       isBulkConfirmableCandidate,
     ).length
+    const ambiguousCount = projections.candidates.items.filter((candidate) => (
+      reviewQueueForCandidate(candidate) === 'needs_choice'
+    )).length
+    const dataIssueCount = projections.candidates.items.filter((candidate) => (
+      reviewQueueForCandidate(candidate) === 'data_issues'
+    )).length
     const lineConfirmableCount = projections.candidates.items.filter(
       isLineLabelConfirmableCandidate,
     ).length
@@ -379,17 +467,12 @@ async function initializeReview(container, mapData) {
     const actions = container.querySelector('.review-bulk-actions')
     const reviewEnabled = reviewAvailability.available
     actions.innerHTML = `
-      <button class="button primary manual-relation-action" type="button"
-        ${manualRelationAssets.length >= 2
-          && reviewEnabled
-          && reviewAvailability.capabilities?.manualRelation === true ? '' : 'disabled'}
-        title="${!reviewEnabled
-          ? escapeHtml(reviewAvailability.message)
-          : manualRelationAssets.length >= 2
-          ? 'Tambahkan koneksi langsung antar device'
-          : 'Minimal dua device bertitik diperlukan'}">
-        <span class="material-symbols-outlined" aria-hidden="true">add_link</span>
-        Tambah koneksi
+      <button class="button primary confirm-safe-all" type="button"
+        ${confirmableCount && reviewEnabled ? '' : 'disabled'}
+        title="${!reviewEnabled ? escapeHtml(reviewAvailability.message) : ''}">
+        <span class="material-symbols-outlined" aria-hidden="true">done_all</span>
+        <span><strong>Hubungkan semua rekomendasi aman</strong>
+          <small>${confirmableCount} aman · ${ambiguousCount} ambigu · ${dataIssueCount} masalah data</small></span>
       </button>
       <details class="bulk-actions-menu">
         <summary class="button secondary">
@@ -406,8 +489,16 @@ async function initializeReview(container, mapData) {
           <button class="confirm-all-candidates" type="button"
             ${confirmableCount && reviewEnabled ? '' : 'disabled'}>
             <span class="material-symbols-outlined" aria-hidden="true">done_all</span>
-            <span><strong>Konfirmasi rekomendasi</strong>
+            <span><strong>Hubungkan semua rekomendasi aman</strong>
               <small>${confirmableCount} koneksi di seluruh dataset</small></span>
+          </button>
+          <button class="manual-relation-action" type="button"
+            ${manualRelationAssets.length >= 2
+              && reviewEnabled
+              && reviewAvailability.capabilities?.manualRelation === true ? '' : 'disabled'}>
+            <span class="material-symbols-outlined" aria-hidden="true">add_link</span>
+            <span><strong>Tambah koneksi manual</strong>
+              <small>Pilih dua device jika tidak ada usulan sistem</small></span>
           </button>
           <button class="revoke-all-relations destructive" type="button"
             ${confirmedCount && reviewEnabled ? '' : 'disabled'}>
@@ -421,6 +512,9 @@ async function initializeReview(container, mapData) {
         escapeHtml(state.bulkMessage)
       }</p>` : ''}
     `
+    actions.querySelector('.confirm-safe-all')?.addEventListener('click', () => {
+      openBulkDialog('confirm-all', confirmableCount)
+    })
     actions.querySelector('.manual-relation-action')?.addEventListener('click', () => {
       openManualRelationDialog()
     })
@@ -441,13 +535,16 @@ async function initializeReview(container, mapData) {
     const selectedVisibleCount = selectableItems.filter(({ candidateId }) => (
       state.selectedCandidateIds.has(candidateId)
     )).length
+    const progress = reviewProgress(locationCandidates)
+    const queueSummaryLabel = REVIEW_QUEUES.find(({ id }) => id === state.status)?.label
+      ?? 'Antrean'
     container.querySelector('.queue-summary').innerHTML = `
-      <div><strong>${items.length}</strong><span>ditampilkan</span></div>
-      <div><strong>${locationCandidates.filter(isBulkConfirmableCandidate).length}</strong>
-        <span>rekomendasi</span></div>
-      <div><strong>${locationCandidates.filter(({ candidateStatus }) => (
-        candidateStatus === 'ambiguous'
-      )).length}</strong><span>belum pasti</span></div>
+      <div class="queue-progress-summary"><strong>${progress.completed} dari ${progress.total}</strong>
+        <span>sudah diperiksa</span></div>
+      <div><strong>${items.length}</strong><span>${escapeHtml(queueSummaryLabel.toLowerCase())}</span></div>
+      <div><strong>${locationCandidates.filter((candidate) => (
+        reviewQueueForCandidate(candidate) === 'ready'
+      )).length}</strong><span>siap diproses</span></div>
       <label class="queue-selection-control">
         <input class="select-visible-candidates" type="checkbox"
           ${selectableItems.length > 0 && selectedVisibleCount === selectableItems.length
@@ -483,9 +580,13 @@ async function initializeReview(container, mapData) {
     const list = container.querySelector('.candidate-list')
     if (!items.length) {
       list.innerHTML = `<div class="empty-candidate-list">
-        <span class="material-symbols-outlined">filter_alt_off</span>
-        <strong>Tidak ada kandidat</strong>
-        <p>Ubah filter untuk melihat candidate lainnya.</p>
+        <span class="material-symbols-outlined">${state.status === 'ready' ? 'task_alt' : 'filter_alt_off'}</span>
+        <strong>${state.status === 'ready'
+          ? 'Semua usulan aman sudah diperiksa'
+          : 'Tidak ada item di antrean ini'}</strong>
+        <p>${state.status === 'ready'
+          ? 'Pindah ke antrean lain jika masih ada kasus yang perlu ditangani.'
+          : 'Ubah filter atau pilih antrean lain untuk melihat item berikutnya.'}</p>
       </div>`
       return
     }
@@ -494,13 +595,16 @@ async function initializeReview(container, mapData) {
       const selectedForBulk = state.selectedCandidateIds.has(candidate.candidateId)
       const sourceName = endpointName(candidate, 'source', projections.sourceFeatures)
       const targetName = endpointName(candidate, 'target', projections.sourceFeatures)
+      const targetInterfaceLabel = candidate.targetInterfaceId
+        ? ` · ${candidate.targetInterfaceId}`
+        : ''
       return `
       <div class="candidate-card-row${selectedForBulk ? ' selection-selected' : ''}" role="listitem">
         <label class="candidate-select-control${selectable ? '' : ' disabled'}"
           title="${selectable
             ? 'Pilih koneksi ini'
-            : isIdentityBlockedCandidate(candidate)
-              ? 'Asset ID belum ditetapkan; tetapkan identity lalu regenerate topology'
+            : isDataIssueCandidate(candidate)
+              ? 'Data sumber belum siap; kandidat dipisahkan dari konfirmasi'
               : candidate.candidateStatus === 'ambiguous'
                 ? 'Pilih tepat satu target dari panel detail'
                 : 'Koneksi ini belum dapat dikonfirmasi'}">
@@ -519,6 +623,9 @@ async function initializeReview(container, mapData) {
         <strong>${escapeHtml(sourceName)}</strong>
         <span class="candidate-arrow" aria-hidden="true">→</span>
         <strong>${escapeHtml(targetName)}</strong>
+        ${candidate.targetInterfaceId
+          ? `<small class="candidate-interface-reference">${escapeHtml(targetInterfaceLabel)}</small>`
+          : ''}
         <small>${escapeHtml(labelCandidateType(candidate.candidateType))} · ${
           formatDistance(candidate.distanceMeters)
         }</small>
@@ -635,6 +742,144 @@ async function initializeReview(container, mapData) {
     if (!candidate) {
       panel.innerHTML = `<div class="review-empty">
         <span class="material-symbols-outlined">fact_check</span>
+        <h2>Pilih sambungan untuk diperiksa</h2>
+        <p>Usulan koneksi dan pilihan keputusan akan muncul di sini.</p>
+      </div>`
+      return
+    }
+    const decisionCandidates = topologyReviewDecisionCandidates(
+      candidatesForLocation(),
+      candidate,
+    )
+    const alternatives = decisionCandidates.filter(({ candidateId }) => (
+      candidateId !== candidate.candidateId
+    ))
+    const requiresTargetSelection = topologyCandidateRequiresTargetSelection(
+      candidate,
+      decisionCandidates,
+    )
+    const relation = projections.graph.confirmedRelations.find(({ candidateId }) => (
+      candidate.candidateId === candidateId
+    ))
+    const sourceName = endpointName(candidate, 'source', projections.sourceFeatures)
+    const targetName = endpointName(candidate, 'target', projections.sourceFeatures)
+    const selectedCount = getSelectedConfirmableCandidates().length
+    const reasons = humanReviewReasons(candidate, decisionCandidates)
+    const reviewItems = filterCandidates(candidatesForLocation(), state)
+    const candidateIndex = reviewItems.findIndex(({ candidateId }) => (
+      candidateId === candidate.candidateId
+    ))
+    const readyForAction = !isDataIssueCandidate(candidate)
+    panel.innerHTML = `
+      <header class="candidate-detail-header">
+        <div>
+          <span class="candidate-status ${escapeHtml(candidate.candidateStatus)}">
+            ${escapeHtml(statusLabel(candidate))}
+          </span>
+          <h2>Periksa sambungan</h2>
+          <p>${escapeHtml(labelCandidateType(candidate.candidateType))} · Usulan sistem</p>
+        </div>
+        <div class="confidence-pill"
+          aria-label="Keyakinan ${Math.round((candidate.score ?? 0) * 100)} persen">
+          <span>${escapeHtml(confidenceLabel(candidate, alternatives))}</span>
+          <strong>${Math.round((candidate.score ?? 0) * 100)}%</strong>
+        </div>
+      </header>
+      ${renderCandidateReviewGuard(candidate)}
+      <section class="candidate-route" aria-label="Usulan sambungan">
+        ${routeEndpoint('Dari', sourceName)}
+        <div class="route-connector">
+          <span>${formatDistance(candidate.distanceMeters)}</span>
+          <i></i>
+          <small>Jarak ujung kabel</small>
+        </div>
+        ${routeEndpoint('Ke', targetName)}
+      </section>
+      <section class="review-reasons" aria-label="Alasan rekomendasi">
+        <div class="review-reasons-heading">
+          <strong>Alasan</strong>
+          <span>Ringkasan yang mudah dibaca</span>
+        </div>
+        <ul>
+          ${reasons.map((reason) => `<li>
+            <span class="material-symbols-outlined" aria-hidden="true">check_circle</span>
+            <span>${escapeHtml(reason)}</span>
+          </li>`).join('')}
+        </ul>
+      </section>
+      ${renderCandidateImpactWarning(candidate)}
+      <details class="technical-details">
+        <summary>
+          <span class="material-symbols-outlined" aria-hidden="true">analytics</span>
+          Lihat detail teknis
+        </summary>
+        ${renderTechnicalDetails(candidate, projections.candidates.history, projections.candidates.runs)}
+      </details>
+      <footer class="review-actions">
+        ${state.actionMessage ? `<p class="review-action-message ${state.actionStatus}" role="status">${escapeHtml(
+          state.actionMessage,
+        )}</p>` : ''}
+        <div class="review-navigation" aria-label="Navigasi kandidat">
+          <button class="icon-button review-previous" type="button"
+            data-review-previous aria-label="Sambungan sebelumnya"
+            ${candidateIndex <= 0 ? 'disabled' : ''}>
+            <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
+          </button>
+          <span>${candidateIndex >= 0 ? candidateIndex + 1 : 0} dari ${reviewItems.length} di antrean</span>
+          <button class="icon-button review-next" type="button"
+            data-review-next aria-label="Sambungan berikutnya"
+            ${candidateIndex < 0 || candidateIndex >= reviewItems.length - 1 ? 'disabled' : ''}>
+            <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
+          </button>
+        </div>
+        <div class="review-primary-actions">
+          <button class="button primary confirm-candidate" type="button"${
+            selectedCount || (readyForAction && canConfirm(candidate)) ? '' : ' disabled'
+          } title="${!readyForAction
+            ? candidateReviewGuardMessage(candidate)
+            : selectedCount
+              ? `Hubungkan ${selectedCount} sambungan yang dipilih`
+            : requiresTargetSelection
+              ? 'Pilih tepat satu target untuk sambungan ini'
+              : readyForAction && canConfirm(candidate)
+                ? 'Hubungkan sambungan ini'
+                : 'Sambungan ini belum dapat dihubungkan'
+          }">${!readyForAction
+            ? 'Perlu perbaikan data'
+            : selectedCount
+              ? `Hubungkan pilihan (${selectedCount})`
+              : requiresTargetSelection ? 'Pilih target' : 'Hubungkan'}${readyForAction ? ' <kbd>H</kbd>' : ''}</button>
+          <button class="button secondary reject-candidate" type="button"${
+            readyForAction && canReject(candidate) ? '' : ' disabled'
+          }>${readyForAction ? 'Tidak terhubung <kbd>T</kbd>' : 'Tidak tersedia'}</button>
+          <button class="button tertiary skip-candidate" type="button"${
+            readyForAction && canSkip(candidate) ? '' : ' disabled'
+          }>${readyForAction ? 'Lewati <kbd>L</kbd>' : 'Tunggu pembaruan'}</button>
+          ${readyForAction && alternatives.length ? `
+            <button class="button secondary select-alternative" type="button">Bandingkan target</button>
+          ` : ''}
+          <details class="decision-more">
+            <summary class="button tertiary">Opsi lain</summary>
+            <div>
+              <button class="button revoke-relation destructive" type="button"${
+                relation?.relationId ? '' : ' disabled'
+              }>Batalkan koneksi</button>
+            </div>
+          </details>
+        </div>
+      </footer>
+    `
+    bindActions(candidate, relation)
+  }
+
+  function renderDetailLegacy() {
+    const panel = container.querySelector('.candidate-review-panel')
+    const candidate = projections.candidates.items.find(({ candidateId }) => (
+      candidateId === state.selectedCandidateId
+    ))
+    if (!candidate) {
+      panel.innerHTML = `<div class="review-empty">
+        <span class="material-symbols-outlined">fact_check</span>
         <h2>Pilih koneksi untuk diperiksa</h2>
         <p>Pasangan aset dan pilihan keputusan akan muncul di sini.</p>
       </div>`
@@ -656,6 +901,7 @@ async function initializeReview(container, mapData) {
     ))
     const sourceName = endpointName(candidate, 'source', projections.sourceFeatures)
     const targetName = endpointName(candidate, 'target', projections.sourceFeatures)
+    const targetInterface = candidate.targetInterface ?? null
     const selectedCount = getSelectedConfirmableCandidates().length
     panel.innerHTML = `
       <header class="candidate-detail-header">
@@ -682,6 +928,22 @@ async function initializeReview(container, mapData) {
         </div>
         ${routeEndpoint('Ke', targetName, shortReference(candidate.targetEndpointId))}
       </section>
+      ${candidate.targetInterfaceId ? `
+        <section class="candidate-interface-card" aria-label="Target interface">
+          <div>
+            <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
+            <div><strong>Target interface</strong><small>${escapeHtml(candidate.targetInterfaceId)}</small></div>
+          </div>
+          <dl>
+            ${detailRow('Tipe', targetInterface?.interfaceType ?? '—')}
+            ${detailRow('Domain', candidate.serviceDomain ?? targetInterface?.serviceDomain ?? 'unknown')}
+            ${detailRow('Media', candidate.mediaType ?? targetInterface?.mediaType ?? 'unknown')}
+            ${detailRow('Occupancy', targetInterface
+              ? `${targetInterface.occupancy ?? 0}/${targetInterface.capacity ?? 1}`
+              : '—')}
+          </dl>
+        </section>
+      ` : ''}
       <details class="technical-details">
         <summary>
           <span class="material-symbols-outlined" aria-hidden="true">analytics</span>
@@ -714,6 +976,10 @@ async function initializeReview(container, mapData) {
               ${detailRow('Endpoint', candidate.sourceEndpointId ?? '—')}
               ${detailRow('Jenis jaringan', candidate.networkFamily ?? '—')}
               ${detailRow('Rule set', candidate.topologyRuleSetVersion ?? '—')}
+              ${detailRow('Target interface', candidate.targetInterfaceId ?? 'unknown')}
+              ${detailRow('Service domain', candidate.serviceDomain ?? 'unknown')}
+              ${detailRow('Media type', candidate.mediaType ?? 'unknown')}
+              ${detailRow('Cable role', candidate.cableRole ?? 'unknown')}
             </dl>
           </section>
         </div>
@@ -762,6 +1028,12 @@ async function initializeReview(container, mapData) {
 
   function bindActions(candidate, relation) {
     const panel = container.querySelector('.candidate-review-panel')
+    panel.querySelector('[data-review-previous]')?.addEventListener('click', () => {
+      moveReviewSelection(-1)
+    })
+    panel.querySelector('[data-review-next]')?.addEventListener('click', () => {
+      moveReviewSelection(1)
+    })
     panel.querySelector('.confirm-candidate')?.addEventListener('click', () => {
       const selectedCount = getSelectedConfirmableCandidates().length
       if (selectedCount) {
@@ -807,13 +1079,38 @@ async function initializeReview(container, mapData) {
         action,
         body: { ...reviewSnapshotBody(), reason, ...extra },
       })
-    ), actionSuccessMessage(action))
+    ), actionSuccessMessage(action), {
+      candidateId: candidate.candidateId,
+      autoAdvance: ['confirm', 'reject', 'skip', 'select-target'].includes(action),
+      undoable: ['confirm', 'select-target'].includes(action),
+    })
   }
 
-  async function performMutation(mutation, successMessage) {
+  function moveReviewSelection(offset) {
+    const items = filterCandidates(candidatesForLocation(), state)
+    if (!items.length) return
+    const currentIndex = items.findIndex(({ candidateId }) => (
+      candidateId === state.selectedCandidateId
+    ))
+    const nextIndex = currentIndex < 0
+      ? offset > 0 ? 0 : items.length - 1
+      : currentIndex + offset
+    const next = items[nextIndex]
+    if (!next) return
+    state.selectedCandidateId = next.candidateId
+    state.actionStatus = 'idle'
+    state.actionMessage = ''
+    renderAll()
+  }
+
+  async function performMutation(mutation, successMessage, {
+    candidateId = null,
+    autoAdvance = false,
+    undoable = false,
+  } = {}) {
     if (state.actionStatus === 'loading') return
     state.actionStatus = 'loading'
-    state.actionMessage = 'Menyimpan keputusan dan memperbarui confirmed graph…'
+    state.actionMessage = 'Menyimpan keputusan dan memperbarui koneksi…'
     renderDetail()
     try {
       let result
@@ -826,13 +1123,106 @@ async function initializeReview(container, mapData) {
         result = await mutation()
       }
       projections = applyReviewMutationResult(projections, result)
-      state.actionStatus = 'success'
-      state.actionMessage = successMessage
+      const undoRelation = undoable && candidateId
+        ? projections.graph.confirmedRelations.find((relation) => (
+          relation.candidateId === candidateId
+            && relation.verificationStatus === 'confirmed'
+        ))
+        : null
+      if (autoAdvance) {
+        const nextItems = filterCandidates(candidatesForLocation(), state)
+        state.selectedCandidateId = nextItems[0]?.candidateId ?? null
+        state.actionStatus = 'idle'
+        state.actionMessage = ''
+      } else {
+        state.actionStatus = 'success'
+        state.actionMessage = successMessage
+      }
+      renderAll()
+      showReviewToast(successMessage, undoRelation ? {
+        relationId: undoRelation.relationId,
+        candidateId,
+      } : null)
+      return result
     } catch (error) {
       state.actionStatus = 'error'
       state.actionMessage = error.message
+      renderAll()
     }
-    renderAll()
+  }
+
+  function bindReviewShortcuts() {
+    window.addEventListener('keydown', (event) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target
+      if (target instanceof HTMLInputElement
+        || target instanceof HTMLTextAreaElement
+        || target instanceof HTMLSelectElement
+        || target.isContentEditable) return
+      if (container.querySelector('dialog[open]')) return
+      const candidate = projections.candidates.items.find(({ candidateId }) => (
+        candidateId === state.selectedCandidateId
+      ))
+      const key = event.key.toLowerCase()
+      if (key === 'h' && candidate) {
+        event.preventDefault()
+        container.querySelector('.confirm-candidate')?.click()
+      } else if (key === 't' && candidate) {
+        event.preventDefault()
+        container.querySelector('.reject-candidate')?.click()
+      } else if (key === 'l' && candidate) {
+        event.preventDefault()
+        container.querySelector('.skip-candidate')?.click()
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        moveReviewSelection(-1)
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        moveReviewSelection(1)
+      }
+    })
+  }
+
+  function showReviewToast(message, undo = null) {
+    const snackbar = container.querySelector('.review-snackbar')
+    if (!snackbar) return
+    clearTimeout(toastTimer)
+    snackbar.className = 'review-snackbar show'
+    snackbar.innerHTML = `
+      <span>${escapeHtml(message)}</span>
+      ${undo ? '<button type="button" class="review-undo">Batalkan</button>' : ''}
+    `
+    snackbar.querySelector('.review-undo')?.addEventListener('click', () => {
+      undoConfirmedRelation(undo)
+    })
+    toastTimer = window.setTimeout(() => {
+      snackbar.classList.remove('show')
+      snackbar.innerHTML = ''
+    }, undo ? 7000 : 4200)
+  }
+
+  async function undoConfirmedRelation(undo) {
+    const snackbar = container.querySelector('.review-snackbar')
+    const button = snackbar?.querySelector('.review-undo')
+    if (!undo?.relationId || button?.disabled) return
+    if (button) button.disabled = true
+    snackbar?.classList.add('loading')
+    try {
+      const result = await revokeTopologyRelation({
+        relationId: undo.relationId,
+        reason: 'Keputusan dibatalkan segera setelah disimpan.',
+        ...reviewSnapshotBody(),
+      })
+      projections = applyReviewMutationResult(projections, result)
+      state.status = 'ready'
+      state.selectedCandidateId = undo.candidateId
+      state.actionStatus = 'idle'
+      state.actionMessage = ''
+      renderAll()
+      showReviewToast('Koneksi dibatalkan.')
+    } catch (error) {
+      showReviewToast(`Pembatalan gagal: ${error.message}`)
+    }
   }
 
   function applyReviewMutationResult(current, result) {
@@ -990,7 +1380,7 @@ async function initializeReview(container, mapData) {
       }
       submit.disabled = true
       cancel.disabled = true
-      message.textContent = 'Menyimpan koneksi dan membangun ulang graph…'
+      message.textContent = 'Menyimpan koneksi dan memperbarui usulan…'
       try {
         const result = await createTopologyRelation({
           datasetVersionId,
@@ -1059,6 +1449,7 @@ async function initializeReview(container, mapData) {
       dialog.dataset.action = ''
       dialog.querySelector('.bulk-review-reason').value = ''
       dialog.querySelector('.bulk-dialog-message').textContent = ''
+      dialog.querySelector('.bulk-preview-summary').innerHTML = ''
     })
   }
 
@@ -1068,6 +1459,13 @@ async function initializeReview(container, mapData) {
     const lineLabelAction = action === 'confirm-line-labels'
     const selectedAction = action === 'confirm-selected'
     if (selectedAction && getSelectedConfirmableCandidates().length < 1) return
+    const safeCount = projections.candidates.items.filter(isBulkConfirmableCandidate).length
+    const ambiguousCount = projections.candidates.items.filter((candidate) => (
+      reviewQueueForCandidate(candidate) === 'needs_choice'
+    )).length
+    const dataIssueCount = projections.candidates.items.filter((candidate) => (
+      reviewQueueForCandidate(candidate) === 'data_issues'
+    )).length
     dialog.dataset.action = action
     dialog.querySelector('.bulk-dialog-icon').textContent = destructive
       ? 'delete_sweep'
@@ -1085,7 +1483,13 @@ async function initializeReview(container, mapData) {
         ? 'Sistem memakai urutan nama device pada garis dan lokasi sumbernya. Garis yang ambigu tidak ikut.'
         : selectedAction
           ? 'Hanya koneksi yang kamu centang yang akan dikonfirmasi. Pastikan semua pilihan sudah diperiksa.'
-        : 'Hanya kandidat berstatus recommended yang dikonfirmasi. Ambiguous, unresolved, rejected, dan revoked tidak ikut.'
+        : 'Hanya rekomendasi aman yang dikonfirmasi. Kandidat ambigu dan masalah data tidak ikut.'
+    dialog.querySelector('.bulk-preview-summary').innerHTML = destructive
+      ? ''
+      : selectedAction
+        ? `<strong>${count} koneksi yang dipilih akan diperiksa ulang sebelum disimpan.</strong>`
+        : `<strong>${safeCount} koneksi aman akan dihubungkan.</strong>
+          <span>${ambiguousCount} koneksi ambigu dan ${dataIssueCount} masalah data tidak disertakan.</span>`
     dialog.querySelector('.bulk-reason-label').textContent = destructive
       ? 'Alasan penghapusan konfirmasi'
       : 'Alasan konfirmasi (wajib)'
@@ -1108,7 +1512,7 @@ async function initializeReview(container, mapData) {
     submit.disabled = true
     cancel.disabled = true
     dialog.querySelector('.bulk-dialog-message').textContent =
-      'Menyimpan keputusan dan membangun ulang graph…'
+      'Menyimpan keputusan dan memperbarui koneksi…'
     try {
       const selectedCandidateIds = action === 'confirm-selected'
         ? getSelectedConfirmableCandidates().map(({ candidateId }) => candidateId)
@@ -1118,7 +1522,7 @@ async function initializeReview(container, mapData) {
       }
       if (action === 'confirm-selected') {
         dialog.querySelector('.bulk-dialog-message').textContent =
-          'Memeriksa konflik endpoint dan dampak graph…'
+          'Memeriksa konflik endpoint dan dampak koneksi…'
         const preview = await previewTopologyReview({
           datasetVersionId,
           candidateIds: selectedCandidateIds,
@@ -1180,7 +1584,6 @@ async function initializeReview(container, mapData) {
 
   function bindFilters() {
     const statuses = [
-      ['needs-review', 'Perlu ditinjau'],
       ['all', 'Semua status'],
       ['candidate', 'Rekomendasi sistem'],
       ['ambiguous', 'Belum pasti'],
@@ -1192,7 +1595,7 @@ async function initializeReview(container, mapData) {
     const locationCandidates = candidatesForLocation()
     const families = unique(locationCandidates.map(({ networkFamily }) => networkFamily))
     const types = unique(locationCandidates.map(({ candidateType }) => candidateType))
-    setOptions('.candidate-status-filter', statuses, state.status)
+    setOptions('.candidate-status-filter', statuses, state.candidateStatus)
     setOptions('.candidate-family-filter', [
       ['all', 'Semua family'],
       ...families.map((value) => [value, value]),
@@ -1206,7 +1609,7 @@ async function initializeReview(container, mapData) {
       renderAll()
     })
     container.querySelector('.candidate-status-filter').addEventListener('change', (event) => {
-      state.status = event.target.value
+      state.candidateStatus = event.target.value
       renderAll()
     })
     container.querySelector('.candidate-family-filter').addEventListener('change', (event) => {
@@ -1242,7 +1645,11 @@ async function initializeReview(container, mapData) {
     setOrDelete(query, 'branchId', mapData.activeContext.branchId)
     setOrDelete(query, 'area', state.area)
     setOrDelete(query, 'reviewCandidateId', state.selectedCandidateId)
-    setOrDelete(query, 'status', state.status)
+    setOrDelete(query, 'queue', state.status === 'ready' ? null : state.status)
+    setOrDelete(query, 'status', state.status === 'ready' ? null : state.status)
+    setOrDelete(query, 'candidateStatus', state.candidateStatus === 'all'
+      ? null
+      : state.candidateStatus)
     setOrDelete(query, 'category', state.category === 'all' ? null : state.category)
     setOrDelete(query, 'family', state.family)
     setOrDelete(query, 'type', state.type)
@@ -1308,10 +1715,10 @@ async function loadReviewProjections(datasetVersionId, mapGeometries = []) {
 function filterCandidates(items, state, { ignoreCategory = false } = {}) {
   const query = state.search.trim().toLowerCase()
   return prioritizeTopologyCandidates(items).filter((candidate) => {
-    const statusMatch = state.status === 'all'
-      || (state.status === 'needs-review'
-        ? isReviewableCandidate(candidate)
-        : candidate.candidateStatus === state.status)
+    const queueMatch = state.status === 'all'
+      || reviewQueueForCandidate(candidate) === state.status
+    const statusMatch = state.candidateStatus === 'all'
+      || candidate.candidateStatus === state.candidateStatus
     const categoryMatch = ignoreCategory
       || state.category === 'all'
       || relationCategoryForCandidate(candidate) === state.category
@@ -1330,7 +1737,7 @@ function filterCandidates(items, state, { ignoreCategory = false } = {}) {
       candidate.targetDisplayName,
       ...(candidate.sourceGeometryIds ?? []),
     ].filter(Boolean).join(' ').toLowerCase().includes(query)
-    return statusMatch && categoryMatch && familyMatch && typeMatch
+    return queueMatch && statusMatch && categoryMatch && familyMatch && typeMatch
       && scoreMatch && distanceMatch && queryMatch
   })
 }
@@ -1366,7 +1773,7 @@ function renderHistory(candidate, history = [], runs = []) {
 function routeEndpoint(label, assetId, reference) {
   return `<div class="route-endpoint">
     <span>${escapeHtml(label)}</span><strong>${escapeHtml(assetId ?? 'Belum ada pasangan')}</strong>
-    <small>${escapeHtml(reference ?? 'Referensi endpoint tidak tersedia')}</small>
+    ${reference ? `<small>${escapeHtml(reference)}</small>` : ''}
   </div>`
 }
 
@@ -1403,14 +1810,15 @@ function validCoordinate(value) {
 }
 
 function statusLabel(candidate) {
-  if (isIdentityBlockedCandidate(candidate)) return 'Asset ID belum ditetapkan'
+  if (isDataIssueCandidate(candidate)) return 'Masalah data'
+  if (reviewQueueForCandidate(candidate) === 'needs_choice') return 'Perlu dipilih'
   if (isBulkConfirmableCandidate(candidate)) return 'Direkomendasikan'
   if (candidate.candidateStatus === 'candidate' && candidate.proposalStatus === 'not_selected') {
     return 'Alternatif tidak dipilih'
   }
   return {
     candidate: 'Perlu ditinjau',
-    ambiguous: 'Belum pasti',
+    ambiguous: 'Perlu dipilih',
     confirmed: 'Terkonfirmasi',
     rejected: 'Tidak terhubung',
     revoked: 'Dibatalkan',
@@ -1424,17 +1832,18 @@ async function synchronizeAutomaticIdentity(datasetVersionId, container) {
   const result = await autoAssignUniqueIdentityAssignments({ datasetVersionId, token })
   if (result?.state !== 'updated' || !result.topologyRegeneration?.statusUrl) return result
   container.innerHTML = reviewState(
-    'progress_activity',
-    'Menyiapkan identitas aset',
-    'Asset ID internal yang unik sedang dibuat dan topology sedang diregenerasi.',
+    'sync',
+    'Memperbarui usulan sambungan',
+    'Sistem sedang menyelaraskan identitas aset dan memperbarui koneksi.',
     true,
   )
   const job = await waitForRegeneration(result.topologyRegeneration.statusUrl, token)
   if (job.status !== 'succeeded') {
     throw new Error(
-      'Identitas aset sudah disimpan, tetapi regenerasi topology belum berhasil. Coba muat ulang beberapa saat lagi.',
+      'Usulan sambungan belum berhasil diperbarui. Coba muat ulang beberapa saat lagi.',
     )
   }
+
   return result
 }
 
@@ -1455,26 +1864,117 @@ function isIdentityBlockedCandidate(candidate) {
 function candidateReviewGuardMessage(candidate) {
   const code = candidate?.reviewEligibility?.code
   if (['missing_stable_asset_id', 'candidate_stable_asset_id_required'].includes(code)) {
-    return 'Sistem sudah mencoba membuat Asset ID internal. Tinjau identity ambigu atau duplikat; isi Asset ID resmi hanya bila aset wajib mengikuti nomor perusahaan.'
+    return 'Identitas aset masih ambigu atau duplikat. Sistem akan memperbarui usulan secara otomatis setelah data sumber diperbaiki.'
   }
   if (code === 'topology_candidate_identity_stale') {
-    return 'Kandidat ini dibuat sebelum identity aset final. Kandidat lama ditutup oleh engine; gunakan hasil regenerasi topology.'
+    return 'Usulan ini dibuat dari data identitas lama dan belum aman untuk dikonfirmasi. Sistem akan memperbaruinya setelah sinkronisasi selesai.'
   }
-  return candidate?.reviewEligibility?.message
-    || 'Kandidat tidak lagi sesuai dengan topology input terkini. Muat ulang setelah topology diregenerasi.'
+  if (code === 'obsolete_rule_set') {
+    return 'Usulan berasal dari aturan lama dan sedang menunggu pembaruan otomatis.'
+  }
+  const message = candidate?.reviewEligibility?.message
+  return message
+    ? String(message)
+      .replaceAll(/Asset ID/gi, 'identitas aset')
+      .replaceAll(/regenerate topology/gi, 'pembaruan usulan sambungan')
+    : 'Data sumber belum cukup jelas untuk memastikan sambungan ini.'
 }
 
-function renderCandidateReviewGuard(candidate, datasetVersionId) {
-  if (!isIdentityBlockedCandidate(candidate)) return ''
-  const previewUrl = `/admin/datasets/import/${encodeURIComponent(datasetVersionId)}/preview`
+function renderCandidateReviewGuard(candidate) {
+  if (!isDataIssueCandidate(candidate)) return ''
   return `<section class="candidate-review-guard" role="status">
-    <span class="material-symbols-outlined" aria-hidden="true">identity_platform</span>
+    <span class="material-symbols-outlined" aria-hidden="true">dataset</span>
     <div>
-      <strong>Asset ID belum ditetapkan</strong>
+      <strong>Perlu perbaikan data</strong>
       <p>${escapeHtml(candidateReviewGuardMessage(candidate))}</p>
-      <a href="${escapeAttribute(previewUrl)}">Buka preview identity</a>
     </div>
   </section>`
+}
+
+function renderTechnicalDetails(candidate, history = [], runs = []) {
+  const targetInterface = candidate.targetInterface ?? null
+  return `
+    ${candidate.targetInterfaceId ? `
+      <section class="candidate-interface-card" aria-label="Target interface">
+        <div>
+          <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
+          <div><strong>Target interface</strong><small>${escapeHtml(candidate.targetInterfaceId)}</small></div>
+        </div>
+        <dl>
+          ${detailRow('Tipe', targetInterface?.interfaceType ?? '—')}
+          ${detailRow('Domain', candidate.serviceDomain ?? targetInterface?.serviceDomain ?? 'unknown')}
+          ${detailRow('Media', candidate.mediaType ?? targetInterface?.mediaType ?? 'unknown')}
+          ${detailRow('Occupancy', targetInterface
+            ? `${targetInterface.occupancy ?? 0}/${targetInterface.capacity ?? 1}`
+            : '—')}
+        </dl>
+      </section>
+    ` : ''}
+    <div class="evidence-grid">
+      <section>
+        <h3>Dasar penilaian</h3>
+        <div class="score-components">
+          ${Object.entries(candidate.scoreComponents ?? {}).map(([key, value]) => `
+            <div><span>${escapeHtml(componentLabel(key))}</span>
+              <meter min="0" max="1" value="${Number(value)}">${Number(value)}</meter>
+              <strong>${Math.round(Number(value) * 100)}%</strong></div>
+          `).join('')}
+        </div>
+        <ul class="evidence-list">${(candidate.evidence ?? []).map((evidence) => `
+          <li>
+            <span class="material-symbols-outlined" aria-hidden="true">task_alt</span>
+            <div><strong>${escapeHtml(evidence.source ?? evidence.evidenceType ?? 'Rule evidence')}</strong>
+            <p>${escapeHtml(evidence.explanation ?? evidence.normalizedValue ?? '')}</p></div>
+          </li>
+        `).join('')}</ul>
+      </section>
+      <section>
+        <h3>Referensi sumber</h3>
+        <dl class="source-reference-list">
+          ${detailRow('Geometry', (candidate.sourceGeometryIds ?? []).join(', ') || '—')}
+          ${detailRow('Source feature', candidate.sourceFeatureId ?? '—')}
+          ${detailRow('Target feature', candidate.targetFeatureId ?? '—')}
+          ${detailRow('Endpoint', candidate.sourceEndpointId ?? '—')}
+          ${detailRow('Jenis jaringan', candidate.networkFamily ?? '—')}
+          ${detailRow('Rule set', candidate.topologyRuleSetVersion ?? '—')}
+          ${detailRow('Target interface', candidate.targetInterfaceId ?? 'unknown')}
+          ${detailRow('Service domain', candidate.serviceDomain ?? 'unknown')}
+          ${detailRow('Media type', candidate.mediaType ?? 'unknown')}
+          ${detailRow('Cable role', candidate.cableRole ?? 'unknown')}
+        </dl>
+      </section>
+    </div>
+    <section class="review-history">
+      <h3>Riwayat keputusan</h3>
+      ${renderHistory(candidate, history, runs)}
+    </section>
+  `
+}
+
+function renderCandidateImpactWarning(candidate) {
+  const warnings = []
+  if (candidate.constraintEvidence?.interfaceCapacityAvailable === false) {
+    warnings.push('Interface tujuan sudah penuh.')
+  }
+  if (candidate.sourceLocationKey && candidate.targetLocationKey
+    && candidate.sourceLocationKey !== candidate.targetLocationKey) {
+    warnings.push('Target berada di site yang berbeda.')
+  }
+  if (candidate.reviewEligibility?.confirmable === false
+    && !isIdentityBlockedCandidate(candidate)) {
+    warnings.push(candidateReviewGuardMessage(candidate))
+  }
+  if (!warnings.length) return ''
+  return `<aside class="review-impact-warning" role="alert">
+    <span class="material-symbols-outlined" aria-hidden="true">warning</span>
+    <div><strong>Perlu perhatian</strong><p>${escapeHtml(warnings.join(' '))}</p></div>
+  </aside>`
+}
+
+function confidenceLabel(candidate, alternatives = []) {
+  if (alternatives.length || Number(candidate.scoreMargin ?? 1) < .12) return 'Perlu dipilih'
+  if (Number(candidate.score ?? 0) >= .75) return 'Direkomendasikan'
+  return 'Perlu ditinjau'
 }
 
 function renderBulkDialog() {
@@ -1488,6 +1988,7 @@ function renderBulkDialog() {
           <div>
             <h2 class="bulk-dialog-title" id="bulk-dialog-title">Konfirmasi semua</h2>
             <p class="bulk-dialog-description"></p>
+            <p class="bulk-preview-summary"></p>
           </div>
           <button class="icon-button close-bulk-dialog" type="button" aria-label="Tutup dialog">
             <span class="material-symbols-outlined" aria-hidden="true">close</span>
@@ -1640,17 +2141,33 @@ function decisionDialogCopy(action) {
 function renderReadiness(summary, locationCandidates = null) {
   const hasLocationScope = Array.isArray(locationCandidates)
   const openCount = hasLocationScope
-    ? locationCandidates.filter(isReviewableCandidate).length
-    : summary.summary?.ambiguousCount ?? 0
-  const readiness = hasLocationScope
-    ? (openCount ? 'not_ready' : 'ready')
-    : summary.readiness?.topologyReadiness ?? 'not_ready'
-  return `<div class="review-readiness ${readiness}">
-    <span class="material-symbols-outlined">${readiness === 'ready' ? 'verified' : 'pending_actions'}</span>
-    <div><strong>${readiness === 'ready' ? 'Site ini selesai' : 'Perlu peninjauan'}</strong>
-    <small>${readiness === 'ready'
-      ? 'Tidak ada koneksi yang tertunda'
-      : `${openCount} koneksi di site ini`}</small></div>
+    ? locationCandidates.filter((candidate) => (
+      ['ready', 'needs_choice'].includes(reviewQueueForCandidate(candidate))
+    )).length
+    : summary.summary?.candidateCount ?? 0
+  const status = summary.status ?? (openCount ? 'ready' : 'ready')
+  const readinessClass = status === 'preparing'
+    ? 'preparing'
+    : status === 'needs_data_fix'
+      ? 'needs-data-fix'
+      : openCount ? 'ready' : 'complete'
+  const title = status === 'preparing'
+    ? 'Sedang disiapkan'
+    : status === 'needs_data_fix'
+      ? 'Perlu perbaikan data'
+      : openCount ? 'Siap dikonfirmasi' : 'Semua diperiksa'
+  const message = status === 'preparing'
+    ? 'Memperbarui usulan sambungan…'
+    : status === 'needs_data_fix'
+      ? 'Kasus konflik dipisahkan dari antrean utama'
+      : openCount ? `${openCount} sambungan menunggu keputusan` : 'Tidak ada sambungan tertunda'
+  return `<div class="review-readiness ${readinessClass}">
+    <span class="material-symbols-outlined">${status === 'preparing'
+      ? 'sync'
+      : status === 'needs_data_fix'
+        ? 'warning'
+        : openCount ? 'pending_actions' : 'verified'}</span>
+    <div><strong>${title}</strong><small>${message}</small></div>
   </div>`
 }
 
@@ -1659,14 +2176,14 @@ function isBulkConfirmableCandidate(candidate) {
 }
 
 function isReviewableCandidate(candidate) {
-  return isBulkConfirmableCandidate(candidate)
-    || isIdentityBlockedCandidate(candidate)
-    || ['ambiguous', 'unresolved'].includes(candidate.candidateStatus)
+  return ['ready', 'needs_choice'].includes(reviewQueueForCandidate(candidate))
 }
 
 function isLineLabelConfirmableCandidate(candidate) {
   return isBulkConfirmableCandidate(candidate)
-    && ['line_label_connection', 'line_label_attachment'].includes(candidate.candidateType)
+    && (['line_label_connection', 'line_label_attachment'].includes(candidate.candidateType)
+      || (candidate.candidateType === 'cable_termination'
+        && candidate.provenance === 'line_label_inference'))
 }
 
 function reviewState(icon, title, message, loading = false) {
@@ -1688,6 +2205,11 @@ function componentLabel(value) {
 
 function labelCandidateType(value) {
   return {
+    cable_termination: 'Terminasi kabel ke interface',
+    mounting_attachment: 'Pemasangan pada tiang',
+    jb_internal_connection: 'Koneksi internal JB',
+    path_continuation: 'Kelanjutan jalur kabel',
+    unresolved_termination: 'Terminasi belum terhubung',
     endpoint_device: 'Endpoint ke perangkat',
     inline_device: 'Perangkat inline',
     endpoint_endpoint: 'Gap antar endpoint',
@@ -1701,10 +2223,10 @@ function labelCandidateType(value) {
 
 function actionSuccessMessage(action) {
   return {
-    confirm: 'Candidate dikonfirmasi. Confirmed graph dan tracing sudah diperbarui.',
-    reject: 'Candidate ditolak dan tidak masuk graph operasional.',
-    skip: 'Candidate dilewati dan tetap di luar graph operasional.',
-    'select-target': 'Target alternatif dikonfirmasi; kandidat lama ditutup.',
+    confirm: 'Koneksi disimpan.',
+    reject: 'Ditandai tidak terhubung.',
+    skip: 'Disimpan untuk nanti.',
+    'select-target': 'Target alternatif disimpan.',
   }[action]
 }
 

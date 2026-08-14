@@ -14,6 +14,7 @@ import {
   generateRelationArtifacts,
   normalizeTopologySummary,
   rebuildConfirmedRelationArtifacts,
+  TOPOLOGY_RULE_SET_VERSION,
 } from './semantic-relation-engine.js'
 import {
   withTopologyGraphRevision,
@@ -47,11 +48,13 @@ export class TopologyService {
     repository,
     auditLog,
     config = {},
+    metrics = null,
     clock = () => new Date(),
   }) {
     this.repository = repository
     this.auditLog = auditLog
     this.config = config
+    this.metrics = metrics
     this.clock = clock
     this.candidateQueryIndexes = new Map()
     this.traceResultCache = new Map()
@@ -64,12 +67,17 @@ export class TopologyService {
     this.activeMutationDatasetIds = new Set()
   }
 
-  normalizedTraceGraph(record, identityMap = buildAssetIdentityMapFromRecord(record)) {
+  normalizedTraceGraph(
+    record,
+    identityMap = buildAssetIdentityMapFromRecord(record),
+    projection = null,
+  ) {
     return normalizedTraceGraphFromCache(
       this.traceGraphCache,
       this.traceGraphObjectCache,
       record,
       identityMap,
+      projection,
     )
   }
 
@@ -88,9 +96,78 @@ export class TopologyService {
         config: this.config,
         previousCandidates: current.topologyCandidates,
         previousRelations: current.confirmedRelations,
+        previousInterfaceRegistry: current.topologyInterfaceRegistry
+          ?? current.topologyGraph?.interfaceRegistry
+          ?? [],
         generatedAt,
       })
       assertPublishableTopologyArtifacts(artifacts, datasetVersionId)
+      recordTopologyMetrics(this.metrics, artifacts, {
+        inputBundle: topologyInputBundle,
+        previousRecord: current,
+      })
+      const interfaceRegistryEvent = await auditLog.record(
+        'topology.interface_registry_generated',
+        {
+          actorId,
+          datasetVersionId,
+          branchId: current.datasetVersion.branchId,
+          correlationId,
+          outcome: 'generated',
+          details: {
+            topologyRuleSetVersion: artifacts.topologyRuleSetVersion,
+            interfaceCount: artifacts.interfaceRegistry?.length ?? 0,
+            componentCount: artifacts.componentRegistry?.length ?? 0,
+            registryRevision: artifacts.generatedAt,
+          },
+        },
+      )
+      const supersededCandidates = (current.topologyCandidates ?? []).filter((candidate) => (
+        candidate.topologyRuleSetVersion
+          && candidate.topologyRuleSetVersion !== artifacts.topologyRuleSetVersion
+      ))
+      const supersededEvent = supersededCandidates.length
+        ? await auditLog.record('topology.candidate_superseded_by_rule_set', {
+          actorId,
+          datasetVersionId,
+          branchId: current.datasetVersion.branchId,
+          correlationId,
+          outcome: 'superseded',
+          details: {
+            previousRuleSetVersions: [...new Set(
+              supersededCandidates.map(({ topologyRuleSetVersion }) => topologyRuleSetVersion),
+            )],
+            currentRuleSetVersion: artifacts.topologyRuleSetVersion,
+            candidateCount: supersededCandidates.length,
+            candidateIds: supersededCandidates.map(({ candidateId }) => candidateId),
+          },
+        })
+        : null
+      const profileAssignmentRecords = topologyProfileAssignmentRecords(
+        topologyInputBundle,
+        artifacts,
+      )
+      const assignedProfiles = [...new Set(profileAssignmentRecords
+        .map(({ profileId }) => profileId)
+        .filter(Boolean))]
+      const profileEvent = profileAssignmentRecords.length
+        ? await auditLog.record('topology.jb_profile_assigned', {
+          actorId,
+          datasetVersionId,
+          branchId: current.datasetVersion.branchId,
+          correlationId,
+          outcome: 'assigned',
+          details: {
+            profileIds: assignedProfiles,
+            assignmentSources: [...new Set(profileAssignmentRecords
+              .map(({ assignmentSource }) => assignmentSource)
+              .filter(Boolean))],
+            assignmentCount: profileAssignmentRecords.length,
+            interfaceCount: artifacts.interfaceRegistry?.length ?? 0,
+            topologyRuleSetVersion: artifacts.topologyRuleSetVersion,
+          },
+        })
+        : null
       const event = await auditLog.record('topology.candidates_regenerated', {
         actorId,
         datasetVersionId,
@@ -106,6 +183,11 @@ export class TopologyService {
             repairedCount: repaired.repairedCount,
           },
           topologyRuleSetVersion: artifacts.topologyRuleSetVersion,
+          auditEventIds: {
+            interfaceRegistryGenerated: interfaceRegistryEvent.id,
+            ...(supersededEvent ? { candidateSupersededByRuleSet: supersededEvent.id } : {}),
+            ...(profileEvent ? { jbProfileAssigned: profileEvent.id } : {}),
+          },
           before: current.topologySummary ?? null,
           after: artifacts.summary,
         },
@@ -152,9 +234,11 @@ export class TopologyService {
   async getSummary(datasetVersionId) {
     const record = await this.repository.get(datasetVersionId)
     const graph = this.normalizedTraceGraph(record)
+    const reviewContract = topologyReviewContract(record)
     return {
       datasetVersionId,
       topologyRuleSetVersion: record.topologyRuleSetVersion ?? null,
+      topologyPolicy: structuredClone(record.topologyPolicy ?? null),
       summary: normalizeTopologySummary(
         record.topologySummary ?? emptySummary(),
         graph,
@@ -166,6 +250,11 @@ export class TopologyService {
       },
       validation: record.topologyValidation ?? null,
       lastGeneratedAt: record.topologyGeneratedAt ?? null,
+      ...reviewContract,
+      topologyDiagnostics: structuredClone(record.topologyDiagnostics ?? []),
+      interfaceRegistry: structuredClone(
+        record.topologyInterfaceRegistry ?? graph.interfaceRegistry ?? [],
+      ),
       graphRevision: graph.graphRevision,
       reviewCapabilities: {
         contractVersion: '2.0.0',
@@ -223,6 +312,10 @@ export class TopologyService {
     return {
       datasetVersionId,
       topologyRuleSetVersion: record.topologyRuleSetVersion ?? null,
+      topologyPolicy: structuredClone(record.topologyPolicy ?? null),
+      interfaceRegistry: structuredClone(
+        record.topologyInterfaceRegistry ?? graph.interfaceRegistry ?? [],
+      ),
       items: reviewItems,
       nextCursor: page.nextCursor,
       pageInfo: page.pageInfo,
@@ -277,7 +370,105 @@ export class TopologyService {
       datasetVersionId,
       graph: structuredClone(graph),
       validation: structuredClone(record.topologyValidation ?? null),
+      topologyDiagnostics: structuredClone(record.topologyDiagnostics ?? []),
       confirmedRelations: structuredClone(record.confirmedRelations ?? []),
+    }
+  }
+
+  async getJunctionBox(datasetVersionId, assetId) {
+    const record = await this.repository.get(datasetVersionId)
+    assertTopologyBundle(record)
+    const node = findTopologyAsset(record, assetId)
+    if (!node) {
+      throw new AppError('Junction Box tidak ditemukan pada topology dataset.', {
+        code: 'topology_junction_box_not_found',
+        statusCode: 404,
+        details: { datasetVersionId, assetId },
+      })
+    }
+    const nodeId = node.id
+      ?? node.canonicalAssetId
+      ?? node.assetId
+      ?? node.stableAssetId
+      ?? assetId
+    const sourceNode = (record.topologyInputBundle?.classifiedNodes ?? []).find((item) => (
+      [
+        item.id,
+        item.canonicalAssetId,
+        item.assetId,
+        item.stableAssetId,
+        item.sourceFeatureId,
+      ].filter(Boolean).map(String).includes(String(nodeId))
+    ))
+    if (!isJunctionBoxOrRackAsset(node)) {
+      throw new AppError('Asset topology bukan Junction Box atau rack enclosure.', {
+        code: 'topology_asset_not_junction_box',
+        statusCode: 422,
+        details: { datasetVersionId, assetId: nodeId },
+      })
+    }
+    const registry = record.topologyInterfaceRegistry
+      ?? record.topologyGraph?.interfaceRegistry
+      ?? []
+    const components = record.topologyComponentRegistry
+      ?? record.topologyGraph?.componentRegistry
+      ?? []
+    const interfaces = registry
+      .filter((item) => item.ownerAssetId === nodeId && item.status !== 'retired')
+      .map((item) => ({
+        ...structuredClone(item),
+        occupancy: activeInterfaceOccupancy(record.confirmedRelations, item.interfaceId),
+      }))
+      .sort((left, right) => String(left.interfaceId).localeCompare(String(right.interfaceId)))
+    const interfaceIds = new Set(interfaces.map(({ interfaceId }) => interfaceId))
+    const componentItems = components
+      .filter((item) => item.ownerAssetId === nodeId && item.status !== 'retired')
+      .map((component) => ({
+        ...structuredClone(component),
+        interfaces: interfaces.filter(({ componentId }) => (
+          componentId === component.componentId
+        )),
+      }))
+      .sort((left, right) => String(left.componentId).localeCompare(String(right.componentId)))
+    const relations = (record.confirmedRelations ?? []).filter((relation) => (
+      relation.targetAssetId === nodeId
+        || relation.sourceAssetId === nodeId
+        || interfaceIds.has(relation.targetInterfaceId)
+        || interfaceIds.has(relation.sourceInterfaceId)
+    ))
+    const candidates = (record.topologyCandidates ?? []).filter((candidate) => (
+      candidate.targetAssetId === nodeId
+        || candidate.sourceAssetId === nodeId
+        || candidate.sourcePathAssetId === nodeId
+        || interfaceIds.has(candidate.targetInterfaceId)
+        || interfaceIds.has(candidate.sourceInterfaceId)
+    ))
+    const profileId = node.jbProfileId
+      ?? node.profileId
+      ?? sourceNode?.jbProfileId
+      ?? sourceNode?.profileId
+      ?? null
+    const profile = (record.topologyInputBundle?.jbProfiles ?? []).find((item) => (
+      String(item.profileId ?? item.id ?? '') === String(profileId)
+    )) ?? null
+    return {
+      datasetVersionId,
+      topologyRuleSetVersion: record.topologyRuleSetVersion ?? null,
+      topologyPolicy: structuredClone(record.topologyPolicy ?? null),
+      asset: structuredClone(node),
+      profile: structuredClone(profile),
+      components: componentItems,
+      interfaces,
+      confirmedRelations: structuredClone(relations),
+      pendingCandidates: structuredClone(candidates),
+      provenance: {
+        profileId,
+        profileVersion: profile?.version ?? profile?.profileVersion ?? null,
+        assignmentSources: [...new Set(interfaces.map(({ assignmentSource }) => assignmentSource).filter(Boolean))],
+        registryRevision: record.topologyGeneratedAt ?? null,
+      },
+      graphRevision: record.topologyGraph?.graphRevision ?? null,
+      recordRevision: recordRevision(record),
     }
   }
 
@@ -294,9 +485,10 @@ export class TopologyService {
     const record = await this.repository.get(datasetVersionId)
     const identityMap = buildAssetIdentityMapFromRecord(record)
     const resolver = createAssetIdentityResolver(identityMap)
-    const graph = this.normalizedTraceGraph(record, identityMap)
+    const graph = this.normalizedTraceGraph(record, identityMap, normalized.serviceDomain)
 
     if (normalized.graphRevision !== graph.graphRevision) {
+      recordTopologyTraceFailure(this.metrics, normalized.serviceDomain, 'topology_graph_stale')
       const error = new AppError(
         'Graph topology berubah sejak peta dimuat. Muat ulang dataset aktif sebelum tracing.',
         {
@@ -321,6 +513,7 @@ export class TopologyService {
 
     const validationErrors = graphValidationErrorCount(record.topologyValidation)
     if (validationErrors > 0) {
+      recordTopologyTraceFailure(this.metrics, normalized.serviceDomain, 'topology_graph_invalid')
       const error = new AppError(
         'Tracing dihentikan karena confirmed graph tidak valid.',
         {
@@ -357,6 +550,7 @@ export class TopologyService {
         reason: 'topology_not_published',
         message: traceMessageForReason('topology_not_published'),
       })
+      recordTopologyTraceFailure(this.metrics, normalized.serviceDomain, result.reason)
       await recordTraceAudit(this.auditLog, {
         actorId,
         datasetVersionId,
@@ -387,6 +581,9 @@ export class TopologyService {
     }
     const finalize = async (result) => {
       const finalized = decorateTopologyPreviewResult(result, traceContext, record)
+      if (finalized.status !== 'found' && finalized.status !== 'destinations') {
+        recordTopologyTraceFailure(this.metrics, normalized.serviceDomain, finalized.reason)
+      }
       if (!isTopologyPreviewAllowed(traceContext)) {
         writeTopologyResultCache(this.traceResultCache, cacheKey, finalized)
       }
@@ -1319,7 +1516,9 @@ export class TopologyService {
               && ['candidate', 'ambiguous', 'revoked', 'confirmed']
                 .includes(candidate.candidateStatus)
           ))
-          event = await auditLog.record('topology.candidate_target_selected', {
+          event = await auditLog.record(
+            topologySelectionAuditEvent(currentSelected, 'confirm'),
+            {
             actorId,
             datasetVersionId: located.datasetVersionId,
             branchId: record.datasetVersion.branchId,
@@ -1334,7 +1533,8 @@ export class TopologyService {
               closedCandidateIds: candidatesToClose.map(({ candidateId: id }) => id),
               topologyRuleSetVersion: currentSelected.topologyRuleSetVersion,
             },
-          })
+            },
+          )
           currentDecisionCandidates.forEach((candidate) => {
             const selectedForDecision = candidate.candidateId === currentSelected.candidateId
             if (!selectedForDecision && !candidatesToClose.some(({ candidateId }) => (
@@ -1555,6 +1755,9 @@ export class TopologyService {
         ],
         previousRelations: record.confirmedRelations,
         previousGraph: record.topologyGraph,
+        previousInterfaceRegistry: record.topologyInterfaceRegistry
+          ?? record.topologyGraph?.interfaceRegistry
+          ?? [],
         affectedAssetIds: [source.topologyAssetId, target.topologyAssetId],
         eligibilityIssues: [
           ...(record.topologyEligibilityIssues ?? []),
@@ -1997,7 +2200,9 @@ export class TopologyService {
             throw invalidTransition(current.candidateStatus, targetStatus)
           }
           const reviewedAt = this.clock().toISOString()
-          const event = await auditLog.record(`topology.candidate_${action}ed`, {
+          const event = await auditLog.record(
+            topologySelectionAuditEvent(current, action),
+            {
             actorId,
             datasetVersionId: located.datasetVersionId,
             branchId: record.datasetVersion.branchId,
@@ -2011,7 +2216,8 @@ export class TopologyService {
               candidateEvidence: current.evidence,
               topologyRuleSetVersion: current.topologyRuleSetVersion,
             },
-          })
+            },
+          )
           const beforeStatus = current.candidateStatus
           current.candidateStatus = targetStatus
           current.proposalStatus = action === 'confirm'
@@ -2233,6 +2439,10 @@ export function applyArtifacts(record, artifacts, {
   return {
     ...record,
     topologyRuleSetVersion: artifacts.topologyRuleSetVersion,
+    topologyPolicy: structuredClone(artifacts.topologyPolicy ?? record.topologyPolicy ?? null),
+    topologyInterfaceRegistry: structuredClone(artifacts.interfaceRegistry ?? []),
+    topologyComponentRegistry: structuredClone(artifacts.componentRegistry ?? []),
+    topologyDiagnostics: structuredClone(artifacts.topologyDiagnostics ?? []),
     topologyGeneratedAt: artifacts.generatedAt,
     topologyCandidates: artifacts.candidates,
     confirmedRelations: artifacts.confirmedRelations,
@@ -2274,14 +2484,236 @@ export function applyArtifacts(record, artifacts, {
   }
 }
 
+function recordTopologyMetrics(metrics, artifacts, {
+  inputBundle = {},
+  previousRecord = null,
+} = {}) {
+  if (!metrics) return
+  try {
+    const candidates = Array.isArray(artifacts?.candidates) ? artifacts.candidates : []
+    const candidateCounts = new Map()
+    candidates.forEach((candidate) => {
+      const candidateType = String(candidate.candidateType ?? 'unknown')
+      const proposalStatus = String(candidate.proposalStatus ?? 'unknown')
+      const key = `${candidateType}\u001f${proposalStatus}`
+      const current = candidateCounts.get(key) ?? {
+        labels: { candidate_type: candidateType, proposal_status: proposalStatus },
+        value: 0,
+      }
+      current.value += 1
+      candidateCounts.set(key, current)
+    })
+    replaceTopologyMetricFamily(
+      metrics,
+      'topology_candidate_count',
+      [...candidateCounts.values()],
+      'Current topology candidate count by candidate type and proposal status.',
+    )
+
+    const forbiddenCounts = new Map()
+    ;(artifacts.topologyDiagnostics ?? [])
+      .filter(({ issueCode, code }) => (
+        issueCode === 'cable_terminated_at_pole' || code === 'forbidden_target_role'
+      ))
+      .forEach((diagnostic) => {
+        const targetRole = String(diagnostic.targetRole ?? 'pole')
+        forbiddenCounts.set(targetRole, (forbiddenCounts.get(targetRole) ?? 0) + 1)
+      })
+    replaceTopologyMetricFamily(
+      metrics,
+      'topology_forbidden_target_count',
+      [...forbiddenCounts.entries()].map(([targetRole, value]) => ({
+        labels: { target_role: targetRole },
+        value,
+      })),
+      'Current topology forbidden target count by target role.',
+    )
+
+    const pathByReference = new Map()
+    ;(inputBundle.classifiedPaths ?? []).forEach((path) => {
+      [
+        path.assetId,
+        path.canonicalAssetId,
+        path.stableAssetId,
+        path.onboardingIdentity,
+        path.sourceFeatureId,
+      ].filter(Boolean).forEach((reference) => pathByReference.set(String(reference), path))
+    })
+    const missingCounts = new Map()
+    const missingIssues = uniqueTopologyMetricIssues([
+      ...(artifacts.eligibilityIssues ?? []),
+      ...(artifacts.validation?.issues ?? []),
+    ]).filter(({ issueCode }) => issueCode === 'required_jb_termination_missing')
+    missingIssues.forEach((issue) => {
+      const path = pathByReference.get(String(issue.entityReference ?? ''))
+      const site = String(path?.siteId ?? artifacts.siteId ?? inputBundle.site ?? 'unknown')
+      const cableRole = String(path?.cableRole ?? 'unknown')
+      const key = `${site}\u001f${cableRole}`
+      const current = missingCounts.get(key) ?? {
+        labels: { site, cable_role: cableRole },
+        value: 0,
+      }
+      current.value += 1
+      missingCounts.set(key, current)
+    })
+    replaceTopologyMetricFamily(
+      metrics,
+      'topology_missing_jb_termination_count',
+      [...missingCounts.values()],
+      'Current topology cable count missing required Junction Box termination.',
+    )
+
+    const nodeById = new Map([
+      ...(artifacts.graph?.nodes ?? []),
+      ...(inputBundle.classifiedNodes ?? []),
+    ].map((node) => [String(node.id ?? node.assetId ?? node.canonicalAssetId), node]))
+    const occupancyCounts = new Map()
+    ;(artifacts.interfaceRegistry ?? [])
+      .filter(({ status }) => status !== 'retired')
+      .forEach((item) => {
+        const owner = nodeById.get(String(item.ownerAssetId))
+        const site = String(owner?.siteId ?? artifacts.siteId ?? inputBundle.site ?? 'unknown')
+        const interfaceType = String(item.interfaceType ?? 'unknown')
+        const key = `${site}\u001f${interfaceType}`
+        const current = occupancyCounts.get(key) ?? {
+          labels: { site, interface_type: interfaceType },
+          value: 0,
+        }
+        current.value += Math.max(0, Number(item.occupancy ?? 0))
+        occupancyCounts.set(key, current)
+      })
+    replaceTopologyMetricFamily(
+      metrics,
+      'topology_interface_occupancy',
+      [...occupancyCounts.values()],
+      'Current topology interface occupancy by site and interface type.',
+    )
+
+    const capacityIssues = uniqueTopologyMetricIssues([
+      ...(artifacts.validation?.issues ?? []),
+      ...(artifacts.eligibilityIssues ?? []),
+    ]).filter(({ issueCode }) => issueCode === 'interface_capacity_exceeded')
+    const unavailableCandidates = candidates.filter(({ proposalStatus }) => (
+      proposalStatus === 'interface_unavailable'
+    ))
+    const conflictsBySite = new Map()
+    const seenCapacityConflicts = new Set()
+    ;[...capacityIssues, ...unavailableCandidates].forEach((issue) => {
+      const interfaceId = issue.entityReference ?? issue.targetInterfaceId
+      const conflictKey = String(issue.candidateId ?? issue.entityReference ?? interfaceId ?? 'unknown')
+      if (seenCapacityConflicts.has(conflictKey)) return
+      seenCapacityConflicts.add(conflictKey)
+      const interfaceRecord = (artifacts.interfaceRegistry ?? [])
+        .find(({ interfaceId: candidateInterfaceId }) => candidateInterfaceId === interfaceId)
+      const owner = interfaceRecord
+        ? nodeById.get(String(interfaceRecord.ownerAssetId))
+        : null
+      const site = String(owner?.siteId ?? issue.siteId ?? artifacts.siteId ?? inputBundle.site ?? 'unknown')
+      conflictsBySite.set(site, (conflictsBySite.get(site) ?? 0) + 1)
+    })
+    replaceTopologyMetricFamily(
+      metrics,
+      'topology_interface_capacity_conflict_count',
+      [...conflictsBySite.entries()].map(([site, value]) => ({
+        labels: { site },
+        value,
+      })),
+      'Current topology interface capacity conflict count by site.',
+    )
+
+    const previousRelations = (previousRecord?.confirmedRelations ?? [])
+      .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+    const currentRelations = (artifacts.confirmedRelations ?? [])
+      .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+    const previousRelationIds = new Set(previousRelations.map(({ relationId }) => relationId).filter(Boolean))
+    const currentRelationIds = new Set(currentRelations.map(({ relationId }) => relationId).filter(Boolean))
+    const migrationDelta = [
+      ['added', [...currentRelationIds].filter((id) => !previousRelationIds.has(id)).length],
+      ['removed', [...previousRelationIds].filter((id) => !currentRelationIds.has(id)).length],
+      ['retained', [...currentRelationIds].filter((id) => previousRelationIds.has(id)).length],
+    ].map(([changeType, value]) => ({
+      labels: { change_type: changeType },
+      value,
+    }))
+    replaceTopologyMetricFamily(
+      metrics,
+      'topology_rule_set_migration_relation_delta',
+      migrationDelta,
+      'Topology confirmed relation delta across rule-set regeneration.',
+    )
+  } catch {
+    // Metrics are advisory and must never make a topology mutation fail.
+  }
+}
+
+function topologyProfileAssignmentRecords(inputBundle, artifacts) {
+  const profileNodeIds = new Set((inputBundle?.classifiedNodes ?? [])
+    .filter((node) => /junction|\bjb\b|server.?rack|rack.?server/.test(String([
+      node.assetType,
+      node.category,
+      node.sourceName,
+    ].filter(Boolean).join(' ')).toLowerCase()))
+    .map((node) => String(
+      node.canonicalAssetId
+        ?? node.assetId
+        ?? node.stableAssetId
+        ?? node.onboardingIdentity
+        ?? node.sourceFeatureId
+        ?? '',
+    )))
+  return (artifacts?.interfaceRegistry ?? []).filter((item) => (
+    item.status !== 'retired' && profileNodeIds.has(String(item.ownerAssetId))
+  ))
+}
+
+function replaceTopologyMetricFamily(metrics, name, samples, help) {
+  if (typeof metrics.replaceGaugeFamily === 'function') {
+    metrics.replaceGaugeFamily(name, samples, help)
+    return
+  }
+  if (typeof metrics.setGauge !== 'function') return
+  samples.forEach(({ labels, value }) => metrics.setGauge(name, labels, value, help))
+}
+
+function uniqueTopologyMetricIssues(issues) {
+  const seen = new Set()
+  return issues.filter((issue) => {
+    const key = issue?.issueId
+      ?? [issue?.issueCode, issue?.entityReference, issue?.severity].join('|')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function recordTopologyTraceFailure(metrics, serviceDomain, reason) {
+  if (!metrics || typeof metrics.increment !== 'function') return
+  metrics.increment(
+    'topology_service_trace_failure_count',
+    {
+      service_domain: String(serviceDomain ?? 'unknown'),
+      reason: String(reason ?? 'unknown'),
+    },
+    1,
+    'Topology service trace failures by service domain and reason.',
+  )
+}
+
 function assertPublishableTopologyArtifacts(artifacts, datasetVersionId) {
   const validationIssues = [
     ...(artifacts?.validation?.issues ?? []),
     ...(artifacts?.eligibilityIssues ?? []),
   ]
-  const errorIssues = validationIssues.filter(({ severity }) => severity === 'error')
-  const validationErrors = Number(artifacts?.validation?.summary?.errors ?? 0)
-  if (!errorIssues.length && validationErrors === 0 && artifacts?.validation?.status !== 'invalid') {
+  // Candidate-level policy/constraint diagnostics are expected while a
+  // topology is awaiting review and must be persisted with the candidate
+  // projection. Errors on the confirmed graph, linework, or object
+  // eligibility remain publication blockers.
+  const nonFatalScopes = new Set(['policy', 'candidate_hard_gate', 'constraint'])
+  const errorIssues = validationIssues.filter(({ severity, scope }) => (
+    severity === 'error' && !nonFatalScopes.has(scope)
+  ))
+  const fatalValidationErrors = errorIssues.length
+  if (!errorIssues.length && fatalValidationErrors === 0) {
     return
   }
   const error = new AppError(
@@ -2291,7 +2723,7 @@ function assertPublishableTopologyArtifacts(artifacts, datasetVersionId) {
       statusCode: 422,
       details: {
         datasetVersionId,
-        validationErrors,
+        validationErrors: fatalValidationErrors,
         issueCodes: [...new Set(errorIssues.map(({ issueCode }) => issueCode).filter(Boolean))]
           .slice(0, 50),
         issueCount: errorIssues.length,
@@ -2314,6 +2746,9 @@ function rebuildFromReviewedCandidates(
     candidates,
     previousRelations: record.confirmedRelations,
     previousGraph: record.topologyGraph,
+    previousInterfaceRegistry: record.topologyInterfaceRegistry
+      ?? record.topologyGraph?.interfaceRegistry
+      ?? [],
     affectedAssetIds,
     eligibilityIssues: record.topologyEligibilityIssues,
     lineworkIssues: record.topologyLineworkIssues,
@@ -2519,6 +2954,9 @@ function candidateReviewEligibility(record, candidate, eligibilityContext = null
 }
 
 function candidateReviewEligibilityReason(eligibility) {
+  if (eligibility.issues.some(({ code }) => code === 'obsolete_rule_set')) {
+    return 'candidate_obsolete_rule_set'
+  }
   if (eligibility.issues.some(({ code }) => code === 'missing_stable_asset_id')) {
     return 'candidate_stable_asset_id_required'
   }
@@ -2537,6 +2975,55 @@ function candidateReviewEligibilityDetails(eligibility) {
     message: eligibility.message,
     issues: structuredClone(eligibility.issues),
     recommendedAction: 'assign_identity_and_regenerate',
+  }
+}
+
+function topologyReviewContract(record) {
+  const candidates = record.topologyCandidates ?? []
+  const eligibilityContext = createTopologyCandidateEligibilityContext(
+    record.topologyInputBundle,
+  )
+  const ineligible = candidates.filter((candidate) => (
+    !evaluateTopologyCandidateEligibility(
+      record.topologyInputBundle,
+      candidate,
+      eligibilityContext,
+    ).eligible
+  ))
+  const confirmable = candidates.some((candidate) => (
+    isCandidateConfirmable(candidate)
+      && candidate.candidateStatus === 'candidate'
+      && candidate.proposalStatus === 'recommended'
+      && evaluateTopologyCandidateEligibility(
+        record.topologyInputBundle,
+        candidate,
+        eligibilityContext,
+      ).eligible
+  ))
+  const preparing = !record.topologyGeneratedAt && candidates.length === 0
+  const needsDataFix = ineligible.length > 0
+    || record.topologyReadiness?.blockingReasons?.includes('stable_identity_coverage')
+  if (preparing) {
+    return {
+      status: 'preparing',
+      confirmable: false,
+      userMessage: 'Sistem sedang menyelaraskan identitas aset dan memperbarui koneksi.',
+      recoveryAction: null,
+    }
+  }
+  if (needsDataFix) {
+    return {
+      status: 'needs_data_fix',
+      confirmable,
+      userMessage: 'Beberapa usulan membutuhkan perbaikan data sebelum dapat dikonfirmasi.',
+      recoveryAction: 'review_data_issues',
+    }
+  }
+  return {
+    status: 'ready',
+    confirmable,
+    userMessage: null,
+    recoveryAction: null,
   }
 }
 
@@ -2704,6 +3191,9 @@ function buildBulkReviewPreview(record, candidateIds, config = {}) {
     ...ineligible.map(({ reason }) => reason),
     ...blockingValidationIssues.map(({ issueCode }) => issueCode),
   ].filter(Boolean))]
+  const topologyDelta = buildTopologyReviewDelta(record, simulated, {
+    selectedCandidateIds: eligibleCandidateIds,
+  })
   return {
     datasetVersionId: record.datasetVersion.id,
     candidateIds: normalizedCandidateIds,
@@ -2716,6 +3206,7 @@ function buildBulkReviewPreview(record, candidateIds, config = {}) {
       confirmedRelationCountBefore: beforeConfirmedRelationCount,
       confirmedRelationCountAfter: afterConfirmedRelationCount,
     },
+    delta: topologyDelta,
     validationPreview: {
       status: validationSummary.errors > 0
         ? 'invalid'
@@ -2749,6 +3240,109 @@ function buildBulkReviewPreview(record, candidateIds, config = {}) {
     graphRevision: beforeGraph.graphRevision,
     candidateRevision: createCandidateCollectionRevision(candidates),
     recordRevision: recordRevision(record),
+  }
+}
+
+function buildTopologyReviewDelta(record, simulated, {
+  selectedCandidateIds = [],
+} = {}) {
+  const after = simulated ?? record
+  const beforeRelations = (record.confirmedRelations ?? [])
+    .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+  const afterRelations = (after.confirmedRelations ?? [])
+    .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+  const beforeRelationIds = new Set(beforeRelations.map(({ relationId }) => relationId).filter(Boolean))
+  const afterRelationIds = new Set(afterRelations.map(({ relationId }) => relationId).filter(Boolean))
+  const changedRelationIds = new Set([
+    ...[...beforeRelationIds].filter((id) => !afterRelationIds.has(id)),
+    ...[...afterRelationIds].filter((id) => !beforeRelationIds.has(id)),
+  ])
+  const afterCandidates = after.topologyCandidates ?? []
+  const reviewRequiredCount = afterCandidates.filter((candidate) => (
+    ['candidate', 'ambiguous'].includes(candidate.candidateStatus)
+      && ['recommended', 'ambiguous', 'not_selected'].includes(candidate.proposalStatus)
+  )).length
+  const poleCandidateCount = (candidateRecord) => (
+    (candidateRecord.topologyCandidates ?? []).filter((candidate) => (
+      candidate.targetAssetId && isPoleAssetReference(candidateRecord, candidate.targetAssetId)
+    )).length
+  )
+  const countIssue = (candidateRecord, issueCodes) => (
+    uniqueTopologyMetricIssues([
+      ...(candidateRecord.topologyValidation?.issues ?? []),
+      ...(candidateRecord.topologyEligibilityIssues ?? []),
+    ]).filter(({ issueCode }) => issueCodes.includes(issueCode)).length
+  )
+  const serviceGraphEdgeCount = (candidateRecord, serviceDomain) => (
+    (candidateRecord.topologyGraph?.serviceGraph?.edges ?? [])
+      .filter((edge) => edge.serviceDomain === serviceDomain).length
+  )
+  const selected = new Set(selectedCandidateIds)
+  const changedAssetIds = new Set()
+  const changedComponentIds = new Set()
+  const collectCandidateReferences = (candidate) => {
+    if (!candidate || (selected.size && !selected.has(candidate.candidateId))) return
+    ;[
+      candidate.sourceAssetId,
+      candidate.sourcePathAssetId,
+      candidate.targetAssetId,
+      candidate.targetPathAssetId,
+    ].filter(Boolean).forEach((assetId) => changedAssetIds.add(String(assetId)))
+    ;[candidate.sourceInterfaceId, candidate.targetInterfaceId]
+      .filter(Boolean)
+      .forEach((interfaceId) => {
+        const item = (after.topologyInterfaceRegistry ?? [])
+          .find(({ interfaceId: candidateInterfaceId }) => candidateInterfaceId === interfaceId)
+        if (item?.componentId) changedComponentIds.add(String(item.componentId))
+        if (item?.ownerAssetId) changedAssetIds.add(String(item.ownerAssetId))
+      })
+  }
+  ;(record.topologyCandidates ?? []).forEach(collectCandidateReferences)
+  afterCandidates.forEach(collectCandidateReferences)
+  ;[...beforeRelations, ...afterRelations].forEach((relation) => {
+    if (!changedRelationIds.has(relation.relationId)) return
+    ;[relation.sourceAssetId, relation.targetAssetId]
+      .filter(Boolean)
+      .forEach((assetId) => changedAssetIds.add(String(assetId)))
+    ;[relation.sourceInterfaceId, relation.targetInterfaceId]
+      .filter(Boolean)
+      .forEach((interfaceId) => {
+        const item = (after.topologyInterfaceRegistry ?? [])
+          .find(({ interfaceId: candidateInterfaceId }) => candidateInterfaceId === interfaceId)
+        if (item?.componentId) changedComponentIds.add(String(item.componentId))
+      })
+  })
+  return {
+    relations: {
+      added: [...afterRelationIds].filter((id) => !beforeRelationIds.has(id)).length,
+      retained: [...afterRelationIds].filter((id) => beforeRelationIds.has(id)).length,
+      removed: [...beforeRelationIds].filter((id) => !afterRelationIds.has(id)).length,
+      requiresReview: reviewRequiredCount,
+    },
+    cableToPoleRemovalCount: Math.max(0, poleCandidateCount(record) - poleCandidateCount(after)),
+    missingJbTerminationCount: countIssue(after, ['required_jb_termination_missing']),
+    interfaceCapacityConflictCount: countIssue(after, ['interface_capacity_exceeded'])
+      + afterCandidates.filter(({ proposalStatus }) => proposalStatus === 'interface_unavailable').length,
+    traceDelta: {
+      data: {
+        beforeEdgeCount: serviceGraphEdgeCount(record, 'data'),
+        afterEdgeCount: serviceGraphEdgeCount(after, 'data'),
+        delta: serviceGraphEdgeCount(after, 'data') - serviceGraphEdgeCount(record, 'data'),
+      },
+      power: {
+        beforeEdgeCount: serviceGraphEdgeCount(record, 'power'),
+        afterEdgeCount: serviceGraphEdgeCount(after, 'power'),
+        delta: serviceGraphEdgeCount(after, 'power') - serviceGraphEdgeCount(record, 'power'),
+      },
+    },
+    affectedAssetIds: [...changedAssetIds].sort(),
+    affectedComponentIds: [...changedComponentIds].sort(),
+    graphRevisionBefore: record.topologyGraph?.graphRevision ?? null,
+    graphRevisionAfter: after.topologyGraph?.graphRevision ?? null,
+    candidateRevisionBefore: createCandidateCollectionRevision(record.topologyCandidates ?? []),
+    candidateRevisionAfter: createCandidateCollectionRevision(afterCandidates),
+    interfaceRegistryRevision: after.topologyGeneratedAt ?? null,
+    topologyRuleSetVersion: after.topologyRuleSetVersion ?? null,
   }
 }
 
@@ -2884,7 +3478,9 @@ function isCandidateConfirmable(candidate) {
 
 function isLineLabelConfirmableCandidate(candidate) {
   return isBulkConfirmableCandidate(candidate)
-    && ['line_label_connection', 'line_label_attachment'].includes(candidate.candidateType)
+    && (['line_label_connection', 'line_label_attachment'].includes(candidate.candidateType)
+      || (candidate.candidateType === 'cable_termination'
+        && candidate.provenance === 'line_label_inference'))
 }
 
 function candidateAuditSnapshot(candidate, status = candidate.candidateStatus) {
@@ -2898,6 +3494,15 @@ function candidateAuditSnapshot(candidate, status = candidate.candidateStatus) {
     score: candidate.score,
     scoreMargin: candidate.scoreMargin,
   }
+}
+
+function topologySelectionAuditEvent(candidate, action) {
+  if (action !== 'confirm') return `topology.candidate_${action}ed`
+  return {
+    cable_termination: 'topology.cable_termination_selected',
+    mounting_attachment: 'topology.mounting_selected',
+    jb_internal_connection: 'topology.internal_connection_confirmed',
+  }[candidate?.candidateType] ?? 'topology.candidate_confirmed'
 }
 
 function reviewRecord({
@@ -2944,6 +3549,46 @@ function assertCurrentCandidateState(candidate, expectedStatus) {
 }
 
 function assertCandidateTopologyEligible(record, candidate) {
+  const candidateRuleSet = candidate?.topologyRuleSetVersion
+  if (candidateRuleSet && candidateRuleSet !== TOPOLOGY_RULE_SET_VERSION) {
+    throw new AppError('Candidate berasal dari rule-set topology lama dan tidak dapat dikonfirmasi.', {
+      code: 'topology_candidate_obsolete_rule_set',
+      statusCode: 422,
+      details: {
+        candidateId: candidate.candidateId,
+        candidateRuleSet,
+        currentRuleSet: TOPOLOGY_RULE_SET_VERSION,
+      },
+    })
+  }
+  const blockedProposalStatuses = [
+    'missing_jb_termination',
+    'incompatible_interface',
+    'interface_unavailable',
+    'forbidden_target_role',
+    'unresolved',
+    'below_threshold',
+  ]
+  if (blockedProposalStatuses.includes(candidate?.proposalStatus)) {
+    throw new AppError('Candidate belum memenuhi hard gate topology v2.', {
+      code: 'topology_candidate_hard_gate_blocked',
+      statusCode: 422,
+      details: {
+        candidateId: candidate.candidateId,
+        proposalStatus: candidate.proposalStatus,
+        constraintEvidence: candidate.constraintEvidence ?? null,
+      },
+    })
+  }
+  if (candidate?.candidateType !== 'mounting_attachment'
+    && isPoleAssetReference(record, candidate?.targetAssetId)) {
+    throw new AppError('Tiang hanya boleh menjadi host pemasangan, bukan endpoint kabel.', {
+      code: 'topology_cable_to_pole_forbidden',
+      statusCode: 422,
+      details: { candidateId: candidate.candidateId, targetAssetId: candidate.targetAssetId },
+    })
+  }
+  assertCandidateInterfaceCapacity(record, candidate)
   const eligibility = candidateReviewEligibility(record, candidate)
   if (eligibility.eligible) return
   const reason = candidateReviewEligibilityReason(eligibility)
@@ -2954,6 +3599,8 @@ function assertCandidateTopologyEligible(record, candidate) {
   throw new AppError(
     identityBlocked
       ? 'Kandidat tidak dapat dikonfirmasi karena identity aset belum stabil atau ambigu. Tinjau identity; isi Asset ID resmi hanya jika diperlukan, lalu regenerasi topology.'
+    : reason === 'candidate_obsolete_rule_set'
+      ? 'Candidate berasal dari rule-set lama; regenerate topology wajib dilakukan.'
       : 'Kandidat tidak lagi eligible terhadap topology input terkini; muat ulang dan regenerate topology.',
     {
       code: identityBlocked
@@ -3486,6 +4133,19 @@ function normalizeTraceRequest(request) {
     })
   }
   const maxDepth = normalizeTraceMaxDepth(request.maxDepth)
+  const requestedServiceDomain = request.serviceDomain === undefined
+    || request.serviceDomain === null
+    || request.serviceDomain === ''
+    ? null
+    : String(request.serviceDomain).trim().toLowerCase()
+  if (requestedServiceDomain !== null
+    && !['data', 'power'].includes(requestedServiceDomain)) {
+    throw new AppError('Service domain tracing hanya mendukung data atau power.', {
+      code: 'invalid_topology_trace_service_domain',
+      statusCode: 400,
+      details: { serviceDomain: requestedServiceDomain, supportedDomains: ['data', 'power'] },
+    })
+  }
   return {
     sourceAssetId,
     targetAssetId: mode === 'point_to_point' ? targetAssetId : null,
@@ -3494,7 +4154,88 @@ function normalizeTraceRequest(request) {
     graphRevision,
     scopeAssetIds,
     maxDepth,
+    serviceDomain: requestedServiceDomain,
   }
+}
+
+function isPoleAssetReference(record, assetId) {
+  if (!assetId) return false
+  const object = [
+    ...(record.topologyInputBundle?.classifiedNodes ?? []),
+    ...(record.topologyGraph?.nodes ?? []),
+  ].find((item) => [
+    item.id,
+    item.assetId,
+    item.canonicalAssetId,
+    item.stableAssetId,
+    item.sourceFeatureId,
+  ].filter(Boolean).map(String).includes(String(assetId)))
+  const text = String([
+    object?.assetType,
+    object?.category,
+    object?.sourceName,
+    object?.assetName,
+  ].filter(Boolean).join(' ')).toLowerCase()
+  return object?.assetType === 'pole' || /(^|\s)(tiang|pole|pylon)(\s|$)/.test(text)
+}
+
+function assertCandidateInterfaceCapacity(record, candidate) {
+  const interfaceId = candidate?.targetInterfaceId
+  if (!interfaceId) return
+  const registry = record.topologyInterfaceRegistry
+    ?? record.topologyGraph?.interfaceRegistry
+    ?? []
+  const target = registry.find(({ interfaceId: id }) => id === interfaceId)
+    ?? candidate.targetInterface
+  if (!target || target.status === 'retired') {
+    throw new AppError('Target interface candidate tidak tersedia pada registry aktif.', {
+      code: 'topology_candidate_interface_not_available',
+      statusCode: 422,
+      details: { candidateId: candidate.candidateId, interfaceId },
+    })
+  }
+  const occupancy = activeInterfaceOccupancy(record.confirmedRelations, interfaceId)
+  const capacity = Math.max(1, Number(target.capacity ?? 1))
+  if (occupancy >= capacity) {
+    throw new AppError('Target interface sudah penuh.', {
+      code: 'topology_candidate_interface_capacity_exceeded',
+      statusCode: 409,
+      details: { candidateId: candidate.candidateId, interfaceId, occupancy, capacity },
+    })
+  }
+}
+
+function findTopologyAsset(record, assetId) {
+  const requested = String(assetId ?? '')
+  const objects = [
+    ...(record.topologyGraph?.nodes ?? []),
+    ...(record.topologyInputBundle?.classifiedNodes ?? []),
+  ]
+  return objects.find((object) => (
+    [object.id, object.assetId, object.canonicalAssetId, object.stableAssetId,
+      object.sourceFeatureId, object.legacyAssetId].filter(Boolean).map(String).includes(requested)
+  )) ?? null
+}
+
+function isJunctionBoxOrRackAsset(asset) {
+  const text = String([
+    asset?.assetType,
+    asset?.category,
+    asset?.sourceName,
+    asset?.assetName,
+  ].filter(Boolean).join(' ')).toLowerCase()
+  return asset?.assetType === 'junction_box'
+    || asset?.assetType === 'server_rack'
+    || /junction|\bjb\b|server[ -]?rack|rack[ -]?server/.test(text)
+}
+
+function activeInterfaceOccupancy(relations, interfaceId) {
+  return (relations ?? []).filter((relation) => (
+    relation.verificationStatus === 'confirmed'
+      && (relation.relationKind === 'path_termination'
+        || relation.relationType === 'terminates_at')
+      && relation.targetInterfaceId === interfaceId
+  )).length
 }
 
 function normalizeImpactRequest(request) {
@@ -3569,11 +4310,17 @@ function normalizeTraceId(value, field, required) {
   return normalized || null
 }
 
-function normalizedTraceGraphFromCache(cache, objectCache, record, identityMap) {
-  const sourceGraph = record.topologyGraph
+function normalizedTraceGraphFromCache(cache, objectCache, record, identityMap, projection = null) {
+  const sourceGraph = projection === 'data' || projection === 'power'
+    ? record.topologyGraph?.serviceGraph
+    : record.topologyGraph
   const datasetVersionId = record.datasetVersion?.id ?? 'unknown'
-  const sourceRevision = sourceGraph?.graphRevision ?? null
-  const cacheKey = sourceRevision ? `${datasetVersionId}:${sourceRevision}` : null
+  const sourceRevision = sourceGraph?.graphRevision
+    ?? record.topologyGraph?.graphRevision
+    ?? null
+  const cacheKey = sourceRevision
+    ? `${datasetVersionId}:${sourceRevision}:${projection ?? 'asset'}`
+    : null
   if (cacheKey && cache.has(cacheKey)) return cache.get(cacheKey)
   const objectCached = sourceGraph && typeof sourceGraph === 'object'
     ? objectCache.get(sourceGraph)
@@ -3581,7 +4328,7 @@ function normalizedTraceGraphFromCache(cache, objectCache, record, identityMap) 
   if (objectCached && objectCached.sourceRevision === sourceRevision) {
     return objectCached.graph
   }
-  const graph = normalizeTraceGraph(record, identityMap)
+  const graph = normalizeTraceGraph(record, identityMap, projection)
   if (cacheKey) {
     cache.set(cacheKey, graph)
     while (cache.size > 64) cache.delete(cache.keys().next().value)
@@ -3592,9 +4339,11 @@ function normalizedTraceGraphFromCache(cache, objectCache, record, identityMap) 
   return graph
 }
 
-function normalizeTraceGraph(record, identityMap) {
+function normalizeTraceGraph(record, identityMap, projection = null) {
   const resolver = createAssetIdentityResolver(identityMap)
-  const sourceGraph = record.topologyGraph ?? {
+  const sourceGraph = (projection === 'data' || projection === 'power'
+    ? record.topologyGraph?.serviceGraph
+    : record.topologyGraph) ?? {
     datasetVersionId: record.datasetVersion?.id,
     nodes: (record.assets ?? []).map((asset) => ({
       id: asset.canonicalAssetId ?? asset.assetId ?? asset.id,
@@ -3659,7 +4408,7 @@ function normalizeTraceGraph(record, identityMap) {
     nodeIds,
     edges,
   )
-  return withTopologyGraphRevision({
+  const normalizedGraph = withTopologyGraphRevision({
     ...structuredClone(sourceGraph),
     datasetVersionId: record.datasetVersion?.id ?? sourceGraph.datasetVersionId,
     nodes,
@@ -3668,6 +4417,12 @@ function normalizeTraceGraph(record, identityMap) {
     degreeByNode,
     isolatedNodeIds: [...nodeIds].filter((id) => degreeByNode[id] === 0).sort(),
   })
+  if (projection === 'data' || projection === 'power') {
+    normalizedGraph.graphRevision = record.topologyGraph?.graphRevision
+      ?? normalizedGraph.graphRevision
+    normalizedGraph.serviceDomain = projection
+  }
+  return normalizedGraph
 }
 
 function normalizeTraceComponents(sourceComponents, resolveNodeId, nodeIds, edges) {
@@ -3773,6 +4528,7 @@ function buildTraceTraversal(graph, normalized) {
 function buildTraceAdjacency(graph, {
   mode = 'connectivity',
   direction = 'both',
+  serviceDomain = null,
 } = {}) {
   const adjacency = new Map(graph.nodes.map(({ id }) => [id, []]))
   const usePhysical = mode === 'connectivity' || direction === 'both'
@@ -3781,6 +4537,8 @@ function buildTraceAdjacency(graph, {
     adjacency.get(source).push({ target, edge })
   }
   graph.edges.forEach((edge) => {
+    if (serviceDomain && edge.serviceDomain !== serviceDomain) return
+    if (edge.relationKind === 'installation_attachment' || edge.traversable === false) return
     const source = edge.sourceAssetId
     const target = edge.targetAssetId
     if (!adjacency.has(source) || !adjacency.has(target)) return

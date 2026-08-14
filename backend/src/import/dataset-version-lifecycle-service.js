@@ -22,7 +22,10 @@ import {
   compareCanonicalDatasetVersions,
   paginateDatasetDiff,
 } from '../domain/dataset-version-diff.js'
-import { normalizeTopologySummary } from '../topology/semantic-relation-engine.js'
+import {
+  normalizeTopologySummary,
+  TOPOLOGY_RULE_SET_VERSION,
+} from '../topology/semantic-relation-engine.js'
 import { withTopologyGraphRevision } from '../topology/topology-graph-revision.js'
 import {
   buildActiveAssetCatalog,
@@ -724,6 +727,29 @@ export class DatasetVersionLifecycleService {
           highRiskChangeCount: comparison.summary.byRisk?.high ?? 0,
         },
       }).catch(() => null)
+      const topologyPublicationEvent = transaction.activated.topologyRuleSetVersion
+        === TOPOLOGY_RULE_SET_VERSION
+        ? await this.auditLog.record(
+          operation === 'rollback'
+            ? 'topology.v2_rolled_back'
+            : 'topology.v2_published',
+          {
+            actorId,
+            datasetVersionId,
+            branchId: transaction.pointer.branchId,
+            correlationId,
+            outcome: operation === 'rollback' ? 'rolled_back' : 'published',
+            details: {
+              datasetId: transaction.pointer.datasetId,
+              previousVersionId: transaction.pointer.previousVersionId,
+              graphRevision: transaction.activated.topologyGraph?.graphRevision ?? null,
+              activePointerRevision: transaction.pointer.revision,
+              publicationProfile: normalizedProfile,
+              operation,
+            },
+          },
+        ).catch(() => null)
+        : null
       return {
         operation,
         datasetVersion: withoutInternalStorage(transaction.activated.datasetVersion),
@@ -733,6 +759,7 @@ export class DatasetVersionLifecycleService {
         activePointer: transaction.pointer,
         datasetVersionId,
         auditEventId: auditEntry?.id ?? null,
+        topologyAuditEventId: topologyPublicationEvent?.id ?? null,
         publicationProfile: normalizedProfile,
         capabilities: publicationCapabilities(
           transaction.activated,

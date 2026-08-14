@@ -46,6 +46,7 @@ const topologyService = new TopologyService({
   repository,
   auditLog,
   config: config.topology,
+  metrics,
 })
 const importPipeline = new ImportPipeline({
   repository,

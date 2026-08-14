@@ -7,6 +7,8 @@ const PROJECTION_DELETE_ORDER = [
   'graph_revisions',
   'confirmed_relations',
   'topology_candidates',
+  'topology_interfaces',
+  'topology_components',
   'classified_objects',
   'source_geometries',
   'source_features',
@@ -17,6 +19,75 @@ const DATASET_VERSION_SELECT = `
   FROM dataset_versions
   WHERE id = $1
 `
+
+async function replaceTopologyInterfaceProjection(client, record) {
+  const datasetVersionId = record.datasetVersion.id
+  await client.query(
+    'DELETE FROM topology_interfaces WHERE dataset_version_id = $1',
+    [datasetVersionId],
+  )
+  await client.query(
+    'DELETE FROM topology_components WHERE dataset_version_id = $1',
+    [datasetVersionId],
+  )
+  const components = asArray(
+    record.topologyComponentRegistry
+      ?? record.topologyGraph?.componentRegistry,
+  )
+  const interfaces = asArray(
+    record.topologyInterfaceRegistry
+      ?? record.topologyGraph?.interfaceRegistry,
+  )
+  for (const component of components) {
+    await client.query(
+      `INSERT INTO topology_components (
+         dataset_version_id, component_id, owner_asset_id, component_type,
+         component_name, profile_id, status, payload
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+      [
+        datasetVersionId,
+        requiredText(component.componentId, 'componentId'),
+        requiredText(component.ownerAssetId, 'ownerAssetId'),
+        requiredText(component.componentType ?? 'device', 'componentType'),
+        component.componentName ?? null,
+        component.profileId ?? null,
+        component.status ?? 'active',
+        JSON.stringify(component),
+      ],
+    )
+  }
+  for (const item of interfaces) {
+    const componentId = requiredText(item.componentId, 'componentId')
+    await client.query(
+      `INSERT INTO topology_interfaces (
+         dataset_version_id, interface_id, owner_asset_id, component_id,
+         interface_type, service_domain, media_type, direction, capacity,
+         occupancy, profile_id, assignment_source, source_feature_id,
+         virtual, is_proxy, status, payload
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+         $14, $15, $16, $17::jsonb)`,
+      [
+        datasetVersionId,
+        requiredText(item.interfaceId, 'interfaceId'),
+        requiredText(item.ownerAssetId, 'ownerAssetId'),
+        componentId,
+        requiredText(item.interfaceType, 'interfaceType'),
+        requiredText(item.serviceDomain ?? 'unknown', 'serviceDomain'),
+        requiredText(item.mediaType ?? 'unknown', 'mediaType'),
+        requiredText(item.direction ?? 'undirected', 'direction'),
+        positiveIntegerOrDefault(item.capacity, 1),
+        nonNegativeIntegerOrDefault(item.occupancy, 0),
+        item.profileId ?? null,
+        item.assignmentSource ?? null,
+        item.sourceFeatureId ?? null,
+        item.virtual === true,
+        item.isProxy === true,
+        item.status ?? 'active',
+        JSON.stringify(item),
+      ],
+    )
+  }
+}
 
 /**
  * PostgreSQL adapter for the current aggregate contract.
@@ -562,6 +633,10 @@ function topologyReviewPayloadPatch(record) {
   for (const key of [
     'recordRevision',
     'topologyRuleSetVersion',
+    'topologyPolicy',
+    'topologyInterfaceRegistry',
+    'topologyComponentRegistry',
+    'topologyDiagnostics',
     'topologyGeneratedAt',
     'topologyInputBundle',
     'topologyCandidates',
@@ -792,12 +867,13 @@ async function replaceProjections(client, record) {
       `INSERT INTO topology_candidates (
          dataset_version_id, candidate_id, candidate_type, source_endpoint_id,
          source_geometry_id, source_path_asset_id, target_asset_id,
-         target_endpoint_id, target_path_asset_id, site_id, network_family,
-         candidate_status, proposal_status, score, score_margin, evidence,
-         revision, payload
+         target_endpoint_id, target_path_asset_id, target_interface_id,
+         source_interface_id, site_id, network_family, service_domain,
+         media_type, cable_role, candidate_status, proposal_status, score,
+         score_margin, evidence, revision, payload
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-         $15, $16::jsonb, $17, $18::jsonb
+         $15, $16, $17, $18, $19, $20, $21::jsonb, $22, $23::jsonb
        )`,
       [
         datasetVersionId,
@@ -809,8 +885,13 @@ async function replaceProjections(client, record) {
         candidate.targetAssetId ?? null,
         candidate.targetEndpointId ?? null,
         candidate.targetPathAssetId ?? null,
+        candidate.targetInterfaceId ?? null,
+        candidate.sourceInterfaceId ?? null,
         candidate.siteId ?? null,
         candidate.networkFamily ?? null,
+        candidate.serviceDomain ?? null,
+        candidate.mediaType ?? null,
+        candidate.cableRole ?? null,
         requiredText(candidate.candidateStatus, 'candidateStatus'),
         requiredText(candidate.proposalStatus, 'proposalStatus'),
         numberOrNull(candidate.score),
@@ -822,6 +903,8 @@ async function replaceProjections(client, record) {
     )
   }
 
+  await replaceTopologyInterfaceProjection(client, record)
+
   for (const relation of asArray(record.confirmedRelations)) {
     const relationId = requiredText(
       relation.relationId ?? relation.id,
@@ -830,22 +913,33 @@ async function replaceProjections(client, record) {
     await client.query(
       `INSERT INTO confirmed_relations (
          dataset_version_id, relation_id, candidate_id, source_asset_id,
-         target_asset_id, relation_type, relation_kind, direction, provenance,
-         verification_status, verified_by, verified_at, audit_event_id,
-         evidence, payload
+         source_endpoint_id, target_asset_id, target_interface_id,
+         source_interface_id, relation_type, relation_kind, direction,
+         service_domain, media_type, cable_role, traversable, profile_version,
+         mounting_role, provenance, verification_status, verified_by,
+         verified_at, audit_event_id, evidence, payload
        ) VALUES (
-         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-         $14::jsonb, $15::jsonb
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+         $15, $16, $17, $18, $19, $20, $21, $22, $23::jsonb, $24::jsonb
        )`,
       [
         datasetVersionId,
         relationId,
         relation.candidateId ?? null,
         requiredText(relation.sourceAssetId, 'sourceAssetId'),
+        relation.sourceEndpointId ?? null,
         requiredText(relation.targetAssetId, 'targetAssetId'),
+        relation.targetInterfaceId ?? null,
+        relation.sourceInterfaceId ?? null,
         relation.relationType ?? 'connected-to',
         relation.relationKind ?? null,
         relation.direction ?? 'undirected',
+        relation.serviceDomain ?? null,
+        relation.mediaType ?? null,
+        relation.cableRole ?? null,
+        relation.traversable !== false,
+        relation.profileVersion ?? null,
+        relation.mountingRole ?? null,
         relation.provenance ?? 'unknown',
         relation.verificationStatus ?? relation.relationStatus ?? 'confirmed',
         relation.verifiedBy ?? null,
@@ -904,6 +998,16 @@ async function replaceTopologyReviewProjections(client, previous, record) {
     )
   }
 
+  if (!jsonValuesEqual(
+    previous.topologyInterfaceRegistry ?? previous.topologyGraph?.interfaceRegistry,
+    record.topologyInterfaceRegistry ?? record.topologyGraph?.interfaceRegistry,
+  ) || !jsonValuesEqual(
+    previous.topologyComponentRegistry ?? previous.topologyGraph?.componentRegistry,
+    record.topologyComponentRegistry ?? record.topologyGraph?.componentRegistry,
+  )) {
+    await replaceTopologyInterfaceProjection(client, record)
+  }
+
   const previousGraphRevision = previous.topologyGraph?.graphRevision
   const nextGraphRevision = record.topologyGraph?.graphRevision
   if (nextGraphRevision && nextGraphRevision !== previousGraphRevision) {
@@ -928,12 +1032,13 @@ async function upsertTopologyCandidate(client, datasetVersionId, candidate) {
     `INSERT INTO topology_candidates (
        dataset_version_id, candidate_id, candidate_type, source_endpoint_id,
        source_geometry_id, source_path_asset_id, target_asset_id,
-       target_endpoint_id, target_path_asset_id, site_id, network_family,
-       candidate_status, proposal_status, score, score_margin, evidence,
-       revision, payload
+       target_endpoint_id, target_path_asset_id, target_interface_id,
+       source_interface_id, site_id, network_family, service_domain,
+       media_type, cable_role, candidate_status, proposal_status, score,
+       score_margin, evidence, revision, payload
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-       $15, $16::jsonb, $17, $18::jsonb
+       $15, $16, $17, $18, $19, $20, $21::jsonb, $22, $23::jsonb
      )
      ON CONFLICT (dataset_version_id, candidate_id) DO UPDATE SET
        candidate_type = EXCLUDED.candidate_type,
@@ -943,8 +1048,13 @@ async function upsertTopologyCandidate(client, datasetVersionId, candidate) {
        target_asset_id = EXCLUDED.target_asset_id,
        target_endpoint_id = EXCLUDED.target_endpoint_id,
        target_path_asset_id = EXCLUDED.target_path_asset_id,
+       target_interface_id = EXCLUDED.target_interface_id,
+       source_interface_id = EXCLUDED.source_interface_id,
        site_id = EXCLUDED.site_id,
        network_family = EXCLUDED.network_family,
+       service_domain = EXCLUDED.service_domain,
+       media_type = EXCLUDED.media_type,
+       cable_role = EXCLUDED.cable_role,
        candidate_status = EXCLUDED.candidate_status,
        proposal_status = EXCLUDED.proposal_status,
        score = EXCLUDED.score,
@@ -963,8 +1073,13 @@ async function upsertTopologyCandidate(client, datasetVersionId, candidate) {
       candidate.targetAssetId ?? null,
       candidate.targetEndpointId ?? null,
       candidate.targetPathAssetId ?? null,
+      candidate.targetInterfaceId ?? null,
+      candidate.sourceInterfaceId ?? null,
       candidate.siteId ?? null,
       candidate.networkFamily ?? null,
+      candidate.serviceDomain ?? null,
+      candidate.mediaType ?? null,
+      candidate.cableRole ?? null,
       requiredText(candidate.candidateStatus, 'candidateStatus'),
       requiredText(candidate.proposalStatus, 'proposalStatus'),
       numberOrNull(candidate.score),
@@ -981,20 +1096,31 @@ async function upsertConfirmedRelation(client, datasetVersionId, relation) {
   await client.query(
     `INSERT INTO confirmed_relations (
        dataset_version_id, relation_id, candidate_id, source_asset_id,
-       target_asset_id, relation_type, relation_kind, direction, provenance,
-       verification_status, verified_by, verified_at, audit_event_id,
-       evidence, payload
+       source_endpoint_id, target_asset_id, target_interface_id,
+       source_interface_id, relation_type, relation_kind, direction,
+       service_domain, media_type, cable_role, traversable, profile_version,
+       mounting_role, provenance, verification_status, verified_by,
+       verified_at, audit_event_id, evidence, payload
      ) VALUES (
-       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-       $14::jsonb, $15::jsonb
+       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+       $15, $16, $17, $18, $19, $20, $21, $22, $23::jsonb, $24::jsonb
      )
      ON CONFLICT (dataset_version_id, relation_id) DO UPDATE SET
        candidate_id = EXCLUDED.candidate_id,
        source_asset_id = EXCLUDED.source_asset_id,
+       source_endpoint_id = EXCLUDED.source_endpoint_id,
        target_asset_id = EXCLUDED.target_asset_id,
+       target_interface_id = EXCLUDED.target_interface_id,
+       source_interface_id = EXCLUDED.source_interface_id,
        relation_type = EXCLUDED.relation_type,
        relation_kind = EXCLUDED.relation_kind,
        direction = EXCLUDED.direction,
+       service_domain = EXCLUDED.service_domain,
+       media_type = EXCLUDED.media_type,
+       cable_role = EXCLUDED.cable_role,
+       traversable = EXCLUDED.traversable,
+       profile_version = EXCLUDED.profile_version,
+       mounting_role = EXCLUDED.mounting_role,
        provenance = EXCLUDED.provenance,
        verification_status = EXCLUDED.verification_status,
        verified_by = EXCLUDED.verified_by,
@@ -1008,10 +1134,19 @@ async function upsertConfirmedRelation(client, datasetVersionId, relation) {
       relationId,
       relation.candidateId ?? null,
       requiredText(relation.sourceAssetId, 'sourceAssetId'),
+      relation.sourceEndpointId ?? null,
       requiredText(relation.targetAssetId, 'targetAssetId'),
+      relation.targetInterfaceId ?? null,
+      relation.sourceInterfaceId ?? null,
       relation.relationType ?? 'connected-to',
       relation.relationKind ?? null,
       relation.direction ?? 'undirected',
+      relation.serviceDomain ?? null,
+      relation.mediaType ?? null,
+      relation.cableRole ?? null,
+      relation.traversable !== false,
+      relation.profileVersion ?? null,
+      relation.mountingRole ?? null,
       relation.provenance ?? 'unknown',
       relation.verificationStatus ?? relation.relationStatus ?? 'confirmed',
       relation.verifiedBy ?? null,
@@ -1385,6 +1520,16 @@ function integerOrNull(value) {
 
 function integerOrZero(value) {
   return integerOrNull(value) ?? 0
+}
+
+function positiveIntegerOrDefault(value, fallback) {
+  const normalized = integerOrNull(value)
+  return normalized !== null && normalized > 0 ? normalized : fallback
+}
+
+function nonNegativeIntegerOrDefault(value, fallback) {
+  const normalized = integerOrNull(value)
+  return normalized !== null && normalized >= 0 ? normalized : fallback
 }
 
 function timestampValue(value) {

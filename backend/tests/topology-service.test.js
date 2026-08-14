@@ -63,7 +63,7 @@ test('candidate review is audited, materializes confirmed graph, and can be revo
   assert.equal(firstConfirmation.candidate.candidateStatus, 'confirmed')
   assert.equal(firstConfirmation.confirmedRelations.length, 1)
   assert.equal(firstConfirmation.graph.edges.length, 0)
-  assert.equal(firstConfirmation.confirmedRelations[0].relationKind, 'path_attachment')
+  assert.equal(firstConfirmation.confirmedRelations[0].relationKind, 'path_termination')
   assert.equal(auditLog.entries[0].correlationId, 'topology-review-correlation')
   const confirmed = await service.confirmCandidate(endCandidate.candidateId, 'admin-1', {
     reason: 'Endpoint kedua telah diverifikasi pada peta sumber.',
@@ -72,7 +72,7 @@ test('candidate review is audited, materializes confirmed graph, and can be revo
   assert.equal(confirmed.confirmedRelations.length, 2)
   assert.equal(confirmed.graph.edges.length, 1)
   assert.equal(confirmed.confirmedRelations.every(({ relationKind }) => (
-    relationKind === 'path_attachment'
+    relationKind === 'path_termination'
   )), true)
   const confirmedRecord = await repository.get('dv-review')
   assert.equal(confirmedRecord.topologySummary.confirmedPathAttachmentCount, 2)
@@ -109,10 +109,10 @@ test('candidate review is audited, materializes confirmed graph, and can be revo
   assert.deepEqual(
     auditLog.entries.map(({ event }) => event),
     [
-      'topology.candidate_confirmed',
-      'topology.candidate_confirmed',
+      'topology.cable_termination_selected',
+      'topology.cable_termination_selected',
       'topology.relation_revoked',
-      'topology.candidate_confirmed',
+      'topology.cable_termination_selected',
     ],
   )
 })
@@ -198,6 +198,9 @@ test('bulk review preview predicts graph changes and rejects endpoint conflicts'
     ))
     .map(({ candidateId }) => candidateId)
   const snapshot = await service.getSummary('dv-review')
+  assert.equal(snapshot.status, 'ready')
+  assert.equal(snapshot.confirmable, true)
+  assert.equal(snapshot.userMessage, null)
   const preview = await service.reviewPreview('dv-review', {
     candidateIds: recommended,
     expectedGraphRevision: snapshot.graphRevision,
@@ -211,7 +214,10 @@ test('bulk review preview predicts graph changes and rejects endpoint conflicts'
   const conflictBundle = reviewBundle({ secondNode: true })
   const conflictArtifacts = generateRelationArtifacts(conflictBundle)
   const conflictCandidates = conflictArtifacts.candidates
-    .filter(({ candidateType }) => candidateType === 'endpoint_device')
+    .filter(({ candidateType, sourceEndpointId }) => (
+      candidateType === 'cable_termination'
+        && sourceEndpointId === 'endpoint:geometry:CBL-01:start'
+    ))
   assert.ok(conflictCandidates.length >= 2)
   const conflictRecord = applyArtifacts(baseRecord(conflictBundle), conflictArtifacts)
   const conflictIds = conflictCandidates.slice(0, 2).map(({ candidateId }) => candidateId)
@@ -242,51 +248,16 @@ test('bulk review preview predicts graph changes and rejects endpoint conflicts'
   )
 })
 
-test('bulk review allows one inline device to anchor multiple paths', async () => {
+test('bulk review never treats a pole as an inline cable anchor', async () => {
   const bundle = inlineReviewBundle()
   const initial = generateRelationArtifacts(bundle)
-  const inlineCandidates = initial.candidates.filter(({ candidateType }) => (
-    candidateType === 'inline_device'
-  ))
-  assert.equal(inlineCandidates.length, 2)
-  assert.ok(inlineCandidates.every(({ candidateStatus, proposalStatus }) => (
-    candidateStatus === 'candidate' && proposalStatus === 'recommended'
+  assert.equal(initial.candidates.some(({ candidateType }) => candidateType === 'inline_device'), false)
+  assert.equal(initial.candidates.some(({ candidateType, targetAssetId }) => (
+    candidateType === 'cable_termination' && targetAssetId === 'T-021'
+  )), false)
+  assert.ok(initial.topologyDiagnostics.some(({ issueCode }) => (
+    issueCode === 'cable_terminated_at_pole'
   )))
-
-  const singleRepository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
-  const singleService = new TopologyService({
-    repository: singleRepository,
-    auditLog: new MemoryAuditLog(),
-  })
-  await singleService.confirmCandidate(inlineCandidates[0].candidateId, 'admin-1', {
-    reason: 'Anchor inline pertama diverifikasi.',
-  })
-  const secondSingleConfirmation = await singleService.confirmCandidate(
-    inlineCandidates[1].candidateId,
-    'admin-1',
-    { reason: 'Anchor inline kedua diverifikasi pada jalur berbeda.' },
-  )
-  assert.equal(secondSingleConfirmation.confirmedRelations.length, 2)
-
-  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
-  const service = new TopologyService({
-    repository,
-    auditLog: new MemoryAuditLog(),
-  })
-  const preview = await service.reviewPreview('dv-inline-review', {
-    candidateIds: inlineCandidates.map(({ candidateId }) => candidateId),
-  })
-
-  assert.equal(preview.safeToApply, true)
-  assert.equal(preview.diagnostics.conflictCount, 0)
-  assert.equal(preview.validationPreview.summary.errors, 0)
-
-  const confirmed = await service.confirmSelectedCandidates('dv-inline-review', 'admin-1', {
-    candidateIds: inlineCandidates.map(({ candidateId }) => candidateId),
-    reason: 'Tiang T-021 diverifikasi menjadi anchor untuk dua jalur berbeda.',
-  })
-  assert.equal(confirmed.affectedCount, 2)
-  assert.equal(confirmed.confirmedRelations.length, 2)
 })
 
 test('stale onboarding candidates are blocked until identity assignment and regeneration', async () => {
@@ -433,7 +404,7 @@ test('line label bulk action confirms only connections read from line names', as
     reason: 'Nama endpoint garis diverifikasi dari sumber resmi.',
   })
   assert.equal(result.action, 'confirm_line_labels')
-  assert.equal(result.affectedCount, 3)
+  assert.equal(result.affectedCount, 2)
   assert.equal(result.graph.edges.length, 1)
   assert.equal(result.confirmedDeviceEdgeCount, 1)
   assert.deepEqual(
@@ -451,7 +422,7 @@ test('reject requires reason and rejected candidates never enter operational gra
     auditLog: new MemoryAuditLog(),
   })
   const candidate = initial.candidates.find(({ candidateType }) => (
-    candidateType === 'endpoint_device'
+    candidateType === 'cable_termination'
   ))
 
   await assert.rejects(
@@ -544,7 +515,7 @@ test('regeneration reconciles decisions and records topology runs without deleti
   const auditLog = new MemoryAuditLog()
   const service = new TopologyService({ repository, auditLog })
   const candidate = initial.candidates.find(({ candidateType }) => (
-    candidateType === 'endpoint_device'
+    candidateType === 'cable_termination'
   ))
   await service.confirmCandidate(candidate.candidateId, 'admin-1', {
     reason: 'Confirmed before regeneration.',
@@ -1081,6 +1052,7 @@ function reviewBundle({ secondNode = false } = {}) {
     classifiedPaths: [path.object],
     geometries: [...nodes.map(({ geometry }) => geometry), path.geometry],
     explicitRelations: [],
+    topologyPolicy: { requireJbTermination: false },
     semanticRuleSetVersion: 'semantic-classifier/1.0.0',
     topologyRuleSetVersion: null,
   }
