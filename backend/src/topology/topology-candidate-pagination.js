@@ -11,6 +11,16 @@ export const CANDIDATE_STATUSES = Object.freeze([
   'rejected',
   'revoked',
 ])
+export const CANDIDATE_TYPES = Object.freeze([
+  'endpoint_device',
+  'inline_device',
+  'endpoint_endpoint',
+  'intersection_with_junction',
+  'explicit_metadata',
+  'line_label_connection',
+  'line_label_attachment',
+  'manual_relation',
+])
 
 /**
  * In-memory postings are the JSON-repository equivalent of the status/site/
@@ -29,14 +39,34 @@ export class TopologyCandidateQueryIndex {
     this.byNetworkFamily = buildPostingIndex(this.all, (candidate) => (
       candidate.networkFamily
     ))
+    this.byCandidateType = buildPostingIndex(this.all, (candidate) => (
+      candidate.candidateType
+    ))
+    this.byProposalStatus = buildPostingIndex(this.all, (candidate) => (
+      candidate.proposalStatus
+    ))
     this.byId = new Map(this.all.map((candidate) => [candidate.candidateId, candidate]))
   }
 
-  query({ status, site, networkFamily, minScore } = {}) {
+  query({
+    status,
+    site,
+    networkFamily,
+    candidateType,
+    proposalStatus,
+    minScore,
+    maxScore,
+    minDistance,
+    maxDistance,
+    assetSearch,
+    requiredTopologyOnly,
+  } = {}) {
     const postingSets = [
       status ? this.byStatus.get(status) : null,
       site ? this.bySite.get(site) : null,
       networkFamily ? this.byNetworkFamily.get(networkFamily) : null,
+      candidateType ? this.byCandidateType.get(candidateType) : null,
+      proposalStatus ? this.byProposalStatus.get(proposalStatus) : null,
     ].filter(Boolean)
     const allowed = postingSets.length
       ? postingSets.sort((left, right) => left.size - right.size)[0]
@@ -51,8 +81,19 @@ export class TopologyCandidateQueryIndex {
       if (status && candidate.candidateStatus !== status) return false
       if (site && !candidateSite(candidate, site)) return false
       if (networkFamily && candidate.networkFamily !== networkFamily) return false
-      return minScore === null || minScore === undefined
-        || scoreValue(candidate) >= minScore
+      if (candidateType && candidate.candidateType !== candidateType) return false
+      if (proposalStatus && candidate.proposalStatus !== proposalStatus) return false
+      if (minScore !== null && minScore !== undefined
+        && scoreValue(candidate) < minScore) return false
+      if (maxScore !== null && maxScore !== undefined
+        && scoreValue(candidate) > maxScore) return false
+      if (minDistance !== null && minDistance !== undefined
+        && distanceValue(candidate) < minDistance) return false
+      if (maxDistance !== null && maxDistance !== undefined
+        && distanceValue(candidate) > maxDistance) return false
+      if (assetSearch && !candidateAssetSearch(candidate).includes(assetSearch)) return false
+      if (requiredTopologyOnly && candidate.topologyRequired !== true) return false
+      return true
     })
   }
 }
@@ -61,7 +102,14 @@ export function paginateCandidates(candidates, {
   status = null,
   site = null,
   networkFamily = null,
+  candidateType = null,
+  proposalStatus = null,
   minScore = null,
+  maxScore = null,
+  minDistance = null,
+  maxDistance = null,
+  assetSearch = null,
+  requiredTopologyOnly = false,
   cursor = null,
   limit = DEFAULT_CANDIDATE_PAGE_SIZE,
   graphRevision = null,
@@ -71,7 +119,14 @@ export function paginateCandidates(candidates, {
     status,
     site,
     networkFamily,
+    candidateType,
+    proposalStatus,
     minScore,
+    maxScore,
+    minDistance,
+    maxDistance,
+    assetSearch,
+    requiredTopologyOnly,
     cursor,
     limit,
   })
@@ -120,21 +175,65 @@ export function normalizeCandidateQuery({
   status,
   site,
   networkFamily,
+  candidateType,
+  proposalStatus,
   minScore,
+  maxScore,
+  minDistance,
+  maxDistance,
+  assetSearch,
+  requiredTopologyOnly,
   cursor,
   limit,
 } = {}) {
   const normalizedStatus = normalizeOptionalEnum(status, CANDIDATE_STATUSES, 'status')
   const normalizedSite = normalizeOptionalText(site, 'site')
   const normalizedFamily = normalizeOptionalText(networkFamily, 'networkFamily')
-  const normalizedMinScore = normalizeScore(minScore)
+  const normalizedCandidateType = normalizeOptionalEnum(
+    candidateType,
+    CANDIDATE_TYPES,
+    'candidateType',
+  )
+  const normalizedProposalStatus = normalizeOptionalText(proposalStatus, 'proposalStatus')
+  const normalizedMinScore = normalizeScore(minScore, 'minScore')
+  const normalizedMaxScore = normalizeScore(maxScore, 'maxScore')
+  if (normalizedMinScore !== null && normalizedMaxScore !== null
+    && normalizedMinScore > normalizedMaxScore) {
+    throw new AppError('Rentang score candidate tidak valid.', {
+      code: 'invalid_topology_candidate_filter',
+      statusCode: 400,
+      details: { field: 'score' },
+    })
+  }
+  const normalizedMinDistance = normalizeDistance(minDistance, 'minDistance')
+  const normalizedMaxDistance = normalizeDistance(maxDistance, 'maxDistance')
+  if (normalizedMinDistance !== null && normalizedMaxDistance !== null
+    && normalizedMinDistance > normalizedMaxDistance) {
+    throw new AppError('Rentang jarak candidate tidak valid.', {
+      code: 'invalid_topology_candidate_filter',
+      statusCode: 400,
+      details: { field: 'distance' },
+    })
+  }
+  const normalizedAssetSearch = normalizeOptionalText(assetSearch, 'assetSearch')
+  const normalizedRequiredTopologyOnly = normalizeBoolean(
+    requiredTopologyOnly,
+    'requiredTopologyOnly',
+  )
   const normalizedCursor = cursor ? normalizeCursorText(cursor) : null
   const normalizedLimit = normalizeLimit(limit)
   return {
     status: normalizedStatus,
     site: normalizedSite,
     networkFamily: normalizedFamily,
+    candidateType: normalizedCandidateType,
+    proposalStatus: normalizedProposalStatus,
     minScore: normalizedMinScore,
+    maxScore: normalizedMaxScore,
+    minDistance: normalizedMinDistance,
+    maxDistance: normalizedMaxDistance,
+    assetSearch: normalizedAssetSearch?.toLocaleLowerCase('id') ?? null,
+    requiredTopologyOnly: normalizedRequiredTopologyOnly,
     cursor: normalizedCursor,
     limit: normalizedLimit,
   }
@@ -278,7 +377,14 @@ function candidateQuerySignature(query) {
     status: query.status ?? null,
     site: query.site ?? null,
     networkFamily: query.networkFamily ?? null,
+    candidateType: query.candidateType ?? null,
+    proposalStatus: query.proposalStatus ?? null,
     minScore: query.minScore ?? null,
+    maxScore: query.maxScore ?? null,
+    minDistance: query.minDistance ?? null,
+    maxDistance: query.maxDistance ?? null,
+    assetSearch: query.assetSearch ?? null,
+    requiredTopologyOnly: query.requiredTopologyOnly === true,
   })
 }
 
@@ -296,16 +402,57 @@ function normalizeLimit(value) {
   return parsed
 }
 
-function normalizeScore(value) {
+function normalizeScore(value, field = 'score') {
   if (value === undefined || value === null || value === '') return null
   const parsed = Number(value)
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
-    throw new AppError('minScore candidate harus berada di antara 0 dan 1.', {
+    throw new AppError(`${field} candidate harus berada di antara 0 dan 1.`, {
       code: 'invalid_topology_candidate_score',
       statusCode: 400,
+      details: { field },
     })
   }
   return parsed
+}
+
+function normalizeDistance(value, field) {
+  if (value === undefined || value === null || value === '') return null
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1000000) {
+    throw new AppError(`${field} candidate harus berada di antara 0 dan 1000000 meter.`, {
+      code: 'invalid_topology_candidate_distance',
+      statusCode: 400,
+      details: { field },
+    })
+  }
+  return parsed
+}
+
+function normalizeBoolean(value, field) {
+  if (value === undefined || value === null || value === '' || value === false) return false
+  if (value === true || value === 'true' || value === '1' || value === 1) return true
+  if (value === 'false' || value === '0' || value === 0) return false
+  throw new AppError(`Filter candidate ${field} tidak valid.`, {
+    code: 'invalid_topology_candidate_filter',
+    statusCode: 400,
+    details: { field },
+  })
+}
+
+function distanceValue(candidate) {
+  const distance = Number(candidate?.distanceMeters)
+  return Number.isFinite(distance) ? distance : Number.POSITIVE_INFINITY
+}
+
+function candidateAssetSearch(candidate) {
+  return [
+    candidate?.sourceAssetId,
+    candidate?.sourcePathAssetId,
+    candidate?.sourceEndpointId,
+    candidate?.targetAssetId,
+    candidate?.targetPathAssetId,
+    candidate?.targetEndpointId,
+  ].filter(Boolean).join(' ').toLocaleLowerCase('id')
 }
 
 function normalizeOptionalEnum(value, allowed, field) {

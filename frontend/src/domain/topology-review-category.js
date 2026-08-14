@@ -1,18 +1,23 @@
 const CATEGORY_TYPES = Object.freeze({
   cable_to_asset: Object.freeze([
+    'cable_termination',
+    'mounting_attachment',
     'endpoint_device',
     'inline_device',
     'intersection_with_junction',
     'line_label_attachment',
   ]),
   asset_to_asset: Object.freeze([
+    'jb_internal_connection',
     'explicit_metadata',
     'line_label_connection',
   ]),
   cable_to_cable: Object.freeze([
+    'path_continuation',
     'endpoint_endpoint',
   ]),
   unresolved: Object.freeze([
+    'unresolved_termination',
     'unresolved',
   ]),
 })

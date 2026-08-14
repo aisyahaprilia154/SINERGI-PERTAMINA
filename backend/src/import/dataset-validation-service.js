@@ -868,7 +868,7 @@ function readinessDimensionForCode(code, scope) {
 }
 
 function recommendedActionForCode(code) {
-  if (code === 'ASSET_ID_MISSING') return 'Tetapkan Asset ID resmi melalui identity review.'
+  if (code === 'ASSET_ID_MISSING') return 'Sistem sudah mencoba membuat Asset ID internal. Tinjau identity ambigu atau duplikat; isi Asset ID resmi hanya bila aset wajib mengikuti nomor perusahaan.'
   if (code === 'ASSET_ID_DUPLICATE') return 'Resolusi duplicate Asset ID sebelum publikasi topology.'
   if (code === 'COORDINATE_INVALID') return 'Perbaiki koordinat pada source KML/KMZ di Google Earth.'
   return 'Periksa evidence sumber dan ulangi validasi dataset version.'

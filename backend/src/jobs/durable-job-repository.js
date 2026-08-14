@@ -101,9 +101,21 @@ export class JsonDurableJobRepository {
     return this.#withLock(this.#claimLockPath(), () => this.#getWithoutLock(jobId))
   }
 
-  async list({ statuses, jobType, datasetVersionId, summary = false } = {}) {
+  async list({
+    statuses,
+    jobType,
+    datasetVersionId,
+    idempotencyKey,
+    summary = false,
+  } = {}) {
     const jobs = await this.#withLock(this.#claimLockPath(), () => (
-      this.#listWithoutLock({ statuses, jobType, datasetVersionId })
+      this.#listWithoutLock({
+        statuses,
+        jobType,
+        datasetVersionId,
+        idempotencyKey,
+        summaryOnly: summary,
+      })
     ))
     return summary
       ? jobs.map(({ jobType: type, status }) => ({ jobType: type, status }))
@@ -111,8 +123,8 @@ export class JsonDurableJobRepository {
   }
 
   async findByIdempotencyKey(idempotencyKey) {
-    const jobs = await this.list()
-    return jobs.find((job) => job.idempotencyKey === idempotencyKey) ?? null
+    const jobs = await this.list({ idempotencyKey })
+    return jobs[0] ?? null
   }
 
   async update(jobId, updater, { expectedRevision } = {}) {
@@ -121,7 +133,13 @@ export class JsonDurableJobRepository {
     ))
   }
 
-  async #listWithoutLock({ statuses, jobType, datasetVersionId } = {}) {
+  async #listWithoutLock({
+    statuses,
+    jobType,
+    datasetVersionId,
+    idempotencyKey,
+    summaryOnly = false,
+  } = {}) {
     await this.initialize()
     const allowedStatuses = statuses
       ? new Set(statuses)
@@ -130,14 +148,22 @@ export class JsonDurableJobRepository {
     const jobs = []
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.json')) continue
-      const job = normalizePersistedJob(JSON.parse(await readFile(
-        path.join(this.rootDirectory, entry.name),
-        'utf8',
-      )))
+      const serialized = await readFile(path.join(this.rootDirectory, entry.name), 'utf8')
+      const descriptor = persistedJobDescriptor(serialized)
+      if (allowedStatuses && descriptor && !allowedStatuses.has(descriptor.status)) continue
+      if (jobType && descriptor && descriptor.jobType !== jobType) continue
+      if (datasetVersionId && descriptor && descriptor.datasetVersionId !== datasetVersionId) continue
+      if (idempotencyKey && descriptor && descriptor.idempotencyKey !== idempotencyKey) continue
+      if (summaryOnly && descriptor) {
+        jobs.push(descriptor)
+        continue
+      }
+      const job = normalizePersistedJob(JSON.parse(serialized))
       if (allowedStatuses && !allowedStatuses.has(job.status)) continue
       if (jobType && job.jobType !== jobType) continue
       if (datasetVersionId && job.datasetVersionId !== datasetVersionId) continue
-      jobs.push(job)
+      if (idempotencyKey && job.idempotencyKey !== idempotencyKey) continue
+      jobs.push(summaryOnly ? durableJobDescriptor(job) : job)
     }
     return jobs.sort((left, right) => (
       String(left.availableAt).localeCompare(String(right.availableAt))
@@ -355,7 +381,7 @@ export class JsonDurableJobRepository {
 
   async hasActiveJobs() {
     return this.#withLock(this.#claimLockPath(), async () => {
-      const jobs = await this.#listWithoutLock()
+      const jobs = await this.#listWithoutLock({ summaryOnly: true })
       return jobs.some((job) => ACTIVE_STATUSES.has(job.status))
     })
   }
@@ -389,6 +415,7 @@ export class JsonDurableJobRepository {
       try {
         await writeFile(lockPath, JSON.stringify({
           token,
+          ownerPid: process.pid,
           acquiredAt: this.clock().toISOString(),
         }), { encoding: 'utf8', flag: 'wx' })
         break
@@ -416,6 +443,8 @@ export class JsonDurableJobRepository {
 
   async #isStaleLock(lockPath) {
     try {
+      const lock = JSON.parse(await readFile(lockPath, 'utf8'))
+      if (Number.isInteger(lock.ownerPid) && !processIsRunning(lock.ownerPid)) return true
       const info = await stat(lockPath)
       return this.clock().getTime() - info.mtimeMs > this.staleLockMilliseconds
     } catch (error) {
@@ -441,6 +470,58 @@ export class JsonDurableJobRepository {
     assertSafeJobId(jobId)
     return path.join(this.lockDirectory, `job-${jobId}.lock`)
   }
+}
+
+function processIsRunning(pid) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return error.code !== 'ESRCH'
+  }
+}
+
+function persistedJobDescriptor(serialized) {
+  try {
+    const descriptor = {
+      jobId: jsonStringField(serialized, 'jobId'),
+      jobType: jsonStringField(serialized, 'jobType'),
+      datasetVersionId: jsonNullableStringField(serialized, 'datasetVersionId'),
+      idempotencyKey: jsonStringField(serialized, 'idempotencyKey'),
+      status: jsonStringField(serialized, 'status'),
+      availableAt: jsonStringField(serialized, 'availableAt'),
+      queuedAt: jsonStringField(serialized, 'queuedAt'),
+    }
+    if (!descriptor.jobId || !descriptor.jobType || !DURABLE_JOB_STATUSES.includes(descriptor.status)) {
+      return null
+    }
+    return descriptor
+  } catch {
+    return null
+  }
+}
+
+function durableJobDescriptor(job) {
+  return {
+    jobId: job.jobId,
+    jobType: job.jobType,
+    datasetVersionId: job.datasetVersionId,
+    status: job.status,
+    availableAt: job.availableAt,
+    queuedAt: job.queuedAt,
+  }
+}
+
+function jsonStringField(serialized, field) {
+  const match = serialized.match(new RegExp(`"${field}"\\s*:\\s*("(?:\\\\.|[^"\\\\])*")`))
+  return match ? JSON.parse(match[1]) : null
+}
+
+function jsonNullableStringField(serialized, field) {
+  const match = serialized.match(new RegExp(
+    `"${field}"\\s*:\\s*(null|"(?:\\\\.|[^"\\\\])*")`,
+  ))
+  return match && match[1] !== 'null' ? JSON.parse(match[1]) : null
 }
 
 export function buildIdempotencyKey({

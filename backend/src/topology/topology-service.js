@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { AppError } from '../errors.js'
 import {
   buildAssetIdentityMapFromRecord,
@@ -9,9 +9,12 @@ import {
 } from '../domain/parser-contract.js'
 import {
   createManualExplicitCandidate,
+  createTopologyCandidateEligibilityContext,
+  evaluateTopologyCandidateEligibility,
   generateRelationArtifacts,
   normalizeTopologySummary,
   rebuildConfirmedRelationArtifacts,
+  TOPOLOGY_RULE_SET_VERSION,
 } from './semantic-relation-engine.js'
 import {
   withTopologyGraphRevision,
@@ -24,6 +27,11 @@ import {
   TopologyCandidateQueryIndex,
 } from './topology-candidate-pagination.js'
 import {
+  findTopologyCandidateConflicts,
+  topologyCandidateCardinality,
+  topologyCandidateDecisionKey,
+} from './topology-cardinality.js'
+import {
   appendTopologyMutationReceipt,
   assertTopologyMutationFingerprint,
   canonicalizeJsonValue,
@@ -33,23 +41,44 @@ import {
 } from './topology-idempotency.js'
 
 const MAX_SELECTED_CANDIDATE_IDS = 5000
+const MAX_MANUAL_REFERENCE_IDS = 256
 
 export class TopologyService {
   constructor({
     repository,
     auditLog,
     config = {},
+    metrics = null,
     clock = () => new Date(),
   }) {
     this.repository = repository
     this.auditLog = auditLog
     this.config = config
+    this.metrics = metrics
     this.clock = clock
     this.candidateQueryIndexes = new Map()
+    this.traceResultCache = new Map()
+    this.impactResultCache = new Map()
+    this.traceGraphCache = new Map()
+    this.traceGraphObjectCache = new WeakMap()
     // Bulk review rewrites a large aggregate and its indexed graph projection.
     // Keep one such mutation in flight per dataset so a browser retry cannot
     // multiply the 35MB+ JSONB working set until Node exhausts its heap.
     this.activeMutationDatasetIds = new Set()
+  }
+
+  normalizedTraceGraph(
+    record,
+    identityMap = buildAssetIdentityMapFromRecord(record),
+    projection = null,
+  ) {
+    return normalizedTraceGraphFromCache(
+      this.traceGraphCache,
+      this.traceGraphObjectCache,
+      record,
+      identityMap,
+      projection,
+    )
   }
 
   async regenerate(datasetVersionId, actorId, {
@@ -67,9 +96,78 @@ export class TopologyService {
         config: this.config,
         previousCandidates: current.topologyCandidates,
         previousRelations: current.confirmedRelations,
+        previousInterfaceRegistry: current.topologyInterfaceRegistry
+          ?? current.topologyGraph?.interfaceRegistry
+          ?? [],
         generatedAt,
       })
       assertPublishableTopologyArtifacts(artifacts, datasetVersionId)
+      recordTopologyMetrics(this.metrics, artifacts, {
+        inputBundle: topologyInputBundle,
+        previousRecord: current,
+      })
+      const interfaceRegistryEvent = await auditLog.record(
+        'topology.interface_registry_generated',
+        {
+          actorId,
+          datasetVersionId,
+          branchId: current.datasetVersion.branchId,
+          correlationId,
+          outcome: 'generated',
+          details: {
+            topologyRuleSetVersion: artifacts.topologyRuleSetVersion,
+            interfaceCount: artifacts.interfaceRegistry?.length ?? 0,
+            componentCount: artifacts.componentRegistry?.length ?? 0,
+            registryRevision: artifacts.generatedAt,
+          },
+        },
+      )
+      const supersededCandidates = (current.topologyCandidates ?? []).filter((candidate) => (
+        candidate.topologyRuleSetVersion
+          && candidate.topologyRuleSetVersion !== artifacts.topologyRuleSetVersion
+      ))
+      const supersededEvent = supersededCandidates.length
+        ? await auditLog.record('topology.candidate_superseded_by_rule_set', {
+          actorId,
+          datasetVersionId,
+          branchId: current.datasetVersion.branchId,
+          correlationId,
+          outcome: 'superseded',
+          details: {
+            previousRuleSetVersions: [...new Set(
+              supersededCandidates.map(({ topologyRuleSetVersion }) => topologyRuleSetVersion),
+            )],
+            currentRuleSetVersion: artifacts.topologyRuleSetVersion,
+            candidateCount: supersededCandidates.length,
+            candidateIds: supersededCandidates.map(({ candidateId }) => candidateId),
+          },
+        })
+        : null
+      const profileAssignmentRecords = topologyProfileAssignmentRecords(
+        topologyInputBundle,
+        artifacts,
+      )
+      const assignedProfiles = [...new Set(profileAssignmentRecords
+        .map(({ profileId }) => profileId)
+        .filter(Boolean))]
+      const profileEvent = profileAssignmentRecords.length
+        ? await auditLog.record('topology.jb_profile_assigned', {
+          actorId,
+          datasetVersionId,
+          branchId: current.datasetVersion.branchId,
+          correlationId,
+          outcome: 'assigned',
+          details: {
+            profileIds: assignedProfiles,
+            assignmentSources: [...new Set(profileAssignmentRecords
+              .map(({ assignmentSource }) => assignmentSource)
+              .filter(Boolean))],
+            assignmentCount: profileAssignmentRecords.length,
+            interfaceCount: artifacts.interfaceRegistry?.length ?? 0,
+            topologyRuleSetVersion: artifacts.topologyRuleSetVersion,
+          },
+        })
+        : null
       const event = await auditLog.record('topology.candidates_regenerated', {
         actorId,
         datasetVersionId,
@@ -85,6 +183,11 @@ export class TopologyService {
             repairedCount: repaired.repairedCount,
           },
           topologyRuleSetVersion: artifacts.topologyRuleSetVersion,
+          auditEventIds: {
+            interfaceRegistryGenerated: interfaceRegistryEvent.id,
+            ...(supersededEvent ? { candidateSupersededByRuleSet: supersededEvent.id } : {}),
+            ...(profileEvent ? { jbProfileAssigned: profileEvent.id } : {}),
+          },
           before: current.topologySummary ?? null,
           after: artifacts.summary,
         },
@@ -130,10 +233,12 @@ export class TopologyService {
 
   async getSummary(datasetVersionId) {
     const record = await this.repository.get(datasetVersionId)
-    const graph = normalizeTraceGraph(record, buildAssetIdentityMapFromRecord(record))
+    const graph = this.normalizedTraceGraph(record)
+    const reviewContract = topologyReviewContract(record)
     return {
       datasetVersionId,
       topologyRuleSetVersion: record.topologyRuleSetVersion ?? null,
+      topologyPolicy: structuredClone(record.topologyPolicy ?? null),
       summary: normalizeTopologySummary(
         record.topologySummary ?? emptySummary(),
         graph,
@@ -145,7 +250,27 @@ export class TopologyService {
       },
       validation: record.topologyValidation ?? null,
       lastGeneratedAt: record.topologyGeneratedAt ?? null,
+      ...reviewContract,
+      topologyDiagnostics: structuredClone(record.topologyDiagnostics ?? []),
+      interfaceRegistry: structuredClone(
+        record.topologyInterfaceRegistry ?? graph.interfaceRegistry ?? [],
+      ),
       graphRevision: graph.graphRevision,
+      reviewCapabilities: {
+        contractVersion: '2.0.0',
+        safePreview: true,
+        deltaValidation: true,
+        confirmSelected: true,
+        confirmAll: true,
+        confirmLineLabels: true,
+        manualRelation: true,
+        maxBatchSize: MAX_SELECTED_CANDIDATE_IDS,
+      },
+      roots: verifiedRootNodes(graph).map(({ id, topologyRole }) => ({
+        assetId: id,
+        topologyRole: topologyRole ?? 'unknown',
+      })),
+      directionCoverage: directionCoverageForGraph(graph),
       candidateRevision: createCandidateCollectionRevision(record.topologyCandidates ?? []),
       recordRevision: recordRevision(record),
     }
@@ -154,7 +279,7 @@ export class TopologyService {
   async getCandidates(datasetVersionId, query = {}) {
     const record = await this.repository.get(datasetVersionId)
     const candidates = record.topologyCandidates ?? []
-    const graph = normalizeTraceGraph(record, buildAssetIdentityMapFromRecord(record))
+    const graph = this.normalizedTraceGraph(record)
     const candidateRevision = createCandidateCollectionRevision(candidates)
     const cached = this.candidateQueryIndexes.get(datasetVersionId)
     const index = cached?.revision === candidateRevision
@@ -167,56 +292,203 @@ export class TopologyService {
       })
     }
     const normalizedQuery = normalizeCandidateQuery(query ?? {})
+    const eligibilityContext = createTopologyCandidateEligibilityContext(
+      record.topologyInputBundle,
+    )
     const page = paginateCandidates(index, {
       ...normalizedQuery,
       graphRevision: graph.graphRevision,
       candidateRevision,
     })
+    const reviewItems = page.items.map((candidate) => (
+      annotateTopologyCandidateForReview(record, candidate, eligibilityContext)
+    ))
+    const filteredReviewCandidates = page.filteredCandidates.map((candidate) => (
+      annotateTopologyCandidateForReview(record, candidate, eligibilityContext)
+    ))
+    const reviewCandidates = candidates.map((candidate) => (
+      annotateTopologyCandidateForReview(record, candidate, eligibilityContext)
+    ))
     return {
       datasetVersionId,
       topologyRuleSetVersion: record.topologyRuleSetVersion ?? null,
-      items: page.items,
+      topologyPolicy: structuredClone(record.topologyPolicy ?? null),
+      interfaceRegistry: structuredClone(
+        record.topologyInterfaceRegistry ?? graph.interfaceRegistry ?? [],
+      ),
+      items: reviewItems,
       nextCursor: page.nextCursor,
       pageInfo: page.pageInfo,
-      summary: summarizeCandidates(page.filteredCandidates),
-      datasetSummary: summarizeCandidates(candidates),
+      summary: summarizeCandidates(filteredReviewCandidates),
+      datasetSummary: summarizeCandidates(reviewCandidates),
       query: {
         status: normalizedQuery.status,
         site: normalizedQuery.site,
         networkFamily: normalizedQuery.networkFamily,
+        candidateType: normalizedQuery.candidateType,
+        proposalStatus: normalizedQuery.proposalStatus,
         minScore: normalizedQuery.minScore,
+        maxScore: normalizedQuery.maxScore,
+        minDistance: normalizedQuery.minDistance,
+        maxDistance: normalizedQuery.maxDistance,
+        assetSearch: normalizedQuery.assetSearch,
+        requiredTopologyOnly: normalizedQuery.requiredTopologyOnly,
       },
       graphRevision: graph.graphRevision,
       candidateRevision,
       unresolved: structuredClone(record.topologyUnresolved ?? []),
       eligibilityIssues: structuredClone(record.topologyEligibilityIssues ?? []),
       lineworkIssues: structuredClone(record.topologyLineworkIssues ?? []),
-      history: structuredClone(record.topologyCandidateHistory ?? []),
+      history: projectCandidateHistory(
+        record.topologyCandidateHistory ?? [],
+        new Set(page.items.map(({ candidateId }) => candidateId)),
+      ),
       runs: structuredClone(record.topologyRuns ?? []),
       recordRevision: recordRevision(record),
     }
   }
 
+  async reviewPreview(datasetVersionId, {
+    candidateIds,
+    expectedGraphRevision,
+    expectedCandidateRevision,
+  } = {}) {
+    const normalizedCandidateIds = normalizeCandidateIds(candidateIds)
+    const record = await this.repository.get(datasetVersionId)
+    assertTopologyBundle(record)
+    assertReviewSnapshot(record, {
+      expectedGraphRevision,
+      expectedCandidateRevision,
+    })
+    return buildBulkReviewPreview(record, normalizedCandidateIds, this.config)
+  }
+
   async getGraph(datasetVersionId) {
     const record = await this.repository.get(datasetVersionId)
-    const graph = normalizeTraceGraph(record, buildAssetIdentityMapFromRecord(record))
+    const graph = this.normalizedTraceGraph(record)
     return {
       datasetVersionId,
-      graph,
+      graph: structuredClone(graph),
       validation: structuredClone(record.topologyValidation ?? null),
+      topologyDiagnostics: structuredClone(record.topologyDiagnostics ?? []),
       confirmedRelations: structuredClone(record.confirmedRelations ?? []),
     }
   }
 
-  async trace(datasetVersionId, request = {}, actorId = null, correlationId = null) {
+  async getJunctionBox(datasetVersionId, assetId) {
+    const record = await this.repository.get(datasetVersionId)
+    assertTopologyBundle(record)
+    const node = findTopologyAsset(record, assetId)
+    if (!node) {
+      throw new AppError('Junction Box tidak ditemukan pada topology dataset.', {
+        code: 'topology_junction_box_not_found',
+        statusCode: 404,
+        details: { datasetVersionId, assetId },
+      })
+    }
+    const nodeId = node.id
+      ?? node.canonicalAssetId
+      ?? node.assetId
+      ?? node.stableAssetId
+      ?? assetId
+    const sourceNode = (record.topologyInputBundle?.classifiedNodes ?? []).find((item) => (
+      [
+        item.id,
+        item.canonicalAssetId,
+        item.assetId,
+        item.stableAssetId,
+        item.sourceFeatureId,
+      ].filter(Boolean).map(String).includes(String(nodeId))
+    ))
+    if (!isJunctionBoxOrRackAsset(node)) {
+      throw new AppError('Asset topology bukan Junction Box atau rack enclosure.', {
+        code: 'topology_asset_not_junction_box',
+        statusCode: 422,
+        details: { datasetVersionId, assetId: nodeId },
+      })
+    }
+    const registry = record.topologyInterfaceRegistry
+      ?? record.topologyGraph?.interfaceRegistry
+      ?? []
+    const components = record.topologyComponentRegistry
+      ?? record.topologyGraph?.componentRegistry
+      ?? []
+    const interfaces = registry
+      .filter((item) => item.ownerAssetId === nodeId && item.status !== 'retired')
+      .map((item) => ({
+        ...structuredClone(item),
+        occupancy: activeInterfaceOccupancy(record.confirmedRelations, item.interfaceId),
+      }))
+      .sort((left, right) => String(left.interfaceId).localeCompare(String(right.interfaceId)))
+    const interfaceIds = new Set(interfaces.map(({ interfaceId }) => interfaceId))
+    const componentItems = components
+      .filter((item) => item.ownerAssetId === nodeId && item.status !== 'retired')
+      .map((component) => ({
+        ...structuredClone(component),
+        interfaces: interfaces.filter(({ componentId }) => (
+          componentId === component.componentId
+        )),
+      }))
+      .sort((left, right) => String(left.componentId).localeCompare(String(right.componentId)))
+    const relations = (record.confirmedRelations ?? []).filter((relation) => (
+      relation.targetAssetId === nodeId
+        || relation.sourceAssetId === nodeId
+        || interfaceIds.has(relation.targetInterfaceId)
+        || interfaceIds.has(relation.sourceInterfaceId)
+    ))
+    const candidates = (record.topologyCandidates ?? []).filter((candidate) => (
+      candidate.targetAssetId === nodeId
+        || candidate.sourceAssetId === nodeId
+        || candidate.sourcePathAssetId === nodeId
+        || interfaceIds.has(candidate.targetInterfaceId)
+        || interfaceIds.has(candidate.sourceInterfaceId)
+    ))
+    const profileId = node.jbProfileId
+      ?? node.profileId
+      ?? sourceNode?.jbProfileId
+      ?? sourceNode?.profileId
+      ?? null
+    const profile = (record.topologyInputBundle?.jbProfiles ?? []).find((item) => (
+      String(item.profileId ?? item.id ?? '') === String(profileId)
+    )) ?? null
+    return {
+      datasetVersionId,
+      topologyRuleSetVersion: record.topologyRuleSetVersion ?? null,
+      topologyPolicy: structuredClone(record.topologyPolicy ?? null),
+      asset: structuredClone(node),
+      profile: structuredClone(profile),
+      components: componentItems,
+      interfaces,
+      confirmedRelations: structuredClone(relations),
+      pendingCandidates: structuredClone(candidates),
+      provenance: {
+        profileId,
+        profileVersion: profile?.version ?? profile?.profileVersion ?? null,
+        assignmentSources: [...new Set(interfaces.map(({ assignmentSource }) => assignmentSource).filter(Boolean))],
+        registryRevision: record.topologyGeneratedAt ?? null,
+      },
+      graphRevision: record.topologyGraph?.graphRevision ?? null,
+      recordRevision: recordRevision(record),
+    }
+  }
+
+  async trace(
+    datasetVersionId,
+    request = {},
+    actorId = null,
+    correlationId = null,
+    traceContext = {},
+  ) {
+    const startedAt = Date.now()
     const normalized = normalizeTraceRequest(request)
     normalized.correlationId = correlationId
     const record = await this.repository.get(datasetVersionId)
     const identityMap = buildAssetIdentityMapFromRecord(record)
     const resolver = createAssetIdentityResolver(identityMap)
-    const graph = normalizeTraceGraph(record, identityMap)
+    const graph = this.normalizedTraceGraph(record, identityMap, normalized.serviceDomain)
 
     if (normalized.graphRevision !== graph.graphRevision) {
+      recordTopologyTraceFailure(this.metrics, normalized.serviceDomain, 'topology_graph_stale')
       const error = new AppError(
         'Graph topology berubah sejak peta dimuat. Muat ulang dataset aktif sebelum tracing.',
         {
@@ -234,12 +506,14 @@ export class TopologyService {
         datasetVersionId,
         request: normalized,
         result: { status: 'stale', graphRevision: graph.graphRevision },
+        durationMilliseconds: Date.now() - startedAt,
       })
       throw error
     }
 
     const validationErrors = graphValidationErrorCount(record.topologyValidation)
     if (validationErrors > 0) {
+      recordTopologyTraceFailure(this.metrics, normalized.serviceDomain, 'topology_graph_invalid')
       const error = new AppError(
         'Tracing dihentikan karena confirmed graph tidak valid.',
         {
@@ -257,8 +531,70 @@ export class TopologyService {
         datasetVersionId,
         request: normalized,
         result: { status: 'invalid', graphRevision: graph.graphRevision },
+        durationMilliseconds: Date.now() - startedAt,
       })
       throw error
+    }
+
+    const unavailablePublication = record.datasetVersion?.publicationProfile
+      && record.datasetVersion.publicationProfile !== 'operational_topology'
+    if (unavailablePublication && !isTopologyPreviewAllowed(traceContext)) {
+      const result = traceState({
+        datasetVersionId,
+        graphRevision: graph.graphRevision,
+        sourceAssetId: normalized.sourceAssetId,
+        targetAssetId: normalized.targetAssetId,
+        mode: normalized.mode,
+        direction: normalized.direction,
+        status: 'unavailable',
+        reason: 'topology_not_published',
+        message: traceMessageForReason('topology_not_published'),
+      })
+      recordTopologyTraceFailure(this.metrics, normalized.serviceDomain, result.reason)
+      await recordTraceAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result,
+        durationMilliseconds: Date.now() - startedAt,
+      })
+      return result
+    }
+
+    const cacheKey = topologyResultCacheKey(
+      'trace',
+      datasetVersionId,
+      graph.graphRevision,
+      normalized,
+    )
+    const cached = readTopologyResultCache(this.traceResultCache, cacheKey)
+    if (cached) {
+      await recordTraceAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result: cached,
+        durationMilliseconds: Date.now() - startedAt,
+        cacheHit: true,
+      })
+      return cached
+    }
+    const finalize = async (result) => {
+      const finalized = decorateTopologyPreviewResult(result, traceContext, record)
+      if (finalized.status !== 'found' && finalized.status !== 'destinations') {
+        recordTopologyTraceFailure(this.metrics, normalized.serviceDomain, finalized.reason)
+      }
+      if (!isTopologyPreviewAllowed(traceContext)) {
+        writeTopologyResultCache(this.traceResultCache, cacheKey, finalized)
+      }
+      await recordTraceAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result: finalized,
+        durationMilliseconds: Date.now() - startedAt,
+      })
+      return finalized
     }
 
     const scopeNodeIds = normalized.scopeAssetIds === null
@@ -275,51 +611,105 @@ export class TopologyService {
       graph,
       normalized.sourceAssetId,
     )
-    if (!sourceAssetId || !nodeIds.has(sourceAssetId)) {
-      const result = traceState({
+    if (!sourceAssetId) {
+      return finalize(traceState({
         datasetVersionId,
         graphRevision: graph.graphRevision,
         sourceAssetId: normalized.sourceAssetId,
         targetAssetId: normalized.targetAssetId,
+        mode: normalized.mode,
+        direction: normalized.direction,
         status: 'invalid-source',
         reason: 'source_not_topology_node',
-        message: 'Aset ini belum terdaftar sebagai node topology.',
-      })
-      await recordTraceAudit(this.auditLog, {
-        actorId,
+        message: traceMessageForReason('source_not_topology_node'),
+      }))
+    }
+    if (!nodeIds.has(sourceAssetId)) {
+      return finalize(traceState({
         datasetVersionId,
-        request: normalized,
-        result,
-      })
-      return result
+        graphRevision: graph.graphRevision,
+        sourceAssetId,
+        targetAssetId: normalized.targetAssetId,
+        mode: normalized.mode,
+        direction: normalized.direction,
+        status: 'unreachable',
+        reason: 'scope_excludes_path',
+        message: traceMessageForReason('scope_excludes_path'),
+      }))
     }
 
     const targetAssetId = normalized.targetAssetId === null
       ? null
       : resolveTraceAssetId(resolver, graph, normalized.targetAssetId)
-    if (normalized.targetAssetId !== null && (!targetAssetId || !nodeIds.has(targetAssetId))) {
-      const result = traceState({
+    if (normalized.targetAssetId !== null && !targetAssetId) {
+      return finalize(traceState({
         datasetVersionId,
         graphRevision: graph.graphRevision,
         sourceAssetId,
         targetAssetId: normalized.targetAssetId,
+        mode: normalized.mode,
+        direction: normalized.direction,
         status: 'invalid-target',
         reason: 'target_not_topology_node',
-        message: 'Aset tujuan belum terdaftar sebagai node topology.',
-      })
-      await recordTraceAudit(this.auditLog, {
-        actorId,
+        message: traceMessageForReason('target_not_topology_node'),
+      }))
+    }
+    if (targetAssetId !== null && !nodeIds.has(targetAssetId)) {
+      return finalize(traceState({
         datasetVersionId,
-        request: normalized,
-        result,
-      })
-      return result
+        graphRevision: graph.graphRevision,
+        sourceAssetId,
+        targetAssetId,
+        mode: normalized.mode,
+        direction: normalized.direction,
+        status: 'unreachable',
+        reason: 'scope_excludes_path',
+        message: traceMessageForReason('scope_excludes_path'),
+      }))
     }
 
-    const adjacency = buildTraceAdjacency(traversalGraph)
+    const traversal = buildTraceTraversal(traversalGraph, normalized)
+    const adjacency = traversal.adjacency
+    const physicalAdjacency = buildTraceAdjacency(traversalGraph, {
+      mode: 'connectivity',
+      direction: 'both',
+    })
     const componentId = componentIdForNode(traversalGraph, sourceAssetId)
+    const availabilityReason = traceAvailabilityReason(
+      traversalGraph,
+      physicalAdjacency,
+      normalized,
+      sourceAssetId,
+    )
+    if (availabilityReason) {
+      return finalize(traceState({
+        datasetVersionId,
+        graphRevision: graph.graphRevision,
+        sourceAssetId,
+        targetAssetId,
+        componentId,
+        mode: normalized.mode,
+        direction: normalized.direction,
+        status: 'unreachable',
+        reason: availabilityReason,
+        message: traceMessageForReason(availabilityReason),
+      }))
+    }
+
     if (targetAssetId === null) {
-      const destinations = reachableDestinations(adjacency, sourceAssetId)
+      const traversalResult = reachableDestinations(
+        adjacency,
+        sourceAssetId,
+        normalized.maxDepth,
+      )
+      const destinations = traversalResult.destinations
+      const reason = destinations.length
+        ? null
+        : traversalResult.truncated
+          ? 'max_depth_reached'
+          : traversalGraph.degreeByNode?.[sourceAssetId] === 0
+            ? 'isolated_source'
+            : 'unreachable'
       const result = destinations.length
         ? {
           status: 'destinations',
@@ -327,8 +717,11 @@ export class TopologyService {
           graphRevision: graph.graphRevision,
           sourceAssetId,
           componentId,
-          destinations,
+          mode: normalized.mode,
           direction: normalized.direction,
+          maxDepth: normalized.maxDepth,
+          truncated: traversalResult.truncated,
+          destinations,
           explanation: 'Tujuan dihitung dari confirmed operational graph.',
         }
         : traceState({
@@ -336,24 +729,21 @@ export class TopologyService {
           graphRevision: graph.graphRevision,
           sourceAssetId,
           componentId,
+          mode: normalized.mode,
+          direction: normalized.direction,
           status: 'unreachable',
-          reason: 'isolated-source',
-          message: 'Belum ada koneksi terkonfirmasi dari aset ini.',
+          reason,
+          message: traceMessageForReason(reason),
         })
-      await recordTraceAudit(this.auditLog, {
-        actorId,
-        datasetVersionId,
-        request: normalized,
-        result,
-      })
-      return result
+      return finalize(result)
     }
 
     if (sourceAssetId === targetAssetId) {
-      const result = {
+      return finalize({
         status: 'found',
         datasetVersionId,
         graphRevision: graph.graphRevision,
+        mode: normalized.mode,
         componentId,
         sourceAssetId,
         targetAssetId,
@@ -363,74 +753,376 @@ export class TopologyService {
         totalLengthMeters: null,
         networkFamily: networkFamilyForNodes(traversalGraph, [sourceAssetId]),
         direction: normalized.direction,
+        maxDepth: normalized.maxDepth,
         verifiedAt: record.topologyGeneratedAt ?? null,
         explanation: 'Titik awal dan tujuan adalah aset yang sama.',
-      }
-      await recordTraceAudit(this.auditLog, {
-        actorId,
-        datasetVersionId,
-        request: normalized,
-        result,
       })
-      return result
     }
 
-    const path = findTracePath(adjacency, sourceAssetId, targetAssetId)
-    if (!path) {
+    const pathResult = findTracePath(
+      adjacency,
+      sourceAssetId,
+      targetAssetId,
+      normalized.maxDepth,
+    )
+    if (!pathResult.path) {
       const targetComponentId = componentIdForNode(traversalGraph, targetAssetId)
-      const reason = traversalGraph.degreeByNode?.[sourceAssetId] === 0
-        ? 'isolated-source'
-        : hasPendingCandidate(record, resolver, sourceAssetId, targetAssetId)
-          ? 'candidate_pending_review'
-          : componentId !== targetComponentId
-            ? 'different-component'
-            : 'unreachable'
-      const result = traceState({
+      const physicalPath = findTracePath(
+        physicalAdjacency,
+        sourceAssetId,
+        targetAssetId,
+        normalized.maxDepth,
+      )
+      const reason = pathResult.truncated
+        ? 'max_depth_reached'
+        : normalized.scopeAssetIds !== null
+          ? 'scope_excludes_path'
+          : hasUnavailableDirectionOnPhysicalPath(traversalGraph, physicalPath)
+            ? 'direction_not_available'
+            : traversalGraph.degreeByNode?.[sourceAssetId] === 0
+              ? 'isolated_source'
+              : hasPendingCandidate(record, resolver, sourceAssetId, targetAssetId)
+                ? 'candidate_pending_review'
+                : componentId !== targetComponentId
+                  ? 'different_component'
+                  : 'unreachable'
+      return finalize(traceState({
         datasetVersionId,
         graphRevision: graph.graphRevision,
         sourceAssetId,
         targetAssetId,
         componentId,
+        mode: normalized.mode,
+        direction: normalized.direction,
         status: 'unreachable',
         reason,
         message: traceMessageForReason(reason),
-      })
-      await recordTraceAudit(this.auditLog, {
-        actorId,
-        datasetVersionId,
-        request: normalized,
-        result,
-      })
-      return result
+      }))
     }
 
-    const edges = path.map(({ edge, source, target }) => traceEdge(edge, source, target))
-    const result = {
+    const edges = pathResult.path.map(({ edge, source, target }) => (
+      traceEdge(edge, source, target)
+    ))
+    return finalize({
       status: 'found',
       datasetVersionId,
       graphRevision: graph.graphRevision,
+      mode: normalized.mode,
       componentId,
       sourceAssetId,
       targetAssetId,
-      nodeIds: [sourceAssetId, ...path.map(({ target }) => target)],
+      nodeIds: [sourceAssetId, ...pathResult.path.map(({ target }) => target)],
       edges,
       hopCount: edges.length,
       totalLengthMeters: sumLength(edges),
       networkFamily: networkFamilyForNodes(traversalGraph, [
         sourceAssetId,
-        ...path.map(({ target }) => target),
+        ...pathResult.path.map(({ target }) => target),
       ]),
       direction: normalized.direction,
+      maxDepth: normalized.maxDepth,
       verifiedAt: record.topologyGeneratedAt ?? null,
       explanation: 'Jalur menggunakan confirmed operational graph.',
-    }
-    await recordTraceAudit(this.auditLog, {
-      actorId,
-      datasetVersionId,
-      request: normalized,
-      result,
     })
-    return result
+  }
+
+  async getRoots(datasetVersionId, request = {}) {
+    const graphRevision = request?.graphRevision === undefined
+      || request?.graphRevision === null
+      ? null
+      : normalizeTraceId(request.graphRevision, 'graphRevision', true)
+    const record = await this.repository.get(datasetVersionId)
+    const graph = this.normalizedTraceGraph(
+      record,
+      buildAssetIdentityMapFromRecord(record),
+    )
+    if (graphRevision !== null && graphRevision !== graph.graphRevision) {
+      throw new AppError(
+        'Graph topology berubah sejak root dimuat. Muat ulang dataset aktif.',
+        {
+          code: 'topology_graph_stale',
+          statusCode: 409,
+          details: {
+            requestedGraphRevision: graphRevision,
+            currentGraphRevision: graph.graphRevision,
+            datasetVersionId,
+          },
+        },
+      )
+    }
+    const validationErrors = graphValidationErrorCount(record.topologyValidation)
+    if (validationErrors > 0) {
+      throw new AppError('Root topology tidak dapat dibaca dari graph invalid.', {
+        code: 'topology_graph_invalid',
+        statusCode: 409,
+        details: {
+          datasetVersionId,
+          graphRevision: graph.graphRevision,
+          validationErrorCount: validationErrors,
+        },
+      })
+    }
+    const roots = verifiedRootNodes(graph).map((node) => ({
+      assetId: node.id,
+      topologyRole: node.topologyRole,
+      siteId: node.siteId ?? null,
+      networkFamily: node.networkFamily ?? null,
+      category: node.category ?? null,
+      componentId: componentIdForNode(graph, node.id),
+    }))
+    return {
+      datasetVersionId,
+      graphRevision: graph.graphRevision,
+      roots,
+      rootAssetIds: roots.map(({ assetId }) => assetId),
+      directionCoverage: directionCoverageForGraph(graph),
+      status: roots.length ? 'ready' : 'unavailable',
+      reason: roots.length ? null : 'root_not_defined',
+    }
+  }
+
+  async impact(
+    datasetVersionId,
+    request = {},
+    actorId = null,
+    correlationId = null,
+    impactContext = {},
+  ) {
+    const startedAt = Date.now()
+    const normalized = normalizeImpactRequest(request)
+    normalized.correlationId = correlationId
+    const record = await this.repository.get(datasetVersionId)
+    const identityMap = buildAssetIdentityMapFromRecord(record)
+    const resolver = createAssetIdentityResolver(identityMap)
+    const graph = this.normalizedTraceGraph(record, identityMap)
+
+    if (normalized.graphRevision !== graph.graphRevision) {
+      const error = new AppError(
+        'Graph topology berubah sejak peta dimuat. Muat ulang dataset aktif sebelum impact analysis.',
+        {
+          code: 'topology_graph_stale',
+          statusCode: 409,
+          details: {
+            requestedGraphRevision: normalized.graphRevision,
+            currentGraphRevision: graph.graphRevision,
+            datasetVersionId,
+          },
+        },
+      )
+      await recordImpactAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result: { status: 'stale', graphRevision: graph.graphRevision },
+        durationMilliseconds: Date.now() - startedAt,
+      })
+      throw error
+    }
+
+    const validationErrors = graphValidationErrorCount(record.topologyValidation)
+    if (validationErrors > 0) {
+      const error = new AppError(
+        'Impact analysis dihentikan karena confirmed graph tidak valid.',
+        {
+          code: 'topology_graph_invalid',
+          statusCode: 409,
+          details: {
+            datasetVersionId,
+            graphRevision: graph.graphRevision,
+            validationErrorCount: validationErrors,
+          },
+        },
+      )
+      await recordImpactAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result: { status: 'invalid', graphRevision: graph.graphRevision },
+        durationMilliseconds: Date.now() - startedAt,
+      })
+      throw error
+    }
+
+    const unavailablePublication = record.datasetVersion?.publicationProfile
+      && record.datasetVersion.publicationProfile !== 'operational_topology'
+    if (unavailablePublication && !isTopologyPreviewAllowed(impactContext)) {
+      const result = impactUnavailable({
+        datasetVersionId,
+        graphRevision: graph.graphRevision,
+        normalized,
+        reason: 'topology_not_published',
+        limitation: 'Impact analysis hanya tersedia pada profile operational_topology.',
+      })
+      await recordImpactAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result,
+        durationMilliseconds: Date.now() - startedAt,
+      })
+      return result
+    }
+
+    const cacheKey = topologyResultCacheKey(
+      'impact',
+      datasetVersionId,
+      graph.graphRevision,
+      normalized,
+    )
+    const cached = readTopologyResultCache(this.impactResultCache, cacheKey)
+    if (cached) {
+      await recordImpactAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result: cached,
+        durationMilliseconds: Date.now() - startedAt,
+        cacheHit: true,
+      })
+      return cached
+    }
+    const finalize = async (result) => {
+      const finalized = decorateTopologyPreviewResult(result, impactContext, record)
+      if (!isTopologyPreviewAllowed(impactContext)) {
+        writeTopologyResultCache(this.impactResultCache, cacheKey, finalized)
+      }
+      await recordImpactAudit(this.auditLog, {
+        actorId,
+        datasetVersionId,
+        request: normalized,
+        result: finalized,
+        durationMilliseconds: Date.now() - startedAt,
+      })
+      return finalized
+    }
+
+    let scopedGraph = graph
+    if (normalized.scopeAssetIds !== null) {
+      const scopeNodeIds = new Set(normalized.scopeAssetIds
+        .map((assetId) => resolveTraceAssetId(resolver, graph, assetId))
+        .filter(Boolean))
+      scopedGraph = restrictTraceGraph(graph, scopeNodeIds)
+    }
+    if (normalized.networkFamily !== null) {
+      const familyNodeIds = new Set(scopedGraph.nodes
+        .filter(({ networkFamily }) => networkFamily === normalized.networkFamily)
+        .map(({ id }) => id))
+      scopedGraph = restrictTraceGraph(scopedGraph, familyNodeIds)
+    }
+
+    const failure = resolveImpactFailure(scopedGraph, normalized, resolver)
+    if (!failure) {
+      return finalize(impactUnavailable({
+        datasetVersionId,
+        graphRevision: graph.graphRevision,
+        normalized,
+        reason: normalized.scopeAssetIds !== null
+          ? 'scope_excludes_path'
+          : 'failure_not_in_graph',
+        limitation: 'Failure ID tidak ditemukan pada confirmed graph yang dianalisis.',
+      }))
+    }
+
+    const roots = resolveImpactRoots(
+      scopedGraph,
+      resolver,
+      normalized.rootAssetIds,
+    )
+    if (!roots.length) {
+      return finalize(impactUnavailable({
+        datasetVersionId,
+        graphRevision: graph.graphRevision,
+        normalized,
+        failure,
+        reason: normalized.rootAssetIds ? 'root_not_defined' : 'root_not_defined',
+        limitation: 'Minimal satu verified root diperlukan untuk impact analysis.',
+      }))
+    }
+
+    const serviceAdjacency = buildTraceAdjacency(scopedGraph, {
+      mode: 'reachable',
+      direction: 'downstream',
+    })
+    const physicalAdjacency = buildTraceAdjacency(scopedGraph, {
+      mode: 'connectivity',
+      direction: 'both',
+    })
+    const baselineReachable = reachableSet(serviceAdjacency, roots.map(({ id }) => id))
+    const physicalReachable = reachableSet(physicalAdjacency, roots.map(({ id }) => id))
+    const incompleteDirectionNodes = reachableViaUndirectedEdge(
+      physicalAdjacency,
+      roots.map(({ id }) => id),
+    )
+    const simulatedGraph = simulateImpactFailure(scopedGraph, failure)
+    const afterAdjacency = buildTraceAdjacency(simulatedGraph, {
+      mode: 'reachable',
+      direction: 'downstream',
+    })
+    const remainingRoots = roots
+      .map(({ id }) => id)
+      .filter((id) => simulatedGraph.nodes.some((node) => node.id === id))
+    const afterReachable = reachableSet(afterAdjacency, remainingRoots)
+    const confirmedImpactedIds = [...baselineReachable]
+      .filter((id) => !afterReachable.has(id))
+      .sort()
+    const potentialIds = [...physicalReachable]
+      .filter((id) => !baselineReachable.has(id) && incompleteDirectionNodes.has(id))
+      .sort()
+    const confirmedImpacted = impactNodes(
+      scopedGraph,
+      confirmedImpactedIds,
+      'lost_root_reachability',
+    )
+    const potentiallyImpacted = impactNodes(
+      scopedGraph,
+      potentialIds,
+      'direction_incomplete',
+    )
+    const cutEdges = failure.edges.map((edge) => ({
+      ...traceEdge(edge, edge.sourceAssetId, edge.targetAssetId),
+      failureType: normalized.failureType,
+      failureId: normalized.failureId,
+    }))
+    const limitations = []
+    const incompleteDirection = hasIncompleteDirectionOnRootArea(
+      scopedGraph,
+      physicalReachable,
+      baselineReachable,
+      incompleteDirectionNodes,
+    )
+    if (incompleteDirection) {
+      limitations.push('Sebagian area hanya terhubung melalui edge undirected; potential impact dipisahkan.')
+    }
+    if (normalized.scopeAssetIds !== null) {
+      limitations.push('Analisis dibatasi oleh scopeAssetIds yang diminta.')
+    }
+    const result = {
+      status: incompleteDirection ? 'partial' : 'completed',
+      datasetVersionId,
+      graphRevision: graph.graphRevision,
+      failure: {
+        type: normalized.failureType,
+        id: normalized.failureId,
+        resolvedAssetId: failure.resolvedAssetId ?? null,
+      },
+      roots: roots.map(({ id }) => id),
+      confirmedImpacted,
+      potentiallyImpacted,
+      confirmedTopologyImpact: confirmedImpacted,
+      potentialTopologyImpact: potentiallyImpacted,
+      confirmedGroups: groupImpactItems(confirmedImpacted),
+      potentialGroups: groupImpactItems(potentiallyImpacted),
+      cutEdges,
+      summary: {
+        baselineReachable: baselineReachable.size,
+        reachableAfterFailure: afterReachable.size,
+        confirmedImpacted: confirmedImpacted.length,
+        potentiallyImpacted: potentiallyImpacted.length,
+      },
+      limitations,
+      computedAt: this.clock().toISOString(),
+    }
+    return finalize(result)
   }
 
   async confirmCandidate(candidateId, actorId, {
@@ -464,6 +1156,7 @@ export class TopologyService {
       action: 'confirm_all',
       eventName: 'topology.candidates_bulk_confirmed',
       predicate: isBulkConfirmableCandidate,
+      requireSafePreview: true,
       expectedGraphRevision,
       expectedCandidateRevision,
       idempotencyKey,
@@ -483,8 +1176,9 @@ export class TopologyService {
       reason,
       action: 'confirm_selected',
       eventName: 'topology.candidates_selected_bulk_confirmed',
-      predicate: isCandidateConfirmable,
+      predicate: isBulkConfirmableCandidate,
       selectedCandidateIds: normalizeCandidateIds(candidateIds),
+      requireSafePreview: true,
       expectedGraphRevision,
       expectedCandidateRevision,
       idempotencyKey,
@@ -504,6 +1198,7 @@ export class TopologyService {
       action: 'confirm_line_labels',
       eventName: 'topology.line_label_connections_bulk_confirmed',
       predicate: isLineLabelConfirmableCandidate,
+      requireSafePreview: true,
       expectedGraphRevision,
       expectedCandidateRevision,
       idempotencyKey,
@@ -521,9 +1216,10 @@ export class TopologyService {
     expectedCandidateRevision,
     idempotencyKey,
     correlationId,
+    requireSafePreview = false,
   }) {
     const normalizedIdempotencyKey = normalizeTopologyIdempotencyKey(idempotencyKey)
-    const normalizedReason = normalizeReason(reason, false)
+    const normalizedReason = normalizeReason(reason, true)
     const fingerprint = normalizedIdempotencyKey
       ? createTopologyMutationFingerprint({
         action,
@@ -589,6 +1285,25 @@ export class TopologyService {
             projectionMode: 'topology-review',
           })
           return response
+        }
+        const selectedConflicts = findTopologyCandidateConflicts(confirmable)
+        if (selectedConflicts.length > 0) {
+          throw bulkReviewConflictError(selectedConflicts)
+        }
+        if (requireSafePreview) {
+          const previewCandidateIds = selectedCandidateIds
+            ?? confirmable.map(({ candidateId }) => candidateId)
+          const preview = buildBulkReviewPreview(current, previewCandidateIds, this.config)
+          if (!preview.safeToApply) {
+            throw new AppError(
+              'Bulk review ditolak karena preview topology tidak aman untuk diterapkan.',
+              {
+                code: 'topology_bulk_review_not_safe',
+                statusCode: 422,
+                details: preview,
+              },
+            )
+          }
         }
 
         const reviewedAt = this.clock().toISOString()
@@ -759,10 +1474,11 @@ export class TopologyService {
         assertReviewSnapshot(located.record, { expectedGraphRevision, expectedCandidateRevision })
         const candidates = located.record.topologyCandidates ?? []
         const original = candidates.find((candidate) => candidate.candidateId === candidateId)
+        const originalDecisionKey = topologyCandidateDecisionKey(original)
         const selected = targetCandidateId
           ? candidates.find((candidate) => candidate.candidateId === targetCandidateId)
           : candidates.find((candidate) => (
-            candidate.sourceEndpointId === original.sourceEndpointId
+            topologyCandidateDecisionKey(candidate) === originalDecisionKey
             && candidate.targetAssetId === targetAssetId
           ))
         if (!selected) {
@@ -771,8 +1487,8 @@ export class TopologyService {
             statusCode: 404,
           })
         }
-        if (selected.sourceEndpointId !== original.sourceEndpointId) {
-          throw new AppError('Candidate target bukan milik endpoint yang sama.', {
+        if (topologyCandidateDecisionKey(selected) !== originalDecisionKey) {
+          throw new AppError('Candidate target bukan bagian dari slot topology yang sama.', {
             code: 'topology_target_candidate_mismatch',
             statusCode: 409,
           })
@@ -789,8 +1505,20 @@ export class TopologyService {
           const currentSelected = nextCandidates.find(({ candidateId: id }) => (
             id === selected.candidateId
           ))
+          assertCurrentCandidateState(currentOriginal, original.candidateStatus)
           assertCurrentCandidateState(currentSelected, selected.candidateStatus)
-          event = await auditLog.record('topology.candidate_target_selected', {
+          assertCandidateTopologyEligible(record, currentSelected)
+          const currentDecisionCandidates = nextCandidates.filter((candidate) => (
+            topologyCandidateDecisionKey(candidate) === originalDecisionKey
+          ))
+          const candidatesToClose = currentDecisionCandidates.filter((candidate) => (
+            candidate.candidateId !== currentSelected.candidateId
+              && ['candidate', 'ambiguous', 'revoked', 'confirmed']
+                .includes(candidate.candidateStatus)
+          ))
+          event = await auditLog.record(
+            topologySelectionAuditEvent(currentSelected, 'confirm'),
+            {
             actorId,
             datasetVersionId: located.datasetVersionId,
             branchId: record.datasetVersion.branchId,
@@ -802,30 +1530,30 @@ export class TopologyService {
               after: candidateAuditSnapshot(currentSelected, 'confirmed'),
               reason: normalizedReason,
               candidateEvidence: currentSelected.evidence,
+              closedCandidateIds: candidatesToClose.map(({ candidateId: id }) => id),
               topologyRuleSetVersion: currentSelected.topologyRuleSetVersion,
             },
-          })
-          currentOriginal.candidateStatus = 'rejected'
-          currentOriginal.proposalStatus = 'target_replaced'
-          currentOriginal.review = reviewRecord({
-            actorId,
-            reviewedAt,
-            reason: normalizedReason,
-            action: 'select_target_replaced',
-            auditEventId: event.id,
-            before: original.candidateStatus,
-            after: 'rejected',
-          })
-          currentSelected.candidateStatus = 'confirmed'
-          currentSelected.proposalStatus = 'selected_by_admin'
-          currentSelected.review = reviewRecord({
-            actorId,
-            reviewedAt,
-            reason: normalizedReason,
-            action: 'select_target',
-            auditEventId: event.id,
-            before: selected.candidateStatus,
-            after: 'confirmed',
+            },
+          )
+          currentDecisionCandidates.forEach((candidate) => {
+            const selectedForDecision = candidate.candidateId === currentSelected.candidateId
+            if (!selectedForDecision && !candidatesToClose.some(({ candidateId }) => (
+              candidateId === candidate.candidateId
+            ))) return
+            const before = candidate.candidateStatus
+            candidate.candidateStatus = selectedForDecision ? 'confirmed' : 'rejected'
+            candidate.proposalStatus = selectedForDecision
+              ? 'selected_by_admin'
+              : 'target_replaced'
+            candidate.review = reviewRecord({
+              actorId,
+              reviewedAt,
+              reason: normalizedReason,
+              action: selectedForDecision ? 'select_target' : 'select_target_replaced',
+              auditEventId: event.id,
+              before,
+              after: selectedForDecision ? 'confirmed' : 'rejected',
+            })
           })
           const rebuilt = rebuildFromReviewedCandidates(
             record,
@@ -833,15 +1561,14 @@ export class TopologyService {
             this.config,
             reviewedAt,
             [
-              ...candidateAssetReferences(original),
-              ...candidateAssetReferences(selected),
+              ...currentDecisionCandidates.flatMap(candidateAssetReferences),
             ],
           )
           if (!normalizedIdempotencyKey) return rebuilt
           const response = candidateReviewResponse({
             ...rebuilt,
             recordRevision: recordRevision(record) + 1,
-          }, selected.candidateId)
+          }, selected.candidateId, { decisionKey: originalDecisionKey })
           return appendTopologyMutationReceipt(rebuilt, {
             key: normalizedIdempotencyKey,
             fingerprint,
@@ -859,7 +1586,9 @@ export class TopologyService {
           const receipt = findTopologyMutationReceipt(updated, normalizedIdempotencyKey)
           if (receipt) return structuredClone(receipt.response)
         }
-        return candidateReviewResponse(updated, selected.candidateId)
+        return candidateReviewResponse(updated, selected.candidateId, {
+          decisionKey: originalDecisionKey,
+        })
       })
     } catch (error) {
       if (!normalizedIdempotencyKey || error?.code !== 'dataset_version_stale_revision') {
@@ -875,8 +1604,12 @@ export class TopologyService {
     sourceAssetId,
     targetAssetId,
     relationType = 'connected-to',
+    relationKind,
     direction = 'undirected',
+    pathAssetIds,
+    sourceGeometryIds,
     reason,
+    evidenceRefs,
     expectedGraphRevision,
     expectedCandidateRevision,
     idempotencyKey,
@@ -891,8 +1624,15 @@ export class TopologyService {
       'targetAssetId',
     )
     const normalizedRelationType = normalizeManualRelationType(relationType)
+    const normalizedRelationKind = normalizeManualRelationKind(relationKind)
     const normalizedDirection = normalizeManualDirection(direction)
+    const normalizedPathAssetIds = normalizeManualReferenceList(pathAssetIds, 'pathAssetIds')
+    const normalizedSourceGeometryIds = normalizeManualReferenceList(
+      sourceGeometryIds,
+      'sourceGeometryIds',
+    )
     const normalizedReason = normalizeReason(reason, true)
+    const normalizedEvidenceRefs = normalizeManualReferenceList(evidenceRefs, 'evidenceRefs')
     const normalizedIdempotencyKey = normalizeTopologyIdempotencyKey(idempotencyKey)
     const fingerprint = normalizedIdempotencyKey
       ? createTopologyMutationFingerprint({
@@ -903,8 +1643,12 @@ export class TopologyService {
           sourceAssetId: normalizedSourceReference,
           targetAssetId: normalizedTargetReference,
           relationType: normalizedRelationType,
+          relationKind: normalizedRelationKind,
           direction: normalizedDirection,
+          pathAssetIds: normalizedPathAssetIds,
+          sourceGeometryIds: normalizedSourceGeometryIds,
           reason: normalizedReason,
+          evidenceRefs: normalizedEvidenceRefs,
           expectedGraphRevision: expectedGraphRevision ?? null,
           expectedCandidateRevision: expectedCandidateRevision ?? null,
         },
@@ -921,6 +1665,12 @@ export class TopologyService {
     const initialTarget = resolveManualDevice(current, normalizedTargetReference, 'targetAssetId')
     assertDistinctManualDevices(initialSource, initialTarget)
     assertSameManualDeviceSite(initialSource, initialTarget)
+    assertManualEvidenceReferences(current, {
+      source: initialSource,
+      target: initialTarget,
+      pathAssetIds: normalizedPathAssetIds,
+      sourceGeometryIds: normalizedSourceGeometryIds,
+    })
     assertNoConfirmedManualDevicePair(current, initialSource, initialTarget)
 
     const createdAt = this.clock().toISOString()
@@ -932,6 +1682,12 @@ export class TopologyService {
       const target = resolveManualDevice(record, normalizedTargetReference, 'targetAssetId')
       assertDistinctManualDevices(source, target)
       assertSameManualDeviceSite(source, target)
+      assertManualEvidenceReferences(record, {
+        source,
+        target,
+        pathAssetIds: normalizedPathAssetIds,
+        sourceGeometryIds: normalizedSourceGeometryIds,
+      })
       assertNoConfirmedManualDevicePair(record, source, target)
       event = await auditLog.record('topology.manual_device_relation_confirmed', {
         actorId,
@@ -946,8 +1702,12 @@ export class TopologyService {
           sourceTopologyAssetId: source.topologyAssetId,
           targetTopologyAssetId: target.topologyAssetId,
           relationType: normalizedRelationType,
+          relationKind: normalizedRelationKind,
           direction: normalizedDirection,
+          pathAssetIds: normalizedPathAssetIds,
+          sourceGeometryIds: normalizedSourceGeometryIds,
           reason: normalizedReason,
+          evidenceRefs: normalizedEvidenceRefs,
           explicitRelationEvidenceId,
         },
       })
@@ -961,7 +1721,11 @@ export class TopologyService {
           sourceReference: source.topologyAssetId,
           targetReference: target.topologyAssetId,
           relationType: normalizedRelationType,
+          ...(normalizedRelationKind ? { relationKind: normalizedRelationKind } : {}),
           direction: normalizedDirection,
+          pathAssetIds: structuredClone(normalizedPathAssetIds),
+          sourceGeometryIds: structuredClone(normalizedSourceGeometryIds),
+          evidenceRefs: structuredClone(normalizedEvidenceRefs),
           source: 'manual_admin',
           sourceKey: 'manual_device_connection',
           manualConfirmation: {
@@ -991,6 +1755,9 @@ export class TopologyService {
         ],
         previousRelations: record.confirmedRelations,
         previousGraph: record.topologyGraph,
+        previousInterfaceRegistry: record.topologyInterfaceRegistry
+          ?? record.topologyGraph?.interfaceRegistry
+          ?? [],
         affectedAssetIds: [source.topologyAssetId, target.topologyAssetId],
         eligibilityIssues: [
           ...(record.topologyEligibilityIssues ?? []),
@@ -1416,6 +2183,11 @@ export class TopologyService {
           const nextCandidates = structuredClone(record.topologyCandidates ?? [])
           const current = nextCandidates.find(({ candidateId: id }) => id === candidateId)
           if (!current) throw candidateNotFound(candidateId)
+          if (action === 'confirm') {
+            assertCandidateTopologyEligible(record, current)
+            assertTargetSelectionNotRequired(nextCandidates, current)
+            assertNoConfirmedCandidateConflict(nextCandidates, current)
+          }
           const targetStatus = {
             confirm: 'confirmed',
             reject: 'rejected',
@@ -1428,7 +2200,9 @@ export class TopologyService {
             throw invalidTransition(current.candidateStatus, targetStatus)
           }
           const reviewedAt = this.clock().toISOString()
-          const event = await auditLog.record(`topology.candidate_${action}ed`, {
+          const event = await auditLog.record(
+            topologySelectionAuditEvent(current, action),
+            {
             actorId,
             datasetVersionId: located.datasetVersionId,
             branchId: record.datasetVersion.branchId,
@@ -1442,7 +2216,8 @@ export class TopologyService {
               candidateEvidence: current.evidence,
               topologyRuleSetVersion: current.topologyRuleSetVersion,
             },
-          })
+            },
+          )
           const beforeStatus = current.candidateStatus
           current.candidateStatus = targetStatus
           current.proposalStatus = action === 'confirm'
@@ -1652,6 +2427,7 @@ export function applyArtifacts(record, artifacts, {
     relationType: edge.relationType,
     direction: edge.direction,
     pathAssetId: edge.pathAssetId,
+    pathAssetIds: structuredClone(edge.pathAssetIds ?? []),
     sourceGeometryIds: structuredClone(edge.sourceGeometryIds),
     relationSource: edge.relationSource,
     relationKind: edge.relationKind ?? 'device_edge',
@@ -1663,6 +2439,10 @@ export function applyArtifacts(record, artifacts, {
   return {
     ...record,
     topologyRuleSetVersion: artifacts.topologyRuleSetVersion,
+    topologyPolicy: structuredClone(artifacts.topologyPolicy ?? record.topologyPolicy ?? null),
+    topologyInterfaceRegistry: structuredClone(artifacts.interfaceRegistry ?? []),
+    topologyComponentRegistry: structuredClone(artifacts.componentRegistry ?? []),
+    topologyDiagnostics: structuredClone(artifacts.topologyDiagnostics ?? []),
     topologyGeneratedAt: artifacts.generatedAt,
     topologyCandidates: artifacts.candidates,
     confirmedRelations: artifacts.confirmedRelations,
@@ -1704,14 +2484,236 @@ export function applyArtifacts(record, artifacts, {
   }
 }
 
+function recordTopologyMetrics(metrics, artifacts, {
+  inputBundle = {},
+  previousRecord = null,
+} = {}) {
+  if (!metrics) return
+  try {
+    const candidates = Array.isArray(artifacts?.candidates) ? artifacts.candidates : []
+    const candidateCounts = new Map()
+    candidates.forEach((candidate) => {
+      const candidateType = String(candidate.candidateType ?? 'unknown')
+      const proposalStatus = String(candidate.proposalStatus ?? 'unknown')
+      const key = `${candidateType}\u001f${proposalStatus}`
+      const current = candidateCounts.get(key) ?? {
+        labels: { candidate_type: candidateType, proposal_status: proposalStatus },
+        value: 0,
+      }
+      current.value += 1
+      candidateCounts.set(key, current)
+    })
+    replaceTopologyMetricFamily(
+      metrics,
+      'topology_candidate_count',
+      [...candidateCounts.values()],
+      'Current topology candidate count by candidate type and proposal status.',
+    )
+
+    const forbiddenCounts = new Map()
+    ;(artifacts.topologyDiagnostics ?? [])
+      .filter(({ issueCode, code }) => (
+        issueCode === 'cable_terminated_at_pole' || code === 'forbidden_target_role'
+      ))
+      .forEach((diagnostic) => {
+        const targetRole = String(diagnostic.targetRole ?? 'pole')
+        forbiddenCounts.set(targetRole, (forbiddenCounts.get(targetRole) ?? 0) + 1)
+      })
+    replaceTopologyMetricFamily(
+      metrics,
+      'topology_forbidden_target_count',
+      [...forbiddenCounts.entries()].map(([targetRole, value]) => ({
+        labels: { target_role: targetRole },
+        value,
+      })),
+      'Current topology forbidden target count by target role.',
+    )
+
+    const pathByReference = new Map()
+    ;(inputBundle.classifiedPaths ?? []).forEach((path) => {
+      [
+        path.assetId,
+        path.canonicalAssetId,
+        path.stableAssetId,
+        path.onboardingIdentity,
+        path.sourceFeatureId,
+      ].filter(Boolean).forEach((reference) => pathByReference.set(String(reference), path))
+    })
+    const missingCounts = new Map()
+    const missingIssues = uniqueTopologyMetricIssues([
+      ...(artifacts.eligibilityIssues ?? []),
+      ...(artifacts.validation?.issues ?? []),
+    ]).filter(({ issueCode }) => issueCode === 'required_jb_termination_missing')
+    missingIssues.forEach((issue) => {
+      const path = pathByReference.get(String(issue.entityReference ?? ''))
+      const site = String(path?.siteId ?? artifacts.siteId ?? inputBundle.site ?? 'unknown')
+      const cableRole = String(path?.cableRole ?? 'unknown')
+      const key = `${site}\u001f${cableRole}`
+      const current = missingCounts.get(key) ?? {
+        labels: { site, cable_role: cableRole },
+        value: 0,
+      }
+      current.value += 1
+      missingCounts.set(key, current)
+    })
+    replaceTopologyMetricFamily(
+      metrics,
+      'topology_missing_jb_termination_count',
+      [...missingCounts.values()],
+      'Current topology cable count missing required Junction Box termination.',
+    )
+
+    const nodeById = new Map([
+      ...(artifacts.graph?.nodes ?? []),
+      ...(inputBundle.classifiedNodes ?? []),
+    ].map((node) => [String(node.id ?? node.assetId ?? node.canonicalAssetId), node]))
+    const occupancyCounts = new Map()
+    ;(artifacts.interfaceRegistry ?? [])
+      .filter(({ status }) => status !== 'retired')
+      .forEach((item) => {
+        const owner = nodeById.get(String(item.ownerAssetId))
+        const site = String(owner?.siteId ?? artifacts.siteId ?? inputBundle.site ?? 'unknown')
+        const interfaceType = String(item.interfaceType ?? 'unknown')
+        const key = `${site}\u001f${interfaceType}`
+        const current = occupancyCounts.get(key) ?? {
+          labels: { site, interface_type: interfaceType },
+          value: 0,
+        }
+        current.value += Math.max(0, Number(item.occupancy ?? 0))
+        occupancyCounts.set(key, current)
+      })
+    replaceTopologyMetricFamily(
+      metrics,
+      'topology_interface_occupancy',
+      [...occupancyCounts.values()],
+      'Current topology interface occupancy by site and interface type.',
+    )
+
+    const capacityIssues = uniqueTopologyMetricIssues([
+      ...(artifacts.validation?.issues ?? []),
+      ...(artifacts.eligibilityIssues ?? []),
+    ]).filter(({ issueCode }) => issueCode === 'interface_capacity_exceeded')
+    const unavailableCandidates = candidates.filter(({ proposalStatus }) => (
+      proposalStatus === 'interface_unavailable'
+    ))
+    const conflictsBySite = new Map()
+    const seenCapacityConflicts = new Set()
+    ;[...capacityIssues, ...unavailableCandidates].forEach((issue) => {
+      const interfaceId = issue.entityReference ?? issue.targetInterfaceId
+      const conflictKey = String(issue.candidateId ?? issue.entityReference ?? interfaceId ?? 'unknown')
+      if (seenCapacityConflicts.has(conflictKey)) return
+      seenCapacityConflicts.add(conflictKey)
+      const interfaceRecord = (artifacts.interfaceRegistry ?? [])
+        .find(({ interfaceId: candidateInterfaceId }) => candidateInterfaceId === interfaceId)
+      const owner = interfaceRecord
+        ? nodeById.get(String(interfaceRecord.ownerAssetId))
+        : null
+      const site = String(owner?.siteId ?? issue.siteId ?? artifacts.siteId ?? inputBundle.site ?? 'unknown')
+      conflictsBySite.set(site, (conflictsBySite.get(site) ?? 0) + 1)
+    })
+    replaceTopologyMetricFamily(
+      metrics,
+      'topology_interface_capacity_conflict_count',
+      [...conflictsBySite.entries()].map(([site, value]) => ({
+        labels: { site },
+        value,
+      })),
+      'Current topology interface capacity conflict count by site.',
+    )
+
+    const previousRelations = (previousRecord?.confirmedRelations ?? [])
+      .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+    const currentRelations = (artifacts.confirmedRelations ?? [])
+      .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+    const previousRelationIds = new Set(previousRelations.map(({ relationId }) => relationId).filter(Boolean))
+    const currentRelationIds = new Set(currentRelations.map(({ relationId }) => relationId).filter(Boolean))
+    const migrationDelta = [
+      ['added', [...currentRelationIds].filter((id) => !previousRelationIds.has(id)).length],
+      ['removed', [...previousRelationIds].filter((id) => !currentRelationIds.has(id)).length],
+      ['retained', [...currentRelationIds].filter((id) => previousRelationIds.has(id)).length],
+    ].map(([changeType, value]) => ({
+      labels: { change_type: changeType },
+      value,
+    }))
+    replaceTopologyMetricFamily(
+      metrics,
+      'topology_rule_set_migration_relation_delta',
+      migrationDelta,
+      'Topology confirmed relation delta across rule-set regeneration.',
+    )
+  } catch {
+    // Metrics are advisory and must never make a topology mutation fail.
+  }
+}
+
+function topologyProfileAssignmentRecords(inputBundle, artifacts) {
+  const profileNodeIds = new Set((inputBundle?.classifiedNodes ?? [])
+    .filter((node) => /junction|\bjb\b|server.?rack|rack.?server/.test(String([
+      node.assetType,
+      node.category,
+      node.sourceName,
+    ].filter(Boolean).join(' ')).toLowerCase()))
+    .map((node) => String(
+      node.canonicalAssetId
+        ?? node.assetId
+        ?? node.stableAssetId
+        ?? node.onboardingIdentity
+        ?? node.sourceFeatureId
+        ?? '',
+    )))
+  return (artifacts?.interfaceRegistry ?? []).filter((item) => (
+    item.status !== 'retired' && profileNodeIds.has(String(item.ownerAssetId))
+  ))
+}
+
+function replaceTopologyMetricFamily(metrics, name, samples, help) {
+  if (typeof metrics.replaceGaugeFamily === 'function') {
+    metrics.replaceGaugeFamily(name, samples, help)
+    return
+  }
+  if (typeof metrics.setGauge !== 'function') return
+  samples.forEach(({ labels, value }) => metrics.setGauge(name, labels, value, help))
+}
+
+function uniqueTopologyMetricIssues(issues) {
+  const seen = new Set()
+  return issues.filter((issue) => {
+    const key = issue?.issueId
+      ?? [issue?.issueCode, issue?.entityReference, issue?.severity].join('|')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function recordTopologyTraceFailure(metrics, serviceDomain, reason) {
+  if (!metrics || typeof metrics.increment !== 'function') return
+  metrics.increment(
+    'topology_service_trace_failure_count',
+    {
+      service_domain: String(serviceDomain ?? 'unknown'),
+      reason: String(reason ?? 'unknown'),
+    },
+    1,
+    'Topology service trace failures by service domain and reason.',
+  )
+}
+
 function assertPublishableTopologyArtifacts(artifacts, datasetVersionId) {
   const validationIssues = [
     ...(artifacts?.validation?.issues ?? []),
     ...(artifacts?.eligibilityIssues ?? []),
   ]
-  const errorIssues = validationIssues.filter(({ severity }) => severity === 'error')
-  const validationErrors = Number(artifacts?.validation?.summary?.errors ?? 0)
-  if (!errorIssues.length && validationErrors === 0 && artifacts?.validation?.status !== 'invalid') {
+  // Candidate-level policy/constraint diagnostics are expected while a
+  // topology is awaiting review and must be persisted with the candidate
+  // projection. Errors on the confirmed graph, linework, or object
+  // eligibility remain publication blockers.
+  const nonFatalScopes = new Set(['policy', 'candidate_hard_gate', 'constraint'])
+  const errorIssues = validationIssues.filter(({ severity, scope }) => (
+    severity === 'error' && !nonFatalScopes.has(scope)
+  ))
+  const fatalValidationErrors = errorIssues.length
+  if (!errorIssues.length && fatalValidationErrors === 0) {
     return
   }
   const error = new AppError(
@@ -1721,7 +2723,7 @@ function assertPublishableTopologyArtifacts(artifacts, datasetVersionId) {
       statusCode: 422,
       details: {
         datasetVersionId,
-        validationErrors,
+        validationErrors: fatalValidationErrors,
         issueCodes: [...new Set(errorIssues.map(({ issueCode }) => issueCode).filter(Boolean))]
           .slice(0, 50),
         issueCount: errorIssues.length,
@@ -1744,6 +2746,9 @@ function rebuildFromReviewedCandidates(
     candidates,
     previousRelations: record.confirmedRelations,
     previousGraph: record.topologyGraph,
+    previousInterfaceRegistry: record.topologyInterfaceRegistry
+      ?? record.topologyGraph?.interfaceRegistry
+      ?? [],
     affectedAssetIds,
     eligibilityIssues: record.topologyEligibilityIssues,
     lineworkIssues: record.topologyLineworkIssues,
@@ -1761,19 +2766,30 @@ function reconcileCandidateHistory(record, artifacts, { eventId, generatedAt }) 
       supersededAt: generatedAt,
       supersededByRunId: eventId,
     }))
-  return [...(record.topologyCandidateHistory ?? []), ...superseded]
+  const reopened = (artifacts.reopenedReviewHistory ?? []).map((candidate) => ({
+    ...structuredClone(candidate),
+    supersededByRunId: eventId,
+  }))
+  return [...(record.topologyCandidateHistory ?? []), ...superseded, ...reopened]
 }
 
-function candidateReviewResponse(record, candidateId) {
+function candidateReviewResponse(record, candidateId, { decisionKey = null } = {}) {
   return canonicalizeJsonValue({
     datasetVersionId: record.datasetVersion.id,
     candidate: structuredClone(
-      record.topologyCandidates.find(({ candidateId: id }) => id === candidateId),
+      (record.topologyCandidates ?? []).find(({ candidateId: id }) => id === candidateId),
     ),
     confirmedRelations: structuredClone(record.confirmedRelations ?? []),
     graph: structuredClone(record.topologyGraph),
     summary: structuredClone(record.topologySummary ?? emptySummary()),
     readiness: structuredClone(record.topologyReadiness),
+    ...(decisionKey ? {
+      updatedCandidates: structuredClone(
+        (record.topologyCandidates ?? []).filter((candidate) => (
+          topologyCandidateDecisionKey(candidate) === decisionKey
+        )),
+      ),
+    } : {}),
     ...reviewSnapshot(record),
   })
 }
@@ -1853,6 +2869,9 @@ function bulkReviewResponse(record, {
   candidateIds = [],
   auditEventId = null,
 }) {
+  const eligibilityContext = createTopologyCandidateEligibilityContext(
+    record.topologyInputBundle,
+  )
   const changedCandidateIds = new Set(candidateIds)
   return {
     datasetVersionId: record.datasetVersion.id,
@@ -1874,10 +2893,525 @@ function bulkReviewResponse(record, {
     confirmedPathAttachmentCount: record.topologySummary?.confirmedPathAttachmentCount ?? 0,
     confirmedPathContinuationCount: record.topologySummary?.confirmedPathContinuationCount ?? 0,
     remainingRecommendedCount: (record.topologyCandidates ?? [])
-      .filter(isBulkConfirmableCandidate).length,
+      .filter((candidate) => (
+        isBulkConfirmableCandidate(candidate)
+          && candidateReviewEligibility(record, candidate, eligibilityContext).eligible
+      )).length,
     remainingLineLabelCount: (record.topologyCandidates ?? [])
-      .filter(isLineLabelConfirmableCandidate).length,
+      .filter((candidate) => (
+        isLineLabelConfirmableCandidate(candidate)
+          && candidateReviewEligibility(record, candidate, eligibilityContext).eligible
+      )).length,
     ...reviewSnapshot(record),
+  }
+}
+
+function annotateTopologyCandidateForReview(record, candidate, eligibilityContext = null) {
+  const eligibility = evaluateTopologyCandidateEligibility(
+    record.topologyInputBundle,
+    candidate,
+    eligibilityContext,
+  )
+  return {
+    ...structuredClone(candidate),
+    reviewCardinality: topologyCandidateCardinality(candidate),
+    reviewEligibility: {
+      identityReady: eligibility.eligible,
+      confirmable: eligibility.eligible && isCandidateConfirmable(candidate),
+      code: eligibility.code,
+      message: eligibility.message,
+      recommendedAction: eligibility.eligible
+        ? null
+        : 'assign_identity_and_regenerate',
+    },
+  }
+}
+
+function projectCandidateHistory(history = [], candidateIds = null) {
+  return history
+    .filter(({ candidateId }) => !candidateIds || candidateIds.has(candidateId))
+    .map((item) => ({
+      candidateId: item.candidateId ?? null,
+      supersededAt: item.supersededAt ?? null,
+      supersededByRunId: item.supersededByRunId ?? null,
+      ...(item.review ? {
+        review: {
+          actorId: item.review.actorId ?? null,
+          reviewedAt: item.review.reviewedAt ?? null,
+          reason: item.review.reason ?? null,
+          action: item.review.action ?? null,
+        },
+      } : {}),
+    }))
+}
+
+function candidateReviewEligibility(record, candidate, eligibilityContext = null) {
+  return evaluateTopologyCandidateEligibility(
+    record.topologyInputBundle,
+    candidate,
+    eligibilityContext,
+  )
+}
+
+function candidateReviewEligibilityReason(eligibility) {
+  if (eligibility.issues.some(({ code }) => code === 'obsolete_rule_set')) {
+    return 'candidate_obsolete_rule_set'
+  }
+  if (eligibility.issues.some(({ code }) => code === 'missing_stable_asset_id')) {
+    return 'candidate_stable_asset_id_required'
+  }
+  if (eligibility.issues.some(({ code }) => code === 'topology_candidate_identity_stale')) {
+    return 'candidate_topology_identity_stale'
+  }
+  if (eligibility.issues.some(({ code }) => code === 'topology_candidate_reference_not_found')) {
+    return 'candidate_topology_reference_not_found'
+  }
+  return 'candidate_topology_object_ineligible'
+}
+
+function candidateReviewEligibilityDetails(eligibility) {
+  return {
+    code: eligibility.code,
+    message: eligibility.message,
+    issues: structuredClone(eligibility.issues),
+    recommendedAction: 'assign_identity_and_regenerate',
+  }
+}
+
+function topologyReviewContract(record) {
+  const candidates = record.topologyCandidates ?? []
+  const eligibilityContext = createTopologyCandidateEligibilityContext(
+    record.topologyInputBundle,
+  )
+  const ineligible = candidates.filter((candidate) => (
+    !evaluateTopologyCandidateEligibility(
+      record.topologyInputBundle,
+      candidate,
+      eligibilityContext,
+    ).eligible
+  ))
+  const confirmable = candidates.some((candidate) => (
+    isCandidateConfirmable(candidate)
+      && candidate.candidateStatus === 'candidate'
+      && candidate.proposalStatus === 'recommended'
+      && evaluateTopologyCandidateEligibility(
+        record.topologyInputBundle,
+        candidate,
+        eligibilityContext,
+      ).eligible
+  ))
+  const preparing = !record.topologyGeneratedAt && candidates.length === 0
+  const needsDataFix = ineligible.length > 0
+    || record.topologyReadiness?.blockingReasons?.includes('stable_identity_coverage')
+  if (preparing) {
+    return {
+      status: 'preparing',
+      confirmable: false,
+      userMessage: 'Sistem sedang menyelaraskan identitas aset dan memperbarui koneksi.',
+      recoveryAction: null,
+    }
+  }
+  if (needsDataFix) {
+    return {
+      status: 'needs_data_fix',
+      confirmable,
+      userMessage: 'Beberapa usulan membutuhkan perbaikan data sebelum dapat dikonfirmasi.',
+      recoveryAction: 'review_data_issues',
+    }
+  }
+  return {
+    status: 'ready',
+    confirmable,
+    userMessage: null,
+    recoveryAction: null,
+  }
+}
+
+function buildBulkReviewPreview(record, candidateIds, config = {}) {
+  const normalizedCandidateIds = [...candidateIds].map(String).sort()
+  const candidates = record.topologyCandidates ?? []
+  const byId = new Map(candidates.map((candidate) => [candidate.candidateId, candidate]))
+  const eligibilityContext = createTopologyCandidateEligibilityContext(
+    record.topologyInputBundle,
+  )
+  const eligibleCandidateIds = []
+  const ineligible = []
+  normalizedCandidateIds.forEach((candidateId) => {
+    const candidate = byId.get(candidateId)
+    if (!candidate) {
+      ineligible.push({ candidateId, reason: 'candidate_not_found' })
+      return
+    }
+    if (candidate.candidateStatus !== 'candidate') {
+      ineligible.push({
+        candidateId,
+        reason: 'candidate_status_not_candidate',
+        currentStatus: candidate.candidateStatus ?? null,
+      })
+      return
+    }
+    if (candidate.proposalStatus !== 'recommended') {
+      ineligible.push({
+        candidateId,
+        reason: 'proposal_not_recommended',
+        currentProposalStatus: candidate.proposalStatus ?? null,
+      })
+      return
+    }
+    const reviewEligibility = candidateReviewEligibility(record, candidate, eligibilityContext)
+    if (!reviewEligibility.eligible) {
+      ineligible.push({
+        candidateId,
+        reason: candidateReviewEligibilityReason(reviewEligibility),
+        reviewEligibility: candidateReviewEligibilityDetails(reviewEligibility),
+      })
+      return
+    }
+    eligibleCandidateIds.push(candidateId)
+  })
+
+  const eligibleSet = new Set(eligibleCandidateIds)
+  const conflicts = findTopologyCandidateConflicts(
+    eligibleCandidateIds.map((candidateId) => byId.get(candidateId)),
+  )
+
+  const confirmedDecisionOwners = new Map()
+  candidates
+    .filter(({ candidateStatus, candidateId }) => (
+      candidateStatus === 'confirmed' && !eligibleSet.has(candidateId)
+    ))
+    .forEach((candidate) => {
+      confirmedDecisionOwners.set(
+        topologyCandidateDecisionKey(candidate),
+        candidate.candidateId,
+      )
+    })
+  eligibleCandidateIds.forEach((candidateId) => {
+    const candidate = byId.get(candidateId)
+    const decisionKey = topologyCandidateDecisionKey(candidate)
+    const owner = confirmedDecisionOwners.get(decisionKey)
+    if (!owner) return
+    conflicts.push({
+      reason: 'endpoint_already_confirmed',
+      decisionKey,
+      sourceEndpointId: candidate.sourceEndpointId,
+      candidateIds: [candidateId, owner],
+    })
+  })
+
+  const beforeGraph = normalizedTraceGraphFromCache(
+    new Map(),
+    new WeakMap(),
+    record,
+    buildAssetIdentityMapFromRecord(record),
+  )
+  let simulated = null
+  let simulationError = null
+  if (eligibleCandidateIds.length > 0 && record.topologyInputBundle) {
+    const nextCandidates = structuredClone(candidates)
+    nextCandidates.forEach((candidate) => {
+      if (!eligibleSet.has(candidate.candidateId)) return
+      candidate.candidateStatus = 'confirmed'
+      candidate.proposalStatus = 'confirmed_by_admin_bulk_preview'
+    })
+    try {
+      simulated = rebuildFromReviewedCandidates(
+        record,
+        nextCandidates,
+        config,
+        record.topologyGeneratedAt ?? new Date().toISOString(),
+        eligibleCandidateIds.flatMap((candidateId) => (
+          candidateAssetReferences(byId.get(candidateId))
+        )),
+      )
+    } catch (error) {
+      simulationError = error
+    }
+  }
+
+  const simulatedValidation = simulated?.topologyValidation ?? null
+  const baselineValidationIssues = record.topologyValidation?.issues ?? []
+  const simulatedValidationIssues = classifyReviewValidationIssues(
+    baselineValidationIssues,
+    simulatedValidation?.issues ?? [],
+  )
+  const validationIssues = [
+    ...simulatedValidationIssues,
+    ...conflicts.map((conflict) => ({
+      severity: 'error',
+      issueCode: conflict.reason,
+      entityReference: conflict.candidateIds.join('|'),
+      details: conflict,
+      reviewImpact: 'introduced',
+    })),
+  ]
+  if (simulationError) {
+    validationIssues.push({
+      severity: 'error',
+      issueCode: 'review_preview_build_failed',
+      message: simulationError.message,
+      reviewImpact: 'introduced',
+    })
+  } else if (eligibleCandidateIds.length > 0 && !simulated) {
+    validationIssues.push({
+      severity: 'error',
+      issueCode: 'review_preview_input_unavailable',
+      message: 'Topology input bundle belum tersedia untuk dry-run review.',
+      reviewImpact: 'introduced',
+    })
+  }
+  const blockingValidationIssues = validationIssues.filter(({ severity, reviewImpact }) => (
+    severity === 'error' && reviewImpact !== 'baseline'
+  ))
+  const baselineErrorCount = validationIssues.filter(({ severity, reviewImpact }) => (
+    severity === 'error' && reviewImpact === 'baseline'
+  )).length
+  const introducedWarningCount = validationIssues.filter(({ severity, reviewImpact }) => (
+    severity === 'warning' && reviewImpact !== 'baseline'
+  )).length
+  const baselineWarningCount = validationIssues.filter(({ severity, reviewImpact }) => (
+    severity === 'warning' && reviewImpact === 'baseline'
+  )).length
+  const validationSummary = {
+    errors: blockingValidationIssues.length,
+    warnings: validationIssues.filter(({ severity }) => severity === 'warning').length,
+    total: validationIssues.length,
+    introducedErrors: blockingValidationIssues.length,
+    introducedWarnings: introducedWarningCount,
+    baselineErrors: baselineErrorCount,
+    baselineWarnings: baselineWarningCount,
+  }
+  const beforeConfirmedRelationCount = (record.confirmedRelations ?? [])
+    .filter(({ verificationStatus }) => verificationStatus === 'confirmed').length
+  const afterConfirmedRelationCount = (simulated?.confirmedRelations ?? [])
+    .filter(({ verificationStatus }) => verificationStatus === 'confirmed').length
+  const predictedGraph = simulated?.topologyGraph ?? beforeGraph
+  const conflictingCandidateIds = new Set(conflicts.flatMap(({ candidateIds }) => candidateIds))
+  const blockingReasonCodes = [...new Set([
+    ...ineligible.map(({ reason }) => reason),
+    ...blockingValidationIssues.map(({ issueCode }) => issueCode),
+  ].filter(Boolean))]
+  const topologyDelta = buildTopologyReviewDelta(record, simulated, {
+    selectedCandidateIds: eligibleCandidateIds,
+  })
+  return {
+    datasetVersionId: record.datasetVersion.id,
+    candidateIds: normalizedCandidateIds,
+    eligibleCandidateIds,
+    ineligible,
+    predictedSummary: {
+      confirmedRelationDelta: afterConfirmedRelationCount - beforeConfirmedRelationCount,
+      componentCountBefore: beforeGraph.components?.length ?? 0,
+      componentCountAfter: predictedGraph.components?.length ?? 0,
+      confirmedRelationCountBefore: beforeConfirmedRelationCount,
+      confirmedRelationCountAfter: afterConfirmedRelationCount,
+    },
+    delta: topologyDelta,
+    validationPreview: {
+      status: validationSummary.errors > 0
+        ? 'invalid'
+        : baselineErrorCount > 0
+          ? 'valid_with_baseline_issues'
+          : validationSummary.warnings > 0 ? 'valid_with_warnings' : 'valid',
+      summary: validationSummary,
+      issues: validationIssues,
+    },
+    safeToApply: normalizedCandidateIds.length > 0
+      && ineligible.length === 0
+      && conflicts.length === 0
+      && !simulationError
+      && Boolean(simulated)
+      && validationSummary.errors === 0,
+    diagnostics: {
+      blockingReasonCodes,
+      conflictCount: conflicts.length,
+      conflicts,
+      blockedCandidateIds: [...new Set([
+        ...ineligible.map(({ candidateId }) => candidateId),
+        ...conflictingCandidateIds,
+      ].filter(Boolean))].sort(),
+      baselineIssuesPreserved: baselineErrorCount + baselineWarningCount,
+      recommendation: reviewPreviewRecommendation({
+        ineligible,
+        conflicts,
+        blockingValidationIssues,
+      }),
+    },
+    graphRevision: beforeGraph.graphRevision,
+    candidateRevision: createCandidateCollectionRevision(candidates),
+    recordRevision: recordRevision(record),
+  }
+}
+
+function buildTopologyReviewDelta(record, simulated, {
+  selectedCandidateIds = [],
+} = {}) {
+  const after = simulated ?? record
+  const beforeRelations = (record.confirmedRelations ?? [])
+    .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+  const afterRelations = (after.confirmedRelations ?? [])
+    .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+  const beforeRelationIds = new Set(beforeRelations.map(({ relationId }) => relationId).filter(Boolean))
+  const afterRelationIds = new Set(afterRelations.map(({ relationId }) => relationId).filter(Boolean))
+  const changedRelationIds = new Set([
+    ...[...beforeRelationIds].filter((id) => !afterRelationIds.has(id)),
+    ...[...afterRelationIds].filter((id) => !beforeRelationIds.has(id)),
+  ])
+  const afterCandidates = after.topologyCandidates ?? []
+  const reviewRequiredCount = afterCandidates.filter((candidate) => (
+    ['candidate', 'ambiguous'].includes(candidate.candidateStatus)
+      && ['recommended', 'ambiguous', 'not_selected'].includes(candidate.proposalStatus)
+  )).length
+  const poleCandidateCount = (candidateRecord) => (
+    (candidateRecord.topologyCandidates ?? []).filter((candidate) => (
+      candidate.targetAssetId && isPoleAssetReference(candidateRecord, candidate.targetAssetId)
+    )).length
+  )
+  const countIssue = (candidateRecord, issueCodes) => (
+    uniqueTopologyMetricIssues([
+      ...(candidateRecord.topologyValidation?.issues ?? []),
+      ...(candidateRecord.topologyEligibilityIssues ?? []),
+    ]).filter(({ issueCode }) => issueCodes.includes(issueCode)).length
+  )
+  const serviceGraphEdgeCount = (candidateRecord, serviceDomain) => (
+    (candidateRecord.topologyGraph?.serviceGraph?.edges ?? [])
+      .filter((edge) => edge.serviceDomain === serviceDomain).length
+  )
+  const selected = new Set(selectedCandidateIds)
+  const changedAssetIds = new Set()
+  const changedComponentIds = new Set()
+  const collectCandidateReferences = (candidate) => {
+    if (!candidate || (selected.size && !selected.has(candidate.candidateId))) return
+    ;[
+      candidate.sourceAssetId,
+      candidate.sourcePathAssetId,
+      candidate.targetAssetId,
+      candidate.targetPathAssetId,
+    ].filter(Boolean).forEach((assetId) => changedAssetIds.add(String(assetId)))
+    ;[candidate.sourceInterfaceId, candidate.targetInterfaceId]
+      .filter(Boolean)
+      .forEach((interfaceId) => {
+        const item = (after.topologyInterfaceRegistry ?? [])
+          .find(({ interfaceId: candidateInterfaceId }) => candidateInterfaceId === interfaceId)
+        if (item?.componentId) changedComponentIds.add(String(item.componentId))
+        if (item?.ownerAssetId) changedAssetIds.add(String(item.ownerAssetId))
+      })
+  }
+  ;(record.topologyCandidates ?? []).forEach(collectCandidateReferences)
+  afterCandidates.forEach(collectCandidateReferences)
+  ;[...beforeRelations, ...afterRelations].forEach((relation) => {
+    if (!changedRelationIds.has(relation.relationId)) return
+    ;[relation.sourceAssetId, relation.targetAssetId]
+      .filter(Boolean)
+      .forEach((assetId) => changedAssetIds.add(String(assetId)))
+    ;[relation.sourceInterfaceId, relation.targetInterfaceId]
+      .filter(Boolean)
+      .forEach((interfaceId) => {
+        const item = (after.topologyInterfaceRegistry ?? [])
+          .find(({ interfaceId: candidateInterfaceId }) => candidateInterfaceId === interfaceId)
+        if (item?.componentId) changedComponentIds.add(String(item.componentId))
+      })
+  })
+  return {
+    relations: {
+      added: [...afterRelationIds].filter((id) => !beforeRelationIds.has(id)).length,
+      retained: [...afterRelationIds].filter((id) => beforeRelationIds.has(id)).length,
+      removed: [...beforeRelationIds].filter((id) => !afterRelationIds.has(id)).length,
+      requiresReview: reviewRequiredCount,
+    },
+    cableToPoleRemovalCount: Math.max(0, poleCandidateCount(record) - poleCandidateCount(after)),
+    missingJbTerminationCount: countIssue(after, ['required_jb_termination_missing']),
+    interfaceCapacityConflictCount: countIssue(after, ['interface_capacity_exceeded'])
+      + afterCandidates.filter(({ proposalStatus }) => proposalStatus === 'interface_unavailable').length,
+    traceDelta: {
+      data: {
+        beforeEdgeCount: serviceGraphEdgeCount(record, 'data'),
+        afterEdgeCount: serviceGraphEdgeCount(after, 'data'),
+        delta: serviceGraphEdgeCount(after, 'data') - serviceGraphEdgeCount(record, 'data'),
+      },
+      power: {
+        beforeEdgeCount: serviceGraphEdgeCount(record, 'power'),
+        afterEdgeCount: serviceGraphEdgeCount(after, 'power'),
+        delta: serviceGraphEdgeCount(after, 'power') - serviceGraphEdgeCount(record, 'power'),
+      },
+    },
+    affectedAssetIds: [...changedAssetIds].sort(),
+    affectedComponentIds: [...changedComponentIds].sort(),
+    graphRevisionBefore: record.topologyGraph?.graphRevision ?? null,
+    graphRevisionAfter: after.topologyGraph?.graphRevision ?? null,
+    candidateRevisionBefore: createCandidateCollectionRevision(record.topologyCandidates ?? []),
+    candidateRevisionAfter: createCandidateCollectionRevision(afterCandidates),
+    interfaceRegistryRevision: after.topologyGeneratedAt ?? null,
+    topologyRuleSetVersion: after.topologyRuleSetVersion ?? null,
+  }
+}
+
+export function classifyReviewValidationIssues(baselineIssues = [], simulatedIssues = []) {
+  const baselineIds = new Set(baselineIssues.map(reviewValidationIssueIdentity))
+  return simulatedIssues.map((issue) => ({
+    ...issue,
+    reviewImpact: baselineIds.has(reviewValidationIssueIdentity(issue))
+      ? 'baseline'
+      : 'introduced',
+  }))
+}
+
+function reviewValidationIssueIdentity(issue) {
+  return issue?.issueId
+    ?? [issue?.issueCode, issue?.scope, issue?.entityReference, issue?.severity]
+      .map((value) => String(value ?? ''))
+      .join('|')
+}
+
+function reviewPreviewRecommendation({
+  ineligible,
+  conflicts,
+  blockingValidationIssues,
+}) {
+  if (ineligible.length > 0) {
+    const identityBlocked = ineligible.some(({ reason }) => (
+      ['candidate_stable_asset_id_required', 'candidate_topology_identity_stale']
+        .includes(reason)
+    ))
+    if (identityBlocked) {
+      return {
+        code: 'assign_identity_and_regenerate',
+        message: 'Sistem sudah mencoba membuat Asset ID internal. Tinjau identity ambigu atau duplikat; isi Asset ID resmi hanya bila aset wajib mengikuti nomor perusahaan.',
+      }
+    }
+    return {
+      code: 'refresh_review_queue',
+      message: 'Muat ulang antrean karena sebagian kandidat sudah berubah atau tidak eligible.',
+    }
+  }
+  if (conflicts.length > 0) {
+    return {
+      code: 'resolve_endpoint_conflicts',
+      message: 'Pilih tepat satu kandidat untuk setiap endpoint yang konflik.',
+    }
+  }
+  const issueCodes = new Set(blockingValidationIssues.map(({ issueCode }) => issueCode))
+  if (issueCodes.has('review_preview_input_unavailable')) {
+    return {
+      code: 'regenerate_topology',
+      message: 'Regenerate topology untuk membangun input dry-run sebelum bulk review.',
+    }
+  }
+  if (issueCodes.has('review_preview_build_failed')) {
+    return {
+      code: 'inspect_preview_build_failure',
+      message: 'Periksa kegagalan rebuild preview sebelum menyimpan relasi.',
+    }
+  }
+  if (blockingValidationIssues.length > 0) {
+    return {
+      code: 'review_introduced_validation_errors',
+      message: 'Batch memperkenalkan validation error baru dan perlu dipecah atau diperiksa manual.',
+    }
+  }
+  return {
+    code: 'ready_to_apply',
+    message: 'Batch tidak memperkenalkan konflik atau validation error baru.',
   }
 }
 
@@ -1886,12 +3420,18 @@ function candidateAssetReferences(candidate) {
     candidate?.sourcePathAssetId,
     candidate?.targetAssetId,
     candidate?.targetPathAssetId,
+    ...(candidate?.pathAssetIds ?? []),
     ...(candidate?.sourceGeometryIds ?? []),
   ].filter(Boolean)
 }
 
 function reviewSnapshot(record) {
-  const graph = normalizeTraceGraph(record, buildAssetIdentityMapFromRecord(record))
+  const graph = normalizedTraceGraphFromCache(
+    new Map(),
+    new WeakMap(),
+    record,
+    buildAssetIdentityMapFromRecord(record),
+  )
   return {
     graphRevision: graph.graphRevision,
     candidateRevision: createCandidateCollectionRevision(record.topologyCandidates ?? []),
@@ -1938,7 +3478,9 @@ function isCandidateConfirmable(candidate) {
 
 function isLineLabelConfirmableCandidate(candidate) {
   return isBulkConfirmableCandidate(candidate)
-    && ['line_label_connection', 'line_label_attachment'].includes(candidate.candidateType)
+    && (['line_label_connection', 'line_label_attachment'].includes(candidate.candidateType)
+      || (candidate.candidateType === 'cable_termination'
+        && candidate.provenance === 'line_label_inference'))
 }
 
 function candidateAuditSnapshot(candidate, status = candidate.candidateStatus) {
@@ -1952,6 +3494,15 @@ function candidateAuditSnapshot(candidate, status = candidate.candidateStatus) {
     score: candidate.score,
     scoreMargin: candidate.scoreMargin,
   }
+}
+
+function topologySelectionAuditEvent(candidate, action) {
+  if (action !== 'confirm') return `topology.candidate_${action}ed`
+  return {
+    cable_termination: 'topology.cable_termination_selected',
+    mounting_attachment: 'topology.mounting_selected',
+    jb_internal_connection: 'topology.internal_connection_confirmed',
+  }[candidate?.candidateType] ?? 'topology.candidate_confirmed'
 }
 
 function reviewRecord({
@@ -1995,6 +3546,142 @@ function assertCurrentCandidateState(candidate, expectedStatus) {
       },
     })
   }
+}
+
+function assertCandidateTopologyEligible(record, candidate) {
+  const candidateRuleSet = candidate?.topologyRuleSetVersion
+  if (candidateRuleSet && candidateRuleSet !== TOPOLOGY_RULE_SET_VERSION) {
+    throw new AppError('Candidate berasal dari rule-set topology lama dan tidak dapat dikonfirmasi.', {
+      code: 'topology_candidate_obsolete_rule_set',
+      statusCode: 422,
+      details: {
+        candidateId: candidate.candidateId,
+        candidateRuleSet,
+        currentRuleSet: TOPOLOGY_RULE_SET_VERSION,
+      },
+    })
+  }
+  const blockedProposalStatuses = [
+    'missing_jb_termination',
+    'incompatible_interface',
+    'interface_unavailable',
+    'forbidden_target_role',
+    'unresolved',
+    'below_threshold',
+  ]
+  if (blockedProposalStatuses.includes(candidate?.proposalStatus)) {
+    throw new AppError('Candidate belum memenuhi hard gate topology v2.', {
+      code: 'topology_candidate_hard_gate_blocked',
+      statusCode: 422,
+      details: {
+        candidateId: candidate.candidateId,
+        proposalStatus: candidate.proposalStatus,
+        constraintEvidence: candidate.constraintEvidence ?? null,
+      },
+    })
+  }
+  if (candidate?.candidateType !== 'mounting_attachment'
+    && isPoleAssetReference(record, candidate?.targetAssetId)) {
+    throw new AppError('Tiang hanya boleh menjadi host pemasangan, bukan endpoint kabel.', {
+      code: 'topology_cable_to_pole_forbidden',
+      statusCode: 422,
+      details: { candidateId: candidate.candidateId, targetAssetId: candidate.targetAssetId },
+    })
+  }
+  assertCandidateInterfaceCapacity(record, candidate)
+  const eligibility = candidateReviewEligibility(record, candidate)
+  if (eligibility.eligible) return
+  const reason = candidateReviewEligibilityReason(eligibility)
+  const identityBlocked = [
+    'candidate_stable_asset_id_required',
+    'candidate_topology_identity_stale',
+  ].includes(reason)
+  throw new AppError(
+    identityBlocked
+      ? 'Kandidat tidak dapat dikonfirmasi karena identity aset belum stabil atau ambigu. Tinjau identity; isi Asset ID resmi hanya jika diperlukan, lalu regenerasi topology.'
+    : reason === 'candidate_obsolete_rule_set'
+      ? 'Candidate berasal dari rule-set lama; regenerate topology wajib dilakukan.'
+      : 'Kandidat tidak lagi eligible terhadap topology input terkini; muat ulang dan regenerate topology.',
+    {
+      code: identityBlocked
+        ? 'topology_candidate_identity_required'
+        : 'topology_candidate_not_eligible',
+      statusCode: 422,
+      details: {
+        candidateId: candidate.candidateId,
+        reason,
+        reviewEligibility: candidateReviewEligibilityDetails(eligibility),
+      },
+    },
+  )
+}
+
+function assertNoConfirmedCandidateConflict(candidates, candidate) {
+  const decisionKey = topologyCandidateDecisionKey(candidate)
+  const owner = candidates.find((other) => (
+    other.candidateId !== candidate.candidateId
+      && other.candidateStatus === 'confirmed'
+      && topologyCandidateDecisionKey(other) === decisionKey
+  ))
+  if (!owner) return
+  throw new AppError(
+    'Koneksi tidak dapat dikonfirmasi karena slot topology sudah dimiliki kandidat lain.',
+    {
+      code: 'topology_candidate_conflict',
+      statusCode: 409,
+      details: {
+        decisionKey,
+        sourceEndpointId: candidate.sourceEndpointId ?? null,
+        candidateId: candidate.candidateId,
+        ownerCandidateId: owner.candidateId,
+      },
+    },
+  )
+}
+
+function assertTargetSelectionNotRequired(candidates, candidate) {
+  if (candidate.candidateStatus !== 'ambiguous') return
+  const decisionKey = topologyCandidateDecisionKey(candidate)
+  const alternatives = candidates.filter((other) => (
+    other.candidateId !== candidate.candidateId
+      && ['candidate', 'ambiguous', 'revoked'].includes(other.candidateStatus)
+      && topologyCandidateDecisionKey(other) === decisionKey
+  ))
+  if (!alternatives.length) return
+  throw new AppError(
+    'Kandidat ini memiliki beberapa target yang mungkin. Pilih tepat satu target.',
+    {
+      code: 'topology_candidate_target_selection_required',
+      statusCode: 409,
+      details: {
+        decisionKey,
+        candidateId: candidate.candidateId,
+        alternativeCandidateIds: alternatives.map(({ candidateId }) => candidateId),
+      },
+    },
+  )
+}
+
+function bulkReviewConflictError(conflicts) {
+  return new AppError(
+    'Bulk review ditolak karena beberapa kandidat memakai slot topology yang sama.',
+    {
+      code: 'topology_bulk_review_not_safe',
+      statusCode: 422,
+      details: {
+        safeToApply: false,
+        diagnostics: {
+          conflictCount: conflicts.length,
+          conflicts,
+          blockingReasonCodes: ['endpoint_conflict'],
+          recommendation: {
+            code: 'resolve_endpoint_conflicts',
+            message: 'Pilih tepat satu kandidat untuk setiap slot topology yang konflik.',
+          },
+        },
+      },
+    },
+  )
 }
 
 function normalizeReason(value, required) {
@@ -2053,6 +3740,42 @@ function normalizeManualRelationType(value) {
   return normalized
 }
 
+function normalizeManualRelationKind(value) {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (!normalized) return null
+  if (!['device_edge', 'service_link'].includes(normalized)) {
+    throw new AppError('Kind koneksi manual tidak didukung.', {
+      code: 'invalid_topology_manual_relation_kind',
+      statusCode: 400,
+      details: { supportedRelationKinds: ['device_edge', 'service_link'] },
+    })
+  }
+  return normalized
+}
+
+function normalizeManualReferenceList(value, field) {
+  if (value === undefined || value === null) return []
+  if (!Array.isArray(value) || value.length > MAX_MANUAL_REFERENCE_IDS) {
+    throw new AppError(`Daftar ${field} untuk koneksi manual tidak valid.`, {
+      code: `invalid_topology_manual_${field}`,
+      statusCode: 400,
+      details: { field, max: MAX_MANUAL_REFERENCE_IDS },
+    })
+  }
+  return uniqueValues(value.map((item) => {
+    const normalized = String(item ?? '').trim()
+    if (!normalized || normalized.length > 256
+      || /[\u0000-\u001f\u007f]/.test(normalized)) {
+      throw new AppError(`Referensi ${field} untuk koneksi manual tidak valid.`, {
+        code: `invalid_topology_manual_${field}`,
+        statusCode: 400,
+        details: { field },
+      })
+    }
+    return normalized
+  }))
+}
+
 function normalizeManualDirection(value) {
   const normalized = String(value ?? 'undirected').trim().toLowerCase()
   if (!['undirected', 'source_to_target', 'target_to_source', 'bidirectional']
@@ -2097,7 +3820,89 @@ function resolveManualDevice(record, reference, field) {
       details: { field, assetId: reference, objectRole: match.object.objectRole },
     })
   }
+  const identityStatus = String(
+    match.object.identityStatus ?? match.object.identityResolutionStatus ?? '',
+  ).trim().toLowerCase()
+  if ((!match.object.stableAssetId && !match.object.assetId)
+    || ['onboarding', 'onboarding_candidate', 'conflict'].includes(identityStatus)) {
+    throw new AppError('Koneksi manual membutuhkan device dengan stable Asset ID.', {
+      code: 'topology_manual_relation_stable_asset_required',
+      statusCode: 409,
+      details: { field, assetId: reference },
+    })
+  }
   return match
+}
+
+function assertManualEvidenceReferences(record, {
+  source,
+  target,
+  pathAssetIds = [],
+  sourceGeometryIds = [],
+}) {
+  const identityMap = buildAssetIdentityMapFromRecord(record)
+  const resolver = createAssetIdentityResolver(identityMap)
+  const objects = manualTopologyObjects(record, identityMap, resolver)
+  const sameSite = source.object.siteId
+  const resolveObject = (reference) => {
+    const canonicalReference = resolver.resolve(reference)
+    return objects.find((item) => (
+      item.canonicalAssetId === canonicalReference
+        || item.topologyAssetId === reference
+        || item.aliases.includes(reference)
+    ))
+  }
+
+  pathAssetIds.forEach((reference) => {
+    const match = resolveObject(reference)
+    if (!match || match.object.objectRole !== 'cable_path') {
+      throw new AppError('Path evidence untuk koneksi manual tidak ditemukan.', {
+        code: 'topology_manual_relation_path_not_found',
+        statusCode: 404,
+        details: { pathAssetId: reference },
+      })
+    }
+    if (match.object.siteId !== sameSite || match.object.siteId !== target.object.siteId) {
+      throw new AppError('Path evidence koneksi manual harus berada pada site yang sama.', {
+        code: 'topology_manual_relation_path_cross_site',
+        statusCode: 400,
+        details: { pathAssetId: reference, siteId: match.object.siteId },
+      })
+    }
+  })
+
+  const geometryById = new Map(
+    (record.topologyInputBundle?.geometries ?? []).map((geometry) => [
+      geometry.geometryId,
+      geometry,
+    ]),
+  )
+  sourceGeometryIds.forEach((reference) => {
+    const geometry = geometryById.get(reference)
+    const owner = geometry
+      ? objects.find(({ object }) => object.sourceFeatureId === geometry.sourceFeatureId)
+      : null
+    if (!geometry || !owner) {
+      throw new AppError('Geometry evidence untuk koneksi manual tidak ditemukan.', {
+        code: 'topology_manual_relation_geometry_not_found',
+        statusCode: 404,
+        details: { sourceGeometryId: reference },
+      })
+    }
+    if (geometry.datasetVersionId !== record.datasetVersion.id
+      || owner.object.siteId !== sameSite
+      || owner.object.siteId !== target.object.siteId) {
+      throw new AppError('Geometry evidence koneksi manual harus berada pada version/site yang sama.', {
+        code: 'topology_manual_relation_geometry_scope_invalid',
+        statusCode: 400,
+        details: {
+          sourceGeometryId: reference,
+          datasetVersionId: geometry.datasetVersionId,
+          siteId: owner.object.siteId,
+        },
+      })
+    }
+  })
 }
 
 function manualTopologyObjects(record, identityMap, resolver) {
@@ -2166,7 +3971,12 @@ function assertSameManualDeviceSite(source, target) {
 
 function assertNoConfirmedManualDevicePair(record, source, target) {
   const identityMap = buildAssetIdentityMapFromRecord(record)
-  const graph = normalizeTraceGraph(record, identityMap)
+  const graph = normalizedTraceGraphFromCache(
+    new Map(),
+    new WeakMap(),
+    record,
+    identityMap,
+  )
   const hasGraphPair = graph.edges.some((edge) => sameUndirectedPair(
     edge.sourceAssetId,
     edge.targetAssetId,
@@ -2268,18 +4078,213 @@ function normalizeTraceRequest(request) {
   const scopeAssetIds = request.scopeAssetIds === undefined || request.scopeAssetIds === null
     ? null
     : normalizeTraceScope(request.scopeAssetIds)
-  const direction = String(request.direction ?? 'both').trim().toLowerCase()
-  if (direction !== 'both') {
-    throw new AppError(
-      'Tracing saat ini hanya mendukung physical connectivity dua arah.',
-      {
-        code: 'unsupported_topology_trace_direction',
-        statusCode: 400,
-        details: { direction, supportedDirections: ['both'] },
+  const requestedMode = request.mode === undefined || request.mode === null
+    ? null
+    : String(request.mode).trim().toLowerCase()
+  const mode = requestedMode ?? (targetAssetId === null ? 'reachable' : 'point_to_point')
+  if (!['connectivity', 'point_to_point', 'upstream', 'downstream', 'reachable'].includes(mode)) {
+    throw new AppError('Mode tracing tidak valid.', {
+      code: 'invalid_topology_trace_mode',
+      statusCode: 400,
+      details: {
+        mode,
+        supportedModes: ['connectivity', 'point_to_point', 'upstream', 'downstream', 'reachable'],
       },
-    )
+    })
   }
-  return { sourceAssetId, targetAssetId, graphRevision, direction, scopeAssetIds }
+  const requestedDirection = request.direction === undefined || request.direction === null
+    ? null
+    : String(request.direction).trim().toLowerCase()
+  let direction = requestedDirection ?? (
+    mode === 'upstream' ? 'upstream' : mode === 'downstream' ? 'downstream' : 'both'
+  )
+  if (!['upstream', 'downstream', 'both'].includes(direction)) {
+    throw new AppError('Direction tracing tidak valid.', {
+      code: 'unsupported_topology_trace_direction',
+      statusCode: 400,
+      details: {
+        direction,
+        supportedDirections: ['upstream', 'downstream', 'both'],
+      },
+    })
+  }
+  if (mode === 'connectivity' && direction !== 'both') {
+    throw new AppError('Mode connectivity hanya mendukung direction both.', {
+      code: 'unsupported_topology_trace_direction',
+      statusCode: 400,
+      details: { mode, direction, supportedDirections: ['both'] },
+    })
+  }
+  if (['upstream', 'downstream'].includes(mode) && direction === 'both') {
+    direction = mode
+  }
+  if (['upstream', 'downstream'].includes(mode) && direction !== mode) {
+    throw new AppError(`Mode ${mode} harus memakai direction ${mode}.`, {
+      code: 'unsupported_topology_trace_direction',
+      statusCode: 400,
+      details: { mode, direction, supportedDirections: [mode] },
+    })
+  }
+  if (mode === 'point_to_point' && targetAssetId === null) {
+    throw new AppError('Target asset wajib untuk mode point_to_point.', {
+      code: 'invalid_topology_trace_targetAssetId',
+      statusCode: 400,
+      details: { field: 'targetAssetId', mode },
+    })
+  }
+  const maxDepth = normalizeTraceMaxDepth(request.maxDepth)
+  const requestedServiceDomain = request.serviceDomain === undefined
+    || request.serviceDomain === null
+    || request.serviceDomain === ''
+    ? null
+    : String(request.serviceDomain).trim().toLowerCase()
+  if (requestedServiceDomain !== null
+    && !['data', 'power'].includes(requestedServiceDomain)) {
+    throw new AppError('Service domain tracing hanya mendukung data atau power.', {
+      code: 'invalid_topology_trace_service_domain',
+      statusCode: 400,
+      details: { serviceDomain: requestedServiceDomain, supportedDomains: ['data', 'power'] },
+    })
+  }
+  return {
+    sourceAssetId,
+    targetAssetId: mode === 'point_to_point' ? targetAssetId : null,
+    mode,
+    direction,
+    graphRevision,
+    scopeAssetIds,
+    maxDepth,
+    serviceDomain: requestedServiceDomain,
+  }
+}
+
+function isPoleAssetReference(record, assetId) {
+  if (!assetId) return false
+  const object = [
+    ...(record.topologyInputBundle?.classifiedNodes ?? []),
+    ...(record.topologyGraph?.nodes ?? []),
+  ].find((item) => [
+    item.id,
+    item.assetId,
+    item.canonicalAssetId,
+    item.stableAssetId,
+    item.sourceFeatureId,
+  ].filter(Boolean).map(String).includes(String(assetId)))
+  const text = String([
+    object?.assetType,
+    object?.category,
+    object?.sourceName,
+    object?.assetName,
+  ].filter(Boolean).join(' ')).toLowerCase()
+  return object?.assetType === 'pole' || /(^|\s)(tiang|pole|pylon)(\s|$)/.test(text)
+}
+
+function assertCandidateInterfaceCapacity(record, candidate) {
+  const interfaceId = candidate?.targetInterfaceId
+  if (!interfaceId) return
+  const registry = record.topologyInterfaceRegistry
+    ?? record.topologyGraph?.interfaceRegistry
+    ?? []
+  const target = registry.find(({ interfaceId: id }) => id === interfaceId)
+    ?? candidate.targetInterface
+  if (!target || target.status === 'retired') {
+    throw new AppError('Target interface candidate tidak tersedia pada registry aktif.', {
+      code: 'topology_candidate_interface_not_available',
+      statusCode: 422,
+      details: { candidateId: candidate.candidateId, interfaceId },
+    })
+  }
+  const occupancy = activeInterfaceOccupancy(record.confirmedRelations, interfaceId)
+  const capacity = Math.max(1, Number(target.capacity ?? 1))
+  if (occupancy >= capacity) {
+    throw new AppError('Target interface sudah penuh.', {
+      code: 'topology_candidate_interface_capacity_exceeded',
+      statusCode: 409,
+      details: { candidateId: candidate.candidateId, interfaceId, occupancy, capacity },
+    })
+  }
+}
+
+function findTopologyAsset(record, assetId) {
+  const requested = String(assetId ?? '')
+  const objects = [
+    ...(record.topologyGraph?.nodes ?? []),
+    ...(record.topologyInputBundle?.classifiedNodes ?? []),
+  ]
+  return objects.find((object) => (
+    [object.id, object.assetId, object.canonicalAssetId, object.stableAssetId,
+      object.sourceFeatureId, object.legacyAssetId].filter(Boolean).map(String).includes(requested)
+  )) ?? null
+}
+
+function isJunctionBoxOrRackAsset(asset) {
+  const text = String([
+    asset?.assetType,
+    asset?.category,
+    asset?.sourceName,
+    asset?.assetName,
+  ].filter(Boolean).join(' ')).toLowerCase()
+  return asset?.assetType === 'junction_box'
+    || asset?.assetType === 'server_rack'
+    || /junction|\bjb\b|server[ -]?rack|rack[ -]?server/.test(text)
+}
+
+function activeInterfaceOccupancy(relations, interfaceId) {
+  return (relations ?? []).filter((relation) => (
+    relation.verificationStatus === 'confirmed'
+      && (relation.relationKind === 'path_termination'
+        || relation.relationType === 'terminates_at')
+      && relation.targetInterfaceId === interfaceId
+  )).length
+}
+
+function normalizeImpactRequest(request) {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) {
+    throw new AppError('Request impact analysis tidak valid.', {
+      code: 'invalid_topology_impact_request',
+      statusCode: 400,
+    })
+  }
+  const failureType = String(request.failureType ?? '').trim().toLowerCase()
+  if (!['asset', 'relation', 'path'].includes(failureType)) {
+    throw new AppError('Failure type impact tidak valid.', {
+      code: 'invalid_topology_impact_failure_type',
+      statusCode: 400,
+      details: { failureType, supportedFailureTypes: ['asset', 'relation', 'path'] },
+    })
+  }
+  const failureId = normalizeTraceId(request.failureId, 'failureId', true)
+  const graphRevision = normalizeTraceId(request.graphRevision, 'graphRevision', true)
+  const rootAssetIds = request.rootAssetIds === undefined || request.rootAssetIds === null
+    ? null
+    : normalizeTraceScope(request.rootAssetIds)
+  const scopeAssetIds = request.scopeAssetIds === undefined || request.scopeAssetIds === null
+    ? null
+    : normalizeTraceScope(request.scopeAssetIds)
+  const networkFamily = request.networkFamily === undefined || request.networkFamily === null
+    ? null
+    : normalizeTraceId(request.networkFamily, 'networkFamily', false)
+  return {
+    failureType,
+    failureId,
+    graphRevision,
+    rootAssetIds,
+    networkFamily,
+    scopeAssetIds,
+  }
+}
+
+function normalizeTraceMaxDepth(value) {
+  if (value === undefined || value === null || value === '') return 100
+  const maxDepth = Number(value)
+  if (!Number.isInteger(maxDepth) || maxDepth < 1 || maxDepth > 10000) {
+    throw new AppError('maxDepth tracing harus integer 1 sampai 10000.', {
+      code: 'invalid_topology_trace_max_depth',
+      statusCode: 400,
+      details: { maxDepth: value, minimum: 1, maximum: 10000 },
+    })
+  }
+  return maxDepth
 }
 
 function normalizeTraceScope(value) {
@@ -2305,9 +4310,40 @@ function normalizeTraceId(value, field, required) {
   return normalized || null
 }
 
-function normalizeTraceGraph(record, identityMap) {
+function normalizedTraceGraphFromCache(cache, objectCache, record, identityMap, projection = null) {
+  const sourceGraph = projection === 'data' || projection === 'power'
+    ? record.topologyGraph?.serviceGraph
+    : record.topologyGraph
+  const datasetVersionId = record.datasetVersion?.id ?? 'unknown'
+  const sourceRevision = sourceGraph?.graphRevision
+    ?? record.topologyGraph?.graphRevision
+    ?? null
+  const cacheKey = sourceRevision
+    ? `${datasetVersionId}:${sourceRevision}:${projection ?? 'asset'}`
+    : null
+  if (cacheKey && cache.has(cacheKey)) return cache.get(cacheKey)
+  const objectCached = sourceGraph && typeof sourceGraph === 'object'
+    ? objectCache.get(sourceGraph)
+    : null
+  if (objectCached && objectCached.sourceRevision === sourceRevision) {
+    return objectCached.graph
+  }
+  const graph = normalizeTraceGraph(record, identityMap, projection)
+  if (cacheKey) {
+    cache.set(cacheKey, graph)
+    while (cache.size > 64) cache.delete(cache.keys().next().value)
+  }
+  if (sourceGraph && typeof sourceGraph === 'object') {
+    objectCache.set(sourceGraph, { sourceRevision, graph })
+  }
+  return graph
+}
+
+function normalizeTraceGraph(record, identityMap, projection = null) {
   const resolver = createAssetIdentityResolver(identityMap)
-  const sourceGraph = record.topologyGraph ?? {
+  const sourceGraph = (projection === 'data' || projection === 'power'
+    ? record.topologyGraph?.serviceGraph
+    : record.topologyGraph) ?? {
     datasetVersionId: record.datasetVersion?.id,
     nodes: (record.assets ?? []).map((asset) => ({
       id: asset.canonicalAssetId ?? asset.assetId ?? asset.id,
@@ -2372,7 +4408,7 @@ function normalizeTraceGraph(record, identityMap) {
     nodeIds,
     edges,
   )
-  return withTopologyGraphRevision({
+  const normalizedGraph = withTopologyGraphRevision({
     ...structuredClone(sourceGraph),
     datasetVersionId: record.datasetVersion?.id ?? sourceGraph.datasetVersionId,
     nodes,
@@ -2381,9 +4417,16 @@ function normalizeTraceGraph(record, identityMap) {
     degreeByNode,
     isolatedNodeIds: [...nodeIds].filter((id) => degreeByNode[id] === 0).sort(),
   })
+  if (projection === 'data' || projection === 'power') {
+    normalizedGraph.graphRevision = record.topologyGraph?.graphRevision
+      ?? normalizedGraph.graphRevision
+    normalizedGraph.serviceDomain = projection
+  }
+  return normalizedGraph
 }
 
 function normalizeTraceComponents(sourceComponents, resolveNodeId, nodeIds, edges) {
+  const edgeIds = new Set(edges.map(({ id }) => id).filter(Boolean))
   const components = (sourceComponents ?? []).map((component, index) => ({
     ...structuredClone(component),
     componentId: component.componentId ?? component.id ?? `component:${index + 1}`,
@@ -2391,7 +4434,7 @@ function normalizeTraceComponents(sourceComponents, resolveNodeId, nodeIds, edge
       .map(resolveNodeId)
       .filter((id) => nodeIds.has(id)))].sort(),
     edgeIds: (component.edgeIds ?? [])
-      .filter((edgeId) => edges.some((edge) => edge.id === edgeId))
+      .filter((edgeId) => edgeIds.has(edgeId))
       .sort(),
   })).filter(({ nodeIds: componentNodeIds }) => componentNodeIds.length)
   return components.length ? components : traceConnectedComponents(nodeIds, edges)
@@ -2475,18 +4518,47 @@ function restrictTraceGraph(graph, nodeIds) {
   }
 }
 
-function buildTraceAdjacency(graph) {
+function buildTraceTraversal(graph, normalized) {
+  return {
+    adjacency: buildTraceAdjacency(graph, normalized),
+    directionCoverage: directionCoverageForGraph(graph),
+  }
+}
+
+function buildTraceAdjacency(graph, {
+  mode = 'connectivity',
+  direction = 'both',
+  serviceDomain = null,
+} = {}) {
   const adjacency = new Map(graph.nodes.map(({ id }) => [id, []]))
+  const usePhysical = mode === 'connectivity' || direction === 'both'
+  const add = (source, target, edge) => {
+    if (!adjacency.has(source) || !adjacency.has(target)) return
+    adjacency.get(source).push({ target, edge })
+  }
   graph.edges.forEach((edge) => {
-    if (!adjacency.has(edge.sourceAssetId) || !adjacency.has(edge.targetAssetId)) return
-    adjacency.get(edge.sourceAssetId).push({
-      target: edge.targetAssetId,
-      edge,
-    })
-    adjacency.get(edge.targetAssetId).push({
-      target: edge.sourceAssetId,
-      edge,
-    })
+    if (serviceDomain && edge.serviceDomain !== serviceDomain) return
+    if (edge.relationKind === 'installation_attachment' || edge.traversable === false) return
+    const source = edge.sourceAssetId
+    const target = edge.targetAssetId
+    if (!adjacency.has(source) || !adjacency.has(target)) return
+    if (usePhysical) {
+      add(source, target, edge)
+      add(target, source, edge)
+      return
+    }
+    const serviceDirection = normalizeRelationDirection(edge.direction)
+    const serviceForward = serviceDirection === 'source_to_target'
+      || serviceDirection === 'bidirectional'
+    const serviceReverse = serviceDirection === 'target_to_source'
+      || serviceDirection === 'bidirectional'
+    if (direction === 'downstream') {
+      if (serviceForward) add(source, target, edge)
+      if (serviceReverse) add(target, source, edge)
+    } else if (direction === 'upstream') {
+      if (serviceForward) add(target, source, edge)
+      if (serviceReverse) add(source, target, edge)
+    }
   })
   adjacency.forEach((relations) => relations.sort((left, right) => (
     String(left.edge.id ?? '').localeCompare(String(right.edge.id ?? ''))
@@ -2495,34 +4567,51 @@ function buildTraceAdjacency(graph) {
   return adjacency
 }
 
-function reachableDestinations(adjacency, sourceAssetId) {
-  if (!adjacency.has(sourceAssetId)) return []
+function reachableDestinations(adjacency, sourceAssetId, maxDepth = 100) {
+  if (!adjacency.has(sourceAssetId)) return { destinations: [], truncated: false }
   const visited = new Set([sourceAssetId])
   const queue = [{ assetId: sourceAssetId, distance: 0 }]
   const destinations = []
-  while (queue.length) {
-    const current = queue.shift()
-    for (const relation of adjacency.get(current.assetId) ?? []) {
+  let cursor = 0
+  let truncated = false
+  while (cursor < queue.length) {
+    const current = queue[cursor]
+    cursor += 1
+    const relations = adjacency.get(current.assetId) ?? []
+    if (current.distance >= maxDepth) {
+      if (relations.some(({ target }) => !visited.has(target))) truncated = true
+      continue
+    }
+    for (const relation of relations) {
       if (visited.has(relation.target)) continue
       visited.add(relation.target)
       destinations.push({ assetId: relation.target, distance: current.distance + 1 })
       queue.push({ assetId: relation.target, distance: current.distance + 1 })
     }
   }
-  return destinations
+  return { destinations, truncated }
 }
 
-function findTracePath(adjacency, sourceAssetId, targetAssetId) {
+function findTracePath(adjacency, sourceAssetId, targetAssetId, maxDepth = 100) {
+  if (!adjacency.has(sourceAssetId)) return { path: null, truncated: false }
   const visited = new Set([sourceAssetId])
-  const queue = [sourceAssetId]
+  const queue = [{ assetId: sourceAssetId, distance: 0 }]
   const predecessor = new Map()
-  while (queue.length) {
-    const current = queue.shift()
-    for (const relation of adjacency.get(current) ?? []) {
+  let cursor = 0
+  let truncated = false
+  while (cursor < queue.length) {
+    const current = queue[cursor]
+    cursor += 1
+    const relations = adjacency.get(current.assetId) ?? []
+    if (current.distance >= maxDepth) {
+      if (relations.some(({ target }) => !visited.has(target))) truncated = true
+      continue
+    }
+    for (const relation of relations) {
       if (visited.has(relation.target)) continue
       visited.add(relation.target)
       predecessor.set(relation.target, {
-        source: current,
+        source: current.assetId,
         edge: relation.edge,
       })
       if (relation.target === targetAssetId) {
@@ -2530,16 +4619,284 @@ function findTracePath(adjacency, sourceAssetId, targetAssetId) {
         let target = targetAssetId
         while (target !== sourceAssetId) {
           const previous = predecessor.get(target)
-          if (!previous) return null
+          if (!previous) return { path: null, truncated }
           path.unshift({ source: previous.source, target, edge: previous.edge })
           target = previous.source
         }
-        return path
+        return { path, truncated }
       }
+      queue.push({ assetId: relation.target, distance: current.distance + 1 })
+    }
+  }
+  return { path: null, truncated }
+}
+
+function reachableSet(adjacency, sourceAssetIds) {
+  const visited = new Set()
+  const queue = [...new Set(sourceAssetIds)].filter((id) => adjacency.has(id))
+  queue.forEach((id) => visited.add(id))
+  let cursor = 0
+  while (cursor < queue.length) {
+    const current = queue[cursor]
+    cursor += 1
+    for (const relation of adjacency.get(current) ?? []) {
+      if (visited.has(relation.target)) continue
+      visited.add(relation.target)
       queue.push(relation.target)
     }
   }
-  return null
+  return visited
+}
+
+function normalizeRelationDirection(value) {
+  const normalized = String(value ?? 'undirected').trim().toLowerCase()
+    .replaceAll('-', '_')
+  return ['source_to_target', 'target_to_source', 'bidirectional', 'undirected']
+    .includes(normalized)
+    ? normalized
+    : 'undirected'
+}
+
+function directionCoverageForGraph(graph) {
+  const edges = graph.edges ?? []
+  const undirectedEdgeCount = edges.filter(({ direction }) => (
+    normalizeRelationDirection(direction) === 'undirected'
+  )).length
+  const directedEdgeCount = edges.length - undirectedEdgeCount
+  return {
+    confirmedEdgeCount: edges.length,
+    directedEdgeCount,
+    undirectedEdgeCount,
+    coverageStatus: edges.length === 0
+      ? 'none'
+      : undirectedEdgeCount === 0 ? 'complete' : directedEdgeCount === 0 ? 'none' : 'partial',
+  }
+}
+
+function verifiedRootNodes(graph) {
+  return graph.nodes.filter((node) => (
+    ['root', 'core'].includes(
+      String(node.topologyRole ?? '').trim().toLowerCase(),
+    )
+  ))
+}
+
+function traceAvailabilityReason(graph, physicalAdjacency, normalized, sourceAssetId) {
+  const directionalMode = ['upstream', 'downstream'].includes(normalized.mode)
+    || (['point_to_point', 'reachable'].includes(normalized.mode)
+      && normalized.direction !== 'both')
+  if (!directionalMode) return null
+  if (!verifiedRootNodes(graph).length) return 'root_not_defined'
+  const physicalComponent = reachableSet(physicalAdjacency, [sourceAssetId])
+  if (physicalComponent.size <= 1) return null
+  const hasServiceEdge = graph.edges.some((edge) => (
+    physicalComponent.has(edge.sourceAssetId)
+      && physicalComponent.has(edge.targetAssetId)
+      && normalizeRelationDirection(edge.direction) !== 'undirected'
+  ))
+  return hasServiceEdge ? null : 'direction_not_available'
+}
+
+function hasUnavailableDirectionOnPhysicalPath(graph, physicalPathResult) {
+  return Boolean(physicalPathResult?.path?.some(({ edge }) => (
+    normalizeRelationDirection(edge.direction) === 'undirected'
+  )))
+}
+
+function hasIncompleteDirectionOnRootArea(
+  graph,
+  physicalReachable,
+  baselineReachable,
+  incompleteDirectionNodes,
+) {
+  if ([...incompleteDirectionNodes].some((id) => !baselineReachable.has(id))) return true
+  return graph.edges.some((edge) => (
+    physicalReachable.has(edge.sourceAssetId)
+      && physicalReachable.has(edge.targetAssetId)
+      && normalizeRelationDirection(edge.direction) === 'undirected'
+  ))
+}
+
+function reachableViaUndirectedEdge(adjacency, sourceAssetIds) {
+  const incomplete = new Set()
+  const bestState = new Map()
+  const queue = [...new Set(sourceAssetIds)]
+    .filter((id) => adjacency.has(id))
+    .map((assetId) => ({ assetId, incomplete: false }))
+  queue.forEach(({ assetId }) => bestState.set(assetId, false))
+  let cursor = 0
+  while (cursor < queue.length) {
+    const current = queue[cursor]
+    cursor += 1
+    if (current.incomplete) incomplete.add(current.assetId)
+    for (const relation of adjacency.get(current.assetId) ?? []) {
+      const nextIncomplete = current.incomplete
+        || normalizeRelationDirection(relation.edge.direction) === 'undirected'
+      const previous = bestState.get(relation.target)
+      if (previous === true || (previous === false && !nextIncomplete)) continue
+      bestState.set(relation.target, nextIncomplete)
+      queue.push({ assetId: relation.target, incomplete: nextIncomplete })
+    }
+  }
+  return incomplete
+}
+
+function resolveImpactFailure(graph, normalized, resolver = null) {
+  if (normalized.failureType === 'asset') {
+    const resolvedAssetId = resolver?.resolve(normalized.failureId) ?? normalized.failureId
+    const node = graph.nodes.find(({ id }) => id === resolvedAssetId)
+    return node
+      ? {
+        type: 'asset',
+        id: normalized.failureId,
+        resolvedAssetId: node.id,
+        edges: graph.edges.filter((edge) => (
+          edge.sourceAssetId === node.id || edge.targetAssetId === node.id
+        )),
+      }
+      : null
+  }
+  const matches = graph.edges.filter((edge) => {
+    const identifiers = [
+      edge.id,
+      edge.relationId,
+      edge.candidateId,
+      ...(edge.sourceRelationIds ?? []),
+    ].filter(Boolean)
+    if (normalized.failureType === 'relation') return identifiers.includes(normalized.failureId)
+    return [
+      edge.pathAssetId,
+      ...(edge.pathAssetIds ?? []),
+      ...(edge.sourceGeometryIds ?? []),
+    ].filter(Boolean).includes(normalized.failureId)
+  })
+  return matches.length
+    ? { type: normalized.failureType, id: normalized.failureId, edges: matches }
+    : null
+}
+
+function resolveImpactRoots(graph, resolver, requestedRootAssetIds) {
+  const rootIds = requestedRootAssetIds === null
+    ? verifiedRootNodes(graph).map(({ id }) => id)
+    : requestedRootAssetIds
+      .map((assetId) => resolver.resolve(assetId) ?? assetId)
+  return graph.nodes
+    .filter(({ id }) => rootIds.includes(id))
+    .filter((node, index, nodes) => nodes.findIndex(({ id }) => id === node.id) === index)
+    .sort((left, right) => left.id.localeCompare(right.id))
+}
+
+function simulateImpactFailure(graph, failure) {
+  const failedNodeIds = failure.type === 'asset'
+    ? new Set([failure.resolvedAssetId])
+    : new Set()
+  const failedEdgeIds = new Set(failure.edges.map(({ id }) => id).filter(Boolean))
+  const nodes = graph.nodes.filter(({ id }) => !failedNodeIds.has(id))
+  const nodeIds = new Set(nodes.map(({ id }) => id))
+  const edges = graph.edges.filter((edge) => (
+    !failedEdgeIds.has(edge.id)
+      && nodeIds.has(edge.sourceAssetId)
+      && nodeIds.has(edge.targetAssetId)
+  ))
+  return restrictTraceGraph({ ...graph, nodes, edges }, nodeIds)
+}
+
+function impactNodes(graph, ids, reason) {
+  return ids.map((assetId) => {
+    const node = graph.nodes.find(({ id }) => id === assetId)
+    return {
+      assetId,
+      siteId: node?.siteId ?? null,
+      category: node?.category ?? node?.networkFamily ?? null,
+      networkFamily: node?.networkFamily ?? null,
+      topologyRole: node?.topologyRole ?? 'unknown',
+      componentId: componentIdForNode(graph, assetId),
+      reason,
+    }
+  })
+}
+
+function impactUnavailable({
+  datasetVersionId,
+  graphRevision,
+  normalized,
+  failure = null,
+  reason,
+  limitation,
+}) {
+  const empty = []
+  return {
+    status: 'unavailable',
+    datasetVersionId,
+    graphRevision,
+    failure: failure
+      ? {
+        type: normalized.failureType,
+        id: normalized.failureId,
+        resolvedAssetId: failure.resolvedAssetId ?? null,
+      }
+      : {
+        type: normalized.failureType,
+        id: normalized.failureId,
+        resolvedAssetId: null,
+      },
+    roots: [],
+    confirmedImpacted: empty,
+    potentiallyImpacted: empty,
+    confirmedTopologyImpact: empty,
+    potentialTopologyImpact: empty,
+    confirmedGroups: [],
+    potentialGroups: [],
+    cutEdges: [],
+    summary: {
+      baselineReachable: 0,
+      reachableAfterFailure: 0,
+      confirmedImpacted: 0,
+      potentiallyImpacted: 0,
+    },
+    reason,
+    limitations: [limitation],
+    computedAt: new Date().toISOString(),
+  }
+}
+
+function isTopologyPreviewAllowed(context) {
+  return context?.preview === true
+    && String(context.actorRole ?? '').toLowerCase() === 'administrator'
+}
+
+function decorateTopologyPreviewResult(result, context, record) {
+  if (!isTopologyPreviewAllowed(context)) return result
+  return {
+    ...result,
+    preview: true,
+    publicationStatus: record.datasetVersion?.publicationStatus ?? 'unpublished',
+    publicationProfile: record.datasetVersion?.publicationProfile ?? null,
+  }
+}
+
+function groupImpactItems(items) {
+  const groups = new Map()
+  items.forEach((item) => {
+    const key = [item.siteId ?? '', item.category ?? '', item.componentId ?? ''].join('|')
+    const group = groups.get(key) ?? {
+      siteId: item.siteId ?? null,
+      category: item.category ?? null,
+      componentId: item.componentId ?? null,
+      assetIds: [],
+      count: 0,
+    }
+    group.assetIds.push(item.assetId)
+    group.count += 1
+    groups.set(key, group)
+  })
+  return [...groups.values()]
+    .map((group) => ({ ...group, assetIds: group.assetIds.sort() }))
+    .sort((left, right) => (
+      String(left.siteId ?? '').localeCompare(String(right.siteId ?? ''))
+        || String(left.category ?? '').localeCompare(String(right.category ?? ''))
+        || String(left.componentId ?? '').localeCompare(String(right.componentId ?? ''))
+    ))
 }
 
 function traceEdge(edge, sourceAssetId, targetAssetId) {
@@ -2551,12 +4908,15 @@ function traceEdge(edge, sourceAssetId, targetAssetId) {
     : edge.pathAssetId ? [edge.pathAssetId] : []
   return {
     edgeId: edge.id,
+    relationId: edge.relationId ?? edge.sourceRelationIds?.[0] ?? null,
     sourceAssetId,
     targetAssetId,
     pathAssetIds: uniqueValues(pathAssetIds),
     sourceGeometryIds: uniqueValues(sourceGeometryIds),
     relationType: edge.relationType ?? 'connected-via-path',
-    direction: edge.direction ?? 'undirected',
+    direction: orientedTraceDirection(edge, sourceAssetId, targetAssetId),
+    relationDirection: normalizeRelationDirection(edge.direction),
+    provenance: edge.provenance ?? edge.relationSource ?? 'manual_review',
     relationSource: edge.relationSource ?? edge.provenance ?? 'manual_review',
     verificationStatus: 'confirmed',
     networkFamily: edge.networkFamily ?? null,
@@ -2605,10 +4965,19 @@ function hasPendingCandidate(record, resolver, sourceAssetId, targetAssetId) {
 
 function traceMessageForReason(reason) {
   return {
+    source_not_topology_node: 'Aset ini belum terdaftar sebagai node topology.',
+    target_not_topology_node: 'Aset tujuan belum terdaftar sebagai node topology.',
+    isolated_source: 'Belum ada koneksi terkonfirmasi dari aset ini.',
     'isolated-source': 'Belum ada koneksi terkonfirmasi dari aset ini.',
+    different_component: 'Target berada di luar komponen yang sudah diverifikasi.',
     'different-component': 'Target berada di luar komponen yang sudah diverifikasi.',
     candidate_pending_review: 'Jalur mungkin tersedia tetapi masih menunggu review topology.',
+    direction_not_available: 'Direction service belum cukup terverifikasi; lengkapi review arah relation.',
+    root_not_defined: 'Verified root/core belum ditetapkan untuk directional traversal.',
+    scope_excludes_path: 'Scope yang diminta mengecualikan sebagian jalur topology.',
+    max_depth_reached: 'Batas kedalaman traversal tercapai; naikkan maxDepth atau gunakan scope yang lebih tepat.',
     unreachable: 'Tidak ada jalur topologi terkonfirmasi antara aset awal dan tujuan.',
+    topology_not_published: 'Topology trace/impact belum dipublikasikan pada profile dataset aktif.',
   }[reason] ?? 'Jalur topologi tidak dapat ditemukan.'
 }
 
@@ -2618,6 +4987,8 @@ function traceState({
   sourceAssetId,
   targetAssetId = null,
   componentId = null,
+  mode = null,
+  direction = null,
   status,
   reason = null,
   message,
@@ -2629,6 +5000,8 @@ function traceState({
     sourceAssetId,
     targetAssetId,
     componentId,
+    mode,
+    direction,
     reason,
     message,
     nodeIds: [],
@@ -2643,6 +5016,8 @@ async function recordTraceAudit(auditLog, {
   datasetVersionId,
   request,
   result,
+  durationMilliseconds = null,
+  cacheHit = false,
 }) {
   if (!auditLog?.record) return
   try {
@@ -2654,16 +5029,97 @@ async function recordTraceAudit(auditLog, {
       details: {
         sourceAssetId: request.sourceAssetId,
         targetAssetId: request.targetAssetId,
+        mode: request.mode,
         direction: request.direction,
         requestedGraphRevision: request.graphRevision,
         graphRevision: result.graphRevision ?? null,
         resultStatus: result.status,
         reason: result.reason ?? null,
         hopCount: result.hopCount ?? null,
+        impactCount: null,
+        durationMilliseconds,
+        cacheHit,
       },
     })
   } catch {
     // Tracing must remain available if telemetry storage is temporarily down.
+  }
+}
+
+function orientedTraceDirection(edge, sourceAssetId, targetAssetId) {
+  const relationDirection = normalizeRelationDirection(edge.direction)
+  if (relationDirection === 'bidirectional' || relationDirection === 'undirected') {
+    return relationDirection
+  }
+  const followsStoredOrientation = sourceAssetId === edge.sourceAssetId
+    && targetAssetId === edge.targetAssetId
+  if (followsStoredOrientation) return relationDirection
+  return relationDirection === 'source_to_target'
+    ? 'target_to_source'
+    : 'source_to_target'
+}
+
+async function recordImpactAudit(auditLog, {
+  actorId,
+  datasetVersionId,
+  request,
+  result,
+  durationMilliseconds = null,
+  cacheHit = false,
+}) {
+  if (!auditLog?.record) return
+  try {
+    await auditLog.record('topology.impact_requested', {
+      actorId,
+      datasetVersionId,
+      correlationId: request.correlationId ?? null,
+      outcome: result.status,
+      details: {
+        failureType: request.failureType,
+        failureId: request.failureId,
+        requestedGraphRevision: request.graphRevision,
+        graphRevision: result.graphRevision ?? null,
+        resultStatus: result.status,
+        reason: result.reason ?? null,
+        impactCount: result.summary?.confirmedImpacted ?? null,
+        potentialImpactCount: result.summary?.potentiallyImpacted ?? null,
+        durationMilliseconds,
+        cacheHit,
+      },
+    })
+  } catch {
+    // Impact calculation remains available if audit storage is temporarily down.
+  }
+}
+
+function topologyResultCacheKey(kind, datasetVersionId, graphRevision, request) {
+  const normalizedRequest = canonicalizeTopologyRequest(request)
+  const requestHash = createHash('sha256')
+    .update(JSON.stringify(normalizedRequest))
+    .digest('hex')
+  return `${kind}:${datasetVersionId}:${graphRevision}:${requestHash}`
+}
+
+function canonicalizeTopologyRequest(request) {
+  return Object.fromEntries(Object.entries(request ?? {})
+    .filter(([key]) => key !== 'correlationId')
+    .map(([key, value]) => [
+      key,
+      Array.isArray(value) ? [...new Set(value)].sort() : value,
+    ])
+    .sort(([left], [right]) => left.localeCompare(right)))
+}
+
+function readTopologyResultCache(cache, key) {
+  const value = cache.get(key)
+  return value ? structuredClone(value) : null
+}
+
+function writeTopologyResultCache(cache, key, value) {
+  cache.set(key, structuredClone(value))
+  while (cache.size > 256) {
+    const oldestKey = cache.keys().next().value
+    cache.delete(oldestKey)
   }
 }
 

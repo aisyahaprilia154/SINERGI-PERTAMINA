@@ -1,7 +1,32 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { generateRelationArtifacts } from '../src/topology/semantic-relation-engine.js'
-import { applyArtifacts, TopologyService } from '../src/topology/topology-service.js'
+import {
+  applyArtifacts,
+  classifyReviewValidationIssues,
+  TopologyService,
+} from '../src/topology/topology-service.js'
+
+test('bulk preview distinguishes baseline topology issues from errors introduced by review', () => {
+  const baseline = [{
+    issueId: 'topology-issue:existing-dangling-relation',
+    severity: 'error',
+    issueCode: 'dangling_confirmed_relation',
+    entityReference: 'relation:legacy',
+  }]
+  const classified = classifyReviewValidationIssues(baseline, [
+    { ...baseline[0] },
+    {
+      issueId: 'topology-issue:new-cross-site-edge',
+      severity: 'error',
+      issueCode: 'cross_site_edge',
+      entityReference: 'relation:new',
+    },
+  ])
+
+  assert.equal(classified[0].reviewImpact, 'baseline')
+  assert.equal(classified[1].reviewImpact, 'introduced')
+})
 
 test('candidate review is audited, materializes confirmed graph, and can be revoked/reconfirmed', async () => {
   const bundle = reviewBundle()
@@ -38,7 +63,7 @@ test('candidate review is audited, materializes confirmed graph, and can be revo
   assert.equal(firstConfirmation.candidate.candidateStatus, 'confirmed')
   assert.equal(firstConfirmation.confirmedRelations.length, 1)
   assert.equal(firstConfirmation.graph.edges.length, 0)
-  assert.equal(firstConfirmation.confirmedRelations[0].relationKind, 'path_attachment')
+  assert.equal(firstConfirmation.confirmedRelations[0].relationKind, 'path_termination')
   assert.equal(auditLog.entries[0].correlationId, 'topology-review-correlation')
   const confirmed = await service.confirmCandidate(endCandidate.candidateId, 'admin-1', {
     reason: 'Endpoint kedua telah diverifikasi pada peta sumber.',
@@ -47,7 +72,7 @@ test('candidate review is audited, materializes confirmed graph, and can be revo
   assert.equal(confirmed.confirmedRelations.length, 2)
   assert.equal(confirmed.graph.edges.length, 1)
   assert.equal(confirmed.confirmedRelations.every(({ relationKind }) => (
-    relationKind === 'path_attachment'
+    relationKind === 'path_termination'
   )), true)
   const confirmedRecord = await repository.get('dv-review')
   assert.equal(confirmedRecord.topologySummary.confirmedPathAttachmentCount, 2)
@@ -84,10 +109,10 @@ test('candidate review is audited, materializes confirmed graph, and can be revo
   assert.deepEqual(
     auditLog.entries.map(({ event }) => event),
     [
-      'topology.candidate_confirmed',
-      'topology.candidate_confirmed',
+      'topology.cable_termination_selected',
+      'topology.cable_termination_selected',
       'topology.relation_revoked',
-      'topology.candidate_confirmed',
+      'topology.cable_termination_selected',
     ],
   )
 })
@@ -146,7 +171,9 @@ test('bulk confirmation excludes ambiguous alternatives', async () => {
     auditLog: new MemoryAuditLog(),
   })
 
-  const result = await service.confirmAllCandidates('dv-review', 'admin-1')
+  const result = await service.confirmAllCandidates('dv-review', 'admin-1', {
+    reason: 'Kandidat recommended telah diverifikasi oleh reviewer.',
+  })
   const record = await repository.get('dv-review')
   assert.equal(result.affectedCount, 1)
   assert.equal(
@@ -154,6 +181,137 @@ test('bulk confirmation excludes ambiguous alternatives', async () => {
       candidateStatus === 'ambiguous'
     )).length,
     2,
+  )
+})
+
+test('bulk review preview predicts graph changes and rejects endpoint conflicts', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const service = new TopologyService({
+    repository,
+    auditLog: new MemoryAuditLog(),
+  })
+  const recommended = initial.candidates
+    .filter(({ candidateStatus, proposalStatus }) => (
+      candidateStatus === 'candidate' && proposalStatus === 'recommended'
+    ))
+    .map(({ candidateId }) => candidateId)
+  const snapshot = await service.getSummary('dv-review')
+  assert.equal(snapshot.status, 'ready')
+  assert.equal(snapshot.confirmable, true)
+  assert.equal(snapshot.userMessage, null)
+  const preview = await service.reviewPreview('dv-review', {
+    candidateIds: recommended,
+    expectedGraphRevision: snapshot.graphRevision,
+    expectedCandidateRevision: snapshot.candidateRevision,
+  })
+  assert.equal(preview.safeToApply, true)
+  assert.equal(preview.predictedSummary.confirmedRelationDelta, 2)
+  assert.equal(preview.predictedSummary.componentCountAfter, 1)
+  assert.equal(preview.validationPreview.summary.errors, 0)
+
+  const conflictBundle = reviewBundle({ secondNode: true })
+  const conflictArtifacts = generateRelationArtifacts(conflictBundle)
+  const conflictCandidates = conflictArtifacts.candidates
+    .filter(({ candidateType, sourceEndpointId }) => (
+      candidateType === 'cable_termination'
+        && sourceEndpointId === 'endpoint:geometry:CBL-01:start'
+    ))
+  assert.ok(conflictCandidates.length >= 2)
+  const conflictRecord = applyArtifacts(baseRecord(conflictBundle), conflictArtifacts)
+  const conflictIds = conflictCandidates.slice(0, 2).map(({ candidateId }) => candidateId)
+  conflictRecord.topologyCandidates = conflictRecord.topologyCandidates.map((candidate) => (
+    conflictIds.includes(candidate.candidateId)
+      ? { ...candidate, candidateStatus: 'candidate', proposalStatus: 'recommended' }
+      : candidate
+  ))
+  const conflictRepository = new MemoryRepository([conflictRecord])
+  const conflictService = new TopologyService({
+    repository: conflictRepository,
+    auditLog: new MemoryAuditLog(),
+  })
+  const conflictPreview = await conflictService.reviewPreview('dv-review', {
+    candidateIds: conflictIds,
+  })
+  assert.equal(conflictPreview.safeToApply, false)
+  assert.ok(conflictPreview.ineligible.length === 0)
+  assert.ok(conflictPreview.validationPreview.issues.some(({ issueCode }) => (
+    issueCode === 'endpoint_conflict'
+  )))
+  await assert.rejects(
+    conflictService.confirmSelectedCandidates('dv-review', 'admin-1', {
+      candidateIds: conflictIds,
+      reason: 'Konflik endpoint harus ditolak oleh safe batch gate.',
+    }),
+    (error) => error.code === 'topology_bulk_review_not_safe',
+  )
+})
+
+test('bulk review never treats a pole as an inline cable anchor', async () => {
+  const bundle = inlineReviewBundle()
+  const initial = generateRelationArtifacts(bundle)
+  assert.equal(initial.candidates.some(({ candidateType }) => candidateType === 'inline_device'), false)
+  assert.equal(initial.candidates.some(({ candidateType, targetAssetId }) => (
+    candidateType === 'cable_termination' && targetAssetId === 'T-021'
+  )), false)
+  assert.ok(initial.topologyDiagnostics.some(({ issueCode }) => (
+    issueCode === 'cable_terminated_at_pole'
+  )))
+})
+
+test('stale onboarding candidates are blocked until identity assignment and regeneration', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const record = applyArtifacts(baseRecord(bundle), initial)
+  const onboardingId = (value) => value && !String(value).startsWith('onboarding-identity:')
+    ? `onboarding-identity:${value}`
+    : value
+  const onboardingObject = (object) => ({
+    ...object,
+    assetId: null,
+    canonicalAssetId: onboardingId(object.assetId),
+    stableAssetId: null,
+    onboardingIdentity: onboardingId(object.assetId),
+    identityStatus: 'onboarding',
+    identityResolutionStatus: 'onboarding_candidate',
+  })
+  record.topologyInputBundle = {
+    ...record.topologyInputBundle,
+    classifiedNodes: record.topologyInputBundle.classifiedNodes.map(onboardingObject),
+    classifiedPaths: record.topologyInputBundle.classifiedPaths.map(onboardingObject),
+  }
+  record.topologyCandidates = record.topologyCandidates.map((candidate) => ({
+    ...candidate,
+    sourcePathAssetId: onboardingId(candidate.sourcePathAssetId),
+    targetAssetId: onboardingId(candidate.targetAssetId),
+    targetPathAssetId: onboardingId(candidate.targetPathAssetId),
+  }))
+  const repository = new MemoryRepository([record])
+  const service = new TopologyService({
+    repository,
+    auditLog: new MemoryAuditLog(),
+  })
+  const candidate = (await service.getCandidates('dv-review')).items.find(({ proposalStatus }) => (
+    proposalStatus === 'recommended'
+  ))
+  assert.equal(candidate.reviewEligibility.identityReady, false)
+  assert.equal(candidate.reviewEligibility.confirmable, false)
+  assert.equal(candidate.reviewEligibility.code, 'missing_stable_asset_id')
+
+  const preview = await service.reviewPreview('dv-review', {
+    candidateIds: [candidate.candidateId],
+  })
+  assert.equal(preview.safeToApply, false)
+  assert.equal(preview.ineligible[0].reason, 'candidate_stable_asset_id_required')
+  assert.equal(preview.diagnostics.recommendation.code, 'assign_identity_and_regenerate')
+
+  await assert.rejects(
+    service.confirmCandidate(candidate.candidateId, 'admin-1', {
+      reason: 'Konfirmasi tidak boleh melewati identity gate.',
+    }),
+    (error) => error.code === 'topology_candidate_identity_required'
+      && error.statusCode === 422,
   )
 })
 
@@ -246,7 +404,7 @@ test('line label bulk action confirms only connections read from line names', as
     reason: 'Nama endpoint garis diverifikasi dari sumber resmi.',
   })
   assert.equal(result.action, 'confirm_line_labels')
-  assert.equal(result.affectedCount, 3)
+  assert.equal(result.affectedCount, 2)
   assert.equal(result.graph.edges.length, 1)
   assert.equal(result.confirmedDeviceEdgeCount, 1)
   assert.deepEqual(
@@ -264,7 +422,7 @@ test('reject requires reason and rejected candidates never enter operational gra
     auditLog: new MemoryAuditLog(),
   })
   const candidate = initial.candidates.find(({ candidateType }) => (
-    candidateType === 'endpoint_device'
+    candidateType === 'cable_termination'
   ))
 
   await assert.rejects(
@@ -310,6 +468,10 @@ test('select-target confirms only an alternative from the same endpoint', async 
   )
   assert.equal(selected.candidate.candidateId, candidates[1].candidateId)
   assert.equal(selected.candidate.candidateStatus, 'confirmed')
+  assert.deepEqual(
+    selected.updatedCandidates.map(({ candidateStatus }) => candidateStatus).sort(),
+    ['confirmed', 'rejected'],
+  )
   const record = await repository.get('dv-review')
   assert.equal(
     record.topologyCandidates.find(({ candidateId }) => (
@@ -353,7 +515,7 @@ test('regeneration reconciles decisions and records topology runs without deleti
   const auditLog = new MemoryAuditLog()
   const service = new TopologyService({ repository, auditLog })
   const candidate = initial.candidates.find(({ candidateType }) => (
-    candidateType === 'endpoint_device'
+    candidateType === 'cable_termination'
   ))
   await service.confirmCandidate(candidate.candidateId, 'admin-1', {
     reason: 'Confirmed before regeneration.',
@@ -374,6 +536,31 @@ test('regeneration reconciles decisions and records topology runs without deleti
   assert.equal(reviewProjection.runs.length, 1)
   assert.ok(Array.isArray(reviewProjection.history))
   assert.ok(auditLog.entries.some(({ event }) => event === 'topology.candidates_regenerated'))
+})
+
+test('candidate projection returns only history for the current page', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const record = applyArtifacts(baseRecord(bundle), initial)
+  const pageCandidate = initial.candidates
+    .slice()
+    .sort((left, right) => right.score - left.score || left.candidateId.localeCompare(right.candidateId))[0]
+  record.topologyCandidateHistory = [
+    { candidateId: 'historical-candidate', evidence: [{ explanation: 'large' }] },
+    { candidateId: pageCandidate.candidateId, supersededAt: '2026-08-13T00:00:00.000Z' },
+  ]
+  const service = new TopologyService({
+    repository: new MemoryRepository([record]),
+    auditLog: new MemoryAuditLog(),
+  })
+
+  const projection = await service.getCandidates('dv-review', { limit: 1 })
+
+  assert.deepEqual(projection.history, [{
+    candidateId: pageCandidate.candidateId,
+    supersededAt: '2026-08-13T00:00:00.000Z',
+    supersededByRunId: null,
+  }])
 })
 
 test('regeneration keeps the previous graph active when the new artifact is invalid', async () => {
@@ -464,6 +651,79 @@ test('manual device relation is audited, materialized, and retained across regen
       reason: 'Percobaan relasi duplikat.',
     }),
     (error) => error.code === 'topology_manual_relation_exists',
+  )
+})
+
+test('ambiguous endpoint requires selecting exactly one target', async () => {
+  const bundle = reviewBundle({ secondNode: true })
+  const initial = generateRelationArtifacts(bundle)
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const service = new TopologyService({
+    repository,
+    auditLog: new MemoryAuditLog(),
+  })
+  const candidates = initial.candidates.filter(({ sourceEndpointId }) => (
+    sourceEndpointId === 'endpoint:geometry:CBL-01:start'
+  ))
+  assert.equal(candidates.length, 2)
+  assert.equal(candidates[0].candidateStatus, 'ambiguous')
+
+  await assert.rejects(
+    service.confirmCandidate(candidates[0].candidateId, 'admin-1', {
+      reason: 'Mencoba konfirmasi tanpa memilih target.',
+    }),
+    (error) => error.code === 'topology_candidate_target_selection_required',
+  )
+
+  const selected = await service.selectTarget(candidates[0].candidateId, 'admin-1', {
+    targetCandidateId: candidates[0].candidateId,
+    reason: 'Target pertama cocok dengan bukti lapangan.',
+  })
+  assert.equal(selected.candidate.candidateStatus, 'confirmed')
+  assert.equal(
+    selected.updatedCandidates.find(({ candidateId }) => (
+      candidateId === candidates[1].candidateId
+    )).candidateStatus,
+    'rejected',
+  )
+})
+
+test('manual relation preserves path and geometry evidence through the graph projection', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle, {
+    config: { autoConfirmExplicitMetadata: false },
+  })
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const service = new TopologyService({
+    repository,
+    auditLog: new MemoryAuditLog(),
+    config: { autoConfirmExplicitMetadata: false },
+  })
+
+  const created = await service.createDeviceRelation('dv-review', 'admin-1', {
+    sourceAssetId: 'CAM-01',
+    targetAssetId: 'CAM-END',
+    relationKind: 'service_link',
+    pathAssetIds: ['CBL-01'],
+    sourceGeometryIds: ['geometry:CBL-01'],
+    evidenceRefs: ['document:network-plan:page-3'],
+    reason: 'Diverifikasi dari dokumentasi jaringan resmi.',
+  })
+
+  assert.equal(created.relation.relationKind, 'service_link')
+  assert.deepEqual(created.relation.pathAssetIds, ['CBL-01'])
+  assert.deepEqual(created.relation.sourceGeometryIds, ['geometry:CBL-01'])
+  assert.deepEqual(created.relation.evidenceRefs, ['document:network-plan:page-3'])
+  assert.equal(created.graph.edges[0].relationKind, 'service_link')
+  assert.deepEqual(created.graph.edges[0].pathAssetIds, ['CBL-01'])
+  await assert.rejects(
+    service.createDeviceRelation('dv-review', 'admin-1', {
+      sourceAssetId: 'CAM-01',
+      targetAssetId: 'CAM-END',
+      pathAssetIds: ['CBL-MISSING'],
+      reason: 'Referensi path tidak valid.',
+    }),
+    (error) => error.code === 'topology_manual_relation_path_not_found',
   )
 })
 
@@ -791,6 +1051,78 @@ function reviewBundle({ secondNode = false } = {}) {
     classifiedNodes: nodes.map(({ object }) => object),
     classifiedPaths: [path.object],
     geometries: [...nodes.map(({ geometry }) => geometry), path.geometry],
+    explicitRelations: [],
+    topologyPolicy: { requireJbTermination: false },
+    semanticRuleSetVersion: 'semantic-classifier/1.0.0',
+    topologyRuleSetVersion: null,
+  }
+}
+
+function inlineReviewBundle() {
+  const node = {
+    assetId: 'T-021',
+    sourceFeatureId: 'feature:T-021',
+    siteId: 'site-1',
+    objectRole: 'device_node',
+    networkFamily: 'fiber_optic',
+    assetType: 'Tiang',
+    category: 'infrastructure',
+    classificationStatus: 'classified',
+    classificationEvidence: [],
+    geometryIds: ['geometry:T-021'],
+  }
+  const nodeGeometry = {
+    geometryId: 'geometry:T-021',
+    datasetVersionId: 'dv-inline-review',
+    sourceFeatureId: 'feature:T-021',
+    geometryType: 'Point',
+    coordinates: [110.00005, -7],
+    valid: true,
+  }
+  const paths = [
+    {
+      assetId: 'FO-JB-011',
+      sourceFeatureId: 'feature:FO-JB-011',
+      geometryId: 'geometry:FO-JB-011',
+      coordinates: [[110, -7], [110.00005, -7], [110.001, -7]],
+    },
+    {
+      assetId: 'FO-JB-011.1',
+      sourceFeatureId: 'feature:FO-JB-011.1',
+      geometryId: 'geometry:FO-JB-011.1',
+      coordinates: [[110.00005, -7.001], [110.00005, -7], [110.00005, -6.999]],
+    },
+  ]
+  return {
+    datasetVersion: {
+      id: 'dv-inline-review',
+      sourceChecksum: `sha256:${'d'.repeat(64)}`,
+    },
+    site: 'site-1',
+    classifiedNodes: [node],
+    classifiedPaths: paths.map((path) => ({
+      assetId: path.assetId,
+      sourceFeatureId: path.sourceFeatureId,
+      siteId: 'site-1',
+      objectRole: 'cable_path',
+      networkFamily: 'fiber_optic',
+      assetType: 'Fiber Optic',
+      category: 'fiber_optic',
+      classificationStatus: 'classified',
+      classificationEvidence: [],
+      geometryIds: [path.geometryId],
+    })),
+    geometries: [
+      nodeGeometry,
+      ...paths.map((path) => ({
+        geometryId: path.geometryId,
+        datasetVersionId: 'dv-inline-review',
+        sourceFeatureId: path.sourceFeatureId,
+        geometryType: 'LineString',
+        coordinates: path.coordinates,
+        valid: true,
+      })),
+    ],
     explicitRelations: [],
     semanticRuleSetVersion: 'semantic-classifier/1.0.0',
     topologyRuleSetVersion: null,
