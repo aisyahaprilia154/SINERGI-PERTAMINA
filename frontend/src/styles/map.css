@@ -5120,7 +5120,7 @@
 .network-row-actions.has-coverage-toggle .network-coverage-toggle {
   position: absolute;
   top: 50%;
-  right: 54px;
+  right: calc(100% + 8px);
   z-index: 1;
   transform: translateY(-50%);
 }
