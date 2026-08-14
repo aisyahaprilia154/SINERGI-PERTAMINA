@@ -5060,6 +5060,7 @@
 }
 
 .network-row {
+  position: relative;
   min-height: 64px;
 }
 
@@ -5097,71 +5098,108 @@
 }
 
 .network-row-actions {
+  width: 52px;
+  min-width: 52px;
+  flex: 0 0 52px;
   padding-right: 4px;
   gap: 0;
   opacity: 1;
 }
 
 .network-icon-action {
-  width: 28px;
+  width: 24px;
   height: 36px;
 }
 
 .network-row-actions.has-coverage-toggle {
-  gap: 1px;
-  padding-right: 2px;
+  position: relative;
+  gap: 0;
+  padding-right: 4px;
+}
+
+.network-row-actions.has-coverage-toggle .network-coverage-toggle {
+  position: absolute;
+  top: 50%;
+  right: 54px;
+  z-index: 1;
+  transform: translateY(-50%);
 }
 
 .network-coverage-toggle {
   width: 40px;
-  height: 22px;
+  height: 20px;
   flex: 0 0 40px;
-  padding: 2px 4px 2px 5px;
+  padding: 2px;
   display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  color: #718096;
-  background: #f4f6f8;
-  border: 1px solid #dbe3eb;
+  justify-content: flex-start;
+  gap: 3px;
+  color: #75839a;
+  background: #e3e8f0;
+  border: 1px solid #d6dee9;
   border-radius: 999px;
-  font-size: 9px;
+  font-size: 7px;
   font-weight: 750;
   line-height: 1;
-  letter-spacing: .02em;
+  letter-spacing: 0;
   cursor: pointer;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease;
 }
 
 .network-coverage-toggle[aria-checked="true"] {
-  color: #5e63ad;
-  background: #f1f1fe;
-  border-color: #cfd1fb;
+  color: #6267b4;
+  background: #f0f1ff;
+  border-color: #d8daf8;
+}
+
+.network-coverage-toggle[aria-checked="false"] {
+  flex-direction: row;
+}
+
+.network-coverage-toggle[aria-checked="false"] .coverage-toggle-dot {
+  order: -1;
 }
 
 .network-coverage-toggle:hover {
-  color: #5258a2;
-  background: #e9e9fc;
-  border-color: #bfc3f7;
+  color: #5f6f87;
+  background: #dfe6ef;
+  border-color: #cbd5e1;
+}
+
+.network-coverage-toggle[aria-checked="true"]:hover {
+  color: #575ca8;
+  background: #e8e9fc;
+  border-color: #c9cdf2;
 }
 
 .network-coverage-toggle[aria-checked="false"]:hover {
   color: #52657a;
-  background: #e2e8f0;
-  border-color: #cbd5e1;
+  background: #dfe6ef;
+  border-color: #c3cedb;
+}
+
+.coverage-toggle-label {
+  min-width: 14px;
+  flex: 0 0 14px;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .coverage-toggle-dot {
-  width: 12px;
-  height: 12px;
-  flex: 0 0 12px;
-  background: #aeb9c7;
-  box-shadow: inset 0 0 0 2px #f4f6f8;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(23, 34, 49, .2);
   border-radius: 50%;
-  transition: background-color 120ms ease, box-shadow 120ms ease;
-}
-
-.network-coverage-toggle[aria-checked="true"] .coverage-toggle-dot {
-  background: var(--color-cctv);
-  box-shadow: inset 0 0 0 2px #f1f1fe;
+  transition: box-shadow 120ms ease, transform 120ms ease;
 }
 
 .network-coverage-toggle:focus-visible {

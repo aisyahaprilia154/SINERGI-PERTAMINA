@@ -223,8 +223,8 @@ function renderNetworkItem({
               data-cctv-coverage-toggle
               role="switch"
               aria-checked="${showCctvCoverage}"
-              aria-label="Tampilkan arah keterbacaan CCTV"
-              title="Tampilkan/sembunyikan arah keterbacaan CCTV">
+              aria-label="${showCctvCoverage ? 'Sembunyikan' : 'Tampilkan'} arah keterbacaan CCTV"
+              title="${showCctvCoverage ? 'Sembunyikan' : 'Tampilkan'} arah keterbacaan CCTV dari KMZ">
               <span class="coverage-toggle-label">${showCctvCoverage ? 'ON' : 'OFF'}</span>
               <span class="coverage-toggle-dot" aria-hidden="true"></span>
             </button>
