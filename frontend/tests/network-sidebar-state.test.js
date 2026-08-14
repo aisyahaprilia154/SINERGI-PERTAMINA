@@ -192,6 +192,7 @@ test('network cards expose compact metadata and clear action tooltips', () => {
       health: 'Aktif',
       color: '#64748b',
       assetCount: 36,
+      categoryKey: 'cctv',
       confirmedConnectionCount: 34,
       isolatedAssetCount: 6,
       nodeIds: [],
@@ -204,9 +205,54 @@ test('network cards expose compact metadata and clear action tooltips', () => {
   })
 
   assert.match(html, /34 koneksi/)
+  assert.doesNotMatch(html, /network-count/)
+  assert.match(html, /data-cctv-coverage-toggle/)
+  assert.match(html, /role="switch"/)
+  assert.match(html, /aria-checked="true"/)
+  assert.match(html, />ON<\/span>/)
   assert.match(html, /network-relation-warning/)
   assert.match(html, /title="Fokuskan peta ke Jaringan CCTV"/)
   assert.match(html, /title="Buka detail Jaringan CCTV"/)
+})
+
+test('asset count badges are removed and CCTV coverage switch is isolated', () => {
+  const html = renderNetworkList({
+    status: 'ready',
+    networks: [{
+      id: 'network:cctv',
+      name: 'Jaringan CCTV',
+      type: 'CCTV',
+      categoryKey: 'cctv',
+      health: 'Aktif',
+      color: '#9698f4',
+      assetCount: 80,
+      confirmedConnectionCount: 49,
+      nodeIds: [],
+      edges: [],
+    }, {
+      id: 'network:fiber-optic',
+      name: 'Jaringan Fiber Optic',
+      type: 'Fiber optic',
+      categoryKey: 'fiber-optic',
+      health: 'Aktif',
+      color: '#70cfb5',
+      assetCount: 20,
+      confirmedConnectionCount: 0,
+      nodeIds: [],
+      edges: [],
+    }],
+    assets: [],
+    selectedNetworkIds: new Set(['network:cctv', 'network:fiber-optic']),
+    expandedNetworkIds: new Set(),
+    search: '',
+    showCctvCoverage: false,
+  })
+
+  assert.doesNotMatch(html, /network-count/)
+  assert.equal((html.match(/data-cctv-coverage-toggle/g) || []).length, 1)
+  assert.match(html, /aria-checked="false"/)
+  assert.match(html, />OFF<\/span>/)
+  assert.match(html, /Jaringan Fiber Optic/)
 })
 
 test('sidebar exposes loading, error, and empty states', () => {

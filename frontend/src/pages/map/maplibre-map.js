@@ -10,6 +10,11 @@ import { groundOverlayCoordinates } from '../../domain/ground-overlay.js'
 import { getDefaultMapToken } from '../../services/active-dataset-service.js'
 import { buildAdaptiveAssetLayout } from './adaptive-asset-layout.js'
 import {
+  isCctvCoverageOverlay,
+  shouldRenderCctvCoverageOverlay,
+  shouldRenderMapGeometry,
+} from './cctv-coverage.js'
+import {
   BASEMAP_LOAD_TIMEOUT_MS,
   BASEMAP_RETRY_DELAYS_MS,
   basemapErrorMessage,
@@ -72,6 +77,7 @@ export function createMapLibreSurface(element, {
     isolateSelectedCandidate: false,
     highlightedNetworkId: null,
     focusedNetworkId: null,
+    showCctvCoverage: true,
   }
   let loaded = false
   let destroyed = false
@@ -85,6 +91,7 @@ export function createMapLibreSurface(element, {
   let layoutFrame = null
   let layoutStatusSignature = ''
   let clusterLookup = new Map()
+  let groundOverlayLayers = []
   const initialBounds = boundsForGeometries(geometries)
   // Vite injects an empty string when Docker passes an unset build arg. Treat
   // that the same as an omitted value so the same-origin proxy remains the
@@ -235,7 +242,8 @@ export function createMapLibreSurface(element, {
     map.addSource('sinergi-focus-lines', emptyGeoJsonSource())
     map.addSource('sinergi-candidates', emptyGeoJsonSource())
     map.addSource('sinergi-points', emptyGeoJsonSource())
-    addGroundOverlayImages(map, overlays)
+    groundOverlayLayers = addGroundOverlayImages(map, overlays)
+    syncGroundOverlayVisibility()
     syncSources()
     addOperationalLayers(map)
     syncAdaptiveMarkers()
@@ -308,6 +316,19 @@ export function createMapLibreSurface(element, {
     map.getSource('sinergi-focus-lines').setData(featureCollections.focusLines)
     map.getSource('sinergi-candidates').setData(featureCollections.candidates)
     map.getSource('sinergi-points').setData(featureCollections.points)
+    syncGroundOverlayVisibility()
+  }
+
+  function syncGroundOverlayVisibility() {
+    if (!loaded || destroyed) return
+    groundOverlayLayers.forEach(({ layerId, isCctvCoverage }) => {
+      if (!isCctvCoverage || !map.getLayer(layerId)) return
+      map.setLayoutProperty(
+        layerId,
+        'visibility',
+        state.showCctvCoverage ? 'visible' : 'none',
+      )
+    })
   }
 
   function scheduleAdaptiveMarkers() {
@@ -1128,6 +1149,7 @@ function clampNumber(value, minimum, maximum) {
 }
 
 function addGroundOverlayImages(map, overlays) {
+  const layers = []
   overlays.filter(({ visibility, resourceUrl }) => (
     visibility !== false && resourceUrl
   )).sort((left, right) => (left.drawOrder ?? 0) - (right.drawOrder ?? 0))
@@ -1146,7 +1168,12 @@ function addGroundOverlayImages(map, overlays) {
         source: sourceId,
         paint: { 'raster-opacity': 0.82, 'raster-fade-duration': 0 },
       })
+      layers.push({
+        layerId: `${sourceId}-layer`,
+        isCctvCoverage: isCctvCoverageOverlay(overlay),
+      })
     })
+  return layers
 }
 
 function buildFeatureCollections({
@@ -1205,6 +1232,7 @@ function buildFeatureCollections({
   }
 
   geometries.forEach((geometry) => {
+    if (!shouldRenderMapGeometry(geometry, assetById, state.showCctvCoverage)) return
     const geoType = {
       point: 'Point',
       line_string: 'LineString',
@@ -1311,8 +1339,10 @@ function buildFeatureCollections({
       },
     })
   })
-  overlays.filter(({ visibility, latLonBox, latLonQuad }) => (
-    visibility !== false && (latLonBox || latLonQuad)
+  overlays.filter((overlay) => (
+    overlay.visibility !== false
+      && shouldRenderCctvCoverageOverlay(overlay, state.showCctvCoverage)
+      && (overlay.latLonBox || overlay.latLonQuad)
   )).forEach((overlay) => {
     const coordinates = groundOverlayCoordinates(overlay)
     if (!coordinates?.length) return
