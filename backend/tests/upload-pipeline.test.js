@@ -456,7 +456,7 @@ test('KMZ import prioritizes doc.kml, records safe resources, and cleans its wor
       ['icons/camera.png'],
     )
     assert.ok(status.issues.some((issue) => (
-      issue.issueCode === 'KML_MULTIPLE_MAIN_CANDIDATES'
+      issue.issueCode === 'KML_DOCUMENTS_MERGED'
     )))
     assert.ok(status.issues.some((issue) => issue.issueCode === 'KMZ_RESOURCE_IGNORED'))
     const sourceDownload = await fetch(
@@ -504,12 +504,12 @@ test('KMZ import prioritizes doc.kml, records safe resources, and cleans its wor
   }
 })
 
-test('KMZ import fails closed when an unselected KML contains source features', async () => {
+test('KMZ import merges source features from every valid KML document', async () => {
   const fixture = await createFixture()
   try {
     const secondKml = VALID_KML
-      .replace('SW-01', 'SW-02')
-      .replace('Switch Core', 'Switch Backup')
+      .replace('CCTV-01', 'CCTV-02')
+      .replace('Camera Gate', 'Camera Backup')
       .replace('110.4,-6.9', '110.5,-6.9')
     const archive = createStoredZip([
       { name: 'doc.kml', content: VALID_KML },
@@ -530,12 +530,21 @@ test('KMZ import fails closed when an unselected KML contains source features', 
     )
     const status = await response.json()
 
-    assert.equal(status.datasetVersion.status, 'invalid')
-    assert.equal(status.validation.canActivate, false)
+    assert.equal(
+      status.datasetVersion.status,
+      'valid',
+      JSON.stringify(status.issues),
+    )
+    assert.equal(status.validation.canActivate, true)
+    assert.equal(status.datasetVersion.summary.totalAssets, 2)
+    assert.deepEqual(status.sourceSelection.mergedKmlPaths, [
+      'doc.kml',
+      'additional-assets.kml',
+    ])
     assert.ok(status.issues.some((issue) => (
-      issue.issueCode === 'KML_UNSELECTED_FEATURES'
-      && issue.severity === 'error'
-      && issue.canActivate === false
+      issue.issueCode === 'KML_DOCUMENTS_MERGED'
+      && issue.severity === 'information'
+      && issue.canActivate === true
     )))
   } finally {
     await fixture.close()

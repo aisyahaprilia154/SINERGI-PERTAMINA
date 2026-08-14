@@ -109,6 +109,8 @@ export function generateRelationArtifacts(topologyInputBundle, {
   })
   const unresolved = buildUnresolvedEndpoints(paths, candidates)
   const summary = buildSummary({
+    nodes,
+    paths,
     candidates,
     confirmedRelations,
     graph,
@@ -203,6 +205,8 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
   const unresolved = buildUnresolvedEndpoints(paths, normalizedCandidates)
   const accuracyGate = evaluateTopologyAccuracyGate(bundle, nodes, paths, settings, generatedAt)
   const summary = buildSummary({
+    nodes,
+    paths,
     candidates: normalizedCandidates,
     confirmedRelations,
     graph,
@@ -1985,10 +1989,24 @@ function buildUnresolvedEndpoints(paths, candidates) {
     }))
 }
 
-function buildSummary({ candidates, confirmedRelations, graph, unresolved, validation }) {
+function buildSummary({
+  nodes,
+  paths,
+  candidates,
+  confirmedRelations,
+  graph,
+  unresolved,
+  validation,
+}) {
   const confirmed = confirmedRelations.filter(({ verificationStatus }) => (
     verificationStatus === 'confirmed'
   ))
+  const evidenceDiagnostics = buildEvidenceDiagnostics({
+    nodes,
+    paths,
+    candidates,
+    confirmedRelations: confirmed,
+  })
   return {
     candidateCount: candidates.filter(({ candidateStatus }) => candidateStatus === 'candidate').length,
     confirmedEdgeCount: graph.edges.length,
@@ -2006,6 +2024,7 @@ function buildSummary({ candidates, confirmedRelations, graph, unresolved, valid
     unresolvedCount: unresolved.length,
     componentCount: graph.components.length,
     isolatedNodeCount: graph.isolatedNodeIds.length,
+    ...evidenceDiagnostics,
     falseComponentMergeCount: validation.issues.filter(({ issueCode }) => (
       ['cross_site_edge', 'incompatible_family_edge'].includes(issueCode)
     )).length,
@@ -2059,6 +2078,68 @@ function evaluateTopologyReadiness({
     ambiguousCount: candidates.filter(({ candidateStatus }) => candidateStatus === 'ambiguous').length,
     blockingReasons,
     topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+  }
+}
+
+function buildEvidenceDiagnostics({ nodes, paths, candidates, confirmedRelations }) {
+  const deviceIds = new Set(nodes.map(({ id }) => id))
+  const pathIds = new Set(paths.map(({ id }) => id))
+  const allIds = new Set([...deviceIds, ...pathIds])
+  const confirmedIds = new Set()
+  const adjacency = new Map([...allIds].map((id) => [id, new Set()]))
+  confirmedRelations.forEach((relation) => {
+    const sourceId = relation.sourceAssetId
+    const targetId = relation.targetAssetId
+    if (!allIds.has(sourceId) || !allIds.has(targetId)) return
+    confirmedIds.add(sourceId)
+    confirmedIds.add(targetId)
+    adjacency.get(sourceId).add(targetId)
+    adjacency.get(targetId).add(sourceId)
+  })
+  const reviewIds = new Set()
+  candidates
+    .filter(({ candidateStatus }) => ['candidate', 'ambiguous'].includes(candidateStatus))
+    .forEach((candidate) => {
+      for (const id of [
+        candidate.sourceAssetId,
+        candidate.sourcePathAssetId,
+        candidate.targetAssetId,
+        candidate.targetPathAssetId,
+      ]) {
+        if (allIds.has(id) && !confirmedIds.has(id)) reviewIds.add(id)
+      }
+    })
+  const unresolvedAssetIds = [...allIds]
+    .filter((id) => !confirmedIds.has(id) && !reviewIds.has(id))
+    .sort()
+  const components = []
+  const visited = new Set()
+  ;[...confirmedIds].sort().forEach((id) => {
+    if (visited.has(id)) return
+    const queue = [id]
+    const component = []
+    visited.add(id)
+    while (queue.length) {
+      const current = queue.shift()
+      component.push(current)
+      ;[...(adjacency.get(current) ?? [])].sort().forEach((neighbor) => {
+        if (visited.has(neighbor)) return
+        visited.add(neighbor)
+        queue.push(neighbor)
+      })
+    }
+    components.push(component)
+  })
+  return {
+    totalTopologyObjectCount: allIds.size,
+    deviceNodeCount: deviceIds.size,
+    pathNodeCount: pathIds.size,
+    evidenceResolvedAssetCount: confirmedIds.size,
+    reviewAssetCount: reviewIds.size,
+    unresolvedAssetCount: unresolvedAssetIds.length,
+    unresolvedAssetIds,
+    unmatchedPathCount: unresolvedAssetIds.filter((id) => pathIds.has(id)).length,
+    evidenceComponentCount: components.length,
   }
 }
 

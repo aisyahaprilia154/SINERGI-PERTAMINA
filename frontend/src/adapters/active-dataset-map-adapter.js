@@ -376,6 +376,12 @@ function createOwnerFeature({ asset, layer, geometries }) {
     identityAliases: structuredClone(asset.identityAliases ?? {}),
     sourceNodeId: asset.id,
     sourceFeatureId: asset.sourceFeatureId ?? readProperty(asset, 'sourceFeatureId'),
+    sourceStyleId: asset.sourceStyleId ?? readProperty(asset, 'sourceStyleId') ?? null,
+    sourceIconHref: asset.sourceIconHref ?? readProperty(asset, 'sourceIconHref') ?? null,
+    sourceIconResourceId: asset.sourceIconResourceId
+      ?? readProperty(asset, 'sourceIconResourceId')
+      ?? null,
+    sourceIconUrl: asset.sourceIconUrl ?? readProperty(asset, 'sourceIconUrl') ?? null,
     name: asset.name || asset.assetId,
     type,
     assetType: type,

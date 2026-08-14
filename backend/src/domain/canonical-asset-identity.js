@@ -69,7 +69,7 @@ export function buildCanonicalAssetIdentityMap({
     const aliases = {
       canonicalAssetId: [canonicalAssetId],
       stableAssetId: stableAssetId ? [stableAssetId] : [],
-      sourceId: unique([feature?.sourceKmlId]),
+      sourceId: unique([scopedSourceKmlId(feature)]),
       onboardingId: [onboardingId],
       legacyId: [legacyId],
       sourceFeatureId: [sourceFeatureId],
@@ -106,6 +106,13 @@ export function buildCanonicalAssetIdentityMap({
     validation,
     identityRegistry: normalizeIdentityRegistry(identityRegistry, datasetVersion),
   }
+}
+
+function scopedSourceKmlId(feature) {
+  if (!feature?.sourceKmlId) return null
+  return feature.sourceDocumentPath
+    ? `${feature.sourceDocumentPath}#${feature.sourceKmlId}`
+    : feature.sourceKmlId
 }
 
 /**

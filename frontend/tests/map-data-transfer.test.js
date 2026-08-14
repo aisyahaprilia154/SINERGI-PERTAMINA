@@ -9,6 +9,7 @@ import {
   resolveConfiguredImportTarget,
 } from '../src/pages/map/map-data-transfer-dialog.js'
 import {
+  renderNetworkMapCanvas,
   renderMapContextPill,
   renderMapFloatingControls,
 } from '../src/pages/map/map-surface.js'
@@ -168,6 +169,21 @@ test('map disables unavailable tracing and displays an Indonesian readiness stat
   assert.match(controls, /class="tool-button trace-toggle map-action-primary"[^>]*disabled aria-disabled="true"/)
   assert.match(controls, /class="tool-button diagram-toggle map-action-secondary"[^>]*disabled aria-disabled="true"/)
   assert.match(controls, /Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\./)
+})
+
+test('map renders topology warning as a distinct readable callout', () => {
+  const html = renderNetworkMapCanvas(activeContext, {
+    topologyReadiness: {
+      ready: false,
+      traceAvailable: false,
+      message: 'Belum ada koneksi yang dikonfirmasi.',
+    },
+  })
+
+  assert.match(html, /class="map-topology-readiness"/)
+  assert.match(html, /material-symbols-outlined" aria-hidden="true">warning/)
+  assert.match(html, /<strong>Topologi perlu diperiksa<\/strong>/)
+  assert.match(html, /Belum ada koneksi yang dikonfirmasi\./)
 })
 
 test('export dialog also disables the diagram entry point while topology is unready', () => {

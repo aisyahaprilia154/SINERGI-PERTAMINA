@@ -152,25 +152,35 @@ export function createApp({
         : null
       const overlayResourceMatch = request.method === 'GET'
         ? url.pathname.match(
-          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/overlay-resources\/([^/]+)$/,
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/(overlay-resources|source-resources)\/([^/]+)$/,
         )
         : null
       if (overlayResourceMatch) {
         authenticator.authenticate(request)
         const record = await repository.get(overlayResourceMatch[1])
-        const resourceId = decodePathSegment(overlayResourceMatch[2])
+        const resourceKind = overlayResourceMatch[2]
+        const resourceId = decodePathSegment(overlayResourceMatch[3])
         const resource = (record.sourceResources ?? []).find(({ resourceId: id }) => (
           id === resourceId
         ))
-        const referenced = (record.sourceOverlays ?? []).some((overlay) => (
-          overlay.resourceId === resourceId
-          && overlay.resourceResolutionStatus === 'resolved'
-        ))
+        const referenced = resourceKind === 'source-resources'
+          ? Boolean(resource && imageContentType(resource.extension).startsWith('image/'))
+          : (record.sourceOverlays ?? []).some((overlay) => (
+            overlay.resourceId === resourceId
+            && overlay.resourceResolutionStatus === 'resolved'
+          ))
         if (!resource || !referenced) {
-          throw new AppError('Resource overlay tidak ditemukan.', {
-            code: 'overlay_resource_not_found',
+          throw new AppError(
+            resourceKind === 'source-resources'
+              ? 'Resource ikon aset tidak ditemukan.'
+              : 'Resource overlay tidak ditemukan.',
+            {
+            code: resourceKind === 'source-resources'
+              ? 'source_resource_not_found'
+              : 'overlay_resource_not_found',
             statusCode: 404,
-          })
+            },
+          )
         }
         if (!String(record.datasetVersion.sourceFilename ?? '').toLowerCase().endsWith('.kmz')) {
           throw new AppError('Resource overlay hanya tersedia dari package KMZ.', {

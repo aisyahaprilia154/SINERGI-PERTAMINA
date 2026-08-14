@@ -711,30 +711,49 @@
   --map-compact-toolbar-width: 196px;
   --map-safe-left: var(--space-4);
   --map-safe-right: var(--space-4);
-  --map-context-row-height: 104px;
+  --map-context-row-height: 128px;
   --panel-transition-duration: 200ms;
 }
 
 .map-topology-readiness {
-  max-width: min(440px, calc(100% - 2 * var(--space-4)));
-  padding: var(--space-2) var(--space-3);
+  width: min(520px, calc(100% - var(--map-safe-left) - var(--map-safe-right)));
+  max-width: none;
+  padding: var(--space-3);
   position: absolute;
-  top: 88px;
-  left: var(--space-4);
-  z-index: 4;
-  display: grid;
-  gap: 2px;
+  top: calc(var(--space-4) + var(--map-context-row-height) + var(--space-3));
+  left: var(--map-safe-left);
+  z-index: 390;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
   color: var(--color-text-secondary);
   background: color-mix(in srgb, var(--color-surface) 94%, var(--color-warning));
-  border: 1px solid var(--color-border);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 38%, var(--color-border));
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-floating);
   font-size: var(--font-size-micro);
   line-height: 1.4;
 }
 
+.map-topology-readiness > .material-symbols-outlined {
+  flex: 0 0 auto;
+  color: var(--color-warning);
+  font-size: 19px;
+}
+
+.map-topology-readiness > span:last-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
 .map-topology-readiness strong {
+  display: block;
   font-size: var(--font-size-caption);
+}
+
+.map-topology-readiness > span:last-child > span {
+  overflow-wrap: anywhere;
 }
 
 #network-map {
@@ -1974,6 +1993,13 @@
   overflow-y: auto;
   scrollbar-color: var(--color-border-strong) transparent;
   scrollbar-width: thin;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.schematic-board.is-panning {
+  cursor: grabbing;
 }
 
 .map-transfer-context {
@@ -3214,6 +3240,41 @@
   padding: var(--space-4);
 }
 
+.drawer-topology-readiness {
+  margin: var(--space-4);
+  padding: var(--space-3);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+  background: color-mix(in srgb, var(--color-surface) 93%, var(--color-warning));
+  border: 1px solid color-mix(in srgb, var(--color-warning) 38%, var(--color-border));
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-caption);
+  line-height: 1.45;
+}
+
+.drawer-topology-readiness > .material-symbols-outlined {
+  flex: 0 0 auto;
+  color: var(--color-warning);
+  font-size: 20px;
+}
+
+.drawer-topology-readiness > span:last-child {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.drawer-topology-readiness strong {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-caption);
+}
+
+.drawer-topology-readiness > span:last-child > span {
+  overflow-wrap: anywhere;
+}
+
 .asset-badge-row {
   display: flex;
   align-items: center;
@@ -3724,16 +3785,95 @@
 /* Read-only SVG schematic preview */
 .schematic-dialog {
   --schematic-canvas: var(--color-surface-subtle);
-  width: min(1120px, calc(100vw - var(--space-8)));
+  width: min(1400px, calc(100vw - var(--space-8)));
   height: min(820px, calc(100dvh - var(--space-8)));
   max-height: none;
   overflow: hidden;
+}
+
+.map-import-confirm-breaking {
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-3);
+  color: var(--color-text-primary);
+}
+
+.map-import-confirm-breaking > .material-symbols-outlined {
+  align-self: center;
+  color: var(--color-warning);
+  font-size: 36px;
+}
+
+.map-import-confirm-breaking h3,
+.map-import-confirm-breaking p {
+  margin: 0;
+  text-align: center;
+}
+
+.map-import-confirm-breaking p {
+  color: var(--color-text-secondary);
+}
+
+.schematic-dialog:fullscreen,
+.schematic-dialog.schematic-dialog-fullscreen {
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.schematic-dialog.schematic-dialog-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
 }
 
 .schematic-shell {
   height: 100%;
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  background: var(--color-surface);
+}
+
+.schematic-shell:fullscreen,
+.schematic-shell.schematic-shell-fullscreen {
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.schematic-shell.schematic-shell-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+}
+
+.schematic-shell:fullscreen .schematic-mode-bar,
+.schematic-shell.schematic-shell-fullscreen .schematic-mode-bar,
+.schematic-shell:fullscreen .schematic-summary,
+.schematic-shell.schematic-shell-fullscreen .schematic-summary {
+  display: none;
+}
+
+.schematic-shell:fullscreen .schematic-content,
+.schematic-shell.schematic-shell-fullscreen .schematic-content {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.schematic-shell:fullscreen .schematic-board,
+.schematic-shell.schematic-shell-fullscreen .schematic-board {
+  padding: var(--space-5);
 }
 
 .schematic-header {
@@ -3747,6 +3887,12 @@
 .schematic-header h2,
 .schematic-header p {
   overflow-wrap: anywhere;
+}
+
+.schematic-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .schematic-mode-bar {
@@ -3829,6 +3975,88 @@
   display: none;
 }
 
+.schematic-search {
+  width: min(300px, 32vw);
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+.schematic-search > .material-symbols-outlined {
+  position: absolute;
+  left: 11px;
+  z-index: 1;
+  color: var(--color-text-muted);
+  font-size: 18px;
+  pointer-events: none;
+}
+
+.diagram-search-input {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px 0 36px;
+  color: var(--color-text-primary);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.diagram-search-input:focus {
+  outline: 2px solid var(--color-primary-soft);
+  border-color: var(--color-primary);
+}
+
+.diagram-search-results {
+  width: 100%;
+  max-height: 280px;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  overflow: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.diagram-search-results[hidden] {
+  display: none;
+}
+
+.diagram-search-results button {
+  width: 100%;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  color: var(--color-text-primary);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--color-divider);
+  cursor: pointer;
+}
+
+.diagram-search-results button:hover,
+.diagram-search-results button:focus {
+  background: var(--color-surface-hover);
+  outline: none;
+}
+
+.diagram-search-results small,
+.diagram-search-results p {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-micro);
+}
+
+.diagram-search-results p {
+  margin: 0;
+  padding: 12px;
+}
+
 .schematic-tool-group {
   display: flex;
   align-items: center;
@@ -3897,6 +4125,10 @@
   background: var(--schematic-canvas);
 }
 
+.schematic-content[data-schematic-mode="all-assets"] {
+  grid-template-columns: minmax(0, 1fr) 244px;
+}
+
 .schematic-content > .schematic-board {
   min-width: 0;
   min-height: 0;
@@ -3907,6 +4139,10 @@
   padding: var(--space-4) var(--space-4) var(--space-3) 0;
   overflow: auto;
   background: var(--schematic-canvas);
+}
+
+.schematic-summary[hidden] {
+  display: none;
 }
 
 .schematic-summary-card {
@@ -3963,6 +4199,63 @@
   color: var(--color-text-secondary);
   font-size: var(--font-size-micro);
   line-height: 1.45;
+}
+
+.schematic-summary-card small {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.schematic-evidence-item > span,
+.unresolved-detail-card li > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.unresolved-detail-card ul {
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.unresolved-detail-card .button.compact {
+  min-height: 28px;
+  padding: 4px 9px;
+  font-size: var(--font-size-micro);
+}
+
+.schematic-candidate-card {
+  display: grid !important;
+  gap: 8px !important;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.schematic-candidate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.schematic-candidate-actions button {
+  min-height: 28px;
+  padding: 4px 8px;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.schematic-no-relation {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.schematic-diagnostic-warning {
+  color: var(--color-danger, #c94b52) !important;
 }
 
 .schematic-summary-card.is-clear {
@@ -4086,6 +4379,14 @@
     overflow: auto;
   }
 
+  .schematic-content[data-schematic-mode="all-assets"] {
+    grid-template-columns: 1fr;
+  }
+
+  .schematic-search {
+    width: min(260px, 42vw);
+  }
+
   .schematic-summary {
     padding: var(--space-2) var(--space-2) 0;
     display: grid;
@@ -4121,6 +4422,10 @@
 }
 
 @media (max-width: 480px) {
+  .schematic-toolbar {
+    flex-wrap: wrap;
+  }
+
   .schematic-mode-switch {
     grid-template-columns: 1fr;
   }
@@ -4131,6 +4436,11 @@
 
   .schematic-readonly {
     display: none;
+  }
+
+  .schematic-search {
+    width: 100%;
+    order: 3;
   }
 }
 
@@ -5417,7 +5727,7 @@
 
 @media (min-width: 961px) and (max-width: 1450px) {
   .map-workspace.drawer-open .map-stage {
-    --map-context-row-height: 136px;
+    --map-context-row-height: 164px;
   }
 }
 
@@ -5425,6 +5735,12 @@
   .map-stage {
     --map-safe-left: var(--space-3);
     --map-safe-right: var(--space-3);
+  }
+
+  .map-topology-readiness {
+    width: min(520px, calc(100% - var(--space-6)));
+    top: calc(74px + var(--map-context-row-height) + var(--space-3));
+    left: var(--space-3);
   }
 
   .map-workspace.drawer-open .map-stage {
@@ -5440,6 +5756,10 @@
 @media (max-width: 620px) {
   .map-stage {
     --map-context-row-height: 48px;
+  }
+
+  .map-topology-readiness {
+    top: calc(64px + var(--map-context-row-height) + var(--space-3));
   }
 
   .map-stage .trace-banner {
@@ -5652,4 +5972,24 @@
     opacity: 0;
     pointer-events: none;
   }
+}
+.review-map-unavailable {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: .5rem;
+  height: 100%;
+  min-height: 20rem;
+  padding: 2rem;
+  color: var(--text-muted, #64748b);
+  text-align: center;
+  background: #f8fafc;
+}
+
+.review-map-unavailable strong {
+  color: var(--text-primary, #1e293b);
+}
+
+.review-map-unavailable p {
+  margin: 0;
 }

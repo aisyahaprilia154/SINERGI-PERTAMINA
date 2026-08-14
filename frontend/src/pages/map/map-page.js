@@ -6,8 +6,10 @@ import {
 import {
   loadActiveAssetDetail,
   loadActiveDataset,
+  loadAllTopologyCandidates,
   loadDatasetProjection,
   loadTopologyProjection,
+  reviewTopologyCandidate,
   traceTopology,
 } from '../../services/active-dataset-service.js'
 import { renderAssetDetailDrawer } from './asset-detail-drawer.js'
@@ -137,6 +139,7 @@ export async function renderMapPage(container) {
     datasetTopologySummary,
   })
   const hasRenderableData = geometries.length > 0
+  let diagramCandidateProjectionPromise = null
   const resolvedOverlays = (overlayResult[0].status === 'fulfilled'
     ? overlayResult[0].value.items ?? []
     : [])
@@ -788,7 +791,7 @@ export async function renderMapPage(container) {
     renderDrawer()
   }
 
-  function openSchematic() {
+  async function openSchematic(event) {
     if (!diagramAvailable) {
       state.traceStatus = 'error'
       state.traceError = topologyReadiness.message
@@ -798,13 +801,48 @@ export async function renderMapPage(container) {
       renderDrawer()
       return
     }
+    const trigger = event?.currentTarget
+    const previousBusy = trigger?.getAttribute('aria-busy')
+    if (trigger) {
+      trigger.disabled = true
+      trigger.setAttribute('aria-busy', 'true')
+    }
+    let topologyCandidates = []
+    let candidateProjection = null
+    let candidateLoadError = null
+    try {
+      diagramCandidateProjectionPromise ??= Promise.all(
+        ['candidate', 'ambiguous'].map((status) => loadAllTopologyCandidates({
+          datasetVersionId: activeContext.datasetVersionId,
+          status,
+        })),
+      ).then(([candidatePage, ambiguousPage]) => ({
+        ...candidatePage,
+        items: [...(candidatePage.items ?? []), ...(ambiguousPage.items ?? [])],
+      }))
+      candidateProjection = await diagramCandidateProjectionPromise
+      topologyCandidates = candidateProjection.items ?? []
+    } catch (error) {
+      diagramCandidateProjectionPromise = null
+      candidateLoadError = error.message
+    } finally {
+      if (trigger) {
+        trigger.disabled = false
+        if (previousBusy === null) trigger.removeAttribute('aria-busy')
+        else trigger.setAttribute('aria-busy', previousBusy)
+      }
+    }
     const allAssetsGraph = buildSchematicGraph({
       assets: diagramAssets,
       networks,
       topologyGraph,
+      topologyCandidates,
       scope: 'all-assets',
       topologyReady: topologyReadiness.ready,
     })
+    if (candidateLoadError && allAssetsGraph.diagnostics) {
+      allAssetsGraph.diagnostics.candidateLoadError = candidateLoadError
+    }
     const fullMapGraph = buildSchematicGraph({
       assets: diagramAssets,
       networks,
@@ -856,6 +894,35 @@ export async function renderMapPage(container) {
           ? 'selected'
           : 'all-assets',
       onSelectAsset: selectAssetFromDiagram,
+      onReviewCandidate: async ({ candidateId, action }) => {
+        await reviewTopologyCandidate({
+          candidateId,
+          action,
+          body: {
+            datasetVersionId: activeContext.datasetVersionId,
+            ...(candidateProjection?.graphRevision !== undefined
+              ? { expectedGraphRevision: candidateProjection.graphRevision } : {}),
+            ...(candidateProjection?.candidateRevision !== undefined
+              ? { expectedCandidateRevision: candidateProjection.candidateRevision } : {}),
+            reason: action === 'reject' ? 'Ditolak dari Diagram Skematik 2D.' : '',
+          },
+        })
+        window.location.reload()
+      },
+      onNoValidRelation: async ({ candidates }) => {
+        const activeCandidates = candidates.filter((candidate) => candidate.candidateId)
+        for (const candidate of activeCandidates) {
+          await reviewTopologyCandidate({
+            candidateId: candidate.candidateId,
+            action: 'reject',
+            body: {
+              datasetVersionId: activeContext.datasetVersionId,
+              reason: 'Tidak ada relasi valid berdasarkan review Diagram Skematik 2D.',
+            },
+          })
+        }
+        window.location.reload()
+      },
     })
   }
 
