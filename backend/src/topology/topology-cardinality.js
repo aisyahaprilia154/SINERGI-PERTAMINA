@@ -6,9 +6,55 @@
  * paths, so its decision slot is the device/path pair.
  */
 export function topologyCandidateCardinality(candidate = {}) {
+  const isMounting = candidate.candidateType === 'mounting_attachment'
+  const isInternal = candidate.candidateType === 'jb_internal_connection'
+  const isPathContinuation = candidate.candidateType === 'path_continuation'
   const isInlineDevice = candidate.candidateType === 'inline_device'
     && candidate.targetAssetId
     && candidate.sourcePathAssetId
+  if (isMounting) {
+    const mountingRole = candidate.mountingRole ?? 'default'
+    return {
+      key: `mounting:${JSON.stringify([
+        String(candidate.sourcePathAssetId ?? candidate.childAssetId ?? ''),
+        String(mountingRole),
+      ])}`,
+      scope: 'child_asset_mounting_role',
+      childAssetId: candidate.sourcePathAssetId ?? candidate.childAssetId ?? null,
+      mountingRole,
+      sourceEndpointId: candidate.sourceEndpointId ?? null,
+      targetAssetId: candidate.targetAssetId ?? null,
+      sourcePathAssetId: candidate.sourcePathAssetId ?? null,
+    }
+  }
+  if (isInternal) {
+    return {
+      key: `internal:${JSON.stringify([
+        String(candidate.sourceInterfaceId ?? ''),
+        String(candidate.serviceDomain ?? 'unknown'),
+      ])}`,
+      scope: 'interface_service_domain',
+      sourceInterfaceId: candidate.sourceInterfaceId ?? null,
+      targetInterfaceId: candidate.targetInterfaceId ?? null,
+      serviceDomain: candidate.serviceDomain ?? 'unknown',
+      sourceEndpointId: candidate.sourceEndpointId ?? null,
+      targetAssetId: candidate.targetAssetId ?? null,
+      sourcePathAssetId: candidate.sourcePathAssetId ?? null,
+    }
+  }
+  if (isPathContinuation) {
+    return {
+      key: `path-continuation:${JSON.stringify([
+        String(candidate.sourceEndpointId ?? ''),
+        String(candidate.targetEndpointId ?? candidate.targetPathAssetId ?? ''),
+      ].sort())}`,
+      scope: 'normalized_endpoint_pair',
+      sourceEndpointId: candidate.sourceEndpointId ?? null,
+      targetEndpointId: candidate.targetEndpointId ?? null,
+      targetAssetId: candidate.targetAssetId ?? null,
+      sourcePathAssetId: candidate.sourcePathAssetId ?? null,
+    }
+  }
   return {
     key: isInlineDevice
       ? `inline-device:${JSON.stringify([

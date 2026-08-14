@@ -108,8 +108,14 @@ test('JSON repository preserves 20 concurrent reviewers on different candidates'
       repository,
       auditLog,
     }))
-    const candidates = initial.candidates.filter(({ candidateStatus }) => (
+    const candidates = initial.candidates.filter(({
+      candidateStatus,
+      candidateType,
+      targetInterfaceId,
+    }) => (
       ['candidate', 'ambiguous'].includes(candidateStatus)
+        && candidateType === 'cable_termination'
+        && Boolean(targetInterfaceId)
     ))
     assert.equal(candidates.length, 20)
 
@@ -249,7 +255,7 @@ test('full regeneration and review concurrently preserve the review decision', a
     assert.equal(persisted.confirmedRelations.length, 1)
     assert.equal(persisted.topologyRuns.length, 1)
     assert.equal(persisted.recordRevision, 2 + retryCount)
-    assert.equal(auditLog.index, 2 + retryCount)
+    assert.equal(auditLog.index, 3 + retryCount)
   } finally {
     await rm(root, {
       recursive: true,
@@ -268,7 +274,7 @@ test('reject and skip preserve confirmed candidates outside the affected compone
     const repository = new JsonDatasetVersionRepository(path.join(root, 'dataset-versions'))
     await repository.create(applyArtifacts(baseRecord(bundle), initial))
     const service = new TopologyService({ repository, auditLog: new MemoryAuditLog() })
-    const candidates = initial.candidates
+    const candidates = reviewableCandidates(initial)
     const confirmed = await service.confirmCandidate(candidates[0].candidateId, 'admin-1', {
       reason: 'Komponen pertama dikonfirmasi sebelum reject/skip scope test.',
     })
@@ -319,8 +325,7 @@ test('revoke removes only the affected component relation', async () => {
     const repository = new JsonDatasetVersionRepository(path.join(root, 'dataset-versions'))
     await repository.create(applyArtifacts(baseRecord(bundle), initial))
     const service = new TopologyService({ repository, auditLog: new MemoryAuditLog() })
-    const first = initial.candidates[0]
-    const second = initial.candidates[1]
+    const [first, second] = reviewableCandidates(initial)
     await service.confirmCandidate(first.candidateId, 'admin-1', {
       reason: 'Komponen pertama dikonfirmasi sebelum revoke scope test.',
     })
@@ -783,6 +788,9 @@ function reviewBundle({ includeIsolatedNode = false } = {}) {
     classifiedPaths: [pathRecordValue.object],
     geometries: [...nodes.map(({ geometry }) => geometry), pathRecordValue.geometry],
     explicitRelations: [],
+    topologyPolicy: {
+      requireJbTermination: false,
+    },
     semanticRuleSetVersion: 'semantic-classifier/1.0.0',
   }
 }
@@ -815,8 +823,19 @@ function twentyReviewerBundle() {
     classifiedPaths: paths,
     geometries,
     explicitRelations: [],
+    topologyPolicy: {
+      requireJbTermination: false,
+    },
     semanticRuleSetVersion: 'semantic-classifier/1.0.0',
   }
+}
+
+function reviewableCandidates(artifacts) {
+  return artifacts.candidates.filter((candidate) => (
+    ['candidate', 'ambiguous'].includes(candidate.candidateStatus)
+      && candidate.candidateType === 'cable_termination'
+      && Boolean(candidate.targetInterfaceId)
+  ))
 }
 
 function nodeRecord(assetId, coordinates) {

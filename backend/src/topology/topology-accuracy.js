@@ -195,6 +195,37 @@ export function evaluateTopologyAccuracy({
   const falseComponentMergeCount = heldOutComponents.filter((result) => (
     result.expectedSameComponent === false && result.actualSameComponent === true
   )).length
+  const terminationCandidates = candidates.filter(({ candidateType }) => (
+    candidateType === 'cable_termination'
+  ))
+  const cableToPolePredictions = terminationCandidates.filter((candidate) => (
+    candidate.targetObjectRole === 'pole'
+      || candidate.targetAssetType === 'pole'
+      || candidate.targetCategory === 'pole'
+  ))
+  const mountingLabels = Array.isArray(goldSet.mountingConnections)
+    ? goldSet.mountingConnections
+    : []
+  const selectedMounting = candidates.filter(({ candidateType, candidateStatus, proposalStatus }) => (
+    candidateType === 'mounting_attachment'
+      && (candidateStatus === 'confirmed' || proposalStatus === 'recommended')
+  ))
+  const mountingCorrect = mountingLabels.filter((label) => (
+    selectedMounting.some((candidate) => (
+      candidate.sourcePathAssetId === label.sourceAssetId
+        && candidate.targetAssetId === label.targetAssetId
+    ))
+  )).length
+  const interfaceLabels = goldSet.endpointConnections.filter(({ expectedTargetInterfaceId }) => (
+    expectedTargetInterfaceId != null
+  ))
+  const interfacePredictions = interfaceLabels.flatMap((label) => {
+    const candidate = selectedByDecisionKey.get(topologyCandidateDecisionKeyFromLabel(label))
+    return candidate ? [{ label, candidate }] : []
+  })
+  const interfaceCorrect = interfacePredictions.filter(({ label, candidate }) => (
+    candidate.targetInterfaceId === label.expectedTargetInterfaceId
+  )).length
 
   return {
     goldSetVersion: goldSet.version,
@@ -210,6 +241,14 @@ export function evaluateTopologyAccuracy({
       heldOutComponents.length,
     ),
     falseComponentMergeCount,
+    cableToPoleFalsePositiveRate: ratio(
+      cableToPolePredictions.length,
+      terminationCandidates.length,
+    ) ?? 0,
+    cableToPoleFalsePositiveCount: cableToPolePredictions.length,
+    interfaceTypeAccuracy: ratio(interfaceCorrect, interfacePredictions.length),
+    mountingRelationPrecision: ratio(mountingCorrect, selectedMounting.length),
+    mountingRelationRecall: ratio(mountingCorrect, mountingLabels.length),
     sampleCoverage: {
       endpointCount: goldSet.endpointConnections.length,
       heldOutEndpointCount: goldSet.endpointConnections.filter(({ split }) => (

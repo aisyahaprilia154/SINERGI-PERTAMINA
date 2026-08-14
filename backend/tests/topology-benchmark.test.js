@@ -29,7 +29,8 @@ test('topology benchmark reports deterministic fixture metrics and no violations
     maxRssMiB: 512,
   })
   assert.equal(result.pathCount, 3)
-  assert.equal(result.candidateCount, 0)
+  assert.equal(result.candidateCount, 6)
+  assert.equal(result.unresolvedCount, 6)
   assert.equal(result.validationErrors, 0)
   assert.equal(result.budgetViolations.length, 0)
   assert.ok(result.fixtureBuildMs >= 0)

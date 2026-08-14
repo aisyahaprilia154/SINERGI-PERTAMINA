@@ -5,6 +5,8 @@ const DEFAULT_OPERATIONAL_TABLES = Object.freeze([
   'classified_objects',
   'topology_jobs',
   'topology_candidates',
+  'topology_components',
+  'topology_interfaces',
   'confirmed_relations',
   'graph_revisions',
   'graph_nodes',

@@ -335,6 +335,22 @@ export async function previewTopologyReview({
   )
 }
 
+export async function loadTopologyJunctionBox({
+  datasetVersionId,
+  assetId,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('datasetVersionId wajib tersedia.')
+  if (!assetId) throw new TypeError('assetId wajib tersedia.')
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + `/topology/junction-boxes/${encodeURIComponent(assetId)}`,
+    { token, signal },
+  )
+}
+
 async function loadAllTopologyCandidatesAtLimit({
   datasetVersionId,
   status,

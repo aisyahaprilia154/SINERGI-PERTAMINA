@@ -347,6 +347,23 @@ export function createApp({
           },
         })
       }
+      const topologyJunctionBoxMatch = request.method === 'GET'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/junction-boxes\/([^/]+)$/,
+        )
+        : null
+      if (topologyJunctionBoxMatch) {
+        requireAdministrator(request, authenticator)
+        assertTopologyService(topologyService)
+        return sendJson(
+          response,
+          200,
+          await topologyService.getJunctionBox(
+            topologyJunctionBoxMatch[1],
+            decodePathSegment(topologyJunctionBoxMatch[2]),
+          ),
+        )
+      }
       const topologyRootsMatch = request.method === 'GET'
         ? url.pathname.match(
           /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/roots$/,
