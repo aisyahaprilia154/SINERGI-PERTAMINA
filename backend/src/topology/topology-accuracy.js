@@ -1,3 +1,5 @@
+import { topologyCandidateDecisionKeyFromLabel, topologyCandidateDecisionKey } from './topology-cardinality.js'
+
 /**
  * Evaluates a versioned calibration/held-out gold set without mutating candidates.
  * Labels are intentionally external to source KML and review decisions.
@@ -123,7 +125,7 @@ export function evaluateTopologyAccuracy({
   goldSet,
 } = {}) {
   validateGoldSet(goldSet)
-  const selectedByEndpoint = new Map()
+  const selectedByDecisionKey = new Map()
   candidates
     .filter((candidate) => (
       candidate.proposalStatus === 'recommended'
@@ -133,8 +135,9 @@ export function evaluateTopologyAccuracy({
       left.candidateId.localeCompare(right.candidateId)
     ))
     .forEach((candidate) => {
-      if (!selectedByEndpoint.has(candidate.sourceEndpointId)) {
-        selectedByEndpoint.set(candidate.sourceEndpointId, candidate)
+      const decisionKey = topologyCandidateDecisionKey(candidate)
+      if (!selectedByDecisionKey.has(decisionKey)) {
+        selectedByDecisionKey.set(decisionKey, candidate)
       }
     })
 
@@ -142,7 +145,7 @@ export function evaluateTopologyAccuracy({
     const labels = goldSet.endpointConnections.filter((label) => label.split === split)
     const positives = labels.filter(({ expectedTargetAssetId }) => Boolean(expectedTargetAssetId))
     const predictions = labels.flatMap((label) => {
-      const candidate = selectedByEndpoint.get(label.sourceEndpointId)
+      const candidate = selectedByDecisionKey.get(topologyCandidateDecisionKeyFromLabel(label))
       return candidate ? [{ label, candidate }] : []
     })
     const correct = predictions.filter(({ label, candidate }) => {
@@ -162,7 +165,7 @@ export function evaluateTopologyAccuracy({
       precision: ratio(correct.length, predictions.length),
       recall: ratio(correct.length, positives.length),
       autoCoverage: ratio(predictions.length, labels.length),
-      distanceStrata: strata(labels, selectedByEndpoint),
+      distanceStrata: strata(labels, selectedByDecisionKey),
     }
   }
 
@@ -192,6 +195,37 @@ export function evaluateTopologyAccuracy({
   const falseComponentMergeCount = heldOutComponents.filter((result) => (
     result.expectedSameComponent === false && result.actualSameComponent === true
   )).length
+  const terminationCandidates = candidates.filter(({ candidateType }) => (
+    candidateType === 'cable_termination'
+  ))
+  const cableToPolePredictions = terminationCandidates.filter((candidate) => (
+    candidate.targetObjectRole === 'pole'
+      || candidate.targetAssetType === 'pole'
+      || candidate.targetCategory === 'pole'
+  ))
+  const mountingLabels = Array.isArray(goldSet.mountingConnections)
+    ? goldSet.mountingConnections
+    : []
+  const selectedMounting = candidates.filter(({ candidateType, candidateStatus, proposalStatus }) => (
+    candidateType === 'mounting_attachment'
+      && (candidateStatus === 'confirmed' || proposalStatus === 'recommended')
+  ))
+  const mountingCorrect = mountingLabels.filter((label) => (
+    selectedMounting.some((candidate) => (
+      candidate.sourcePathAssetId === label.sourceAssetId
+        && candidate.targetAssetId === label.targetAssetId
+    ))
+  )).length
+  const interfaceLabels = goldSet.endpointConnections.filter(({ expectedTargetInterfaceId }) => (
+    expectedTargetInterfaceId != null
+  ))
+  const interfacePredictions = interfaceLabels.flatMap((label) => {
+    const candidate = selectedByDecisionKey.get(topologyCandidateDecisionKeyFromLabel(label))
+    return candidate ? [{ label, candidate }] : []
+  })
+  const interfaceCorrect = interfacePredictions.filter(({ label, candidate }) => (
+    candidate.targetInterfaceId === label.expectedTargetInterfaceId
+  )).length
 
   return {
     goldSetVersion: goldSet.version,
@@ -207,6 +241,14 @@ export function evaluateTopologyAccuracy({
       heldOutComponents.length,
     ),
     falseComponentMergeCount,
+    cableToPoleFalsePositiveRate: ratio(
+      cableToPolePredictions.length,
+      terminationCandidates.length,
+    ) ?? 0,
+    cableToPoleFalsePositiveCount: cableToPolePredictions.length,
+    interfaceTypeAccuracy: ratio(interfaceCorrect, interfacePredictions.length),
+    mountingRelationPrecision: ratio(mountingCorrect, selectedMounting.length),
+    mountingRelationRecall: ratio(mountingCorrect, mountingLabels.length),
     sampleCoverage: {
       endpointCount: goldSet.endpointConnections.length,
       heldOutEndpointCount: goldSet.endpointConnections.filter(({ split }) => (
@@ -281,7 +323,7 @@ function graphHasPath(graph, source, target) {
   return false
 }
 
-function strata(labels, selectedByEndpoint) {
+function strata(labels, selectedByDecisionKey) {
   const result = {
     '0_2m': { labels: 0, correct: 0 },
     '2_4m': { labels: 0, correct: 0 },
@@ -289,7 +331,7 @@ function strata(labels, selectedByEndpoint) {
     noCandidate: { labels: 0, correct: 0 },
   }
   labels.forEach((label) => {
-    const candidate = selectedByEndpoint.get(label.sourceEndpointId)
+    const candidate = selectedByDecisionKey.get(topologyCandidateDecisionKeyFromLabel(label))
     const key = !candidate || !Number.isFinite(candidate.distanceMeters)
       ? 'noCandidate'
       : candidate.distanceMeters <= 2 ? '0_2m'

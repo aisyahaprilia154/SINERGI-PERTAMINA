@@ -6,13 +6,13 @@ import {
   loadImportStatus,
   uploadDataset,
 } from '../../services/import-dataset-service.js'
+import { exportActiveKml } from '../../services/active-dataset-service.js'
 import {
   formatFileSize,
   validateImportFile,
 } from '../admin/import-dataset-state.js'
 import {
   collectSelectedNetworkAssetIds,
-  downloadActiveDatasetKml,
 } from './active-dataset-kml-export.js'
 
 export function openMapDataTransferDialog({
@@ -131,7 +131,7 @@ export function openMapDataTransferDialog({
     })
     dialog.querySelector('.start-map-import')?.addEventListener('click', startImport)
     dialog.querySelector('.retry-map-import')?.addEventListener('click', resetImport)
-    dialog.querySelector('.export-active-kml')?.addEventListener('click', exportActiveKml)
+    dialog.querySelector('.export-active-kml')?.addEventListener('click', exportActiveKmlFile)
     dialog.querySelector('.export-selected-kml')?.addEventListener('click', exportSelectedKml)
     dialog.querySelector('.download-active-source')?.addEventListener('click', downloadSource)
     dialog.querySelector('.open-map-diagram')?.addEventListener('click', () => {
@@ -257,19 +257,39 @@ export function openMapDataTransferDialog({
     window.setTimeout(() => onActivated?.(result), 350)
   }
 
-  function exportActiveKml() {
-    downloadActiveDatasetKml(
-      { activeContext, assets },
-      createExportFilename(activeContext, 'dataset-aktif'),
-    )
+  async function exportActiveKmlFile() {
+    await exportServerKml([], 'dataset-aktif')
   }
 
-  function exportSelectedKml() {
+  async function exportSelectedKml() {
     const assetIds = collectSelectedNetworkAssetIds(networks, selectedNetworkIds)
-    downloadActiveDatasetKml(
-      { activeContext, assets, assetIds },
-      createExportFilename(activeContext, 'jaringan-terpilih'),
-    )
+    await exportServerKml(assetIds, 'jaringan-terpilih')
+  }
+
+  async function exportServerKml(assetIds, fallbackLabel) {
+    state.error = null
+    const activeBranchId = activeContext.branchId
+    if (!activeContext.datasetId || !activeBranchId) {
+      state.error = 'Konteks dataset aktif belum lengkap untuk export.'
+      render()
+      return
+    }
+    try {
+      const exported = await exportActiveKml({
+        datasetId: activeContext.datasetId,
+        branchId: activeBranchId,
+        siteId: activeContext.siteId,
+        assetIds,
+        token: getDefaultMapToken(),
+      })
+      downloadBlob(
+        exported.blob,
+        exported.filename || createExportFilename(activeContext, fallbackLabel),
+      )
+    } catch (error) {
+      state.error = error.message
+      render()
+    }
   }
 
   async function downloadSource() {

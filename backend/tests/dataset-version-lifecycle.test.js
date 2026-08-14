@@ -238,6 +238,79 @@ test('active map migrates legacy asset and topology IDs into one canonical ident
   }
 })
 
+test('automatic identity assignment persists source feature mapping and is idempotent', async () => {
+  const fixture = await createLifecycleFixture()
+  try {
+    const record = versionRecord('version-auto-identity', 'valid')
+    const sourceFeatureId = 'source-feature-auto'
+    record.sourceFeatures = [{
+      sourceFeatureId,
+      datasetVersionId: record.datasetVersion.id,
+      sourceName: 'Asset Auto',
+      sourceFeatureKey: 'feature-key-auto',
+      sourceElementType: 'Placemark',
+      sourceFolderPath: '/root',
+      sourceName: 'Asset Auto',
+    }]
+    record.classifiedObjects = [{
+      sourceFeatureId,
+      objectRole: 'device_node',
+      assetId: 'onboarding-identity:auto',
+      identityStatus: 'onboarding',
+      identityResolutionStatus: 'onboarding_candidate',
+      assetName: 'Asset Auto',
+      sourceStatus: 'active',
+    }]
+    record.assetIdentityRegistry = []
+    record.identityRegistry = []
+    record.sourceGeometries = []
+    record.sourceOverlays = []
+    record.parserCoverage = {}
+    record.canonicalParser = { explicitRelationEvidence: [] }
+    record.topologyInputBundle = {
+      classifiedNodes: [{
+        sourceFeatureId,
+        assetId: 'onboarding-identity:auto',
+      }],
+      classifiedPaths: [],
+    }
+    record.topologyGraph = null
+    record.topologyReadiness = null
+    await fixture.repository.create(record)
+
+    const first = await fixture.service.autoAssignUniqueIdentityAssignments(
+      record.datasetVersion.id,
+    )
+    const updated = await fixture.repository.get(record.datasetVersion.id)
+    const assetId = updated.classifiedObjects[0].stableAssetId
+    const activeMappings = updated.assetIdentityRegistry.filter((entry) => (
+      entry.assetId === assetId && entry.status === 'active'
+    ))
+
+    assert.equal(first.state, 'updated')
+    assert.equal(first.automaticIdentity.generatedCount, 1)
+    assert.match(assetId, /^AUTO-[A-F0-9]{24}$/)
+    assert.deepEqual(
+      activeMappings.map(({ sourceMatchType, sourceMatchValue }) => [
+        sourceMatchType,
+        sourceMatchValue,
+      ]).sort(),
+      [
+        ['source_feature_id', sourceFeatureId],
+        ['source_feature_key', '/root|asset auto|placemark'],
+      ],
+    )
+
+    const second = await fixture.service.autoAssignUniqueIdentityAssignments(
+      record.datasetVersion.id,
+    )
+    assert.equal(second.state, 'no_changes')
+    assert.equal(second.automaticIdentity.generatedCount, 0)
+  } finally {
+    await fixture.close()
+  }
+})
+
 test('concurrent activation is locked and cannot publish two active versions', async () => {
   let enterCommit
   let releaseCommit
