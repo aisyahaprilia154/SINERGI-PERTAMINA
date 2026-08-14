@@ -138,6 +138,8 @@ test('drawer explains missing relations and keeps topology actions unavailable',
   })
 
   assert.match(html, /Topologi perlu diperiksa/)
+  assert.match(html, /class="drawer-topology-readiness" role="status"/)
+  assert.match(html, /material-symbols-outlined" aria-hidden="true">warning/)
   assert.match(html, /Relasi aset belum tersedia\./)
   assert.doesNotMatch(html, /class="button primary trace-from"/)
   assert.match(html, /class="button secondary open-schematic"[^>]*disabled aria-disabled="true"/)

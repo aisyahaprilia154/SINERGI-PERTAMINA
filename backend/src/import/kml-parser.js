@@ -7,8 +7,6 @@ const UNSUPPORTED_ELEMENTS = new Set([
   'PhotoOverlay',
   'ScreenOverlay',
   'Model',
-  'Track',
-  'MultiTrack',
   'Tour',
   'BalloonStyle',
   'ListStyle',
@@ -18,8 +16,6 @@ const CRITICAL_UNSUPPORTED_ELEMENTS = new Set([
   'PhotoOverlay',
   'ScreenOverlay',
   'Model',
-  'Track',
-  'MultiTrack',
 ])
 
 export async function parseKmlFile(filePath, {
@@ -149,6 +145,8 @@ function parseXml(xml) {
         'LineString',
         'Polygon',
         'MultiGeometry',
+        'Track',
+        'MultiTrack',
         'innerBoundaryIs',
         'Style',
         'StyleMap',
@@ -374,7 +372,14 @@ function validLatLonBox(box) {
 
 function parsePlacemarkGeometry(placemark, context) {
   const geometries = []
-  for (const type of ['Point', 'LineString', 'Polygon', 'MultiGeometry']) {
+  for (const type of [
+    'Point',
+    'LineString',
+    'Polygon',
+    'MultiGeometry',
+    'Track',
+    'MultiTrack',
+  ]) {
     children(placemark, type).forEach((geometry, index) => {
       const parsed = parseGeometry(type, geometry, {
         ...context,
@@ -397,6 +402,58 @@ function parsePlacemarkGeometry(placemark, context) {
 
 function parseGeometry(type, geometry, context) {
   const altitudeMode = normalizedText(firstChild(geometry, 'altitudeMode')) || undefined
+  if (type === 'Track') {
+    const sourceCoordinates = children(geometry, 'coord')
+      .map((value) => textValue(value).trim())
+      .filter(Boolean)
+    const coordinates = sourceCoordinates.map((tuple) => tuple
+      .split(/\s+/)
+      .map((coordinate) => (
+        coordinate.trim() === '' ? Number.NaN : Number(coordinate.trim())
+      )))
+    let valid = validatePositions(coordinates, context)
+    if (coordinates.length < 2) {
+      valid = false
+      addGeometryIssue(context, {
+        issueCode: 'track_too_short',
+        message: 'gx:Track minimal harus memiliki dua gx:coord.',
+      })
+    }
+    return {
+      type: 'LineString',
+      coordinates,
+      sourceCoordinates,
+      valid,
+      normalization: {
+        sourceGeometryType: 'gx:Track',
+        timeCount: children(geometry, 'when').length,
+      },
+      ...(altitudeMode ? { altitudeMode } : {}),
+    }
+  }
+  if (type === 'MultiTrack') {
+    const geometries = children(geometry, 'Track').map((track, index) => parseGeometry(
+      'Track',
+      track,
+      {
+        ...context,
+        geometryReference: `${context.geometryReference}.Track[${index}]`,
+      },
+    )).filter(Boolean)
+    if (!geometries.length) {
+      addGeometryIssue(context, {
+        issueCode: 'empty_multi_track',
+        message: 'gx:MultiTrack tidak memiliki gx:Track yang dapat dibaca.',
+      })
+    }
+    return {
+      type: 'MultiGeometry',
+      geometries,
+      valid: geometries.length > 0 && geometries.every((item) => item.valid !== false),
+      normalization: { sourceGeometryType: 'gx:MultiTrack' },
+      ...(altitudeMode ? { altitudeMode } : {}),
+    }
+  }
   if (type === 'Point') {
     const sequence = parseCoordinateSequence(firstChild(geometry, 'coordinates'))
     let valid = validatePositions(sequence.coordinates, context)
@@ -483,7 +540,14 @@ function parseGeometry(type, geometry, context) {
   }
   if (type === 'MultiGeometry') {
     const geometries = []
-    for (const childType of ['Point', 'LineString', 'Polygon']) {
+    for (const childType of [
+      'Point',
+      'LineString',
+      'Polygon',
+      'MultiGeometry',
+      'Track',
+      'MultiTrack',
+    ]) {
       children(geometry, childType).forEach((child, index) => {
         const parsed = parseGeometry(childType, child, {
           ...context,
@@ -854,9 +918,15 @@ function collectUnsupportedElements(node, output, path = '/') {
     values.forEach((value) => {
       const nextPath = `${path}${name}/`
       if (UNSUPPORTED_ELEMENTS.has(name)) {
+        const href = name === 'NetworkLink'
+          ? normalizedText(
+            firstChild(firstChild(value, 'Link') ?? firstChild(value, 'Url'), 'href'),
+          )
+          : ''
         output.push({
           name,
           geometryReference: nextPath,
+          ...(href ? { href } : {}),
           canActivate: !CRITICAL_UNSUPPORTED_ELEMENTS.has(name),
         })
       }

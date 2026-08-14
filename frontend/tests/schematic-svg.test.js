@@ -74,6 +74,35 @@ test('SVG renderer includes context, asset identity, legend, and schematic discl
   assert.match(svg, /Diagram skematik mengikuti posisi relatif tampilan peta dan tidak menunjukkan skala geografis\./)
 })
 
+test('SVG renderer uses the preloaded source icon from the KMZ style when available', () => {
+  const iconUrl = '/api/dataset-versions/version-1/source-resources/resource-camera'
+  const iconGraph = {
+    status: 'ready',
+    mode: 'selected',
+    title: 'Relasi kamera',
+    anchorAssetId: 'cam',
+    nodes: [{
+      id: 'cam',
+      name: 'C-001',
+      type: 'CCTV',
+      category: 'cctv',
+      sourceIconUrl: iconUrl,
+      isAnchor: true,
+    }],
+    edges: [],
+  }
+  const layout = calculateSchematicLayout(iconGraph)
+  const svg = renderSchematicSvg({
+    graph: iconGraph,
+    layout,
+    context: { branchName: 'Semarang', version: 'v14' },
+    sourceIconDataByUrl: new Map([[iconUrl, 'data:image/png;base64,Y2FtZXJh']]),
+  })
+
+  assert.match(svg, /class="node-source-icon"/)
+  assert.match(svg, /data:image\/png;base64,Y2FtZXJh/)
+})
+
 test('SVG renderer draws every selected node and confirmed edge without clipping', () => {
   const selectedGraph = {
     status: 'ready',
@@ -106,4 +135,45 @@ test('SVG renderer draws every selected node and confirmed edge without clipping
   assert.match(svg, /JB-00X-exp/)
   assert.match(svg, />Junction Box</)
   assert.doesNotMatch(svg, />CCTV</)
+})
+
+test('all-assets SVG renders every asset on one canvas with evidence status', () => {
+  const allAssetsGraph = {
+    status: 'ready',
+    mode: 'all-assets',
+    title: 'Seluruh aset',
+    anchorAssetId: 'jb-1',
+    relationCount: 1,
+    nodes: [
+      { id: 'jb-1', name: 'JB-001', type: 'Junction Box', category: 'cctv', resolutionStatus: 'confirmed' },
+      { id: 'cam-1', name: 'C-001', type: 'CCTV', category: 'cctv', resolutionStatus: 'confirmed' },
+      { id: 'recommendation-1', name: 'T-001', type: 'Rekomendasi', category: 'infrastructure', resolutionStatus: 'review' },
+      { id: 'fo-recommendation-1', name: 'FO-001', type: 'FO Rekomendasi', category: 'fiber-optic', resolutionStatus: 'unresolved' },
+    ],
+    edges: [{
+      id: 'jb-cam',
+      sourceId: 'jb-1',
+      targetId: 'cam-1',
+      networkName: 'CCTV',
+      networkColor: '#9698f4',
+      relationStatus: 'confirmed',
+    }],
+  }
+  const layout = calculateSchematicLayout(allAssetsGraph)
+  const svg = renderSchematicSvg({
+    graph: allAssetsGraph,
+    layout,
+    context: { branchName: 'Semarang', version: 'v13' },
+  })
+
+  assert.match(svg, /Seluruh aset · 4/)
+  assert.match(svg, /100% tercakup/)
+  assert.match(svg, /2 memiliki evidence · 2 belum terhubung · 1 komponen/)
+  assert.match(svg, /KOMPONEN TERHUBUNG/)
+  assert.match(svg, /ASET TANPA RELASI/)
+  assert.match(svg, /Rekomendasi/)
+  assert.match(svg, /FO Rekomendasi/)
+  assert.match(svg, /resolution-review/)
+  assert.match(svg, /resolution-unresolved/)
+  assert.equal((svg.match(/class="diagram-node compact/g) || []).length, 2)
 })

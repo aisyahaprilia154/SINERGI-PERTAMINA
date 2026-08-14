@@ -238,6 +238,47 @@ test('active map migrates legacy asset and topology IDs into one canonical ident
   }
 })
 
+test('active map exposes KMZ source icon resources for diagram nodes', async () => {
+  const fixture = await createLifecycleFixture()
+  try {
+    const record = versionRecord('version-source-icon', 'active')
+    record.sourceSelection = { selectedKmlPath: 'doc.kml' }
+    record.sourceFeatures = [{
+      sourceFeatureId: 'source-feature-version-source-icon',
+      sourceStyleUrl: '#asset-map',
+      rawProperties: { styleUrl: '#asset-map' },
+    }]
+    record.sourceStyles = {
+      styles: [{
+        sourceKmlStyleId: 'asset-normal',
+        parsedStyle: { iconStyle: { iconHref: 'files/camera.png' } },
+      }],
+      styleMaps: [{
+        sourceKmlStyleMapId: 'asset-map',
+        pairs: [{ key: 'normal', styleUrl: '#asset-normal' }],
+      }],
+    }
+    record.sourceResources = [{
+      resourceId: 'resource-camera',
+      relativePath: 'files/camera.png',
+      relativePaths: ['files/camera.png'],
+      extension: '.png',
+    }]
+    await fixture.repository.create(record)
+
+    const mapView = await fixture.service.getActiveMapDataset({
+      datasetId: 'dataset-semarang',
+      branchId: 'semarang',
+    })
+
+    assert.equal(mapView.assets[0].sourceIconHref, 'files/camera.png')
+    assert.equal(mapView.assets[0].sourceIconResourceId, 'resource-camera')
+    assert.match(mapView.assets[0].sourceIconUrl, /source-resources\/resource-camera$/)
+  } finally {
+    await fixture.close()
+  }
+})
+
 test('concurrent activation is locked and cannot publish two active versions', async () => {
   let enterCommit
   let releaseCommit

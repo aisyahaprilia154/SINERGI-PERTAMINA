@@ -492,6 +492,12 @@ export function adaptKmlImportResult({
           totalOccurrences: sourceIdentity.total,
         },
       } : {}),
+      ...(placemark.resolvedStyle?.resolvedStyleId
+        ? { resolvedStyleId: placemark.resolvedStyle.resolvedStyleId }
+        : {}),
+      ...(placemark.resolvedStyle?.resolvedIconHref
+        ? { sourceIconHref: placemark.resolvedStyle.resolvedIconHref }
+        : {}),
     }
     if (
       semanticMetadata.values.branchId
