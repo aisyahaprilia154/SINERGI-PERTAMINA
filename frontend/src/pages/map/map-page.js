@@ -187,6 +187,7 @@ export async function renderMapPage(container) {
     assetDetailStatus: 'ready',
     assetDetailError: null,
     showAdditionalMetadata: false,
+    showCctvCoverage: true,
     dimOthers: true,
     search: '',
     expandedNetworkIds: new Set(),
@@ -316,6 +317,7 @@ export async function renderMapPage(container) {
       expandedNetworkIds: state.expandedNetworkIds,
       search: state.search,
       focusedNetworkId: state.focusedNetworkId,
+      showCctvCoverage: state.showCctvCoverage,
     })
     container.querySelector('.selected-count').textContent = selection.selectedNetworkIds.size
     syncNetworkSelectionActions()
@@ -370,8 +372,20 @@ export async function renderMapPage(container) {
       )),
       connectedNodeIds,
       dimOthers: state.dimOthers,
+      showCctvCoverage: state.showCctvCoverage,
     })
     syncToolbarState(connectedNodeIds.length)
+  }
+
+  function syncCctvCoverage() {
+    canvasApi.setState({ showCctvCoverage: state.showCctvCoverage })
+  }
+
+  function toggleCctvCoverage() {
+    state.showCctvCoverage = !state.showCctvCoverage
+    renderNetworkList()
+    syncCctvCoverage()
+    networkList.querySelector('[data-cctv-coverage-toggle]')?.focus()
   }
 
   function syncToolbarState(connectedCount = 0) {
@@ -1146,6 +1160,14 @@ export async function renderMapPage(container) {
       return
     }
 
+    const coverageToggle = event.target.closest('[data-cctv-coverage-toggle]')
+    if (coverageToggle) {
+      event.preventDefault()
+      event.stopPropagation()
+      toggleCctvCoverage()
+      return
+    }
+
     const selectButton = event.target.closest('[data-network-select]')
     if (selectButton) {
       toggleNetwork(selectButton.dataset.networkSelect)
@@ -1165,6 +1187,13 @@ export async function renderMapPage(container) {
       else state.expandedNetworkIds.add(networkId)
       renderNetworkList()
     }
+  })
+  networkList.addEventListener('keydown', (event) => {
+    const coverageToggle = event.target.closest('[data-cctv-coverage-toggle]')
+    if (!coverageToggle || !['Enter', ' ', 'Spacebar'].includes(event.key)) return
+    event.preventDefault()
+    event.stopPropagation()
+    toggleCctvCoverage()
   })
   networkList.addEventListener('pointerover', (event) => {
     const item = event.target.closest('.network-item')

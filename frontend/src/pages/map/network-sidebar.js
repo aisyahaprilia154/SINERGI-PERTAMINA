@@ -156,6 +156,7 @@ export function renderNetworkList({
   expandedNetworkIds,
   search,
   focusedNetworkId = null,
+  showCctvCoverage = true,
 }) {
   if (status === 'loading') return renderLoadingSkeleton()
   if (status === 'error') return renderErrorState(errorMessage)
@@ -174,13 +175,22 @@ export function renderNetworkList({
     selected: selectedNetworkIds.has(network.id),
     expanded: expandedNetworkIds.has(network.id),
     focused: focusedNetworkId === network.id,
+    showCctvCoverage,
   })).join('')
 }
 
-function renderNetworkItem({ network, assetById, selected, expanded, focused }) {
+function renderNetworkItem({
+  network,
+  assetById,
+  selected,
+  expanded,
+  focused,
+  showCctvCoverage,
+}) {
   const subcategories = getNetworkSubcategories(network, assetById)
   const networkId = escapeAttribute(network.id)
   const networkName = escapeHtml(network.name)
+  const isCctvNetwork = network.categoryKey === 'cctv' || network.id === 'network:cctv'
 
   return `
     <article class="network-item ${selected ? 'selected' : ''} ${focused ? 'focused' : ''}"
@@ -206,9 +216,19 @@ function renderNetworkItem({ network, assetById, selected, expanded, focused }) 
               ` : ''}
             </small>
           </span>
-          <span class="network-count" aria-label="${networkCountLabel(network)}">${network.assetCount}</span>
         </button>
-        <div class="network-row-actions">
+        <div class="network-row-actions${isCctvNetwork ? ' has-coverage-toggle' : ''}">
+          ${isCctvNetwork ? `
+            <button class="network-coverage-toggle" type="button"
+              data-cctv-coverage-toggle
+              role="switch"
+              aria-checked="${showCctvCoverage}"
+              aria-label="Tampilkan arah keterbacaan CCTV"
+              title="Tampilkan/sembunyikan arah keterbacaan CCTV">
+              <span class="coverage-toggle-label">${showCctvCoverage ? 'ON' : 'OFF'}</span>
+              <span class="coverage-toggle-dot" aria-hidden="true"></span>
+            </button>
+          ` : ''}
           <button class="network-icon-action focus-network" type="button" data-network-focus="${networkId}"
             aria-pressed="${focused}" aria-label="${focused ? 'Keluar dari fokus' : 'Fokuskan peta ke'} ${networkName}"
             title="${focused ? 'Keluar dari fokus' : 'Fokuskan peta ke'} ${networkName}"
@@ -278,13 +298,6 @@ function formatDatasetCounts(counts) {
 
 function formatCount(value) {
   return Number(value || 0).toLocaleString('id-ID')
-}
-
-function networkCountLabel(network) {
-  return `${Number(network.assetCount) || 0} objek: `
-    + `${Number(network.nodeCount) || 0} node, `
-    + `${Number(network.lineCount) || 0} line, `
-    + `${Number(network.polygonCount) || 0} polygon`
 }
 
 function renderLoadingSkeleton() {
