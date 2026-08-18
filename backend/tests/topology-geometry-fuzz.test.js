@@ -64,6 +64,7 @@ function topologyBundle({ object, geometry }) {
     explicitRelations: [],
     semanticRuleSetVersion: 'semantic-classifier/1.0.0',
     topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+    topologyPolicy: { requireJbTermination: false },
   }
 }
 

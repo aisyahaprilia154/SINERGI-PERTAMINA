@@ -1,4 +1,7 @@
 import path from 'node:path'
+import {
+  hydrateIdentityRegistrySourceAliases,
+} from '../domain/canonical-asset-identity.js'
 import { buildCanonicalParserResult } from '../domain/parser-contract.js'
 import { compareCanonicalDatasetVersions } from '../domain/dataset-version-diff.js'
 import { buildReadinessContract } from '../domain/publication-contract.js'
@@ -136,9 +139,15 @@ export class ImportPipeline {
         sourceSelection,
         metadataAliases: this.metadataAliases,
         resources,
-        identityRegistry: activeRecord?.assetIdentityRegistry
-          ?? activeRecord?.identityRegistry
-          ?? [],
+        identityRegistry: hydrateIdentityRegistrySourceAliases({
+          datasetVersion: current.datasetVersion,
+          sourceFeatures: activeRecord?.sourceFeatures ?? [],
+          classifiedObjects: activeRecord?.classifiedObjects ?? [],
+          identityRegistry: activeRecord?.assetIdentityRegistry
+            ?? activeRecord?.identityRegistry
+            ?? [],
+        }).identityRegistry,
+        autoAssignOnboarding: true,
         ...(this.publicationPolicyVersion
           ? { publicationPolicyVersion: this.publicationPolicyVersion }
           : {}),
@@ -359,6 +368,18 @@ async function selectKmlCandidate(kmlFiles, limits) {
     })
   }
   return { selected, parserOutput, issues, mergedKmlPaths }
+}
+
+export function summarizeImportJobResult(record) {
+  return {
+    datasetVersionId: record?.datasetVersion?.id ?? null,
+    status: record?.datasetVersion?.status ?? null,
+    validationStatus: record?.datasetVersion?.validationStatus ?? null,
+    publicationStatus: record?.datasetVersion?.publicationStatus ?? null,
+    summary: structuredClone(record?.datasetVersion?.summary ?? null),
+    graphRevision: record?.topologyGraph?.graphRevision ?? null,
+    recordRevision: Number.isInteger(record?.recordRevision) ? record.recordRevision : 0,
+  }
 }
 
 export function createProcessingRecord(datasetVersion, clock = () => new Date()) {

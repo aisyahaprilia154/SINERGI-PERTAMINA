@@ -26,6 +26,8 @@ test('pilot JSON has a complete deterministic entity count contract', async () =
     classified_objects: 3,
     topology_jobs: 0,
     topology_candidates: 1,
+    topology_components: 0,
+    topology_interfaces: 0,
     confirmed_relations: 1,
     graph_revisions: 1,
     graph_nodes: 2,

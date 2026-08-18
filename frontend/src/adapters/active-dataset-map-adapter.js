@@ -126,6 +126,32 @@ export function adaptActiveDatasetForMap(payload) {
     asset.networkIds = networkIdsByAssetId.get(asset.id) ?? []
   })
 
+  const capabilities = structuredClone(payload.capabilities ?? null)
+  const activeContextSource = payload.context ?? {}
+  const activeContext = {
+    branchId: activeContextSource.branchId ?? payload.datasetVersion.branchId,
+    branchName: formatName(activeContextSource.branchId ?? payload.datasetVersion.branchId),
+    datasetId: activeContextSource.datasetId ?? payload.datasetVersion.datasetId,
+    datasetVersionId: activeContextSource.datasetVersionId ?? payload.datasetVersion.id,
+    siteId: activeContextSource.siteId ?? null,
+    publicationProfile: activeContextSource.publicationProfile
+      ?? payload.publicationProfile
+      ?? payload.datasetVersion.publicationProfile
+      ?? 'map_only',
+    datasetName: payload.datasetVersion.versionName,
+    version: payload.datasetVersion.versionName,
+    sourceFilename: payload.datasetVersion.sourceFilename,
+    publishedAt: payload.datasetVersion.publishedAt
+      || payload.datasetVersion.activatedAt
+      || payload.activePointer?.activatedAt,
+    activePointerRevision: activeContextSource.activePointerRevision
+      ?? payload.activePointer?.revision,
+    topologyReady: topologyReadiness.ready,
+    topologyReadiness,
+    readinessContract: structuredClone(payload.readinessContract ?? null),
+    capabilities,
+  }
+
   const counts = {
     networkCount: networks.length,
     layerCount: layers.length,
@@ -142,20 +168,7 @@ export function adaptActiveDatasetForMap(payload) {
   }
 
   return {
-    activeContext: {
-      branchId: payload.datasetVersion.branchId,
-      branchName: formatName(payload.datasetVersion.branchId),
-      datasetId: payload.datasetVersion.datasetId,
-      datasetVersionId: payload.datasetVersion.id,
-      datasetName: payload.datasetVersion.versionName,
-      version: payload.datasetVersion.versionName,
-      sourceFilename: payload.datasetVersion.sourceFilename,
-      publishedAt: payload.datasetVersion.activatedAt || payload.activePointer?.activatedAt,
-      activePointerRevision: payload.activePointer?.revision,
-      topologyReady: topologyReadiness.ready,
-      topologyReadiness,
-      readinessContract: structuredClone(payload.readinessContract ?? null),
-    },
+    activeContext,
     assets,
     diagramAssets,
     assetById,
@@ -168,6 +181,10 @@ export function adaptActiveDatasetForMap(payload) {
     topologyReadiness,
     readiness: structuredClone(payload.readiness ?? null),
     readinessContract: structuredClone(payload.readinessContract ?? null),
+    capabilities,
+    sites: structuredClone(payload.sites ?? []),
+    overlays: structuredClone(payload.overlays ?? []),
+    summary: structuredClone(payload.summary ?? null),
     assetIdentityMap: structuredClone(payload.assetIdentityMap ?? null),
     layers,
     counts,
@@ -181,6 +198,22 @@ export function adaptActiveDatasetForMap(payload) {
 }
 
 function confirmedTopologyProjection(payload) {
+  if (payload.capabilities && payload.capabilities.trace !== true) {
+    return {
+      datasetVersionId: payload.datasetVersion?.id ?? null,
+      nodes: [],
+      edges: [],
+      components: [],
+      degreeByNode: {},
+      isolatedNodeIds: [],
+      identityResolution: {
+        unresolvedNodeCount: 0,
+        unresolvedEdgeCount: 0,
+        unresolvedNodes: [],
+        unresolvedEdges: [],
+      },
+    }
+  }
   const source = payload.topologyGraph
   const resolver = createFrontendIdentityResolver(payload)
   if (source && Array.isArray(source.nodes) && Array.isArray(source.edges)) {

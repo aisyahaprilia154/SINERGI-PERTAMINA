@@ -10,6 +10,7 @@ export function getDefaultMapToken() {
 export async function loadActiveDataset({
   datasetId,
   branchId,
+  siteId = null,
   token = getDefaultMapToken(),
   signal,
   apiBase = '',
@@ -17,6 +18,7 @@ export async function loadActiveDataset({
   if (!datasetId) throw new TypeError('datasetId wajib tersedia.')
   const query = new URLSearchParams({ view: 'map' })
   if (branchId) query.set('branchId', branchId)
+  if (siteId) query.set('siteId', siteId)
   const response = await fetch(
     `${apiBase}/api/datasets/${encodeURIComponent(datasetId)}/active?${query}`,
     {
@@ -68,13 +70,160 @@ export async function loadActiveAssetDetail({
   return body
 }
 
+export async function loadActiveAssets({
+  datasetId,
+  branchId,
+  siteId,
+  q = null,
+  networkFamily = [],
+  category = [],
+  assetType = [],
+  sourceStatus = [],
+  identityStatus = [],
+  topologyStatus = [],
+  bounds = null,
+  cursor = null,
+  limit = null,
+  includeVisualOnly = false,
+  assetIds = [],
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetId) throw new TypeError('datasetId wajib tersedia.')
+  if (!branchId) throw new TypeError('branchId wajib tersedia.')
+  if (!siteId) throw new TypeError('siteId wajib tersedia.')
+  const query = new URLSearchParams({ branchId, siteId })
+  setActiveQueryValue(query, 'q', q)
+  appendActiveQueryValues(query, 'networkFamily', networkFamily)
+  appendActiveQueryValues(query, 'category', category)
+  appendActiveQueryValues(query, 'assetType', assetType)
+  appendActiveQueryValues(query, 'sourceStatus', sourceStatus)
+  appendActiveQueryValues(query, 'identityStatus', identityStatus)
+  appendActiveQueryValues(query, 'topologyStatus', topologyStatus)
+  appendActiveQueryValues(query, 'assetId', assetIds)
+  setActiveQueryValue(query, 'bounds', bounds ? boundsToQuery(bounds) : null)
+  setActiveQueryValue(query, 'cursor', cursor)
+  setActiveQueryValue(query, 'limit', limit)
+  if (includeVisualOnly) query.set('includeVisualOnly', 'true')
+  return topologyRequest(
+    `${apiBase}/api/datasets/${encodeURIComponent(datasetId)}/active/assets?${query}`,
+    { token, signal },
+  )
+}
+
+export async function loadActiveSites({
+  datasetId,
+  branchId,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetId) throw new TypeError('datasetId wajib tersedia.')
+  if (!branchId) throw new TypeError('branchId wajib tersedia.')
+  const query = new URLSearchParams({ branchId })
+  return topologyRequest(
+    `${apiBase}/api/datasets/${encodeURIComponent(datasetId)}/active/sites?${query}`,
+    { token, signal },
+  )
+}
+
+export async function loadActiveOverlays({
+  datasetId,
+  branchId,
+  siteId = null,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetId) throw new TypeError('datasetId wajib tersedia.')
+  if (!branchId) throw new TypeError('branchId wajib tersedia.')
+  const query = new URLSearchParams({ branchId })
+  setActiveQueryValue(query, 'siteId', siteId)
+  return topologyRequest(
+    `${apiBase}/api/datasets/${encodeURIComponent(datasetId)}/active/overlays?${query}`,
+    { token, signal },
+  )
+}
+
+export async function exportActiveKml({
+  datasetId,
+  branchId,
+  siteId = null,
+  q = null,
+  networkFamily = [],
+  category = [],
+  assetType = [],
+  sourceStatus = [],
+  identityStatus = [],
+  topologyStatus = [],
+  bounds = null,
+  assetIds = [],
+  includeVisualOnly = false,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetId) throw new TypeError('datasetId wajib tersedia.')
+  if (!branchId) throw new TypeError('branchId wajib tersedia.')
+  const response = await fetch(
+    `${apiBase}/api/datasets/${encodeURIComponent(datasetId)}/active/exports/kml`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        branchId,
+        ...(siteId ? { siteId } : {}),
+        ...(q ? { q } : {}),
+        ...(networkFamily.length ? { networkFamily } : {}),
+        ...(category.length ? { category } : {}),
+        ...(assetType.length ? { assetType } : {}),
+        ...(sourceStatus.length ? { sourceStatus } : {}),
+        ...(identityStatus.length ? { identityStatus } : {}),
+        ...(topologyStatus.length ? { topologyStatus } : {}),
+        ...(bounds ? { bounds } : {}),
+        ...(assetIds.length ? { assetIds } : {}),
+        ...(includeVisualOnly ? { includeVisualOnly: true } : {}),
+      }),
+      signal,
+    },
+  )
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    const error = new Error(
+      body?.error?.message || `Export KML dataset aktif gagal (${response.status}).`,
+    )
+    error.code = body?.error?.code
+    error.status = response.status
+    error.details = body?.error?.details ?? null
+    throw error
+  }
+  return {
+    blob: await response.blob(),
+    filename: filenameFromContentDisposition(response.headers.get('content-disposition'))
+      || 'sinergi-active-dataset.kml',
+    datasetVersionId: response.headers.get('x-dataset-version-id'),
+    activePointerRevision: response.headers.get('x-active-pointer-revision'),
+  }
+}
+
 export async function loadTopologyProjection({
   datasetVersionId,
   projection,
   status = null,
   site = null,
   networkFamily = null,
+  candidateType = null,
+  proposalStatus = null,
   minScore = null,
+  maxScore = null,
+  minDistance = null,
+  maxDistance = null,
+  assetSearch = null,
+  requiredTopologyOnly = null,
   cursor = null,
   limit = null,
   token = getDefaultMapToken(),
@@ -90,7 +239,14 @@ export async function loadTopologyProjection({
     setTopologyQueryValue(query, 'status', status)
     setTopologyQueryValue(query, 'site', site)
     setTopologyQueryValue(query, 'networkFamily', networkFamily)
+    setTopologyQueryValue(query, 'candidateType', candidateType)
+    setTopologyQueryValue(query, 'proposalStatus', proposalStatus)
     setTopologyQueryValue(query, 'minScore', minScore)
+    setTopologyQueryValue(query, 'maxScore', maxScore)
+    setTopologyQueryValue(query, 'minDistance', minDistance)
+    setTopologyQueryValue(query, 'maxDistance', maxDistance)
+    setTopologyQueryValue(query, 'assetSearch', assetSearch)
+    setTopologyQueryValue(query, 'requiredTopologyOnly', requiredTopologyOnly)
     setTopologyQueryValue(query, 'cursor', cursor)
     setTopologyQueryValue(query, 'limit', limit)
   }
@@ -107,11 +263,18 @@ export async function loadAllTopologyCandidates({
   status = null,
   site = null,
   networkFamily = null,
+  candidateType = null,
+  proposalStatus = null,
   minScore = null,
+  maxScore = null,
+  minDistance = null,
+  maxDistance = null,
+  assetSearch = null,
+  requiredTopologyOnly = null,
   token = getDefaultMapToken(),
   signal,
   apiBase = '',
-  limit = 500,
+  limit = 250,
 } = {}) {
   if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
   let pageLimit = limit
@@ -122,7 +285,14 @@ export async function loadAllTopologyCandidates({
         status,
         site,
         networkFamily,
+        candidateType,
+        proposalStatus,
         minScore,
+        maxScore,
+        minDistance,
+        maxDistance,
+        assetSearch,
+        requiredTopologyOnly,
         token,
         signal,
         apiBase,
@@ -136,12 +306,64 @@ export async function loadAllTopologyCandidates({
   }
 }
 
+export async function previewTopologyReview({
+  datasetVersionId,
+  candidateIds,
+  expectedGraphRevision,
+  expectedCandidateRevision,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
+  if (!Array.isArray(candidateIds) || candidateIds.length < 1) {
+    throw new TypeError('Minimal satu candidate harus dipilih.')
+  }
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + '/topology/review-preview',
+    {
+      token,
+      signal,
+      method: 'POST',
+      body: {
+        candidateIds,
+        ...(expectedGraphRevision !== undefined ? { expectedGraphRevision } : {}),
+        ...(expectedCandidateRevision !== undefined ? { expectedCandidateRevision } : {}),
+      },
+    },
+  )
+}
+
+export async function loadTopologyJunctionBox({
+  datasetVersionId,
+  assetId,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('datasetVersionId wajib tersedia.')
+  if (!assetId) throw new TypeError('assetId wajib tersedia.')
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + `/topology/junction-boxes/${encodeURIComponent(assetId)}`,
+    { token, signal },
+  )
+}
+
 async function loadAllTopologyCandidatesAtLimit({
   datasetVersionId,
   status,
   site,
   networkFamily,
+  candidateType,
+  proposalStatus,
   minScore,
+  maxScore,
+  minDistance,
+  maxDistance,
+  assetSearch,
+  requiredTopologyOnly,
   token,
   signal,
   apiBase,
@@ -150,6 +372,7 @@ async function loadAllTopologyCandidatesAtLimit({
   let cursor = null
   let firstPage = null
   const items = []
+  const history = []
   let pageCount = 0
   do {
     const page = await loadTopologyProjection({
@@ -158,7 +381,14 @@ async function loadAllTopologyCandidatesAtLimit({
       status,
       site,
       networkFamily,
+      candidateType,
+      proposalStatus,
       minScore,
+      maxScore,
+      minDistance,
+      maxDistance,
+      assetSearch,
+      requiredTopologyOnly,
       cursor,
       limit,
       token,
@@ -172,6 +402,7 @@ async function loadAllTopologyCandidatesAtLimit({
       throw topologyCandidateSnapshotChanged()
     }
     items.push(...(page.items ?? []))
+    history.push(...(page.history ?? []))
     cursor = page.nextCursor ?? null
     pageCount += 1
     if (pageCount > 10000) throw new Error('Pagination candidate melebihi batas aman.')
@@ -180,6 +411,7 @@ async function loadAllTopologyCandidatesAtLimit({
   return {
     ...firstPage,
     items,
+    history,
     nextCursor: null,
     pageInfo: {
       ...(firstPage?.pageInfo ?? {}),
@@ -203,6 +435,8 @@ export async function traceTopology({
   targetAssetId = null,
   graphRevision,
   direction = 'both',
+  mode = null,
+  maxDepth = null,
   scopeAssetIds = null,
   token = getDefaultMapToken(),
   signal,
@@ -222,12 +456,71 @@ export async function traceTopology({
         sourceAssetId,
         graphRevision,
         direction,
+        ...(mode ? { mode } : {}),
+        ...(maxDepth !== null && maxDepth !== undefined ? { maxDepth } : {}),
         ...(Array.isArray(scopeAssetIds) ? { scopeAssetIds } : {}),
         ...(targetAssetId ? { targetAssetId } : {}),
       },
     },
   )
 }
+
+export async function loadTopologyRoots({
+  datasetVersionId,
+  graphRevision = null,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('datasetVersionId wajib tersedia.')
+  const query = graphRevision
+    ? `?graphRevision=${encodeURIComponent(graphRevision)}`
+    : ''
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + `/topology/roots${query}`,
+    { token, signal },
+  )
+}
+
+export async function analyzeTopologyImpact({
+  datasetVersionId,
+  failureType,
+  failureId,
+  graphRevision,
+  rootAssetIds = null,
+  networkFamily = null,
+  scopeAssetIds = null,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('datasetVersionId wajib tersedia.')
+  if (!['asset', 'relation', 'path'].includes(failureType)) {
+    throw new TypeError('failureType impact tidak valid.')
+  }
+  if (!failureId) throw new TypeError('failureId wajib tersedia.')
+  if (!graphRevision) throw new TypeError('Graph revision wajib tersedia.')
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + '/topology/impact',
+    {
+      token,
+      signal,
+      method: 'POST',
+      body: {
+        failureType,
+        failureId,
+        graphRevision,
+        ...(Array.isArray(rootAssetIds) ? { rootAssetIds } : {}),
+        ...(networkFamily ? { networkFamily } : {}),
+        ...(Array.isArray(scopeAssetIds) ? { scopeAssetIds } : {}),
+      },
+    },
+  )
+}
+
+export const impactTopology = analyzeTopologyImpact
 
 export async function loadDatasetProjection({
   datasetVersionId,
@@ -283,6 +576,9 @@ export async function reviewTopologyBulk({
   if (action === 'confirm-selected' && (!Array.isArray(candidateIds) || candidateIds.length === 0)) {
     throw new TypeError('Minimal satu candidate harus dipilih.')
   }
+  if (Array.isArray(candidateIds) && candidateIds.length > 5000) {
+    throw new TypeError('Maksimal 5.000 candidate dapat diproses dalam satu batch.')
+  }
   return topologyRequest(
     `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
       + `/topology/${action}`,
@@ -305,8 +601,12 @@ export async function createTopologyRelation({
   sourceAssetId,
   targetAssetId,
   relationType = 'connected-to',
+  relationKind,
   direction = 'undirected',
+  pathAssetIds,
+  sourceGeometryIds,
   reason,
+  evidenceRefs,
   expectedGraphRevision,
   expectedCandidateRevision,
   token = getDefaultMapToken(),
@@ -327,8 +627,12 @@ export async function createTopologyRelation({
         sourceAssetId,
         targetAssetId,
         relationType,
+        ...(relationKind !== undefined ? { relationKind } : {}),
         direction,
+        ...(pathAssetIds !== undefined ? { pathAssetIds } : {}),
+        ...(sourceGeometryIds !== undefined ? { sourceGeometryIds } : {}),
         reason: String(reason ?? '').trim() || undefined,
+        ...(evidenceRefs !== undefined ? { evidenceRefs } : {}),
         ...(expectedGraphRevision !== undefined ? { expectedGraphRevision } : {}),
         ...(expectedCandidateRevision !== undefined ? { expectedCandidateRevision } : {}),
       },
@@ -378,12 +682,23 @@ async function topologyRequest(url, {
   })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
+    const missingReviewEndpoint = response.status === 404
+      && payload?.error?.code === 'not_found'
+      && /\/topology\/(review-preview|confirm-selected|confirm-all|confirm-line-labels|revoke-all|relations)$/.test(url)
     const error = new Error(
-      payload?.error?.message || `Layanan topology gagal (${response.status}).`,
+      missingReviewEndpoint
+        ? 'API relasi aset belum sinkron. Restart atau deploy ulang backend, lalu muat ulang halaman.'
+        : payload?.error?.message || `Layanan topology gagal (${response.status}).`,
     )
-    error.code = payload?.error?.code
+    error.code = missingReviewEndpoint
+      ? 'topology_review_api_unavailable'
+      : payload?.error?.code
     error.status = response.status
-    error.details = payload?.error?.details ?? null
+    error.details = {
+      ...(payload?.error?.details ?? {}),
+      ...(missingReviewEndpoint ? { requestUrl: url, requestMethod: method } : {}),
+      correlationId: response.headers.get('x-correlation-id'),
+    }
     error.payload = payload
     throw error
   }
@@ -393,6 +708,36 @@ async function topologyRequest(url, {
 function setTopologyQueryValue(query, key, value) {
   if (value === undefined || value === null || value === '') return
   query.set(key, String(value))
+}
+
+function setActiveQueryValue(query, key, value) {
+  if (value === undefined || value === null || value === '') return
+  query.set(key, String(value))
+}
+
+function appendActiveQueryValues(query, key, values) {
+  const list = Array.isArray(values) ? values : values ? [values] : []
+  list.filter((value) => value !== undefined && value !== null && value !== '')
+    .forEach((value) => query.append(key, String(value)))
+}
+
+function boundsToQuery(bounds) {
+  return [bounds.west, bounds.south, bounds.east, bounds.north].join(',')
+}
+
+function filenameFromContentDisposition(header) {
+  const value = String(header ?? '')
+  const encoded = value.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded)
+    } catch {
+      return null
+    }
+  }
+  return value.match(/filename="([^"]+)"/i)?.[1]
+    ?? value.match(/filename=([^;]+)/i)?.[1]?.trim()
+    ?? null
 }
 
 function topologyCandidateSnapshotChanged() {

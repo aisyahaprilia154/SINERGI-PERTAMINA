@@ -2,7 +2,7 @@
   "fixtureVersion": "topology-baseline-fixture/1.0.0",
   "datasetVersionId": "dv-baseline-fixture",
   "siteId": "site-baseline",
-  "topologyRuleSetVersion": "semantic-relation-engine/1.0.0",
+  "topologyRuleSetVersion": "semantic-relation-engine/2.1.0",
   "semanticRuleSetVersion": "semantic-classifier/1.0.0",
   "summary": {
     "candidateCount": 2,
@@ -26,20 +26,26 @@
     "unresolvedAssetIds": [],
     "unmatchedPathCount": 0,
     "evidenceComponentCount": 1,
-    "falseComponentMergeCount": 0
+    "falseComponentMergeCount": 0,
+    "cableTerminationCandidateCount": 2,
+    "mountingCandidateCount": 0,
+    "internalConnectionCandidateCount": 0,
+    "missingJbTerminationCount": 0,
+    "interfaceCapacityConflictCount": 0,
+    "cableToPoleDiagnosticCount": 0
   },
   "candidates": [
     {
-      "candidateId": "candidate:4a22dcf761966393b273a2dd",
-      "candidateType": "endpoint_device",
-      "sourceEndpointId": "endpoint:geometry:LAN-01:start",
-      "targetAssetId": "SW-01",
+      "candidateId": "candidate:04e6894d403273053b970d35",
+      "candidateType": "cable_termination",
+      "sourceEndpointId": "endpoint:geometry:LAN-01:end",
+      "targetAssetId": "SW-02",
       "candidateStatus": "candidate",
       "proposalStatus": "recommended",
-      "relationKind": "path_attachment"
+      "relationKind": "path_termination"
     },
     {
-      "candidateId": "candidate:823d169b04a8dbad37ed0daa",
+      "candidateId": "candidate:708342932115089d9ba21a88",
       "candidateType": "explicit_metadata",
       "sourceEndpointId": "explicit:explicit-baseline-01",
       "targetAssetId": "SW-02",
@@ -48,18 +54,18 @@
       "relationKind": "device_edge"
     },
     {
-      "candidateId": "candidate:a572bec5ab3a39cf34b3a264",
-      "candidateType": "endpoint_device",
-      "sourceEndpointId": "endpoint:geometry:LAN-01:end",
-      "targetAssetId": "SW-02",
+      "candidateId": "candidate:afe9f0b885a9b8fbb0099bef",
+      "candidateType": "cable_termination",
+      "sourceEndpointId": "endpoint:geometry:LAN-01:start",
+      "targetAssetId": "SW-01",
       "candidateStatus": "candidate",
       "proposalStatus": "recommended",
-      "relationKind": "path_attachment"
+      "relationKind": "path_termination"
     }
   ],
   "confirmedRelations": [
     {
-      "relationId": "relation:3fccc15f1b450b234588a1a8",
+      "relationId": "relation:5c65f3d93db9491f456e2b3b",
       "sourceAssetId": "SW-01",
       "targetAssetId": "SW-02",
       "relationType": "connected-to",

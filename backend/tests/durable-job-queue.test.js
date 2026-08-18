@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -299,6 +299,56 @@ test('queued job can be cancelled before a worker claims it', async () => {
     assert.equal(cancelled.status, 'cancelled')
     assert.equal(cancelled.completedAt !== null, true)
     assert.equal(await repository.hasActiveJobs(), false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('lock owned by a dead process is recovered without waiting for stale timeout', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-dead-owner-lock-'))
+  const repository = new JsonDurableJobRepository(root, {
+    staleLockMilliseconds: 60_000,
+  })
+  try {
+    await repository.initialize()
+    await writeFile(path.join(root, '.locks', 'claim.lock'), JSON.stringify({
+      token: 'dead-owner',
+      ownerPid: 2147483647,
+      acquiredAt: new Date().toISOString(),
+    }))
+
+    assert.deepEqual(await repository.list({ summary: true }), [])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('idempotency lookup skips unrelated legacy result payloads', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sinergi-idempotency-scan-'))
+  const repository = new JsonDurableJobRepository(root)
+  try {
+    await repository.initialize()
+    await writeFile(path.join(root, 'job-legacy.json'), JSON.stringify({
+      schemaVersion: '1.0.0',
+      jobId: 'job-legacy',
+      jobType: 'parse_source',
+      datasetVersionId: 'dv-legacy',
+      idempotencyKey: 'legacy-key',
+      status: 'succeeded',
+      availableAt: new Date().toISOString(),
+      queuedAt: new Date().toISOString(),
+      result: { aggregate: 'x'.repeat(2 * 1024 * 1024) },
+    }))
+
+    const created = await repository.create({
+      jobType: 'parse_source',
+      datasetVersionId: 'dv-current',
+      inputFingerprint: 'sha256:current',
+      idempotencyKey: 'current-key',
+    })
+
+    assert.equal(created.idempotencyKey, 'current-key')
+    assert.equal(created.deduplicated, undefined)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

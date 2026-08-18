@@ -4,10 +4,45 @@ import {
   evaluateAccuracyGate,
   MINIMUM_HELD_OUT_SAMPLE_SIZE,
 } from './topology-accuracy.js'
+import { deriveTopologyDimensions } from '../domain/parser-contract.js'
+import { topologyCandidateDecisionKey } from './topology-cardinality.js'
 
 const EARTH_RADIUS_METERS = 6371008.8
 
-export const TOPOLOGY_RULE_SET_VERSION = 'semantic-relation-engine/1.0.0'
+export const TOPOLOGY_RULE_SET_VERSION = 'semantic-relation-engine/2.1.0'
+export const TOPOLOGY_POLICY_VERSION = 'topology-policy/1.0.0'
+
+export const DEFAULT_TOPOLOGY_POLICY = Object.freeze({
+  version: TOPOLOGY_POLICY_VERSION,
+  requireJbTermination: true,
+  allowDirectCameraTermination: true,
+  allowCableToPole: false,
+  allowOpaqueJbInternalBridge: false,
+  allowDirectRackEnclosureTermination: false,
+})
+
+const BUILTIN_JB_PROFILES = Object.freeze({
+  main_jb: Object.freeze({
+    profileId: 'builtin:main_jb',
+    version: 'builtin-jb-profile/1.0.0',
+    profileKind: 'main_jb',
+  }),
+  extended_passive: Object.freeze({
+    profileId: 'builtin:extended_passive',
+    version: 'builtin-jb-profile/1.0.0',
+    profileKind: 'extended_passive',
+  }),
+  extended_poe: Object.freeze({
+    profileId: 'builtin:extended_poe',
+    version: 'builtin-jb-profile/1.0.0',
+    profileKind: 'extended_poe',
+  }),
+  server_rack: Object.freeze({
+    profileId: 'builtin:server_rack',
+    version: 'builtin-jb-profile/1.0.0',
+    profileKind: 'server_rack',
+  }),
+})
 
 export const DEFAULT_RELATION_ENGINE_CONFIG = Object.freeze({
   searchRadiusMeters: 6,
@@ -29,16 +64,17 @@ export const DEFAULT_RELATION_ENGINE_CONFIG = Object.freeze({
   pathAccuracy: null,
   maxCandidateCount: 50000,
   maxGenerationMilliseconds: 60000,
+  topologyPolicy: DEFAULT_TOPOLOGY_POLICY,
 })
 
 const SCORE_WEIGHTS = Object.freeze({
-  distance: 0.35,
-  semanticCompatibility: 0.25,
-  sourceContext: 0.1,
-  endpointRole: 0.1,
-  styleConsistency: 0.05,
-  angle: 0.1,
-  graphConsistency: 0.05,
+  interfaceCompatibility: 0.30,
+  explicitEvidence: 0.25,
+  distance: 0.15,
+  labelCorrespondence: 0.15,
+  siteContext: 0.05,
+  endpointRoleConsistency: 0.05,
+  capacityAvailability: 0.05,
 })
 
 /**
@@ -49,15 +85,31 @@ export function generateRelationArtifacts(topologyInputBundle, {
   config = {},
   previousCandidates = [],
   previousRelations = [],
+  previousInterfaceRegistry = [],
   generatedAt = new Date().toISOString(),
 } = {}) {
   const settings = normalizeConfig(config)
   const bundle = normalizeAndValidateBundle(topologyInputBundle)
+  const topologyPolicy = normalizeTopologyPolicy(
+    bundle.topologyPolicy ?? settings.topologyPolicy,
+  )
   const candidateBudget = createCandidateBudget(settings, bundle)
   const eligibilityIssues = []
   const lineworkIssues = []
   const nodes = prepareNodes(bundle, eligibilityIssues)
   const paths = preparePaths(bundle, eligibilityIssues, lineworkIssues)
+  const interfaceRegistry = buildInterfaceRegistry(bundle, nodes, {
+    paths,
+    previousInterfaceRegistry,
+    generatedAt,
+  })
+  const interfaceContext = createInterfaceContext({
+    bundle,
+    nodes,
+    paths,
+    interfaceRegistry,
+    topologyPolicy,
+  })
   detectDuplicateAndOverlappingLinework(paths, lineworkIssues, bundle, settings)
   assertGenerationBudget(candidateBudget, 'linework_validation')
   const spatialIndexes = buildSpatialIndexes(nodes, paths, settings)
@@ -65,25 +117,84 @@ export function generateRelationArtifacts(topologyInputBundle, {
   const accuracyGate = evaluateTopologyAccuracyGate(bundle, nodes, paths, settings, generatedAt)
 
   const rawCandidates = [
-    ...generateEndpointDeviceCandidates(paths, spatialIndexes, settings, candidateBudget),
-    ...generateInlineDeviceCandidates(nodes, spatialIndexes, settings, candidateBudget),
+    ...generateCableTerminationCandidates(
+      paths,
+      spatialIndexes,
+      settings,
+      interfaceContext,
+      candidateBudget,
+    ),
+    ...generateInlineCableTerminationCandidates(
+      paths,
+      spatialIndexes,
+      settings,
+      interfaceContext,
+      candidateBudget,
+    ),
+    ...generateMountingCandidates(nodes, spatialIndexes, settings, interfaceContext, candidateBudget),
     ...generateEndpointEndpointCandidates(spatialIndexes, settings, candidateBudget),
-    ...generateIntersectionCandidates(spatialIndexes, settings, candidateBudget),
-    ...generateLineLabelConnectionCandidates(nodes, paths, candidateBudget),
-    ...generateLineLabelAttachmentCandidates(nodes, paths, settings, candidateBudget),
-    ...generateExplicitCandidates(bundle, nodes, paths, eligibilityIssues, candidateBudget),
+    ...generateIntersectionTerminationCandidates(
+      spatialIndexes,
+      settings,
+      interfaceContext,
+      candidateBudget,
+    ),
+    ...generateLineLabelAttachmentCandidates(
+      nodes,
+      paths,
+      settings,
+      interfaceContext,
+      candidateBudget,
+    ),
+    ...generateInternalConnectionCandidates(interfaceContext, candidateBudget),
+    ...generateExplicitCandidates(
+      bundle,
+      nodes,
+      paths,
+      eligibilityIssues,
+      interfaceContext,
+      candidateBudget,
+    ),
   ]
+  const terminationEndpointIds = new Set(rawCandidates
+    .filter(({ candidateType, targetInterfaceId, targetInterface }) => (
+      candidateType === 'cable_termination'
+        && Boolean(targetInterfaceId ?? targetInterface?.interfaceId)
+    ))
+    .map(({ sourceEndpointId }) => sourceEndpointId))
+  paths.flatMap(lineEndpoints).filter(({ id }) => !terminationEndpointIds.has(id))
+    .forEach((endpoint) => {
+      pushCandidate(rawCandidates, unresolvedTerminationCandidate(endpoint), candidateBudget, 'unresolved_termination')
+    })
   const candidates = scoreAndProposeCandidates(
     rawCandidates,
     settings,
     generatedAt,
     bundle.datasetVersion.id,
+    topologyPolicy,
   )
   candidates.forEach((candidate) => {
     candidate.datasetVersionId = bundle.datasetVersion.id
   })
-  reconcilePreviousDecisions(candidates, previousCandidates)
-  applyCapacityConstraints(candidates, nodes, settings, eligibilityIssues, accuracyGate)
+  const reopenedReviewHistory = reconcilePreviousDecisions(candidates, previousCandidates, {
+    generatedAt,
+  })
+  applyTopologyPolicyConstraints(
+    candidates,
+    paths,
+    interfaceContext,
+    settings,
+    eligibilityIssues,
+  )
+  applyCapacityConstraints(
+    candidates,
+    nodes,
+    settings,
+    eligibilityIssues,
+    accuracyGate,
+    interfaceContext,
+    previousRelations,
+  )
 
   const confirmedRelations = buildConfirmedRelations({
     bundle,
@@ -91,12 +202,15 @@ export function generateRelationArtifacts(topologyInputBundle, {
     previousRelations,
     settings,
     generatedAt,
+    interfaceContext,
   })
+  refreshInterfaceOccupancy(interfaceRegistry, confirmedRelations)
   const graph = buildConfirmedGraph({
     bundle,
     nodes,
     paths,
     confirmedRelations,
+    interfaceRegistry,
   })
   const validation = validateConfirmedGraph({
     bundle,
@@ -106,7 +220,9 @@ export function generateRelationArtifacts(topologyInputBundle, {
     confirmedRelations,
     graph,
     lineworkIssues,
+    interfaceContext,
   })
+  mergeValidationIssues(validation, eligibilityIssues)
   const unresolved = buildUnresolvedEndpoints(paths, candidates)
   const summary = buildSummary({
     nodes,
@@ -119,6 +235,8 @@ export function generateRelationArtifacts(topologyInputBundle, {
   })
   const readiness = evaluateTopologyReadiness({
     bundle,
+    nodes,
+    paths,
     candidates,
     confirmedRelations,
     validation,
@@ -132,6 +250,12 @@ export function generateRelationArtifacts(topologyInputBundle, {
     datasetVersionId: bundle.datasetVersion.id,
     siteId: bundle.site,
     topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+    topologyPolicy,
+    interfaceRegistry: interfaceRegistry.interfaces,
+    componentRegistry: interfaceRegistry.components,
+    installationGraph: graph.installationGraph,
+    physicalTerminationGraph: graph.physicalTerminationGraph,
+    serviceGraph: graph.serviceGraph,
     semanticRuleSetVersion: bundle.semanticRuleSetVersion,
     generatedAt,
     config: settings,
@@ -139,11 +263,13 @@ export function generateRelationArtifacts(topologyInputBundle, {
     confirmedRelations,
     graph,
     eligibilityIssues,
+    topologyDiagnostics: interfaceContext.diagnostics,
     lineworkIssues,
     validation,
     unresolved,
     summary,
     readiness,
+    reopenedReviewHistory,
   }
 }
 
@@ -157,6 +283,7 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
   candidates = [],
   previousRelations = [],
   previousGraph = {},
+  previousInterfaceRegistry = [],
   affectedAssetIds = [],
   eligibilityIssues = [],
   lineworkIssues = [],
@@ -164,10 +291,25 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
 } = {}) {
   const settings = normalizeConfig(config)
   const bundle = normalizeAndValidateBundle(topologyInputBundle)
+  const topologyPolicy = normalizeTopologyPolicy(
+    bundle.topologyPolicy ?? settings.topologyPolicy,
+  )
   const computedEligibilityIssues = []
   const computedLineworkIssues = []
   const nodes = prepareNodes(bundle, computedEligibilityIssues)
   const paths = preparePaths(bundle, computedEligibilityIssues, computedLineworkIssues)
+  const interfaceRegistry = buildInterfaceRegistry(bundle, nodes, {
+    paths,
+    previousInterfaceRegistry,
+    generatedAt,
+  })
+  const interfaceContext = createInterfaceContext({
+    bundle,
+    nodes,
+    paths,
+    interfaceRegistry,
+    topologyPolicy,
+  })
   detectDuplicateAndOverlappingLinework(paths, computedLineworkIssues, bundle, settings)
   const nextEligibilityIssues = mergeIssues(
     eligibilityIssues,
@@ -184,7 +326,9 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
     previousRelations,
     settings,
     generatedAt,
+    interfaceContext,
   })
+  refreshInterfaceOccupancy(interfaceRegistry, confirmedRelations)
   const graph = rebuildConfirmedGraphIncrementally({
     bundle,
     nodes,
@@ -192,6 +336,7 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
     confirmedRelations,
     previousGraph,
     affectedAssetIds,
+    interfaceRegistry,
   })
   const validation = validateConfirmedGraph({
     bundle,
@@ -201,7 +346,9 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
     confirmedRelations,
     graph,
     lineworkIssues: nextLineworkIssues,
+    interfaceContext,
   })
+  mergeValidationIssues(validation, nextEligibilityIssues)
   const unresolved = buildUnresolvedEndpoints(paths, normalizedCandidates)
   const accuracyGate = evaluateTopologyAccuracyGate(bundle, nodes, paths, settings, generatedAt)
   const summary = buildSummary({
@@ -215,6 +362,8 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
   })
   const readiness = evaluateTopologyReadiness({
     bundle,
+    nodes,
+    paths,
     candidates: normalizedCandidates,
     confirmedRelations,
     validation,
@@ -228,6 +377,12 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
     datasetVersionId: bundle.datasetVersion.id,
     siteId: bundle.site,
     topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+    topologyPolicy,
+    interfaceRegistry: interfaceRegistry.interfaces,
+    componentRegistry: interfaceRegistry.components,
+    installationGraph: graph.installationGraph,
+    physicalTerminationGraph: graph.physicalTerminationGraph,
+    serviceGraph: graph.serviceGraph,
     semanticRuleSetVersion: bundle.semanticRuleSetVersion,
     generatedAt,
     config: settings,
@@ -235,6 +390,7 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
     confirmedRelations,
     graph,
     eligibilityIssues: nextEligibilityIssues,
+    topologyDiagnostics: interfaceContext.diagnostics,
     lineworkIssues: nextLineworkIssues,
     validation,
     unresolved,
@@ -261,12 +417,28 @@ export function createManualExplicitCandidate(topologyInputBundle, {
   const lineworkIssues = []
   const nodes = prepareNodes(bundle, eligibilityIssues)
   const paths = preparePaths(bundle, eligibilityIssues, lineworkIssues)
+  const topologyPolicy = normalizeTopologyPolicy(
+    bundle.topologyPolicy ?? settings.topologyPolicy,
+  )
+  const interfaceRegistry = buildInterfaceRegistry(bundle, nodes, {
+    paths,
+    previousInterfaceRegistry: bundle.interfaceRegistry ?? [],
+    generatedAt,
+  })
+  const interfaceContext = createInterfaceContext({
+    bundle,
+    nodes,
+    paths,
+    interfaceRegistry,
+    topologyPolicy,
+  })
   const candidateBudget = createCandidateBudget(settings, bundle)
   const rawCandidates = generateExplicitCandidates(
     bundle,
     nodes,
     paths,
     eligibilityIssues,
+    interfaceContext,
     candidateBudget,
   )
   const candidates = scoreAndProposeCandidates(
@@ -274,6 +446,7 @@ export function createManualExplicitCandidate(topologyInputBundle, {
     settings,
     generatedAt,
     bundle.datasetVersion.id,
+    topologyPolicy,
   )
   candidates.forEach((candidate) => {
     candidate.datasetVersionId = bundle.datasetVersion.id
@@ -296,6 +469,7 @@ export function rebuildConfirmedGraphIncrementally({
   confirmedRelations,
   previousGraph = {},
   affectedAssetIds = [],
+  interfaceRegistry = { interfaces: [], components: [] },
 } = {}) {
   const allNodes = asArray(nodes)
   const previousNodes = asArray(previousGraph.nodes)
@@ -303,8 +477,23 @@ export function rebuildConfirmedGraphIncrementally({
   const previousNodeIds = new Set(previousNodes.map(({ id }) => id))
   const graphShapeChanged = currentNodeIds.size !== previousNodeIds.size
     || [...currentNodeIds].some((id) => !previousNodeIds.has(id))
+  if (asArray(interfaceRegistry?.interfaces).length || previousGraph.serviceGraph) {
+    return buildConfirmedGraph({
+      bundle,
+      nodes: allNodes,
+      paths,
+      confirmedRelations,
+      interfaceRegistry,
+    })
+  }
   if (!previousNodes.length || graphShapeChanged) {
-    return buildConfirmedGraph({ bundle, nodes: allNodes, paths, confirmedRelations })
+    return buildConfirmedGraph({
+      bundle,
+      nodes: allNodes,
+      paths,
+      confirmedRelations,
+      interfaceRegistry,
+    })
   }
 
   const scopeAssets = incrementalScopeAssets({
@@ -316,7 +505,13 @@ export function rebuildConfirmedGraphIncrementally({
 
   const affectedNodeIds = new Set([...scopeAssets].filter((id) => currentNodeIds.has(id)))
   if (!affectedNodeIds.size || affectedNodeIds.size === currentNodeIds.size) {
-    return buildConfirmedGraph({ bundle, nodes: allNodes, paths, confirmedRelations })
+    return buildConfirmedGraph({
+      bundle,
+      nodes: allNodes,
+      paths,
+      confirmedRelations,
+      interfaceRegistry,
+    })
   }
 
   const scopedRelations = confirmedRelations.filter((relation) => (
@@ -329,6 +524,7 @@ export function rebuildConfirmedGraphIncrementally({
     nodes: allNodes.filter(({ id }) => affectedNodeIds.has(id)),
     paths: scopedPaths,
     confirmedRelations: scopedRelations,
+    interfaceRegistry,
   })
   const retainedNodes = previousNodes.filter(({ id }) => !affectedNodeIds.has(id))
   const retainedEdges = asArray(previousGraph.edges).filter((edge) => (
@@ -344,6 +540,7 @@ export function rebuildConfirmedGraphIncrementally({
     topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
     nodes: graphNodes,
     edges,
+    interfaceRegistry,
   })
 }
 
@@ -393,6 +590,7 @@ function finalizeConfirmedGraph({
   topologyRuleSetVersion,
   nodes,
   edges,
+  interfaceRegistry = { interfaces: [], components: [] },
 }) {
   const degreeByNode = Object.fromEntries(nodes.map((node) => [
     node.id,
@@ -411,6 +609,8 @@ function finalizeConfirmedGraph({
       .filter(([, degree]) => degree === 0)
       .map(([nodeId]) => nodeId)
       .sort(),
+    interfaceRegistry: structuredClone(interfaceRegistry.interfaces ?? []),
+    componentRegistry: structuredClone(interfaceRegistry.components ?? []),
   }
 }
 
@@ -443,7 +643,8 @@ export function normalizeTopologySummary(
     confirmedEdgeCount: deviceEdgeCount,
     confirmedDeviceEdgeCount: deviceEdgeCount,
     confirmedRelationCount: confirmed.length,
-    confirmedPathAttachmentCount: kindCounts.path_attachment ?? 0,
+    confirmedPathAttachmentCount: (kindCounts.path_attachment ?? 0)
+      + (kindCounts.path_termination ?? 0),
     confirmedPathContinuationCount: kindCounts.path_continuation ?? 0,
   }
 }
@@ -462,7 +663,10 @@ export function normalizeAndValidateBundle(input) {
   if (!semanticRuleSetVersion) {
     throw invalidBundle('Semantic rule-set version tidak tersedia.')
   }
-  if (suppliedTopologyVersion && suppliedTopologyVersion !== TOPOLOGY_RULE_SET_VERSION) {
+  const legacyTopologyVersions = new Set(['semantic-relation-engine/1.0.0'])
+  if (suppliedTopologyVersion
+    && suppliedTopologyVersion !== TOPOLOGY_RULE_SET_VERSION
+    && !legacyTopologyVersions.has(suppliedTopologyVersion)) {
     throw invalidBundle('Topology rule-set version input tidak kompatibel.', {
       suppliedTopologyVersion,
       expectedTopologyVersion: TOPOLOGY_RULE_SET_VERSION,
@@ -496,11 +700,6 @@ export function normalizeAndValidateBundle(input) {
           sourceFeatureId: record.sourceFeatureId,
           siteId: record.siteId,
           expectedSiteId: site,
-        })
-      }
-      if (!record.networkFamily || record.networkFamily === 'unknown') {
-        throw invalidBundle(`${kind} memiliki network family yang tidak eligible.`, {
-          sourceFeatureId: record.sourceFeatureId,
         })
       }
       asArray(record.geometryIds).forEach((geometryId) => {
@@ -545,6 +744,13 @@ export function normalizeAndValidateBundle(input) {
     classifiedPaths: asArray(bundle.classifiedPaths),
     geometries,
     explicitRelations: asArray(bundle.explicitRelations),
+    topologyPolicy: bundle.topologyPolicy
+      ? normalizeTopologyPolicy(bundle.topologyPolicy)
+      : null,
+    interfaceRegistry: asArray(bundle.interfaceRegistry),
+    componentInventory: asArray(bundle.componentInventory),
+    jbProfiles: asArray(bundle.jbProfiles),
+    internalConnections: asArray(bundle.internalConnections),
   }
 }
 
@@ -584,10 +790,162 @@ function validateIdentityAliases(objects) {
   })
 }
 
+function mergeValidationIssues(validation, ...issueGroups) {
+  if (!validation || typeof validation !== 'object') return validation
+  validation.issues = mergeIssues(validation.issues, ...issueGroups)
+  validation.summary = {
+    total: validation.issues.length,
+    errors: validation.issues.filter(({ severity }) => severity === 'error').length,
+    warnings: validation.issues.filter(({ severity }) => severity === 'warning').length,
+  }
+  validation.status = validation.summary.errors > 0
+    ? 'invalid'
+    : validation.summary.total > 0 ? 'valid_with_warnings' : 'valid'
+  return validation
+}
+
+export function createTopologyCandidateEligibilityContext(bundle) {
+  const objects = [
+    ...asArray(bundle?.classifiedNodes),
+    ...asArray(bundle?.classifiedPaths),
+  ]
+  const objectByAlias = new Map()
+  objects.forEach((object) => {
+    const canonicalAssetId = objectIdentity(object)
+    const aliases = [
+      canonicalAssetId,
+      object.assetId,
+      object.stableAssetId,
+      object.onboardingIdentity,
+      object.legacyAssetId,
+      object.sourceFeatureId,
+      ...Object.values(object.identityAliases ?? {}).flat(),
+    ]
+    aliases.filter(Boolean).forEach((alias) => {
+      if (!objectByAlias.has(alias)) objectByAlias.set(alias, object)
+    })
+  })
+  return { objectByAlias }
+}
+
+export function evaluateTopologyCandidateEligibility(bundle, candidate, context = null) {
+  const objectByAlias = context?.objectByAlias
+    ? context.objectByAlias
+    : createTopologyCandidateEligibilityContext(bundle).objectByAlias
+
+  const references = [
+    candidate?.sourcePathAssetId,
+    candidate?.targetAssetId,
+    candidate?.targetPathAssetId,
+    ...asArray(candidate?.pathAssetIds),
+  ].filter(Boolean).map(String)
+  const issues = []
+  if (candidate?.topologyRuleSetVersion
+    && candidate.topologyRuleSetVersion !== TOPOLOGY_RULE_SET_VERSION) {
+    issues.push({
+      code: 'obsolete_rule_set',
+      message: `Candidate memakai rule-set ${candidate.topologyRuleSetVersion}; regenerasi topology v2 diperlukan.`,
+      currentRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+      candidateRuleSetVersion: candidate.topologyRuleSetVersion,
+    })
+  }
+  if (!references.length) {
+    issues.push({
+      code: 'topology_candidate_reference_missing',
+      message: 'Candidate tidak memiliki referensi topology yang dapat divalidasi.',
+    })
+  }
+  references.forEach((reference) => {
+    const object = objectByAlias.get(reference)
+    if (!object) {
+      issues.push({
+        code: 'topology_candidate_reference_not_found',
+        message: `Referensi topology ${reference} tidak ditemukan pada input terkini.`,
+        reference,
+      })
+      return
+    }
+    const eligibility = topologyObjectEligibility(object)
+    const currentAssetId = objectIdentity(object)
+    if (eligibility) {
+      issues.push({
+        ...eligibility,
+        reference,
+        currentAssetId,
+        sourceFeatureId: object.sourceFeatureId ?? null,
+      })
+      return
+    }
+    if (reference !== currentAssetId) {
+      issues.push({
+        code: 'topology_candidate_identity_stale',
+        message: `Candidate masih memakai identity ${reference}; identity terkini adalah ${currentAssetId}.`,
+        reference,
+        currentAssetId,
+        sourceFeatureId: object.sourceFeatureId ?? null,
+      })
+    }
+  })
+  const firstIssue = issues[0] ?? null
+  return {
+    eligible: issues.length === 0,
+    code: firstIssue?.code ?? null,
+    message: firstIssue?.message ?? null,
+    references,
+    issues,
+  }
+}
+
+function topologyObjectEligibility(object) {
+  const identityStatus = String(
+    object.identityStatus ?? object.identityResolutionStatus ?? '',
+  ).trim().toLowerCase()
+  const stableIdentity = Boolean(readString(object.stableAssetId))
+    || ['stable', 'stable_explicit', 'stable_registry'].includes(identityStatus)
+    || (object.identityStatus === undefined && Boolean(readString(object.assetId)))
+  if (!stableIdentity || ['onboarding', 'onboarding_candidate', 'conflict'].includes(identityStatus)) {
+    return {
+      code: 'missing_stable_asset_id',
+      message: `Object ${object.sourceFeatureId ?? 'unknown'} belum memiliki stable Asset ID.`,
+    }
+  }
+  if (object.sourceStatus === 'retired') {
+    return {
+      code: 'retired_topology_object',
+      message: `Object ${object.sourceFeatureId ?? 'unknown'} berstatus retired.`,
+    }
+  }
+  if (!readString(object.siteId)) {
+    return {
+      code: 'missing_topology_site',
+      message: `Object ${object.sourceFeatureId ?? 'unknown'} belum memiliki site.`,
+    }
+  }
+  if (!readString(object.networkFamily) || object.networkFamily === 'unknown') {
+    return {
+      code: 'unknown_network_family',
+      message: `Object ${object.sourceFeatureId ?? 'unknown'} belum memiliki network family.`,
+    }
+  }
+  return null
+}
+
 function prepareNodes(bundle, issues) {
   const geometryById = new Map(bundle.geometries.map((geometry) => [geometry.geometryId, geometry]))
   return bundle.classifiedNodes.flatMap((object) => {
     const identity = objectIdentity(object)
+    const eligibility = topologyObjectEligibility(object)
+    if (eligibility) {
+      issues.push(topologyIssue(bundle, {
+        severity: eligibility.code === 'missing_stable_asset_id' ? 'warning' : 'error',
+        issueCode: eligibility.code,
+        scope: 'eligibility',
+        message: eligibility.message,
+        entityReference: object.sourceFeatureId,
+        readinessImpact: eligibility.code === 'missing_stable_asset_id' ? 'warning' : 'blocking',
+      }))
+      return []
+    }
     const geometries = asArray(object.geometryIds)
       .map((id) => geometryById.get(id))
       .filter(Boolean)
@@ -617,15 +975,31 @@ function prepareNodes(bundle, issues) {
       identityAliases: structuredClone(object.identityAliases ?? {}),
       sourceFeatureId: object.sourceFeatureId,
       siteId: object.siteId,
+      sourceStatus: object.sourceStatus ?? 'unknown',
+      topologyRequired: object.topologyRequired === true,
       sourceName: object.sourceName ?? null,
       sourceFolderPath: object.sourceFolderPath ?? null,
       networkFamily: object.networkFamily,
+      serviceDomain: object.serviceDomain ?? deriveTopologyDimensions(object).serviceDomain,
+      serviceDomains: structuredClone(
+        object.serviceDomains ?? deriveTopologyDimensions(object).serviceDomains,
+      ),
+      mediaType: object.mediaType ?? deriveTopologyDimensions(object).mediaType,
+      cableRole: object.cableRole ?? deriveTopologyDimensions(object).cableRole,
       objectRole: 'device_node',
+      topologyRole: object.topologyRole ?? 'unknown',
       assetType: object.assetType ?? 'unknown',
       category: object.category ?? 'unknown',
       coordinate: cloneCoordinate(point.coordinates),
       geometryId: point.geometryId,
+      geometryFingerprint: point.geometryFingerprint
+        ?? coordinateSequenceKey([point.coordinates]),
       classificationEvidence: structuredClone(object.classificationEvidence ?? []),
+      semanticDimensionEvidence: structuredClone(object.semanticDimensionEvidence ?? []),
+      jbProfileId: object.jbProfileId ?? null,
+      componentInventory: structuredClone(object.componentInventory ?? []),
+      interfaceDefinitions: structuredClone(object.interfaceDefinitions ?? []),
+      mountingRole: object.mountingRole ?? 'default',
       sourceContext: evidenceContext(object.classificationEvidence),
     }]
   }).sort(compareId)
@@ -635,6 +1009,18 @@ function preparePaths(bundle, issues, lineworkIssues) {
   const geometryById = new Map(bundle.geometries.map((geometry) => [geometry.geometryId, geometry]))
   return bundle.classifiedPaths.flatMap((object) => {
     const identity = objectIdentity(object)
+    const eligibility = topologyObjectEligibility(object)
+    if (eligibility) {
+      issues.push(topologyIssue(bundle, {
+        severity: eligibility.code === 'missing_stable_asset_id' ? 'warning' : 'error',
+        issueCode: eligibility.code,
+        scope: 'eligibility',
+        message: eligibility.message,
+        entityReference: object.sourceFeatureId,
+        readinessImpact: eligibility.code === 'missing_stable_asset_id' ? 'warning' : 'blocking',
+      }))
+      return []
+    }
     const validLines = asArray(object.geometryIds)
       .map((id) => geometryById.get(id))
       .filter((geometry) => (
@@ -684,25 +1070,561 @@ function preparePaths(bundle, issues, lineworkIssues) {
         identityAliases: structuredClone(object.identityAliases ?? {}),
         sourceFeatureId: object.sourceFeatureId,
         siteId: object.siteId,
+        sourceStatus: object.sourceStatus ?? 'unknown',
+        topologyRequired: object.topologyRequired === true,
         sourceName: object.sourceName ?? null,
         sourceFolderPath: object.sourceFolderPath ?? null,
-        networkFamily: object.networkFamily,
-        objectRole: 'cable_path',
+      networkFamily: object.networkFamily,
+      serviceDomain: object.serviceDomain ?? deriveTopologyDimensions(object).serviceDomain,
+      serviceDomains: structuredClone(
+        object.serviceDomains ?? deriveTopologyDimensions(object).serviceDomains,
+      ),
+      mediaType: object.mediaType ?? deriveTopologyDimensions(object).mediaType,
+      cableRole: object.cableRole ?? deriveTopologyDimensions(object).cableRole,
+      objectRole: 'cable_path',
         assetType: object.assetType ?? 'unknown',
         category: object.category ?? 'unknown',
         geometryId: geometry.geometryId,
-        geometryFingerprint: geometry.geometryFingerprint,
+        geometryFingerprint: geometry.geometryFingerprint
+          ?? coordinateSequenceKey(geometry.coordinates),
         coordinates,
         segmentLengths,
         cumulativeLengths,
         totalLengthMeters,
-        classificationEvidence: structuredClone(object.classificationEvidence ?? []),
+      classificationEvidence: structuredClone(object.classificationEvidence ?? []),
+      semanticDimensionEvidence: structuredClone(object.semanticDimensionEvidence ?? []),
         sourceContext: evidenceContext(object.classificationEvidence),
       }]
     })
   }).sort((left, right) => (
     left.id.localeCompare(right.id) || left.geometryId.localeCompare(right.geometryId)
   ))
+}
+
+function createInterfaceContext({
+  bundle,
+  nodes,
+  paths,
+  interfaceRegistry,
+  topologyPolicy,
+}) {
+  const interfaceById = new Map(
+    asArray(interfaceRegistry?.interfaces).map((item) => [item.interfaceId, item]),
+  )
+  const interfacesByAssetId = new Map()
+  asArray(interfaceRegistry?.interfaces).forEach((item) => {
+    if (item.status === 'retired') return
+    const list = interfacesByAssetId.get(item.ownerAssetId) ?? []
+    list.push(item)
+    interfacesByAssetId.set(item.ownerAssetId, list)
+  })
+  interfacesByAssetId.forEach((list) => list.sort(compareInterface))
+  return {
+    bundle,
+    nodes,
+    paths,
+    topologyPolicy,
+    interfaceRegistry,
+    interfaceById,
+    interfacesByAssetId,
+    nodeById: new Map(nodes.map((node) => [node.id, node])),
+    lineLabelNodesByGeometryId: new Map(),
+    diagnostics: [],
+  }
+}
+
+function buildInterfaceRegistry(bundle, nodes, {
+  paths = [],
+  previousInterfaceRegistry = [],
+  generatedAt = new Date().toISOString(),
+} = {}) {
+  const supplied = asArray(bundle.interfaceRegistry)
+  const previous = asArray(previousInterfaceRegistry)
+  const previousById = new Map(
+    [...previous, ...supplied]
+      .filter((item) => item?.interfaceId)
+      .map((item) => [String(item.interfaceId), item]),
+  )
+  const profileById = new Map([
+    ...Object.values(BUILTIN_JB_PROFILES),
+    ...asArray(bundle.jbProfiles),
+  ].map((profile) => [
+    String(profile.profileId ?? profile.id ?? ''),
+    profile,
+  ]))
+  const profileByAssetType = new Map(asArray(bundle.jbProfiles)
+    .flatMap((profile) => asArray(profile.assetTypes ?? profile.assetType)
+      .filter(Boolean)
+      .map((assetType) => [normalizeToken(assetType), profile])))
+  const inventoryByAssetId = new Map()
+  asArray(bundle.componentInventory).forEach((component) => {
+    const ownerAssetId = component.ownerAssetId ?? component.assetId
+    if (!ownerAssetId) return
+    const records = inventoryByAssetId.get(String(ownerAssetId)) ?? []
+    records.push(component)
+    inventoryByAssetId.set(String(ownerAssetId), records)
+  })
+  const activeIds = new Set()
+  const interfaces = []
+  const components = new Map()
+
+  nodes.slice().sort(compareId).forEach((node) => {
+    const profile = profileById.get(String(node.jbProfileId ?? ''))
+      ?? profileByAssetType.get(normalizeToken(node.assetType))
+      ?? profileByAssetType.get(normalizeToken(node.category))
+      ?? builtinProfileForNode(node)
+    const suppliedRecords = supplied
+      .filter((item) => item.ownerAssetId === node.id && item.status !== 'retired')
+      .sort(compareInterface)
+    const inventoryRecords = inventoryByAssetId.get(node.id) ?? []
+    inventoryRecords.forEach((inventory) => {
+      const componentId = inventory.componentId
+      if (!componentId) return
+      components.set(String(componentId), {
+        componentId: String(componentId),
+        ownerAssetId: node.id,
+        componentType: inventory.componentType ?? 'device_component',
+        componentName: inventory.componentName ?? null,
+        profileId: inventory.profileId ?? profile?.profileId ?? profile?.id ?? null,
+        status: inventory.status ?? 'active',
+        assignmentSource: inventory.assignmentSource ?? 'component_inventory',
+      })
+    })
+    const inventoryDefinitions = inventoryRecords.flatMap((inventory) => (
+      asArray(inventory.interfaces ?? inventory.interfaceDefinitions)
+      .map((definition) => ({
+        ...definition,
+        componentId: definition.componentId
+          ?? inventory.componentId,
+        componentType: definition.componentType
+          ?? inventory.componentType,
+        componentName: definition.componentName
+          ?? inventory.componentName,
+      }))
+    ))
+    const definitions = (suppliedRecords.length
+      ? suppliedRecords
+      : inventoryDefinitions.length
+        ? inventoryDefinitions
+      : interfaceDefinitionsForNode(node, profile, { paths }))
+      .slice()
+      .sort(compareInterfaceDefinitions)
+    const usedKeys = new Set()
+    definitions.flatMap((definition, definitionIndex) => {
+      const normalized = normalizeInterfaceDefinition(definition, {
+        node,
+        profile,
+        definitionIndex,
+      })
+      if (!normalized) return []
+      return normalized._expandedDefinitions ?? [normalized]
+    }).forEach((normalized) => {
+      const key = `${normalized.interfaceType}|${normalized.ordinal}`
+      if (usedKeys.has(key)) return
+      usedKeys.add(key)
+      const previousMatch = previousInterfaceFor(
+        previousById,
+        node.id,
+        normalized,
+      )
+      const interfaceId = String(
+        normalized.interfaceId
+          ?? previousMatch?.interfaceId
+          ?? `${node.id}/interface/${interfaceTypeSlug(normalized.interfaceType)}/${String(normalized.ordinal).padStart(2, '0')}`,
+      )
+      if (activeIds.has(interfaceId)) return
+      activeIds.add(interfaceId)
+      const componentId = String(
+        normalized.componentId
+          ?? previousMatch?.componentId
+          ?? `${node.id}/component/${componentSlug(normalized.componentType ?? normalized.interfaceType)}`,
+      )
+      const component = {
+        componentId,
+        ownerAssetId: node.id,
+        componentType: normalized.componentType ?? defaultComponentType(node),
+        componentName: normalized.componentName ?? null,
+        profileId: normalized.profileId ?? profile?.profileId ?? profile?.id ?? null,
+        status: 'active',
+        assignmentSource: normalized.assignmentSource
+          ?? (suppliedRecords.length ? 'persisted_registry' : profile ? 'approved_profile' : 'default_site_policy'),
+      }
+      components.set(componentId, component)
+      interfaces.push({
+        interfaceId,
+        ownerAssetId: node.id,
+        componentId,
+        interfaceType: normalized.interfaceType,
+        serviceDomain: normalized.serviceDomain,
+        mediaType: normalized.mediaType,
+        direction: normalized.direction,
+        capacity: normalized.capacity,
+        occupancy: Number.isFinite(Number(previousMatch?.occupancy))
+          ? Number(previousMatch.occupancy)
+          : Number(normalized.occupancy ?? 0),
+        profileId: normalized.profileId ?? profile?.profileId ?? profile?.id ?? null,
+        assignmentSource: normalized.assignmentSource
+          ?? (suppliedRecords.length ? 'persisted_registry' : profile ? 'approved_profile' : 'default_site_policy'),
+        sourceFeatureId: node.sourceFeatureId ?? null,
+        virtual: normalized.virtual === true,
+        isProxy: normalized.isProxy === true,
+        status: 'active',
+        createdAt: previousMatch?.createdAt ?? generatedAt,
+      })
+    })
+  })
+
+  // Existing assignments are never silently re-identified. Retain missing
+  // records as retired so relation history can still resolve their IDs.
+  previousById.forEach((record, interfaceId) => {
+    if (activeIds.has(interfaceId) || !record.ownerAssetId) return
+    if (record.componentId && !components.has(record.componentId)) {
+      components.set(record.componentId, {
+        componentId: record.componentId,
+        ownerAssetId: record.ownerAssetId,
+        componentType: record.componentType ?? 'device_component',
+        componentName: record.componentName ?? null,
+        profileId: record.profileId ?? null,
+        status: 'retired',
+        assignmentSource: record.assignmentSource ?? 'persisted_registry',
+      })
+    }
+    interfaces.push({
+      ...structuredClone(record),
+      interfaceId,
+      status: 'retired',
+      retiredAt: record.retiredAt ?? generatedAt,
+    })
+  })
+  const sortedInterfaces = interfaces.sort(compareInterface)
+  return {
+    interfaces: sortedInterfaces,
+    components: [...components.values()].sort((left, right) => (
+      left.componentId.localeCompare(right.componentId)
+    )),
+  }
+}
+
+function refreshInterfaceOccupancy(interfaceRegistry, confirmedRelations = []) {
+  const occupancyByInterface = new Map()
+  asArray(confirmedRelations)
+    .filter((relation) => (
+      relation.verificationStatus === 'confirmed'
+        && (relation.relationKind ?? persistedRelationKind(relation)) === 'path_termination'
+        && relation.targetInterfaceId
+    ))
+    .forEach((relation) => {
+      const interfaceId = String(relation.targetInterfaceId)
+      occupancyByInterface.set(interfaceId, (occupancyByInterface.get(interfaceId) ?? 0) + 1)
+    })
+  interfaceRegistry.interfaces = asArray(interfaceRegistry.interfaces).map((item) => ({
+    ...item,
+    occupancy: occupancyByInterface.get(item.interfaceId) ?? 0,
+  }))
+  return interfaceRegistry
+}
+
+function interfaceDefinitionsForNode(node, profile, { paths = [] } = {}) {
+  if (asArray(node.interfaceDefinitions).length) return node.interfaceDefinitions
+  if (asArray(profile?.interfaces ?? profile?.interfaceDefinitions).length) {
+    return profile.interfaces ?? profile.interfaceDefinitions
+  }
+  const text = nodeSemanticText(node)
+  const type = normalizeToken(node.assetType ?? node.category)
+  if (isPoleNode(node)) return []
+  if (isRackNode(node) || profileKind(profile) === 'server_rack') {
+    const evidence = interfaceEvidenceForNode(node, paths)
+    return [
+      {
+        interfaceType: 'lan_port',
+        ordinal: 1,
+        count: evidence.lanCount,
+        serviceDomain: 'data',
+        mediaType: 'copper_lan',
+        virtual: true,
+        isProxy: true,
+      },
+      {
+        interfaceType: 'fiber_port',
+        ordinal: 1,
+        count: evidence.fiberCount,
+        serviceDomain: 'data',
+        mediaType: 'fiber',
+        virtual: true,
+        isProxy: true,
+      },
+    ]
+  }
+  if (isOtbNode(node) || /otb|optical/.test(text) || type === 'otb') {
+    return [{ interfaceType: 'fiber_port', ordinal: 1, count: 24, serviceDomain: 'data', mediaType: 'fiber' }]
+  }
+  if (isExtendedJunctionBoxNode(node) || ['extended_passive', 'extended_poe'].includes(profileKind(profile))) {
+    const evidence = interfaceEvidenceForNode(node, paths)
+    const definitions = [
+      {
+        interfaceType: 'lan_port',
+        ordinal: 1,
+        count: 1,
+        capacity: profileKind(profile) === 'extended_poe' ? 1 : 2,
+        serviceDomain: 'data',
+        mediaType: 'copper_lan',
+      },
+    ]
+    if (evidence.fiber) {
+      definitions.push({
+        interfaceType: 'fiber_port',
+        ordinal: 1,
+        count: 1,
+        serviceDomain: 'data',
+        mediaType: 'fiber',
+      })
+    }
+    if (evidence.power || profileKind(profile) === 'extended_poe') {
+      definitions.push(
+        { interfaceType: 'power_in', ordinal: 1, count: 1, serviceDomain: 'power', mediaType: 'power_copper', direction: 'input' },
+        { interfaceType: 'power_out', ordinal: 1, count: 1, serviceDomain: 'power', mediaType: 'power_copper', direction: 'output' },
+      )
+    }
+    return definitions
+  }
+  if (/junction box|\bjb\b/.test(text) || type === 'junction_box') {
+    return [
+      { interfaceType: 'uplink_port', ordinal: 1, count: 1, serviceDomain: 'data', mediaType: 'copper_lan' },
+      { interfaceType: 'lan_port', ordinal: 1, count: 8, serviceDomain: 'data', mediaType: 'copper_lan' },
+      { interfaceType: 'fiber_port', ordinal: 1, count: 1, serviceDomain: 'data', mediaType: 'fiber' },
+      { interfaceType: 'power_in', ordinal: 1, count: 1, serviceDomain: 'power', mediaType: 'power_copper', direction: 'input' },
+      { interfaceType: 'power_out', ordinal: 1, count: 4, serviceDomain: 'power', mediaType: 'power_copper', direction: 'output' },
+    ]
+  }
+  if (/patch.?panel/.test(text) || type === 'patch_panel') {
+    return [{ interfaceType: 'patch_port', ordinal: 1, count: 24, serviceDomain: 'data', mediaType: 'copper_lan' }]
+  }
+  if (/switch|router|core/.test(text) || ['switch', 'router'].includes(type)) {
+    return [
+      { interfaceType: 'lan_port', ordinal: 1, count: 48, serviceDomain: 'data', mediaType: 'copper_lan' },
+      { interfaceType: 'uplink_port', ordinal: 1, count: 4, serviceDomain: 'data', mediaType: 'copper_lan' },
+      { interfaceType: 'fiber_port', ordinal: 1, count: 4, serviceDomain: 'data', mediaType: 'fiber' },
+    ]
+  }
+  if (/pln|power source|power panel/.test(text) || ['pln_source', 'power_panel'].includes(type)) {
+    return [{ interfaceType: 'power_out', ordinal: 1, count: 1, serviceDomain: 'power', mediaType: 'power_copper', direction: 'output' }]
+  }
+  if (/camera|cctv|nvr|server|peripheral/.test(text)
+    || ['cctv_camera', 'cctv_fixed', 'cctv_ptz', 'cctv_dome', 'nvr', 'server'].includes(type)) {
+    return [
+      { interfaceType: 'lan_port', ordinal: 1, count: 1, serviceDomain: 'data', mediaType: 'copper_lan' },
+      { interfaceType: 'power_in', ordinal: 1, count: 1, serviceDomain: 'power', mediaType: 'power_copper', direction: 'input' },
+    ]
+  }
+  return []
+}
+
+function builtinProfileForNode(node) {
+  if (isRackNode(node)) return BUILTIN_JB_PROFILES.server_rack
+  if (isExtendedJunctionBoxNode(node)) {
+    return /poe|power over ethernet|switch|extender/.test(nodeSemanticText(node))
+      ? BUILTIN_JB_PROFILES.extended_poe
+      : BUILTIN_JB_PROFILES.extended_passive
+  }
+  if (isJunctionBoxNode(node)) return BUILTIN_JB_PROFILES.main_jb
+  return null
+}
+
+function profileKind(profile) {
+  return normalizeToken(profile?.profileKind ?? profile?.kind ?? profile?.profileId)
+    .replaceAll('builtin ', '')
+    .replaceAll(':', ' ')
+    .replaceAll(' ', '_')
+}
+
+function interfaceEvidenceForNode(node, paths) {
+  const nearbyPaths = asArray(paths).filter((path) => {
+    if (path.siteId !== node.siteId) return false
+    if (pathLabelMatchesNode(path, node)) return true
+    if (!validCoordinate(node.coordinate) || !validLineCoordinates(path.coordinates)) return false
+    return nearestPointOnLine(node.coordinate, path).distanceMeters
+      <= DEFAULT_RELATION_ENGINE_CONFIG.searchRadiusMeters
+  })
+  const evidencePaths = [...new Map(nearbyPaths.map((path) => [
+    path.id ?? path.geometryId,
+    path,
+  ])).values()]
+  const dataPaths = evidencePaths.filter((path) => (
+    (path.serviceDomain ?? deriveTopologyDimensions(path).serviceDomain) === 'data'
+  ))
+  const fiberPaths = dataPaths.filter((path) => (
+    (path.mediaType ?? deriveTopologyDimensions(path).mediaType) === 'fiber'
+      || path.networkFamily === 'fiber_optic'
+  ))
+  const lanPaths = dataPaths.filter((path) => !fiberPaths.includes(path)
+    && (path.mediaType ?? deriveTopologyDimensions(path).mediaType) !== 'power_copper')
+  return {
+    fiber: fiberPaths.length > 0,
+    power: evidencePaths.some((path) => (
+      (path.serviceDomain ?? deriveTopologyDimensions(path).serviceDomain) === 'power'
+    )),
+    data: dataPaths.length > 0,
+    fiberCount: Math.max(1, fiberPaths.length),
+    lanCount: Math.max(1, lanPaths.length),
+  }
+}
+
+function normalizeInterfaceDefinition(definition, { node, profile, definitionIndex }) {
+  if (!definition || typeof definition !== 'object') return null
+  const interfaceType = normalizeInterfaceType(
+    definition.interfaceType ?? definition.type ?? definition.kind,
+  )
+  if (!interfaceType) return null
+  const count = Math.max(1, Number.isInteger(Number(definition.count))
+    ? Number(definition.count)
+    : 1)
+  const ordinal = Number.isInteger(Number(definition.ordinal))
+    ? Number(definition.ordinal)
+    : definitionIndex + 1
+  const serviceDomain = normalizeServiceDomain(
+    definition.serviceDomain ?? defaultServiceDomainForInterface(interfaceType),
+  )
+  const mediaType = normalizeMediaType(
+    definition.mediaType ?? defaultMediaTypeForInterface(interfaceType),
+  )
+  const direction = normalizeInterfaceDirection(
+    definition.direction ?? defaultDirectionForInterface(interfaceType),
+  )
+  const capacity = Math.max(1, Number(definition.capacity ?? 1))
+  const records = []
+  for (let offset = 0; offset < count; offset += 1) {
+    records.push({
+      ...definition,
+      interfaceId: count === 1 && definition.interfaceId
+        ? definition.interfaceId
+        : count === 1 ? null : null,
+      interfaceType,
+      serviceDomain,
+      mediaType,
+      direction,
+      capacity,
+      ordinal: ordinal + offset,
+      profileId: definition.profileId ?? profile?.profileId ?? profile?.id ?? null,
+      virtual: definition.virtual === true,
+      isProxy: definition.isProxy === true,
+      componentType: definition.componentType,
+      componentName: definition.componentName,
+      assignmentSource: definition.assignmentSource,
+    })
+  }
+  // The caller expects one definition per generated record. Return the first
+  // and attach expansion metadata for deterministic expansion below.
+  return records.length === 1
+    ? records[0]
+    : { ...records[0], _expandedDefinitions: records }
+}
+
+function previousInterfaceFor(previousById, ownerAssetId, definition) {
+  return [...previousById.values()]
+    .filter((record) => (
+      record.ownerAssetId === ownerAssetId
+        && record.interfaceType === definition.interfaceType
+        && Number(record.ordinal) === Number(definition.ordinal)
+    ))
+    .sort(compareInterface)[0] ?? null
+}
+
+function normalizeInterfaceType(value) {
+  const normalized = normalizeToken(value).replaceAll(' ', '_')
+  return {
+    lan: 'lan_port',
+    ethernet: 'lan_port',
+    ethernet_port: 'lan_port',
+    lan_port: 'lan_port',
+    fiber: 'fiber_port',
+    fibre: 'fiber_port',
+    fiber_port: 'fiber_port',
+    uplink: 'uplink_port',
+    uplink_port: 'uplink_port',
+    power_in: 'power_in',
+    power_input: 'power_in',
+    power_out: 'power_out',
+    power_output: 'power_out',
+    splice: 'splice_slot',
+    splice_slot: 'splice_slot',
+    patch: 'patch_port',
+    patch_port: 'patch_port',
+    server_nic: 'server_nic',
+    nic: 'server_nic',
+  }[normalized] ?? null
+}
+
+function interfaceTypeSlug(value) {
+  return {
+    lan_port: 'lan',
+    fiber_port: 'fiber',
+    uplink_port: 'uplink',
+    power_in: 'power-in',
+    power_out: 'power-out',
+    splice_slot: 'splice',
+    patch_port: 'patch',
+    server_nic: 'nic',
+  }[value] ?? String(value).replaceAll('_', '-').replace(/[^a-z0-9-]/gi, '')
+}
+
+function componentSlug(value) {
+  return normalizeToken(value).replaceAll(' ', '-') || 'component'
+}
+
+function defaultComponentType(node) {
+  if (isJunctionBoxNode(node)) return 'opaque_jb_profile'
+  if (isRackNode(node)) return 'rack_proxy'
+  return 'device'
+}
+
+function compareInterface(left, right) {
+  return String(left.interfaceId ?? '').localeCompare(String(right.interfaceId ?? ''))
+}
+
+function compareInterfaceDefinitions(left, right) {
+  return Number(left?.ordinal ?? Number.MAX_SAFE_INTEGER)
+    - Number(right?.ordinal ?? Number.MAX_SAFE_INTEGER)
+    || String(left?.interfaceType ?? left?.type ?? '').localeCompare(
+      String(right?.interfaceType ?? right?.type ?? ''),
+    )
+    || stableStringify(left).localeCompare(stableStringify(right))
+}
+
+function normalizeInterfaceDirection(value) {
+  const normalized = String(value ?? 'undirected').trim().toLowerCase()
+  return ['input', 'output', 'undirected', 'bidirectional'].includes(normalized)
+    ? normalized
+    : 'undirected'
+}
+
+function defaultDirectionForInterface(interfaceType) {
+  if (interfaceType === 'power_in') return 'input'
+  if (interfaceType === 'power_out') return 'output'
+  return 'bidirectional'
+}
+
+function defaultServiceDomainForInterface(interfaceType) {
+  return ['power_in', 'power_out'].includes(interfaceType) ? 'power' : 'data'
+}
+
+function defaultMediaTypeForInterface(interfaceType) {
+  if (['power_in', 'power_out'].includes(interfaceType)) return 'power_copper'
+  if (['fiber_port', 'splice_slot'].includes(interfaceType)) return 'fiber'
+  return 'copper_lan'
+}
+
+function normalizeServiceDomain(value) {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  return ['data', 'power', 'mounting', 'unknown'].includes(normalized)
+    ? normalized
+    : 'unknown'
+}
+
+function normalizeMediaType(value) {
+  const normalized = String(value ?? '').trim().toLowerCase().replaceAll('-', '_')
+  return ['copper_lan', 'fiber', 'power_copper', 'none', 'unknown'].includes(normalized)
+    ? normalized
+    : 'unknown'
 }
 
 function detectDuplicateAndOverlappingLinework(paths, issues, bundle, settings) {
@@ -742,6 +1664,462 @@ function detectDuplicateAndOverlappingLinework(paths, issues, bundle, settings) 
     left.overlaps = [...(left.overlaps ?? []), right.geometryId]
     right.overlaps = [...(right.overlaps ?? []), left.geometryId]
   })
+}
+
+function generateCableTerminationCandidates(
+  paths,
+  spatialIndexes,
+  settings,
+  interfaceContext,
+  candidateBudget,
+) {
+  const candidates = []
+  paths.filter((path) => !path.duplicateOfGeometryId).forEach((path) => {
+    assertGenerationBudget(candidateBudget, 'cable_termination')
+    const labelNodes = path.sourceName
+      ? lineLabelNodesForPath(path, interfaceContext)
+      : []
+    lineEndpoints(path).forEach((endpoint) => {
+      spatialIndexes.nodes.queryPoint(
+        endpoint.coordinate,
+        settings.searchRadiusMeters,
+      ).forEach((node) => {
+        const distanceMeters = geographicDistanceMeters(endpoint.coordinate, node.coordinate)
+        if (distanceMeters > settings.searchRadiusMeters) return
+        if (isPoleNode(node) && interfaceContext.topologyPolicy.allowCableToPole !== true) {
+          recordForbiddenTargetDiagnostic(interfaceContext, {
+            path,
+            endpoint,
+            node,
+            distanceMeters,
+          })
+          return
+        }
+        const compatible = compatibleInterfacesForPath(
+          path,
+          node,
+          interfaceContext,
+          labelEndpointRole(node, labelNodes, endpoint.role),
+        )
+        if (!compatible.length) {
+          if (nodeHasTopologyInterface(node, interfaceContext)) {
+            interfaceContext.diagnostics.push({
+              code: 'incompatible_interface',
+              issueCode: 'interface_media_mismatch',
+              severity: 'warning',
+              sourceEndpointId: endpoint.id,
+              targetAssetId: node.id,
+              message: `Tidak ada interface ${path.mediaType}/${path.serviceDomain} yang compatible pada ${node.id}.`,
+            })
+          }
+          return
+        }
+        compatible.forEach(({ item, score, ruleId, explanation, capacityAvailable }) => {
+          pushCandidate(candidates, baseCandidate({
+            candidateType: 'cable_termination',
+            sourceEndpointId: endpoint.id,
+            sourcePath: path,
+            targetAssetId: node.id,
+            targetNode: node,
+            distanceMeters,
+            sourceCoordinate: endpoint.coordinate,
+            targetCoordinate: node.coordinate,
+            measureMeters: endpoint.measureMeters,
+            semanticCompatibility: score,
+            endpointRole: endpointRoleScore(node, false),
+            sourceContext: contextScore(path.sourceContext, node.sourceContext),
+            styleConsistency: styleConsistencyScore(path, node),
+            angleScore: 1,
+            graphConsistency: 1,
+            evidence: [{
+              source: 'spatial',
+              ruleId: 'endpoint.within-search-radius',
+              observedValue: distanceMeters,
+              normalizedValue: `${distanceMeters.toFixed(3)}m`,
+              weight: SCORE_WEIGHTS.distance,
+              explanation: `Endpoint berada dalam radius ${settings.searchRadiusMeters} meter.`,
+            }, {
+              source: 'semantic',
+              ruleId,
+              observedValue: `${path.serviceDomain}:${path.mediaType}:${item.interfaceType}`,
+              normalizedValue: true,
+              weight: SCORE_WEIGHTS.interfaceCompatibility,
+              explanation,
+            }],
+            targetInterface: item,
+            serviceDomain: path.serviceDomain,
+            mediaType: path.mediaType,
+            cableRole: path.cableRole,
+            capacityAvailable,
+          }), candidateBudget, 'cable_termination')
+        })
+      })
+    })
+  })
+  return candidates
+}
+
+function generateInlineCableTerminationCandidates(
+  paths,
+  spatialIndexes,
+  settings,
+  interfaceContext,
+  candidateBudget,
+) {
+  const candidates = []
+  interfaceContext.nodes.filter(inlineNodeAllowed).forEach((node) => {
+    assertGenerationBudget(candidateBudget, 'inline_cable_termination')
+    spatialIndexes.segments.queryPoint(node.coordinate, settings.inlineSearchRadiusMeters)
+      .filter((path) => !path.duplicateOfGeometryId)
+      .forEach((path) => {
+        const nearest = nearestPointOnLine(node.coordinate, path)
+        if (nearest.distanceMeters > settings.inlineSearchRadiusMeters) return
+        if (nearest.measureMeters <= settings.minimumInlineEndpointDistanceMeters
+          || path.totalLengthMeters - nearest.measureMeters
+            <= settings.minimumInlineEndpointDistanceMeters) return
+        const compatible = compatibleInterfacesForPath(
+          path,
+          node,
+          interfaceContext,
+          'inline',
+        )
+        compatible.forEach(({ item, score, ruleId, explanation, capacityAvailable }) => {
+          pushCandidate(candidates, baseCandidate({
+            candidateType: 'cable_termination',
+            sourceEndpointId: `inline:${path.geometryId}:${node.id}`,
+            sourcePath: path,
+            targetAssetId: node.id,
+            targetNode: node,
+            targetInterface: item,
+            distanceMeters: nearest.distanceMeters,
+            sourceCoordinate: nearest.projectedCoordinate,
+            targetCoordinate: node.coordinate,
+            measureMeters: nearest.measureMeters,
+            semanticCompatibility: score,
+            endpointRole: endpointRoleScore(node, true),
+            sourceContext: contextScore(path.sourceContext, node.sourceContext),
+            styleConsistency: styleConsistencyScore(path, node),
+            angleScore: 1,
+            graphConsistency: 1,
+            serviceDomain: path.serviceDomain,
+            mediaType: path.mediaType,
+            cableRole: path.cableRole,
+            capacityAvailable,
+            provenance: 'inline_device_inference',
+            evidence: [{
+              source: 'spatial',
+              ruleId: 'inline.closest-point-derived-anchor',
+              observedValue: nearest.distanceMeters,
+              normalizedValue: `${nearest.distanceMeters.toFixed(3)}m`,
+              weight: SCORE_WEIGHTS.distance,
+              explanation: 'JB Extended berada di tengah geometri kabel dan diproyeksikan ke measure kabel.',
+            }, {
+              source: 'semantic',
+              ruleId,
+              observedValue: `${path.serviceDomain}:${path.mediaType}:${item.interfaceType}`,
+              normalizedValue: true,
+              weight: SCORE_WEIGHTS.interfaceCompatibility,
+              explanation,
+            }],
+          }), candidateBudget, 'inline_cable_termination')
+        })
+      })
+  })
+  return candidates
+}
+
+function generateMountingCandidates(
+  nodes,
+  spatialIndexes,
+  settings,
+  interfaceContext,
+  candidateBudget,
+) {
+  const candidates = []
+  nodes.filter(isMountableAsset).forEach((child) => {
+    assertGenerationBudget(candidateBudget, 'mounting_attachment')
+    spatialIndexes.nodes.queryPoint(child.coordinate, settings.searchRadiusMeters)
+      .filter((host) => isPoleNode(host) && host.id !== child.id)
+      .forEach((host) => {
+        const distanceMeters = geographicDistanceMeters(child.coordinate, host.coordinate)
+        if (distanceMeters > settings.searchRadiusMeters) return
+        const base = baseCandidate({
+          candidateType: 'mounting_attachment',
+          sourceEndpointId: `mounting:${child.id}:${child.mountingRole ?? 'default'}`,
+          sourcePath: child,
+          targetAssetId: host.id,
+          targetNode: host,
+          distanceMeters,
+          sourceCoordinate: child.coordinate,
+          targetCoordinate: host.coordinate,
+          measureMeters: null,
+          semanticCompatibility: 1,
+          endpointRole: 1,
+          sourceContext: contextScore(child.sourceContext, host.sourceContext),
+          styleConsistency: styleConsistencyScore(child, host),
+          angleScore: 1,
+          graphConsistency: 1,
+          evidence: [{
+            source: 'spatial',
+            ruleId: 'mounting.host-within-search-radius',
+            observedValue: distanceMeters,
+            normalizedValue: `${distanceMeters.toFixed(3)}m`,
+            weight: SCORE_WEIGHTS.distance,
+            explanation: 'Asset yang dapat dipasang berada dekat tiang host.',
+          }, {
+            source: 'semantic',
+            ruleId: 'mounting.host-role-pole',
+            observedValue: host.assetType,
+            normalizedValue: true,
+            weight: SCORE_WEIGHTS.interfaceCompatibility,
+            explanation: 'Tiang hanya digunakan sebagai host pemasangan.',
+          }],
+          serviceDomain: 'mounting',
+          mediaType: 'none',
+          cableRole: 'mounting',
+        })
+        base.relationKind = 'installation_attachment'
+        base.relationType = 'mounted_on'
+        base.mountingRole = child.mountingRole ?? 'default'
+        pushCandidate(candidates, base, candidateBudget, 'mounting_attachment')
+      })
+  })
+  return candidates
+}
+
+function generateInternalConnectionCandidates(interfaceContext, candidateBudget) {
+  const candidates = []
+  internalConnectionDefinitions(interfaceContext).forEach((definition) => {
+    assertGenerationBudget(candidateBudget, 'jb_internal_connection')
+    const source = interfaceContext.interfaceById.get(definition.sourceInterfaceId)
+    const target = interfaceContext.interfaceById.get(definition.targetInterfaceId)
+    if (!source || !target || source.status === 'retired' || target.status === 'retired') return
+    if (source.ownerAssetId !== target.ownerAssetId) return
+    const sourceNode = interfaceContext.nodeById.get(source.ownerAssetId)
+    if (!sourceNode) return
+    const serviceDomain = normalizeServiceDomain(
+      definition.serviceDomain ?? source.serviceDomain,
+    )
+    if (serviceDomain === 'mounting') return
+    candidates.push({
+      candidateType: 'jb_internal_connection',
+      candidateId: null,
+      datasetVersionId: null,
+      siteId: sourceNode.siteId,
+      sourceEndpointId: `internal:${source.interfaceId}:${target.interfaceId}`,
+      sourcePathAssetId: null,
+      targetAssetId: target.ownerAssetId,
+      sourceAssetId: source.ownerAssetId,
+      sourceInterfaceId: source.interfaceId,
+      targetInterfaceId: target.interfaceId,
+      sourceObjectRole: 'device_node',
+      targetObjectRole: 'device_node',
+      topologyRequired: false,
+      relationKind: 'internal_connection',
+      relationType: 'internally_connected_to',
+      serviceDomain,
+      mediaType: normalizeMediaType(definition.mediaType ?? source.mediaType),
+      cableRole: 'unknown',
+      provenance: definition.provenance ?? 'approved_jb_profile',
+      profileVersion: definition.profileVersion ?? null,
+      autoConfirm: definition.approved === true || definition.provenance === 'approved_jb_profile',
+      components: {
+        interfaceCompatibility: 1,
+        explicitEvidence: definition.approved === true ? 1 : 0.9,
+        distance: 1,
+        labelCorrespondence: 1,
+        siteContext: 1,
+        endpointRoleConsistency: 1,
+        capacityAvailability: 1,
+      },
+      evidence: [{
+        source: definition.provenance ?? 'approved_jb_profile',
+        ruleId: 'jb.internal-connection.approved-evidence',
+        observedValue: `${source.interfaceId}->${target.interfaceId}`,
+        normalizedValue: serviceDomain,
+        weight: SCORE_WEIGHTS.explicitEvidence,
+        explanation: 'Hubungan internal hanya dibuat dari profile/evidence yang disetujui.',
+      }],
+      sourceGeometryIds: [],
+      sourceGeometryFingerprints: [],
+      sourceCoordinate: sourceNode.coordinate,
+      targetCoordinate: sourceNode.coordinate,
+      networkFamily: sourceNode.networkFamily,
+    })
+  })
+  return candidates
+}
+
+function internalConnectionDefinitions(interfaceContext) {
+  const bundle = interfaceContext.bundle
+  const definitions = [
+    ...asArray(bundle.internalConnections),
+    ...asArray(bundle.componentInventory).flatMap((component) => (
+      asArray(component.internalConnections ?? component.internalConnectionDefinitions).map((connection) => ({
+        ...connection,
+        ownerAssetId: connection.ownerAssetId
+          ?? component.ownerAssetId
+          ?? component.assetId,
+        provenance: connection.provenance ?? 'component_inventory',
+      }))
+    )),
+    ...asArray(bundle.jbProfiles).flatMap((profile) => (
+      profile.approved === true || profile.status === 'approved'
+        ? asArray(profile.internalConnections).map((connection) => ({
+          ...connection,
+          profileVersion: connection.profileVersion ?? profile.version ?? profile.profileVersion ?? null,
+          provenance: connection.provenance ?? 'approved_jb_profile',
+          approved: true,
+          profileId: connection.profileId ?? profile.profileId ?? profile.id ?? null,
+        }))
+        : []
+    )),
+  ]
+  return definitions.flatMap((definition) => (
+    expandInternalConnectionDefinition(definition, interfaceContext)
+  ))
+}
+
+function expandInternalConnectionDefinition(definition, interfaceContext) {
+  const sourceReference = definition.sourceInterfaceId ?? definition.source
+  const targetReference = definition.targetInterfaceId ?? definition.target
+  const ownerAssetId = definition.ownerAssetId ?? definition.assetId ?? null
+  const candidateNodes = ownerAssetId
+    ? [interfaceContext.nodeById.get(String(ownerAssetId))].filter(Boolean)
+    : interfaceContext.nodes.filter((node) => profileMatchesNode(definition, node))
+  if (!candidateNodes.length && sourceReference && targetReference) {
+    return [{
+      ...definition,
+      sourceInterfaceId: sourceReference,
+      targetInterfaceId: targetReference,
+    }]
+  }
+  return candidateNodes.flatMap((node) => {
+    const interfaces = interfaceContext.interfacesByAssetId.get(node.id) ?? []
+    const sourceInterfaceId = resolveInternalInterfaceReference(
+      sourceReference,
+      definition.sourceInterfaceType ?? definition.sourceType,
+      definition.sourceInterfaceOrdinal ?? definition.sourceOrdinal,
+      node,
+      interfaces,
+    )
+    const targetInterfaceId = resolveInternalInterfaceReference(
+      targetReference,
+      definition.targetInterfaceType ?? definition.targetType,
+      definition.targetInterfaceOrdinal ?? definition.targetOrdinal,
+      node,
+      interfaces,
+    )
+    if (!sourceInterfaceId || !targetInterfaceId) return []
+    return [{
+      ...definition,
+      sourceInterfaceId,
+      targetInterfaceId,
+    }]
+  })
+}
+
+function profileMatchesNode(definition, node) {
+  if (!definition.profileId && !definition.profileKind) return true
+  const nodeProfileId = String(node.jbProfileId ?? '')
+  const profile = builtinProfileForNode(node)
+  const nodeProfileKind = profileKind(profile)
+  const expectedId = String(definition.profileId ?? '')
+  const expectedKind = normalizeToken(definition.profileKind ?? '').replaceAll(' ', '_')
+  return (expectedId && nodeProfileId === expectedId)
+    || (expectedKind && nodeProfileKind === expectedKind)
+}
+
+function resolveInternalInterfaceReference(reference, interfaceType, ordinal, node, interfaces) {
+  const normalizedType = normalizeInterfaceType(interfaceType ?? reference)
+  const normalizedOrdinal = Number.isInteger(Number(ordinal)) ? Number(ordinal) : 1
+  if (reference) {
+    const raw = String(reference)
+    const expanded = raw
+      .replaceAll('{assetId}', node.id)
+      .replaceAll('{ownerAssetId}', node.id)
+      .replaceAll('$assetId', node.id)
+    const candidates = [
+      expanded,
+      expanded.startsWith('interface/') ? `${node.id}/${expanded}` : null,
+      expanded.includes('/') && !expanded.startsWith(`${node.id}/`)
+        ? `${node.id}/interface/${expanded}` : null,
+    ].filter(Boolean)
+    const exact = candidates.find((candidate) => (
+      interfaces.some(({ interfaceId }) => interfaceId === candidate)
+    ))
+    if (exact) return exact
+  }
+  if (!normalizedType) return null
+  return interfaces.find((item) => (
+    item.interfaceType === normalizedType
+      && Number(item.ordinal) === normalizedOrdinal
+      && item.status !== 'retired'
+  ))?.interfaceId ?? null
+}
+
+function recordForbiddenTargetDiagnostic(interfaceContext, {
+  path,
+  endpoint,
+  node,
+  distanceMeters,
+}) {
+  const key = `${endpoint.id}|${node.id}`
+  if (interfaceContext.diagnostics.some((item) => item.key === key)) return
+  interfaceContext.diagnostics.push({
+    key,
+    code: 'forbidden_target_role',
+    issueCode: 'cable_terminated_at_pole',
+    severity: 'warning',
+    sourceEndpointId: endpoint.id,
+    sourcePathAssetId: path.id,
+    targetAssetId: node.id,
+    targetRole: 'pole',
+    distanceMeters,
+    message: `Tiang ${node.id} diabaikan sebagai target kabel; tiang hanya host pemasangan.`,
+  })
+}
+
+function unresolvedTerminationCandidate(endpoint) {
+  const path = endpoint.path
+  const dimensions = deriveTopologyDimensions(path)
+  return {
+    candidateType: 'unresolved_termination',
+    siteId: path.siteId,
+    networkFamily: path.networkFamily,
+    sourceEndpointId: endpoint.id,
+    sourcePathAssetId: path.id,
+    sourceFeatureId: path.sourceFeatureId,
+    sourceObjectRole: 'cable_path',
+    targetObjectRole: null,
+    topologyRequired: path.topologyRequired === true,
+    distanceMeters: null,
+    measureMeters: endpoint.measureMeters,
+    sourceCoordinate: cloneCoordinate(endpoint.coordinate),
+    targetCoordinate: null,
+    serviceDomain: path.serviceDomain ?? dimensions.serviceDomain,
+    mediaType: path.mediaType ?? dimensions.mediaType,
+    cableRole: path.cableRole ?? dimensions.cableRole,
+    components: {
+      interfaceCompatibility: 0,
+      explicitEvidence: 0,
+      distance: 0,
+      labelCorrespondence: 0,
+      siteContext: 1,
+      endpointRoleConsistency: 0,
+      capacityAvailability: 0,
+    },
+    evidence: [{
+      source: 'diagnostic',
+      ruleId: 'termination.no-compatible-interface',
+      observedValue: endpoint.id,
+      normalizedValue: 'unresolved',
+      weight: 1,
+      explanation: 'Tidak ada target interface yang lolos semantic hard gate.',
+    }],
+    sourceGeometryIds: [path.geometryId],
+    sourceGeometryFingerprints: [path.geometryFingerprint].filter(Boolean),
+  }
 }
 
 function generateEndpointDeviceCandidates(paths, spatialIndexes, settings, candidateBudget) {
@@ -875,7 +2253,7 @@ function generateEndpointEndpointCandidates(spatialIndexes, settings, candidateB
         1 - deviation / settings.endpointContinuationAngleDegrees,
       )
       pushCandidate(candidates, baseCandidate({
-        candidateType: 'endpoint_endpoint',
+        candidateType: 'path_continuation',
         sourceEndpointId: left.id,
         sourcePath: left.path,
         targetAssetId: right.path.id,
@@ -899,70 +2277,128 @@ function generateEndpointEndpointCandidates(spatialIndexes, settings, candidateB
           weight: SCORE_WEIGHTS.angle,
           explanation: 'Arah segmen ujung mendekati kontinuitas dan tidak memiliki device penghubung.',
         }],
-      }), candidateBudget, 'endpoint_endpoint')
+      }), candidateBudget, 'path_continuation')
     })
   })
   return candidates
 }
 
-function generateIntersectionCandidates(spatialIndexes, settings, candidateBudget) {
+function generateIntersectionTerminationCandidates(
+  spatialIndexes,
+  settings,
+  interfaceContext,
+  candidateBudget,
+) {
   const candidates = []
   spatialIndexes.segments.pathPairs().forEach(([left, right]) => {
-      assertGenerationBudget(candidateBudget, 'intersection_with_junction')
-      if (left.duplicateOfGeometryId) return
-      if (right.duplicateOfGeometryId
-        || left.id === right.id
-        || left.siteId !== right.siteId
-        || left.networkFamily !== right.networkFamily) return
-      intersections(left, right).forEach((intersection, intersectionIndex) => {
-        const junctions = spatialIndexes.nodes
-          .queryPoint(intersection.coordinate, settings.intersectionToleranceMeters)
-          .filter((node) => (
-            inlineNodeAllowed(node)
-            && compatiblePathNode(left, node).compatible
-            && compatiblePathNode(right, node).compatible
-          ))
-          .map((node) => ({
-            node,
-            distanceMeters: geographicDistanceMeters(intersection.coordinate, node.coordinate),
-          }))
-          .filter(({ distanceMeters }) => distanceMeters <= settings.intersectionToleranceMeters)
-          .sort((a, b) => a.distanceMeters - b.distanceMeters || compareId(a.node, b.node))
-        if (!junctions.length) return
-        const selected = junctions[0]
-        pushCandidate(candidates, baseCandidate({
-          candidateType: 'intersection_with_junction',
-          sourceEndpointId: `intersection:${left.geometryId}:${right.geometryId}:${intersectionIndex}`,
-          sourcePath: left,
-          targetAssetId: selected.node.id,
-          targetNode: selected.node,
-          targetPath: right,
-          distanceMeters: selected.distanceMeters,
-          sourceCoordinate: intersection.coordinate,
-          targetCoordinate: selected.node.coordinate,
+    assertGenerationBudget(candidateBudget, 'intersection_termination')
+    if (left.duplicateOfGeometryId) return
+    if (right.duplicateOfGeometryId
+      || left.id === right.id
+      || left.siteId !== right.siteId
+      || left.networkFamily !== right.networkFamily) return
+    intersections(left, right).forEach((intersection, intersectionIndex) => {
+      const junctions = spatialIndexes.nodes
+        .queryPoint(intersection.coordinate, settings.intersectionToleranceMeters)
+        .filter((node) => (
+          inlineNodeAllowed(node)
+          && compatibleInterfacesForPath(left, node, interfaceContext).length
+          && compatibleInterfacesForPath(right, node, interfaceContext).length
+        ))
+        .map((node) => ({
+          node,
+          distanceMeters: geographicDistanceMeters(intersection.coordinate, node.coordinate),
+        }))
+        .filter(({ distanceMeters }) => distanceMeters <= settings.intersectionToleranceMeters)
+        .sort((a, b) => a.distanceMeters - b.distanceMeters || compareId(a.node, b.node))
+      if (!junctions.length) return
+      const selected = junctions[0]
+      ;[
+        {
+          path: left,
           measureMeters: intersection.leftMeasureMeters,
-          targetMeasureMeters: intersection.rightMeasureMeters,
-          semanticCompatibility: 1,
-          endpointRole: 1,
-          sourceContext: Math.max(
-            contextScore(left.sourceContext, selected.node.sourceContext),
-            contextScore(right.sourceContext, selected.node.sourceContext),
+          side: 'left',
+          interfaces: compatibleInterfacesForPath(
+            left,
+            selected.node,
+            interfaceContext,
+            labelEndpointRole(
+              selected.node,
+              left.sourceName ? lineLabelNodesForPath(left, interfaceContext) : [],
+              null,
+            ),
           ),
-          styleConsistency: 1,
-          angleScore: 1,
-          graphConsistency: 1,
-          evidence: [{
-            source: 'junction',
-            ruleId: 'intersection.classified-junction-required',
-            observedValue: selected.node.assetType,
-            normalizedValue: selected.node.id,
-            weight: SCORE_WEIGHTS.semanticCompatibility,
-            explanation: 'Persilangan hanya menjadi candidate karena ada classified junction.',
-          }],
-        }), candidateBudget, 'intersection_with_junction')
+        },
+        {
+          path: right,
+          measureMeters: intersection.rightMeasureMeters,
+          side: 'right',
+          interfaces: compatibleInterfacesForPath(
+            right,
+            selected.node,
+            interfaceContext,
+            labelEndpointRole(
+              selected.node,
+              right.sourceName ? lineLabelNodesForPath(right, interfaceContext) : [],
+              null,
+            ),
+          ),
+        },
+      ].filter(({ path, measureMeters }) => (
+        !isRackLabelledEndpointIntersection(path, measureMeters, selected.node, interfaceContext)
+      )).forEach(({ path, measureMeters, side, interfaces }) => {
+        interfaces.forEach(({ item, score, ruleId, explanation, capacityAvailable }) => {
+          pushCandidate(candidates, baseCandidate({
+            candidateType: 'cable_termination',
+            sourceEndpointId: `intersection:${left.geometryId}:${right.geometryId}:${intersectionIndex}:${side}`,
+            sourcePath: path,
+            targetAssetId: selected.node.id,
+            targetNode: selected.node,
+            distanceMeters: selected.distanceMeters,
+            sourceCoordinate: intersection.coordinate,
+            targetCoordinate: selected.node.coordinate,
+            measureMeters,
+            semanticCompatibility: score,
+            endpointRole: 1,
+            sourceContext: contextScore(path.sourceContext, selected.node.sourceContext),
+            styleConsistency: 1,
+            angleScore: 1,
+            graphConsistency: 1,
+            targetInterface: item,
+            serviceDomain: path.serviceDomain,
+            mediaType: path.mediaType,
+            cableRole: path.cableRole,
+            capacityAvailable,
+            provenance: 'intersection_junction_inference',
+            evidence: [{
+              source: 'junction',
+              ruleId: 'intersection.classified-junction-required',
+              observedValue: selected.node.assetType,
+              normalizedValue: selected.node.id,
+              weight: SCORE_WEIGHTS.explicitEvidence,
+              explanation: 'Persilangan hanya menjadi termination karena ada classified junction.',
+            }, {
+              source: 'semantic',
+              ruleId,
+              observedValue: `${path.serviceDomain}:${path.mediaType}:${item.interfaceType}`,
+              normalizedValue: true,
+              weight: SCORE_WEIGHTS.interfaceCompatibility,
+              explanation,
+            }],
+          }), candidateBudget, 'intersection_termination')
+        })
       })
+    })
   })
   return candidates
+}
+
+function isRackLabelledEndpointIntersection(path, measureMeters, node, interfaceContext) {
+  if (!isRackNode(node) || !path.sourceName) return false
+  const endpointDistance = Math.min(measureMeters, path.totalLengthMeters - measureMeters)
+  if (endpointDistance > 0.01) return false
+  return lineLabelNodesForPath(path, interfaceContext)
+    .some(({ id }) => id === node.id)
 }
 
 function generateLineLabelConnectionCandidates(nodes, paths, candidateBudget) {
@@ -1023,54 +2459,199 @@ function generateLineLabelConnectionCandidates(nodes, paths, candidateBudget) {
   return candidates
 }
 
-function generateLineLabelAttachmentCandidates(nodes, paths, settings, candidateBudget) {
+function generateLineLabelAttachmentCandidates(
+  nodes,
+  paths,
+  settings,
+  interfaceContext,
+  candidateBudget,
+) {
   const candidates = []
-  paths.filter((path) => path.sourceName).forEach((path) => {
+  const labeledPathRecords = paths
+    .filter((path) => path.sourceName)
+    .map((path) => ({
+      path,
+      matchedNodes: lineLabelNodesForPath(path, interfaceContext),
+    }))
+  const proxyInterfaceAssignments = buildLineLabelProxyInterfaceAssignments(
+    labeledPathRecords,
+    interfaceContext,
+  )
+  labeledPathRecords.forEach(({ path, matchedNodes }) => {
     assertGenerationBudget(candidateBudget, 'line_label_attachment')
-    const matchedNodes = lineLabelNodeSequence(path, nodes)
     if (matchedNodes.length < 2) return
-    const [startNode, endNode] = assignLineLabelEndpoints(path, matchedNodes)
-    lineEndpoints(path).forEach((endpoint, index) => {
-      const targetNode = index === 0 ? startNode : endNode
+    assignLineLabelNodes(path, matchedNodes).forEach(({ node: targetNode, endpoint, nearest }) => {
       const compatibility = compatiblePathNode(path, targetNode)
       if (!compatibility.compatible) return
-      const distanceMeters = geographicDistanceMeters(endpoint.coordinate, targetNode.coordinate)
+      const distanceMeters = endpoint
+        ? geographicDistanceMeters(endpoint.coordinate, targetNode.coordinate)
+        : nearest.distanceMeters
       if (distanceMeters > settings.searchRadiusMeters) return
-      pushCandidate(candidates, baseCandidate({
-        candidateType: 'line_label_attachment',
-        sourceEndpointId: endpoint.id,
-        sourcePath: path,
-        targetAssetId: targetNode.id,
+      const compatibleInterfaces = compatibleInterfacesForPath(
+        path,
         targetNode,
-        distanceMeters,
-        sourceCoordinate: endpoint.coordinate,
-        targetCoordinate: targetNode.coordinate,
-        measureMeters: endpoint.measureMeters,
-        semanticCompatibility: compatibility.score,
-        endpointRole: endpointRoleScore(targetNode, false),
-        sourceContext: 1,
-        styleConsistency: 1,
-        angleScore: 1,
-        graphConsistency: 1,
-        evidence: [{
-          source: 'line_label',
-          ruleId: 'line.name.endpoint-attachment',
-          observedValue: path.sourceName,
-          normalizedValue: `${endpoint.role}:${targetNode.id}`,
-          weight: SCORE_WEIGHTS.semanticCompatibility,
-          explanation: 'Nama device pada garis menentukan device yang dipasang pada endpoint kabel.',
-        }, {
-          source: 'spatial',
-          ruleId: 'line.endpoint.within-search-radius',
-          observedValue: distanceMeters,
-          normalizedValue: `${distanceMeters.toFixed(3)}m`,
-          weight: SCORE_WEIGHTS.distance,
-          explanation: `Endpoint garis berada dalam radius ${settings.searchRadiusMeters} meter dari device hasil pembacaan nama garis.`,
-        }],
-      }), candidateBudget, 'line_label_attachment')
+        interfaceContext,
+        labelEndpointRole(targetNode, matchedNodes, endpoint?.role ?? 'inline'),
+      )
+      const sourceEndpointId = endpoint?.id ?? `inline:${path.geometryId}:${targetNode.id}`
+      const selectedInterfaces = lineLabelInterfacesForTarget(
+        path,
+        targetNode,
+        sourceEndpointId,
+        compatibleInterfaces,
+        proxyInterfaceAssignments,
+      )
+      selectedInterfaces.forEach(({ item, score, ruleId, explanation, capacityAvailable }) => {
+        const candidate = baseCandidate({
+          candidateType: 'cable_termination',
+          sourceEndpointId,
+          sourcePath: path,
+          targetAssetId: targetNode.id,
+          targetNode,
+          targetInterface: item,
+          distanceMeters,
+          sourceCoordinate: endpoint?.coordinate ?? nearest.projectedCoordinate,
+          targetCoordinate: targetNode.coordinate,
+          measureMeters: endpoint?.measureMeters ?? nearest.measureMeters,
+          semanticCompatibility: Math.min(compatibility.score, score),
+          endpointRole: endpointRoleScore(targetNode, false),
+          sourceContext: 1,
+          styleConsistency: 1,
+          angleScore: 1,
+          graphConsistency: 1,
+          serviceDomain: path.serviceDomain,
+          mediaType: path.mediaType,
+          cableRole: path.cableRole,
+          capacityAvailable,
+          provenance: 'line_label_inference',
+          evidence: [{
+            source: 'line_label',
+            ruleId: 'line.name.endpoint-attachment',
+            observedValue: path.sourceName,
+            normalizedValue: `${endpoint?.role ?? 'inline'}:${targetNode.id}:${item.interfaceId}`,
+            weight: SCORE_WEIGHTS.labelCorrespondence,
+            explanation: 'Nama device pada garis menentukan target interface kabel.',
+          }, {
+            source: 'semantic',
+            ruleId,
+            observedValue: `${path.serviceDomain}:${path.mediaType}:${item.interfaceType}`,
+            normalizedValue: true,
+            weight: SCORE_WEIGHTS.interfaceCompatibility,
+            explanation,
+          }, {
+            source: 'spatial',
+            ruleId: 'line.endpoint.within-search-radius',
+            observedValue: distanceMeters,
+            normalizedValue: `${distanceMeters.toFixed(3)}m`,
+            weight: SCORE_WEIGHTS.distance,
+            explanation: `Endpoint garis berada dalam radius ${settings.searchRadiusMeters} meter dari device hasil pembacaan nama garis.`,
+          }],
+        })
+        candidate.lineLabelEvidence = true
+        pushCandidate(candidates, candidate, candidateBudget, 'line_label_attachment')
+      })
     })
   })
   return candidates
+}
+
+function buildLineLabelProxyInterfaceAssignments(pathRecords, interfaceContext) {
+  const groups = new Map()
+  pathRecords.forEach(({ path, matchedNodes }) => {
+    if (matchedNodes.length < 2) return
+    assignLineLabelNodes(path, matchedNodes).forEach(({ node: targetNode, endpoint }) => {
+      if (!isRackNode(targetNode)) return
+      const endpointRole = labelEndpointRole(
+        targetNode,
+        matchedNodes,
+        endpoint?.role ?? 'inline',
+      )
+      const compatibleInterfaces = compatibleInterfacesForPath(
+        path,
+        targetNode,
+        interfaceContext,
+        endpointRole,
+      )
+      const proxyInterfaces = compatibleInterfaces.filter(({ item }) => (
+        item.isProxy === true || item.virtual === true
+      ))
+      if (!proxyInterfaces.length) return
+      const sourceEndpointId = endpoint?.id ?? `inline:${path.geometryId}:${targetNode.id}`
+      const recordKey = lineLabelProxyAllocationKey(path, targetNode, sourceEndpointId)
+      const interfaceClass = unique(proxyInterfaces.map(({ item }) => (
+        `${item.interfaceType}:${item.serviceDomain}:${item.mediaType}`
+      ))).sort().join(',')
+      const groupKey = [
+        targetNode.id,
+        path.serviceDomain ?? 'unknown',
+        path.mediaType ?? 'unknown',
+        interfaceClass,
+      ].join('|')
+      const records = groups.get(groupKey) ?? []
+      if (records.some((record) => record.recordKey === recordKey)) return
+      records.push({
+        recordKey,
+        pathId: path.id,
+        geometryId: path.geometryId,
+        proxyInterfaces,
+      })
+      groups.set(groupKey, records)
+    })
+  })
+
+  const assignments = new Map()
+  groups.forEach((records) => {
+    const commonInterfaceIds = new Set(
+      records[0].proxyInterfaces.map(({ item }) => item.interfaceId),
+    )
+    records.slice(1).forEach((record) => {
+      const recordInterfaceIds = new Set(
+        record.proxyInterfaces.map(({ item }) => item.interfaceId),
+      )
+      commonInterfaceIds.forEach((interfaceId) => {
+        if (!recordInterfaceIds.has(interfaceId)) commonInterfaceIds.delete(interfaceId)
+      })
+    })
+    const orderedInterfaces = records[0].proxyInterfaces
+      .filter(({ item }) => commonInterfaceIds.has(item.interfaceId))
+      .sort((left, right) => compareInterface(left.item, right.item))
+    records.sort((left, right) => (
+      left.pathId.localeCompare(right.pathId)
+        || left.geometryId.localeCompare(right.geometryId)
+        || left.recordKey.localeCompare(right.recordKey)
+    ))
+    records.forEach((record, index) => {
+      const selected = orderedInterfaces[index]
+      if (selected) assignments.set(record.recordKey, selected)
+    })
+  })
+  return assignments
+}
+
+function lineLabelInterfacesForTarget(
+  path,
+  targetNode,
+  sourceEndpointId,
+  compatibleInterfaces,
+  proxyInterfaceAssignments,
+) {
+  const hasProxyInterfaces = compatibleInterfaces.some(({ item }) => (
+    item.isProxy === true || item.virtual === true
+  ))
+  if (!isRackNode(targetNode) || !hasProxyInterfaces) return compatibleInterfaces
+  const selected = proxyInterfaceAssignments.get(
+    lineLabelProxyAllocationKey(path, targetNode, sourceEndpointId),
+  )
+  return selected ? [selected] : []
+}
+
+function lineLabelProxyAllocationKey(path, targetNode, sourceEndpointId) {
+  return [
+    path.id,
+    path.geometryId,
+    sourceEndpointId,
+    targetNode.id,
+  ].join('|')
 }
 
 function assignLineLabelEndpoints(path, matchedNodes) {
@@ -1084,8 +2665,18 @@ function assignLineLabelEndpoints(path, matchedNodes) {
   return forwardDistance <= reverseDistance ? [first, last] : [last, first]
 }
 
+function lineLabelNodesForPath(path, interfaceContext) {
+  if (!path?.sourceName) return []
+  const cache = interfaceContext?.lineLabelNodesByGeometryId
+  const cacheKey = `${path.id}|${path.geometryId}`
+  if (cache?.has(cacheKey)) return cache.get(cacheKey)
+  const matchedNodes = lineLabelNodeSequence(path, interfaceContext.nodes)
+  cache?.set(cacheKey, matchedNodes)
+  return matchedNodes
+}
+
 function lineLabelNodeSequence(path, nodes) {
-  const pathTokens = normalizeToken(path.sourceName).split(' ').filter(Boolean)
+  const pathTokens = normalizeLabelTokens(path.sourceName)
   if (!pathTokens.length) return []
   const localNodes = nodes.filter((node) => (
     node.siteId === path.siteId
@@ -1110,11 +2701,48 @@ function lineLabelNodeSequence(path, nodes) {
     if (accepted.some(({ node }) => node.id === match.node.id)) return
     accepted.push(match)
   })
-  return accepted.map(({ node }) => node)
+  const labelNodes = accepted.map(({ node }) => node)
+  if (labelNodes.length < 2) return labelNodes
+  return insertInlineJunctionBoxes(path, labelNodes, localNodes)
+}
+
+function insertInlineJunctionBoxes(path, labelNodes, localNodes) {
+  const output = []
+  const labelIds = new Set(labelNodes.map(({ id }) => id))
+  labelNodes.forEach((node, index) => {
+    output.push(node)
+    if (index === labelNodes.length - 1) return
+    const start = nearestPointOnLine(node.coordinate, path)
+    const end = nearestPointOnLine(labelNodes[index + 1].coordinate, path)
+    const minimumMeasure = Math.min(start.measureMeters, end.measureMeters)
+    const maximumMeasure = Math.max(start.measureMeters, end.measureMeters)
+    const direction = start.measureMeters <= end.measureMeters ? 1 : -1
+    const inlineNodes = localNodes
+      .filter((candidate) => (
+        !labelIds.has(candidate.id)
+          && isExtendedJunctionBoxNode(candidate)
+          && !isPoleNode(candidate)
+      ))
+      .map((candidate) => ({
+        candidate,
+        nearest: nearestPointOnLine(candidate.coordinate, path),
+      }))
+      .filter(({ nearest }) => (
+        nearest.distanceMeters <= DEFAULT_RELATION_ENGINE_CONFIG.inlineSearchRadiusMeters
+          && nearest.measureMeters > minimumMeasure
+          && nearest.measureMeters < maximumMeasure
+      ))
+      .sort((left, right) => (
+        direction * (left.nearest.measureMeters - right.nearest.measureMeters)
+        || left.candidate.id.localeCompare(right.candidate.id)
+      ))
+    inlineNodes.forEach(({ candidate }) => output.push(candidate))
+  })
+  return output
 }
 
 function topologyLabelAliases(sourceName) {
-  const tokens = normalizeToken(sourceName).split(' ').filter(Boolean)
+  const tokens = normalizeLabelTokens(sourceName)
   if (!tokens.length) return []
   const aliases = [tokens]
   const baseTokens = stripDeviceLabelDecorators(tokens)
@@ -1130,7 +2758,44 @@ function topologyLabelAliases(sourceName) {
     aliases.push(['c', ...baseTokens.slice(1)])
   }
   if (baseTokens[0] === 'server') aliases.push(['svr'])
+  if (isGenericRackServerLabel(sourceName)) {
+    // Kabel lapangan memakai alias lokasi rack, sedangkan node KMZ sering
+    // hanya bernama "JB-Rack Server".
+    aliases.push(['rs'], ['cr'], ['svr', 'office'])
+  }
   return [...new Map(aliases.map((alias) => [alias.join(' '), alias])).values()]
+}
+
+function normalizeLabelTokens(value) {
+  return normalizeToken(value)
+    .split(' ')
+    .filter(Boolean)
+    .map((token) => /^\d+$/.test(token)
+      ? token.replace(/^0+(?=\d)/, '')
+      : token)
+}
+
+function labelEndpointRole(node, labelNodes, fallback = null) {
+  if (!node || !asArray(labelNodes).length) return fallback
+  const index = labelNodes.findIndex(({ id }) => id === node.id)
+  if (index < 0) return fallback
+  if (index === 0) return 'start'
+  if (index === labelNodes.length - 1) return 'end'
+  return 'inline'
+}
+
+function pathLabelMatchesNode(path, node) {
+  const pathTokens = normalizeLabelTokens(path?.sourceName)
+  if (!pathTokens.length) return false
+  if (!sameSourceLocation(path?.sourceFolderPath, node?.sourceFolderPath)) return false
+  return topologyLabelAliases(node?.sourceName)
+    .some((alias) => tokenSequencePositions(pathTokens, alias).length > 0)
+}
+
+function isGenericRackServerLabel(value) {
+  const normalized = normalizeToken(value)
+  return /(?:^|\s)(?:jb\s+)?rack\s+server(?:\s|$)/.test(normalized)
+    || /(?:^|\s)(?:jb\s+)?server\s+rack(?:\s|$)/.test(normalized)
 }
 
 function stripDeviceLabelDecorators(tokens) {
@@ -1188,7 +2853,7 @@ function sourceLocationKey(value) {
   return segments.slice(0, layerIndex > 0 ? layerIndex : Math.min(2, segments.length)).join('/')
 }
 
-function generateExplicitCandidates(bundle, nodes, paths, issues, candidateBudget) {
+function generateExplicitCandidates(bundle, nodes, paths, issues, interfaceContext, candidateBudget) {
   const objectByFeature = new Map([
     ...nodes.map((node) => [node.sourceFeatureId, node]),
     ...paths.map((path) => [path.sourceFeatureId, path]),
@@ -1237,9 +2902,76 @@ function generateExplicitCandidates(bundle, nodes, paths, issues, candidateBudge
       }))
       return
     }
-    pushCandidate(candidates, {
-      ...baseCandidate({
-        candidateType: 'explicit_metadata',
+    const explicitRelationType = String(relation.relationType ?? '').trim().toLowerCase()
+    const isMounting = relation.relationKind === 'installation_attachment'
+      || explicitRelationType === 'mounted_on'
+    const isTermination = relation.relationKind === 'path_termination'
+      || explicitRelationType === 'terminates_at'
+    if (!isMounting
+      && (isPoleNode(source) || isPoleNode(target))
+      && interfaceContext.topologyPolicy.allowCableToPole !== true) {
+      issues.push(topologyIssue(bundle, {
+        severity: 'error',
+        issueCode: 'cable_terminated_at_pole',
+        scope: 'explicit_relation',
+        message: 'Relasi kabel menuju tiang ditolak; gunakan mounted_on untuk pemasangan.',
+        entityReference: relation.explicitRelationEvidenceId,
+        readinessImpact: 'blocking',
+      }))
+      return
+    }
+    const targetInterfaceId = relation.targetInterfaceId
+      ?? relation.targetInterfaceReference
+      ?? (isTermination ? null : undefined)
+    const targetInterface = targetInterfaceId
+      ? interfaceContext.interfaceById.get(String(targetInterfaceId))
+      : null
+    let hardGateStatus = null
+    if (isTermination && !targetInterfaceId) {
+      hardGateStatus = 'incompatible_interface'
+      issues.push(topologyIssue(bundle, {
+        severity: 'error',
+        issueCode: 'dangling_interface_reference',
+        scope: 'explicit_relation',
+        message: `Relasi terminasi ${relation.explicitRelationEvidenceId} belum memiliki interface target yang tervalidasi.`,
+        entityReference: relation.explicitRelationEvidenceId,
+        readinessImpact: 'blocking',
+      }))
+    }
+    if (isTermination && targetInterface
+      && (targetInterface.ownerAssetId !== target.id
+        || source.objectRole !== 'cable_path'
+        || !interfaceCompatibility(source, target, targetInterface, interfaceContext.topologyPolicy))) {
+      hardGateStatus = 'incompatible_interface'
+      issues.push(topologyIssue(bundle, {
+        severity: 'error',
+        issueCode: targetInterface.ownerAssetId !== target.id
+          ? 'dangling_interface_reference'
+          : 'interface_media_mismatch',
+        scope: 'explicit_relation',
+        message: `Interface ${targetInterface.interfaceId} tidak compatible dengan terminasi ${source.id}.`,
+        entityReference: relation.explicitRelationEvidenceId,
+        readinessImpact: 'blocking',
+      }))
+    }
+    if (isTermination && targetInterfaceId && !targetInterface) {
+      issues.push(topologyIssue(bundle, {
+        severity: 'error',
+        issueCode: 'dangling_interface_reference',
+        scope: 'explicit_relation',
+        message: `Interface ${targetInterfaceId} pada relasi eksplisit tidak ditemukan.`,
+        entityReference: relation.explicitRelationEvidenceId,
+        readinessImpact: 'blocking',
+      }))
+      return
+    }
+    const candidateType = isMounting
+      ? 'mounting_attachment'
+      : isTermination ? 'cable_termination' : relation.source === 'manual_admin'
+        ? 'manual_relation'
+        : 'explicit_metadata'
+    const base = baseCandidate({
+        candidateType,
         sourceEndpointId: `explicit:${relation.explicitRelationEvidenceId}`,
         sourcePath: source,
         targetAssetId: target.id,
@@ -1262,16 +2994,70 @@ function generateExplicitCandidates(bundle, nodes, paths, issues, candidateBudge
           weight: 1,
           explanation: 'Relasi dinyatakan eksplisit pada metadata sumber.',
         }],
-      }),
+        targetInterface,
+        serviceDomain: relation.serviceDomain ?? source.serviceDomain ?? 'unknown',
+        mediaType: relation.mediaType ?? source.mediaType ?? 'unknown',
+        cableRole: relation.cableRole ?? source.cableRole ?? 'unknown',
+        capacityAvailable: true,
+    })
+    const candidate = {
+      ...base,
+      sourceGeometryIds: asArray(relation.sourceGeometryIds).length
+        ? unique(asArray(relation.sourceGeometryIds).filter(Boolean))
+        : base.sourceGeometryIds,
+      sourceGeometryFingerprints: unique([
+        ...base.sourceGeometryFingerprints,
+        ...asArray(relation.sourceGeometryIds).map((geometryId) => {
+          const geometry = bundle.geometries.find((item) => item.geometryId === geometryId)
+          return geometry?.geometryFingerprint
+            ?? (geometry?.coordinates ? coordinateSequenceKey(geometry.coordinates) : null)
+        }),
+      ].filter(Boolean)),
       explicitRelationEvidenceId: relation.explicitRelationEvidenceId,
       explicitRelationType: relation.relationType,
       direction: normalizeDirection(relation.direction),
+      targetInterfaceId: targetInterfaceId ?? undefined,
+      sourceInterfaceId: relation.sourceInterfaceId ?? undefined,
+      serviceDomain: relation.serviceDomain ?? source.serviceDomain ?? 'unknown',
+      mediaType: relation.mediaType ?? source.mediaType ?? 'unknown',
+      cableRole: relation.cableRole ?? source.cableRole ?? 'unknown',
+      relationType: relation.relationType,
+      relationKind: relation.relationKind
+        ?? (isMounting ? 'installation_attachment' : isTermination ? 'path_termination' : undefined),
+      traversable: isMounting ? false : relation.traversable !== false,
+      provenance: relation.provenance
+        ?? (relation.source === 'manual_admin' ? 'manual_admin' : 'explicit_kml_metadata'),
+      ...compact({
+        relationKind: relation.relationKind,
+        pathAssetIds: unique(asArray(relation.pathAssetIds).filter(Boolean)),
+        evidenceRefs: unique(asArray(relation.evidenceRefs).filter(Boolean)),
+      }),
       manualConfirmation: relation.source === 'manual_admin'
         ? structuredClone(relation.manualConfirmation ?? null)
         : null,
-    }, candidateBudget, 'explicit_metadata')
+      hardGateStatus,
+    }
+    pushCandidate(candidates, candidate, candidateBudget, candidate.candidateType)
   })
   return candidates
+}
+
+function assignLineLabelNodes(path, matchedNodes) {
+  const [start, end] = lineEndpoints(path)
+  const firstNearest = nearestPointOnLine(matchedNodes[0].coordinate, path)
+  const lastNearest = nearestPointOnLine(matchedNodes.at(-1).coordinate, path)
+  const ordered = firstNearest.measureMeters <= lastNearest.measureMeters
+    ? matchedNodes
+    : [...matchedNodes].reverse()
+  return ordered.map((node, index) => {
+    if (index === 0) return { node, endpoint: start, nearest: null }
+    if (index === ordered.length - 1) return { node, endpoint: end, nearest: null }
+    return {
+      node,
+      endpoint: null,
+      nearest: nearestPointOnLine(node.coordinate, path),
+    }
+  })
 }
 
 function baseCandidate({
@@ -1294,24 +3080,61 @@ function baseCandidate({
   angleScore,
   graphConsistency,
   evidence,
+  targetInterface,
+  targetInterfaceId,
+  sourceInterfaceId,
+  serviceDomain,
+  mediaType,
+  cableRole,
+  capacityAvailable = true,
+  provenance,
+  profileVersion,
+  relationType,
+  relationKind,
+  direction,
+  traversable,
+  mountingRole,
 }) {
+  const derivedDimensions = deriveTopologyDimensions(sourcePath ?? {})
   return {
     candidateType,
     siteId: sourcePath.siteId,
     networkFamily: sourcePath.networkFamily,
+    serviceDomain: serviceDomain ?? sourcePath.serviceDomain ?? derivedDimensions.serviceDomain,
+    mediaType: mediaType ?? sourcePath.mediaType ?? derivedDimensions.mediaType,
+    cableRole: cableRole ?? sourcePath.cableRole ?? derivedDimensions.cableRole,
     sourceEndpointId,
+    sourceAssetId: sourcePath?.id,
     sourcePathAssetId: sourcePath.id,
     sourceFeatureId: sourcePath.sourceFeatureId,
     sourceGeometryIds: unique([
       sourcePath.geometryId,
       targetPath?.geometryId,
     ].filter(Boolean)),
+    sourceGeometryFingerprints: unique([
+      sourcePath.geometryFingerprint,
+      targetPath?.geometryFingerprint,
+      targetNode?.geometryFingerprint,
+    ].filter(Boolean)),
     targetAssetId,
     targetEndpointId,
     targetPathAssetId: targetPath?.id,
+    targetInterfaceId: targetInterfaceId ?? targetInterface?.interfaceId,
+    sourceInterfaceId,
+    targetInterface: targetInterface ? structuredClone(targetInterface) : null,
+    provenance: provenance ?? null,
+    profileVersion: profileVersion ?? null,
+    relationType: relationType ?? null,
+    relationKind: relationKind ?? null,
+    direction: direction ?? null,
+    traversable: traversable !== false,
+    mountingRole: mountingRole ?? null,
     targetFeatureId: targetNode?.sourceFeatureId ?? targetPath?.sourceFeatureId,
     sourceObjectRole: sourcePath?.objectRole ?? null,
     targetObjectRole: targetNode?.objectRole ?? targetPath?.objectRole ?? null,
+    topologyRequired: sourcePath?.topologyRequired === true
+      || targetNode?.topologyRequired === true
+      || targetPath?.topologyRequired === true,
     distanceMeters,
     sourceCoordinate: sourceCoordinate ? cloneCoordinate(sourceCoordinate) : null,
     targetCoordinate: targetCoordinate ? cloneCoordinate(targetCoordinate) : null,
@@ -1324,6 +3147,13 @@ function baseCandidate({
       styleConsistency,
       angle: angleScore,
       graphConsistency,
+      interfaceCompatibility: semanticCompatibility,
+      explicitEvidence: 0,
+      distance: distanceMeters == null ? 1 : undefined,
+      labelCorrespondence: sourceContext,
+      siteContext: sourceContext,
+      endpointRoleConsistency: endpointRole,
+      capacityAvailability: capacityAvailable ? 1 : 0,
     },
     evidence,
   }
@@ -1371,7 +3201,13 @@ function assertGenerationBudget(budget, stage) {
   )
 }
 
-function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, datasetVersionId) {
+function scoreAndProposeCandidates(
+  rawCandidates,
+  settings,
+  generatedAt,
+  datasetVersionId,
+  topologyPolicy = settings.topologyPolicy,
+) {
   const candidates = rawCandidates.map((candidate) => {
     const distanceScore = [
       'explicit_metadata',
@@ -1383,8 +3219,24 @@ function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, dataset
         -(candidate.distanceMeters ** 2) / (2 * settings.distanceSigmaMeters ** 2),
       )
     const components = {
-      distance: distanceScore,
       ...candidate.components,
+      distance: candidate.components?.distance ?? distanceScore,
+      interfaceCompatibility: candidate.components?.interfaceCompatibility
+        ?? candidate.components?.semanticCompatibility
+        ?? 0,
+      explicitEvidence: candidate.components?.explicitEvidence
+        ?? (['explicit_metadata', 'manual_relation', 'jb_internal_connection'].includes(candidate.candidateType)
+          ? 1 : 0),
+      labelCorrespondence: candidate.components?.labelCorrespondence
+        ?? candidate.components?.sourceContext
+        ?? 0,
+      siteContext: candidate.components?.siteContext
+        ?? candidate.components?.sourceContext
+        ?? 0,
+      endpointRoleConsistency: candidate.components?.endpointRoleConsistency
+        ?? candidate.components?.endpointRole
+        ?? 0,
+      capacityAvailability: candidate.components?.capacityAvailability ?? 1,
     }
     const score = Object.entries(SCORE_WEIGHTS).reduce((total, [field, weight]) => (
       total + weight * clamp(components[field] ?? 0, 0, 1)
@@ -1395,20 +3247,28 @@ function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, dataset
       siteId: candidate.siteId,
       sourceEndpointId: candidate.sourceEndpointId,
       sourcePathAssetId: candidate.sourcePathAssetId,
+      sourceAssetId: candidate.sourceAssetId,
       targetAssetId: candidate.targetAssetId,
       targetEndpointId: candidate.targetEndpointId,
+      targetInterfaceId: candidate.targetInterfaceId ?? candidate.targetInterface?.interfaceId,
+      sourceInterfaceId: candidate.sourceInterfaceId,
       sourceGeometryIds: candidate.sourceGeometryIds,
+      provenance: candidate.provenance ?? null,
+      lineLabelEvidence: candidate.lineLabelEvidence === true,
     })
     return {
       candidateId,
       datasetVersionId: null,
       siteId: candidate.siteId,
+      sourceAssetId: candidate.sourceAssetId ?? candidate.sourcePathAssetId,
       sourceEndpointId: candidate.sourceEndpointId,
       sourcePathAssetId: candidate.sourcePathAssetId,
       ...compact({
         targetAssetId: candidate.targetAssetId,
         targetEndpointId: candidate.targetEndpointId,
         targetPathAssetId: candidate.targetPathAssetId,
+        targetInterfaceId: candidate.targetInterfaceId ?? candidate.targetInterface?.interfaceId,
+        sourceInterfaceId: candidate.sourceInterfaceId,
         sourceFeatureId: candidate.sourceFeatureId,
         targetFeatureId: candidate.targetFeatureId,
         distanceMeters: candidate.distanceMeters,
@@ -1416,9 +3276,12 @@ function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, dataset
         targetMeasureMeters: candidate.targetMeasureMeters,
       }),
       candidateType: candidate.candidateType,
+      candidateKind: candidate.candidateType,
+      legacyCandidateType: legacyCandidateTypeFor(candidate.candidateType),
       sourceObjectRole: candidate.sourceObjectRole,
       targetObjectRole: candidate.targetObjectRole,
-      relationKind: relationKindForCandidate(candidate),
+      topologyRequired: candidate.topologyRequired === true,
+      relationKind: candidate.relationKind ?? relationKindForCandidate(candidate),
       score: round(score, 6),
       scoreMargin: null,
       evidence: [
@@ -1433,19 +3296,45 @@ function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, dataset
       topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
       generatedAt,
       sourceGeometryIds: candidate.sourceGeometryIds,
+      sourceGeometryFingerprints: candidate.sourceGeometryFingerprints,
       sourceCoordinate: candidate.sourceCoordinate,
       targetCoordinate: candidate.targetCoordinate,
       networkFamily: candidate.networkFamily,
+      serviceDomain: candidate.serviceDomain ?? 'unknown',
+      mediaType: candidate.mediaType ?? 'unknown',
+      cableRole: candidate.cableRole ?? 'unknown',
+      targetInterface: candidate.targetInterface
+        ? structuredClone(candidate.targetInterface)
+        : null,
+      targetInterfaceId: candidate.targetInterfaceId
+        ?? candidate.targetInterface?.interfaceId
+        ?? null,
+      sourceInterfaceId: candidate.sourceInterfaceId ?? null,
+      relationType: candidate.relationType,
+      traversable: candidate.traversable !== false,
+      provenance: candidate.provenance ?? null,
+      profileVersion: candidate.profileVersion ?? null,
+      mountingRole: candidate.mountingRole ?? null,
+      lineLabelEvidence: candidate.lineLabelEvidence === true,
+      hardGateStatus: candidate.hardGateStatus ?? null,
+      constraintEvidence: {
+        interfaceCapacityAvailable: components.capacityAvailability >= 1,
+        serviceDomain: candidate.serviceDomain ?? 'unknown',
+        mediaType: candidate.mediaType ?? 'unknown',
+        requiresJbTermination: topologyPolicy?.requireJbTermination !== false,
+      },
       manualConfirmation: candidate.manualConfirmation ?? null,
       ...compact({
         explicitRelationEvidenceId: candidate.explicitRelationEvidenceId,
         relationType: candidate.explicitRelationType,
         direction: candidate.direction,
+        pathAssetIds: candidate.pathAssetIds,
+        evidenceRefs: candidate.evidenceRefs,
       }),
     }
   })
 
-  const groups = groupBy(candidates, candidateGroupKey)
+  const groups = groupBy(candidates, topologyCandidateDecisionKey)
   groups.forEach((group) => {
     group.sort((left, right) => right.score - left.score || compareCandidate(left, right))
     const best = group[0]
@@ -1455,9 +3344,21 @@ function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, dataset
       const next = group[index + 2]
       candidate.scoreMargin = next ? round(candidate.score - next.score, 6) : candidate.score
     })
-    if (best.candidateType === 'explicit_metadata') {
+    if (best.hardGateStatus) {
+      group.forEach((candidate) => {
+        candidate.candidateStatus = 'ambiguous'
+        candidate.proposalStatus = best.hardGateStatus
+      })
+      return
+    }
+    if (['explicit_metadata', 'manual_relation'].includes(best.candidateType)
+      || (best.candidateType === 'jb_internal_connection'
+        && best.provenance === 'approved_jb_profile')) {
       const manualConfirmation = best.manualConfirmation
-      const shouldConfirm = settings.autoConfirmExplicitMetadata || Boolean(manualConfirmation)
+      const shouldConfirm = Boolean(manualConfirmation)
+        || (best.candidateType === 'explicit_metadata' && settings.autoConfirmExplicitMetadata)
+        || (best.candidateType === 'jb_internal_connection'
+          && best.provenance === 'approved_jb_profile')
       best.proposalStatus = shouldConfirm
         ? manualConfirmation ? 'confirmed_by_admin' : 'confirmed_by_explicit_policy'
         : 'recommended'
@@ -1477,14 +3378,19 @@ function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, dataset
             actorId: 'explicit-metadata-policy',
             reviewedAt: generatedAt,
             reason: 'Explicit metadata valid sesuai publication policy.',
-            action: 'auto_confirm_explicit',
+            action: best.candidateType === 'jb_internal_connection'
+              ? 'auto_confirm_approved_jb_profile'
+              : 'auto_confirm_explicit',
             before: 'candidate',
             after: 'confirmed',
           }
       }
       return
     }
-    const lineLabelCandidate = group.find(isLineLabelCandidate)
+    const lineLabelCandidates = group.filter(isLineLabelCandidate)
+    const lineLabelCandidate = lineLabelCandidates.length === 1
+      ? lineLabelCandidates[0]
+      : null
     if (lineLabelCandidate) {
       group.forEach((candidate) => {
         if (candidate === lineLabelCandidate) return
@@ -1494,6 +3400,11 @@ function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, dataset
       lineLabelCandidate.candidateStatus = 'candidate'
       lineLabelCandidate.proposalStatus = 'recommended'
       lineLabelCandidate.scoreMargin = lineLabelCandidate.score
+      return
+    }
+    if (best.candidateType === 'unresolved_termination') {
+      best.proposalStatus = 'unresolved'
+      best.candidateStatus = 'candidate'
       return
     }
     if (best.score < settings.acceptanceThreshold) {
@@ -1513,40 +3424,167 @@ function scoreAndProposeCandidates(rawCandidates, settings, generatedAt, dataset
   return candidates.sort(compareCandidate)
 }
 
-function applyCapacityConstraints(candidates, nodes, settings, issues, accuracyGate) {
-  const nodeById = new Map(nodes.map((node) => [node.id, node]))
+function applyTopologyPolicyConstraints(
+  candidates,
+  paths,
+  interfaceContext,
+  settings,
+  issues,
+) {
+  const policy = interfaceContext.topologyPolicy
+  const terminationCandidates = candidates.filter(({ candidateType }) => (
+    candidateType === 'cable_termination'
+  ))
+  const byPath = groupBy(terminationCandidates, ({ sourcePathAssetId }) => sourcePathAssetId)
+  paths.forEach((path) => {
+    const pathCandidates = byPath.get(path.id) ?? []
+    const jbCandidates = pathCandidates.filter(({ targetAssetId, targetInterfaceId, proposalStatus }) => (
+      Boolean(targetInterfaceId)
+        && !['incompatible_interface', 'interface_unavailable', 'missing_jb_termination']
+          .includes(proposalStatus)
+        && isJunctionBoxNode(interfaceContext.nodeById.get(targetAssetId))
+    ))
+    if (policy.requireJbTermination && !jbCandidates.length) {
+      const issue = {
+        issueId: deterministicId('topology-issue', interfaceContext.bundle.datasetVersion.id, 'required_jb_termination_missing', path.id),
+        datasetVersionId: interfaceContext.bundle.datasetVersion.id,
+        severity: 'error',
+        issueCode: 'required_jb_termination_missing',
+        scope: 'policy',
+        message: `Cable ${path.id} belum memiliki target interface JB yang compatible.`,
+        entityReference: path.id,
+        readinessImpact: 'blocking',
+      }
+      issues.push(issue)
+      pathCandidates.forEach((candidate) => {
+        if (!['incompatible_interface', 'interface_unavailable', 'forbidden_target_role']
+          .includes(candidate.proposalStatus)) {
+          candidate.proposalStatus = 'missing_jb_termination'
+        }
+        candidate.constraintEvidence = {
+          ...(candidate.constraintEvidence ?? {}),
+          requiresJbTermination: true,
+          jbTerminationSatisfied: false,
+        }
+      })
+    } else {
+      pathCandidates.forEach((candidate) => {
+        candidate.constraintEvidence = {
+          ...(candidate.constraintEvidence ?? {}),
+          requiresJbTermination: policy.requireJbTermination,
+          jbTerminationSatisfied: !policy.requireJbTermination || jbCandidates.length > 0,
+        }
+      })
+    }
+  })
+  interfaceContext.diagnostics.forEach((diagnostic) => {
+    const issueCode = diagnostic.issueCode ?? diagnostic.code
+    if (issues.some((issue) => issue.issueCode === issueCode
+      && issue.entityReference === (diagnostic.sourceEndpointId ?? diagnostic.sourcePathAssetId))) return
+    issues.push({
+      issueId: deterministicId(
+        'topology-issue',
+        interfaceContext.bundle.datasetVersion.id,
+        issueCode,
+        diagnostic.sourceEndpointId ?? diagnostic.sourcePathAssetId,
+        diagnostic.targetAssetId,
+      ),
+      datasetVersionId: interfaceContext.bundle.datasetVersion.id,
+      severity: diagnostic.severity ?? 'warning',
+      issueCode,
+      scope: 'candidate_hard_gate',
+      message: diagnostic.message,
+      entityReference: diagnostic.sourceEndpointId ?? diagnostic.sourcePathAssetId,
+      readinessImpact: issueCode === 'cable_terminated_at_pole' ? 'blocking' : 'warning',
+      details: structuredClone(diagnostic),
+    })
+  })
+}
+
+function applyCapacityConstraints(
+  candidates,
+  nodes,
+  settings,
+  issues,
+  accuracyGate,
+  interfaceContext,
+  previousRelations = [],
+) {
+  const interfaceById = interfaceContext.interfaceById
+  const occupied = new Map(
+    [...interfaceById.entries()].map(([interfaceId, item]) => [
+      interfaceId,
+      Math.max(0, Number(item.occupancy ?? 0)),
+    ]),
+  )
+  const previousOccupancy = new Map()
+  asArray(previousRelations)
+    .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+    .map((relation) => relation.targetInterfaceId)
+    .filter(Boolean)
+    .forEach((interfaceId) => previousOccupancy.set(
+      interfaceId,
+      (previousOccupancy.get(interfaceId) ?? 0) + 1,
+    ))
+  previousOccupancy.forEach((count, interfaceId) => {
+    occupied.set(interfaceId, Math.max(occupied.get(interfaceId) ?? 0, count))
+  })
   const recommended = candidates
     .filter((candidate) => (
       candidate.proposalStatus === 'recommended'
       && candidate.candidateStatus === 'candidate'
-      && candidate.candidateType !== 'explicit_metadata'
+      && !['explicit_metadata', 'manual_relation', 'jb_internal_connection'].includes(candidate.candidateType)
     ))
     .sort((left, right) => right.score - left.score || compareCandidate(left, right))
-  const capacityConstrained = recommended.filter((candidate) => (
-    !['line_label_connection', 'line_label_attachment'].includes(candidate.candidateType)
-  ))
-  const targetCounts = new Map()
-  capacityConstrained.forEach((candidate) => {
-    const node = nodeById.get(candidate.targetAssetId)
-    if (!node) return
-    const count = targetCounts.get(node.id) ?? 0
-    const capacity = nodeCapacity(node)
-    if (count >= capacity) {
+  recommended.forEach((candidate) => {
+    if (candidate.candidateType === 'mounting_attachment') return
+    const interfaceId = candidate.targetInterfaceId
+    const item = interfaceId ? interfaceById.get(interfaceId) : null
+    if (!item) {
       candidate.candidateStatus = 'ambiguous'
-      candidate.proposalStatus = 'capacity_conflict'
+      candidate.proposalStatus = 'incompatible_interface'
       issues.push({
-        issueId: deterministicId('topology-issue', candidate.candidateId, 'capacity'),
+        issueId: deterministicId('topology-issue', candidate.candidateId, 'interface_missing'),
         datasetVersionId: candidate.datasetVersionId,
-        severity: 'warning',
-        issueCode: 'device_capacity_conflict',
+        severity: 'error',
+        issueCode: 'dangling_asset_component_interface_reference',
         scope: 'constraint',
-        message: `Candidate ${candidate.candidateId} melebihi capacity ${capacity} untuk ${node.id}.`,
+        message: `Candidate ${candidate.candidateId} tidak memiliki interface target yang terdaftar.`,
         entityReference: candidate.candidateId,
-        readinessImpact: 'warning',
+        readinessImpact: 'blocking',
       })
       return
     }
-    targetCounts.set(node.id, count + 1)
+    const count = occupied.get(interfaceId) ?? 0
+    const capacity = Math.max(1, Number(item.capacity ?? 1))
+    if (count >= capacity) {
+      candidate.candidateStatus = 'ambiguous'
+      candidate.proposalStatus = 'interface_unavailable'
+      candidate.constraintEvidence = {
+        ...(candidate.constraintEvidence ?? {}),
+        interfaceCapacityAvailable: false,
+        interfaceCapacity: capacity,
+        interfaceOccupancy: count,
+      }
+      issues.push({
+        issueId: deterministicId('topology-issue', candidate.candidateId, 'interface_capacity'),
+        datasetVersionId: candidate.datasetVersionId,
+        severity: 'error',
+        issueCode: 'interface_capacity_exceeded',
+        scope: 'constraint',
+        message: `Interface ${interfaceId} penuh (${count}/${capacity}).`,
+        entityReference: candidate.candidateId,
+        readinessImpact: 'blocking',
+      })
+      return
+    }
+    occupied.set(interfaceId, count + 1)
+    candidate.constraintEvidence = {
+      ...(candidate.constraintEvidence ?? {}),
+      interfaceCapacityAvailable: true,
+      interfaceCapacity: capacity,
+      interfaceOccupancy: count,
+    }
   })
   if (settings.autoConfirmSpatialInference && accuracyGate.approved) {
     recommended.filter(({ proposalStatus }) => proposalStatus === 'recommended')
@@ -1562,20 +3600,55 @@ function applyCapacityConstraints(candidates, nodes, settings, issues, accuracyG
   }
 }
 
-function reconcilePreviousDecisions(candidates, previousCandidates) {
+function reconcilePreviousDecisions(candidates, previousCandidates, { generatedAt } = {}) {
   const previousById = new Map(asArray(previousCandidates).map((candidate) => [
     candidate.candidateId,
     candidate,
   ]))
+  const reopenedReviewHistory = []
   candidates.forEach((candidate) => {
     const previous = previousById.get(candidate.candidateId)
     if (!previous) return
     if (!['confirmed', 'rejected', 'revoked'].includes(previous.candidateStatus)) return
+    if (!sameCandidateReviewInput(candidate, previous)) {
+      reopenedReviewHistory.push({
+        ...structuredClone(previous),
+        supersededAt: generatedAt ?? new Date().toISOString(),
+        supersededReason: 'topology_input_changed_review_reopened',
+        reissuedCandidateId: candidate.candidateId,
+      })
+      return
+    }
     candidate.candidateStatus = previous.candidateStatus
     candidate.proposalStatus = previous.proposalStatus ?? candidate.proposalStatus
     candidate.review = structuredClone(previous.review)
     candidate.supersedesCandidateId = previous.supersedesCandidateId
   })
+  return reopenedReviewHistory
+}
+
+function sameCandidateReviewInput(candidate, previous) {
+  const fields = [
+    'candidateType',
+    'relationKind',
+    'siteId',
+    'networkFamily',
+    'sourcePathAssetId',
+    'targetAssetId',
+    'targetInterfaceId',
+    'sourceInterfaceId',
+    'targetPathAssetId',
+    'serviceDomain',
+    'mediaType',
+    'cableRole',
+    'topologyRuleSetVersion',
+    'topologyRequired',
+  ]
+  if (fields.some((field) => candidate[field] !== previous[field])) return false
+  const currentFingerprints = [...(candidate.sourceGeometryFingerprints ?? [])].sort()
+  const previousFingerprints = [...(previous.sourceGeometryFingerprints ?? [])].sort()
+  if (!currentFingerprints.length && !previousFingerprints.length) return true
+  return stableStringify(currentFingerprints) === stableStringify(previousFingerprints)
 }
 
 function buildConfirmedRelations({
@@ -1584,50 +3657,89 @@ function buildConfirmedRelations({
   previousRelations,
   settings,
   generatedAt,
+  interfaceContext,
 }) {
   const previousByCandidate = new Map(asArray(previousRelations)
     .filter(({ candidateId }) => Boolean(candidateId))
     .map((relation) => [relation.candidateId, relation]))
   const relations = candidates.flatMap((candidate) => {
-    const explicitlyConfirmed = candidate.candidateType === 'explicit_metadata'
+    const explicitlyConfirmed = (
+      candidate.candidateType === 'explicit_metadata'
+        || (candidate.candidateType === 'cable_termination'
+          && candidate.provenance === 'explicit_kml_metadata')
+    )
       && settings.autoConfirmExplicitMetadata
-      && !['rejected', 'revoked'].includes(candidate.candidateStatus)
-    const confirmed = candidate.candidateStatus === 'confirmed' || explicitlyConfirmed
+      && !['rejected', 'revoked', 'ambiguous'].includes(candidate.candidateStatus)
+    const blockedProposalStatuses = [
+      'missing_jb_termination',
+      'incompatible_interface',
+      'interface_unavailable',
+      'forbidden_target_role',
+      'unresolved',
+    ]
+    const confirmed = (candidate.candidateStatus === 'confirmed' || explicitlyConfirmed)
+      && !blockedProposalStatuses.includes(candidate.proposalStatus)
+      && candidate.topologyRuleSetVersion === TOPOLOGY_RULE_SET_VERSION
     if (!confirmed) return []
+    if (candidate.targetInterfaceId) {
+      const targetInterface = interfaceContext?.interfaceById?.get(candidate.targetInterfaceId)
+      if (!targetInterface || targetInterface.status === 'retired') return []
+    }
     const previous = previousByCandidate.get(candidate.candidateId)
     if (previous?.verificationStatus === 'revoked'
       && candidate.candidateStatus !== 'confirmed') return []
     const verifiedBy = candidate.review?.actorId
-      ?? (explicitlyConfirmed ? 'explicit-metadata-policy' : 'publication-policy')
+      ?? (candidate.provenance === 'approved_jb_profile'
+        ? 'approved-jb-profile-policy'
+        : explicitlyConfirmed ? 'explicit-metadata-policy' : 'publication-policy')
     const verifiedAt = candidate.review?.reviewedAt ?? generatedAt
     const provenance = candidate.manualConfirmation
       ? 'manual_admin'
-      : candidate.candidateType === 'explicit_metadata'
-        ? 'explicit_kml_metadata'
-        : ['line_label_connection', 'line_label_attachment'].includes(candidate.candidateType)
-          ? 'line_label_inference'
-          : 'spatial_inference'
+      : candidate.provenance
+        ?? (candidate.candidateType === 'explicit_metadata'
+          ? 'explicit_kml_metadata'
+          : ['line_label_connection', 'line_label_attachment'].includes(candidate.candidateType)
+            ? 'line_label_inference'
+            : 'spatial_inference')
+    const relationKind = candidate.relationKind ?? relationKindForCandidate(candidate)
+    const sourceAssetId = candidate.candidateType === 'mounting_attachment'
+      ? candidate.sourcePathAssetId
+      : candidate.sourceAssetId ?? candidate.sourcePathAssetId
+    const targetAssetId = candidate.targetAssetId ?? candidate.targetPathAssetId
     const baseRelation = {
       datasetVersionId: bundle.datasetVersion.id,
-      sourceAssetId: candidate.sourcePathAssetId,
-      targetAssetId: candidate.targetAssetId ?? candidate.targetPathAssetId,
+      sourceAssetId,
+      targetAssetId,
       relationType: candidate.relationType ?? relationTypeForCandidate(candidate.candidateType),
       direction: candidate.direction ?? 'undirected',
+      networkFamily: candidate.networkFamily ?? null,
+      serviceDomain: candidate.serviceDomain ?? 'unknown',
+      mediaType: candidate.mediaType ?? 'unknown',
+      cableRole: candidate.cableRole ?? 'unknown',
+      sourceEndpointId: candidate.sourceEndpointId ?? null,
+      targetInterfaceId: candidate.targetInterfaceId ?? candidate.targetInterface?.interfaceId ?? null,
+      sourceInterfaceId: candidate.sourceInterfaceId ?? null,
+      traversable: candidate.traversable !== false,
+      profileVersion: candidate.profileVersion ?? null,
+      mountingRole: candidate.mountingRole ?? null,
       ...compact({
         pathAssetId: [
+          'cable_termination',
           'endpoint_device',
           'inline_device',
           'line_label_attachment',
         ].includes(candidate.candidateType)
           ? candidate.sourcePathAssetId
           : undefined,
+        pathAssetIds: candidate.pathAssetIds,
+        evidenceRefs: candidate.evidenceRefs,
       }),
       sourceGeometryIds: structuredClone(candidate.sourceGeometryIds),
       ...compact({
         anchorMeasureMeters: candidate.measureMeters,
         targetAnchorMeasureMeters: candidate.targetMeasureMeters,
       }),
-      relationKind: candidate.relationKind ?? relationKindForCandidate(candidate),
+      relationKind,
       provenance,
       verificationStatus: 'confirmed',
       candidateId: candidate.candidateId,
@@ -1691,6 +3803,34 @@ function deduplicateRedundantConfirmedRelations(relations) {
       }
       return
     }
+    if (relationKind === 'path_termination') {
+      const key = [
+        relationKind,
+        relation.sourceAssetId,
+        relation.sourceEndpointId,
+        relation.targetInterfaceId,
+      ].join('|')
+      materialized.set(key, relation)
+      return
+    }
+    if (relationKind === 'installation_attachment') {
+      const key = [
+        relationKind,
+        relation.sourceAssetId,
+        relation.mountingRole ?? 'default',
+      ].join('|')
+      materialized.set(key, relation)
+      return
+    }
+    if (relationKind === 'internal_connection') {
+      const key = [
+        relationKind,
+        ...[relation.sourceInterfaceId, relation.targetInterfaceId].sort(),
+        relation.serviceDomain ?? 'unknown',
+      ].join('|')
+      materialized.set(key, relation)
+      return
+    }
     materialized.set(relation.relationId, relation)
   })
   return [...materialized.values()]
@@ -1714,7 +3854,13 @@ function confirmedRelationPreference(left, right) {
     || String(right.relationId ?? '').localeCompare(String(left.relationId ?? ''))
 }
 
-export function buildConfirmedGraph({ bundle, nodes, paths, confirmedRelations }) {
+export function buildConfirmedGraph({
+  bundle,
+  nodes,
+  paths,
+  confirmedRelations,
+  interfaceRegistry = { interfaces: [], components: [] },
+}) {
   const graphNodes = nodes.map((node) => ({
       id: node.id,
       canonicalAssetId: node.id,
@@ -1727,14 +3873,26 @@ export function buildConfirmedGraph({ bundle, nodes, paths, confirmedRelations }
       sourceFeatureId: node.sourceFeatureId,
       siteId: node.siteId,
       networkFamily: node.networkFamily,
+      serviceDomain: node.serviceDomain ?? 'unknown',
+      serviceDomains: structuredClone(node.serviceDomains ?? [node.serviceDomain ?? 'unknown']),
+      mediaType: node.mediaType ?? 'unknown',
+      cableRole: node.cableRole ?? 'unknown',
       objectRole: 'device_node',
+      topologyRole: node.topologyRole ?? 'unknown',
+      topologyRequired: node.topologyRequired === true,
       assetType: node.assetType,
+      category: node.category,
+      sourceStatus: node.sourceStatus ?? 'unknown',
     })).sort(compareId)
   const deviceIds = new Set(graphNodes.map(({ id }) => id))
   const pathIds = new Set(paths.map(({ id }) => id))
   const adjacency = new Map([...deviceIds, ...pathIds].map((id) => [id, []]))
   confirmedRelations
-    .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+    .filter(({ verificationStatus, relationKind }) => (
+      verificationStatus === 'confirmed'
+        && relationKind !== 'installation_attachment'
+        && relationKind !== 'internal_connection'
+    ))
     .forEach((relation) => {
       if (!adjacency.has(relation.sourceAssetId) || !adjacency.has(relation.targetAssetId)) return
       adjacency.get(relation.sourceAssetId).push({
@@ -1794,7 +3952,7 @@ export function buildConfirmedGraph({ bundle, nodes, paths, confirmedRelations }
       edge.sourceAssetId === node.id || edge.targetAssetId === node.id
     )).length,
   ]))
-  return {
+  const graph = {
     datasetVersionId: bundle.datasetVersion.id,
     topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
     nodes: graphNodes,
@@ -1806,6 +3964,276 @@ export function buildConfirmedGraph({ bundle, nodes, paths, confirmedRelations }
       .map(([nodeId]) => nodeId)
       .sort(),
   }
+  const projections = buildGraphProjections({
+    bundle,
+    nodes,
+    paths,
+    confirmedRelations,
+    interfaceRegistry,
+  })
+  return {
+    ...graph,
+    installationGraph: projections.installationGraph,
+    physicalTerminationGraph: projections.physicalTerminationGraph,
+    serviceGraph: projections.serviceGraph,
+    interfaceRegistry: structuredClone(interfaceRegistry.interfaces ?? []),
+    componentRegistry: structuredClone(interfaceRegistry.components ?? []),
+  }
+}
+
+function buildGraphProjections({
+  bundle,
+  nodes,
+  paths,
+  confirmedRelations,
+  interfaceRegistry,
+}) {
+  const confirmed = confirmedRelations.filter(({ verificationStatus }) => (
+    verificationStatus === 'confirmed'
+  ))
+  const assetNodes = nodes.map((node) => ({
+    id: node.id,
+    canonicalAssetId: node.id,
+    assetId: node.id,
+    siteId: node.siteId,
+    networkFamily: node.networkFamily,
+    serviceDomain: node.serviceDomain ?? 'unknown',
+    mediaType: node.mediaType ?? 'unknown',
+    objectRole: 'device_node',
+    assetType: node.assetType,
+    category: node.category,
+    topologyRole: node.topologyRole ?? 'unknown',
+  })).sort(compareId)
+  const pathNodes = paths.map((path) => ({
+    id: path.id,
+    canonicalAssetId: path.id,
+    assetId: path.id,
+    siteId: path.siteId,
+    networkFamily: path.networkFamily,
+    serviceDomain: path.serviceDomain ?? 'unknown',
+    mediaType: path.mediaType ?? 'unknown',
+    cableRole: path.cableRole ?? 'unknown',
+    objectRole: 'cable_path',
+    assetType: path.assetType,
+    category: path.category,
+  })).sort(compareId)
+  const registryInterfaces = asArray(interfaceRegistry?.interfaces)
+    .filter(({ status }) => status !== 'retired')
+    .map((item) => ({
+      id: item.interfaceId,
+      interfaceId: item.interfaceId,
+      ownerAssetId: item.ownerAssetId,
+      componentId: item.componentId,
+      interfaceType: item.interfaceType,
+      serviceDomain: item.serviceDomain,
+      mediaType: item.mediaType,
+      direction: item.direction,
+      capacity: item.capacity,
+      occupancy: item.occupancy,
+      objectRole: 'interface',
+      nodeType: 'interface',
+    }))
+    .sort(compareId)
+  const interfaceById = new Map(registryInterfaces.map((item) => [item.id, item]))
+  const nodesById = new Map(assetNodes.map((item) => [item.id, item]))
+  const pathById = new Map(pathNodes.map((item) => [item.id, item]))
+  const installationEdges = confirmed
+    .filter(({ relationKind }) => relationKind === 'installation_attachment')
+    .map((relation) => ({
+      id: relation.relationId,
+      datasetVersionId: bundle.datasetVersion.id,
+      sourceAssetId: relation.sourceAssetId,
+      targetAssetId: relation.targetAssetId,
+      relationType: 'mounted_on',
+      relationKind: 'installation_attachment',
+      serviceDomain: 'mounting',
+      mediaType: 'none',
+      traversable: false,
+      verificationStatus: 'confirmed',
+      relationId: relation.relationId,
+      candidateId: relation.candidateId,
+    }))
+    .filter((edge) => nodesById.has(edge.sourceAssetId) && nodesById.has(edge.targetAssetId))
+    .sort(compareGraphEdge)
+  const physicalEdges = confirmed.flatMap((relation) => {
+    if (relation.relationKind === 'path_termination' && relation.targetInterfaceId) {
+      return [{
+        id: deterministicId('physical-termination-edge', relation.relationId),
+        datasetVersionId: bundle.datasetVersion.id,
+        sourceAssetId: relation.sourceAssetId,
+        targetAssetId: relation.targetInterfaceId,
+        ownerAssetId: relation.targetAssetId,
+        relationType: 'terminates_at',
+        relationKind: 'path_termination',
+        serviceDomain: relation.serviceDomain,
+        mediaType: relation.mediaType,
+        cableRole: relation.cableRole,
+        verificationStatus: 'confirmed',
+        relationId: relation.relationId,
+        candidateId: relation.candidateId,
+      }]
+    }
+    if (relation.relationKind === 'path_attachment') {
+      return [{
+        id: deterministicId('physical-attachment-edge', relation.relationId),
+        datasetVersionId: bundle.datasetVersion.id,
+        sourceAssetId: relation.sourceAssetId,
+        targetAssetId: relation.targetAssetId,
+        relationType: relation.relationType,
+        relationKind: 'path_attachment',
+        serviceDomain: relation.serviceDomain ?? 'unknown',
+        mediaType: relation.mediaType ?? 'unknown',
+        verificationStatus: 'confirmed',
+        relationId: relation.relationId,
+        candidateId: relation.candidateId,
+      }]
+    }
+    return []
+  }).filter((edge) => (
+    pathById.has(edge.sourceAssetId)
+      && (interfaceById.has(edge.targetAssetId) || nodesById.has(edge.targetAssetId))
+  )).sort(compareGraphEdge)
+  const serviceEdges = []
+  const addServiceEdge = (edge) => {
+    if (!edge.sourceAssetId || !edge.targetAssetId || edge.sourceAssetId === edge.targetAssetId) return
+    serviceEdges.push({
+      id: edge.id ?? deterministicId('service-edge', edge.sourceAssetId, edge.targetAssetId, edge.relationId),
+      datasetVersionId: bundle.datasetVersion.id,
+      sourceAssetId: edge.sourceAssetId,
+      targetAssetId: edge.targetAssetId,
+      sourceNodeId: edge.sourceAssetId,
+      targetNodeId: edge.targetAssetId,
+      relationType: edge.relationType,
+      relationKind: edge.relationKind,
+      serviceDomain: edge.serviceDomain ?? 'unknown',
+      mediaType: edge.mediaType ?? 'unknown',
+      cableRole: edge.cableRole ?? 'unknown',
+      direction: edge.direction ?? 'undirected',
+      traversable: edge.traversable !== false,
+      verificationStatus: 'confirmed',
+      relationId: edge.relationId ?? null,
+      candidateId: edge.candidateId ?? null,
+    })
+  }
+  confirmed.forEach((relation) => {
+    if (relation.relationKind === 'installation_attachment') return
+    if (relation.relationKind === 'internal_connection') {
+      addServiceEdge({
+        id: deterministicId('service-internal-edge', relation.relationId),
+        sourceAssetId: relation.sourceInterfaceId,
+        targetAssetId: relation.targetInterfaceId,
+        relationType: relation.relationType,
+        relationKind: relation.relationKind,
+        serviceDomain: relation.serviceDomain,
+        mediaType: relation.mediaType,
+        direction: relation.direction,
+        relationId: relation.relationId,
+        candidateId: relation.candidateId,
+      })
+      return
+    }
+    if (relation.relationKind === 'path_termination' && relation.targetInterfaceId) {
+      addServiceEdge({
+        id: deterministicId('service-termination-edge', relation.relationId),
+        sourceAssetId: relation.sourceAssetId,
+        targetAssetId: relation.targetInterfaceId,
+        relationType: relation.relationType,
+        relationKind: relation.relationKind,
+        serviceDomain: relation.serviceDomain,
+        mediaType: relation.mediaType,
+        cableRole: relation.cableRole,
+        direction: relation.direction,
+        relationId: relation.relationId,
+        candidateId: relation.candidateId,
+      })
+      return
+    }
+    if (relation.sourceAssetId && relation.targetAssetId) {
+      addServiceEdge(relation)
+    }
+  })
+  registryInterfaces.forEach((item) => {
+    const owner = nodesById.get(item.ownerAssetId)
+    if (!owner || isJunctionBoxNode(owner) || isRackNode(owner) || isPoleNode(owner)) return
+    addServiceEdge({
+      id: deterministicId('service-interface-owner-edge', item.interfaceId),
+      sourceAssetId: item.ownerAssetId,
+      targetAssetId: item.interfaceId,
+      relationType: 'interface_of',
+      relationKind: 'interface_attachment',
+      serviceDomain: item.serviceDomain,
+      mediaType: item.mediaType,
+      direction: 'bidirectional',
+      traversable: true,
+    })
+  })
+  const serviceNodes = [...assetNodes, ...pathNodes, ...registryInterfaces]
+    .sort(compareId)
+  const serviceGraph = finalizeProjectionGraph({
+    datasetVersionId: bundle.datasetVersion.id,
+    topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+    graphType: 'service',
+    nodes: serviceNodes,
+    edges: serviceEdges,
+    extra: {
+      assetNodeIds: assetNodes.map(({ id }) => id),
+      pathNodeIds: pathNodes.map(({ id }) => id),
+      interfaceNodeIds: registryInterfaces.map(({ id }) => id),
+      traversalDomains: ['data', 'power'],
+    },
+  })
+  return {
+    installationGraph: finalizeProjectionGraph({
+      datasetVersionId: bundle.datasetVersion.id,
+      topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+      graphType: 'installation',
+      nodes: assetNodes,
+      edges: installationEdges,
+      extra: { traversable: false },
+    }),
+    physicalTerminationGraph: finalizeProjectionGraph({
+      datasetVersionId: bundle.datasetVersion.id,
+      topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+      graphType: 'physical_termination',
+      nodes: [...assetNodes, ...pathNodes, ...registryInterfaces].sort(compareId),
+      edges: physicalEdges,
+      extra: { traversableRelationKinds: ['path_termination', 'path_attachment'] },
+    }),
+    serviceGraph,
+  }
+}
+
+function finalizeProjectionGraph({
+  datasetVersionId,
+  topologyRuleSetVersion,
+  graphType,
+  nodes,
+  edges,
+  extra = {},
+}) {
+  const degreeByNode = Object.fromEntries(nodes.map(({ id }) => [id, 0]))
+  edges.forEach((edge) => {
+    if (degreeByNode[edge.sourceAssetId] !== undefined) degreeByNode[edge.sourceAssetId] += 1
+    if (degreeByNode[edge.targetAssetId] !== undefined) degreeByNode[edge.targetAssetId] += 1
+  })
+  return {
+    datasetVersionId,
+    topologyRuleSetVersion,
+    graphType,
+    nodes,
+    edges: edges.slice().sort(compareGraphEdge),
+    components: connectedComponents(nodes, edges),
+    degreeByNode,
+    isolatedNodeIds: Object.entries(degreeByNode)
+      .filter(([, degree]) => degree === 0)
+      .map(([nodeId]) => nodeId)
+      .sort(),
+    ...extra,
+  }
+}
+
+function compareGraphEdge(left, right) {
+  return String(left.id ?? '').localeCompare(String(right.id ?? ''))
 }
 
 function collapseConfirmedPath(bundle, sourceAssetId, targetAssetId, relations) {
@@ -1814,11 +4242,20 @@ function collapseConfirmedPath(bundle, sourceAssetId, targetAssetId, relations) 
   )))
   const pathAssetIds = unique(relations.flatMap((relation) => [
     relation.pathAssetId,
+    ...(relation.pathAssetIds ?? []),
     ...(relation.relationType === 'path-continuation'
       ? [relation.sourceAssetId, relation.targetAssetId]
       : []),
   ].filter(Boolean)))
   const candidateIds = unique(relations.map(({ candidateId }) => candidateId).filter(Boolean))
+  const pathById = new Map((bundle.paths ?? []).map((path) => [path.id, path]))
+  const pathLengths = pathAssetIds.map((pathAssetId) => (
+    Number(pathById.get(pathAssetId)?.totalLengthMeters)
+  ))
+  const lengthMeters = pathLengths.length === pathAssetIds.length
+    && pathLengths.every(Number.isFinite)
+    ? pathLengths.reduce((total, length) => total + length, 0)
+    : undefined
   const allManual = relations.every(({ provenance }) => provenance === 'manual_admin')
   const allExplicit = relations.every(({ provenance }) => (
     provenance === 'explicit_kml_metadata'
@@ -1842,8 +4279,22 @@ function collapseConfirmedPath(bundle, sourceAssetId, targetAssetId, relations) 
       ? relations[0].relationType
       : 'connected-via-path',
     direction: relations.length === 1 ? relations[0].direction : 'undirected',
+    serviceDomain: unique(relations.map(({ serviceDomain }) => serviceDomain).filter(Boolean)).length === 1
+      ? relations.find(({ serviceDomain }) => serviceDomain)?.serviceDomain
+      : 'unknown',
+    mediaType: unique(relations.map(({ mediaType }) => mediaType).filter(Boolean)).length === 1
+      ? relations.find(({ mediaType }) => mediaType)?.mediaType
+      : 'unknown',
+    cableRole: unique(relations.map(({ cableRole }) => cableRole).filter(Boolean)).length === 1
+      ? relations.find(({ cableRole }) => cableRole)?.cableRole
+      : 'unknown',
+    networkFamily: unique(relations.map(({ networkFamily }) => networkFamily).filter(Boolean)).length === 1
+      ? relations.find(({ networkFamily }) => networkFamily)?.networkFamily
+      : null,
+    lengthMeters,
     pathAssetId: pathAssetIds.length === 1 ? pathAssetIds[0] : undefined,
     pathAssetIds,
+    targetInterfaceIds: unique(relations.map(({ targetInterfaceId }) => targetInterfaceId).filter(Boolean)),
     sourceGeometryIds,
     provenance: allManual
       ? 'manual_admin'
@@ -1857,7 +4308,9 @@ function collapseConfirmedPath(bundle, sourceAssetId, targetAssetId, relations) 
       : allExplicit
         ? 'explicit_kml_metadata'
         : allLineLabel ? 'line_label_inference' : 'spatial_inference',
-    relationKind: 'device_edge',
+    relationKind: relations.length === 1
+      ? relations[0].relationKind ?? 'device_edge'
+      : 'device_edge',
     candidateId: candidateIds.length === 1 ? candidateIds[0] : undefined,
     candidateIds,
     sourceRelationIds: relations.map(({ relationId }) => relationId),
@@ -1872,13 +4325,24 @@ export function validateConfirmedGraph({
   confirmedRelations,
   graph,
   lineworkIssues = [],
+  interfaceContext = null,
 }) {
   const issues = [...lineworkIssues]
   const objectById = new Map([
     ...nodes.map((node) => [node.id, node]),
     ...paths.map((path) => [path.id, path]),
+    ...asArray(interfaceContext?.interfaceRegistry?.interfaces)
+      .filter(({ status }) => status !== 'retired')
+      .map((item) => [item.interfaceId, {
+        ...item,
+        id: item.interfaceId,
+        siteId: interfaceContext?.nodeById?.get(item.ownerAssetId)?.siteId ?? null,
+        objectRole: 'interface',
+        networkFamily: interfaceContext?.nodeById?.get(item.ownerAssetId)?.networkFamily ?? 'unknown',
+      }]),
   ])
   const edgeKeys = new Set()
+  const interfaceOccupancy = new Map()
   confirmedRelations.forEach((relation) => {
     const source = objectById.get(relation.sourceAssetId)
     const target = objectById.get(relation.targetAssetId)
@@ -1893,11 +4357,62 @@ export function validateConfirmedGraph({
     if (source.siteId !== target.siteId) {
       issues.push(graphIssue(bundle, relation, 'cross_site_edge', 'error'))
     }
-    if (!familiesCompatibleForRelation(source, target)
+    if (relation.topologyRuleSetVersion !== TOPOLOGY_RULE_SET_VERSION) {
+      issues.push(graphIssue(bundle, relation, 'mixed_topology_rule_set', 'error'))
+    }
+    if (relation.relationKind === 'path_termination') {
+      if (isPoleNode(target)
+        && interfaceContext?.topologyPolicy?.allowCableToPole !== true) {
+        issues.push(graphIssue(bundle, relation, 'cable_terminated_at_pole', 'error'))
+      }
+      const targetInterface = interfaceContext?.interfaceById?.get(relation.targetInterfaceId)
+      if (!targetInterface || targetInterface.ownerAssetId !== target.id) {
+        issues.push(graphIssue(bundle, relation, 'dangling_asset_component_interface_reference', 'error'))
+      } else {
+        interfaceOccupancy.set(
+          targetInterface.interfaceId,
+          (interfaceOccupancy.get(targetInterface.interfaceId) ?? 0) + 1,
+        )
+        if (targetInterface.serviceDomain !== relation.serviceDomain
+          && relation.serviceDomain !== 'unknown') {
+          issues.push(graphIssue(bundle, relation, 'interface_service_domain_mismatch', 'error'))
+        }
+        if (targetInterface.mediaType !== relation.mediaType
+          && relation.mediaType !== 'unknown') {
+          issues.push(graphIssue(bundle, relation, 'interface_media_mismatch', 'error'))
+        }
+      }
+      if (relation.serviceDomain === 'power'
+        && relation.cableRole === 'feeder'
+        && (!isJunctionBoxNode(target) || targetInterface?.interfaceType !== 'power_in')) {
+        issues.push(graphIssue(bundle, relation, 'power_direction_invalid', 'error'))
+      }
+    }
+    if (relation.relationKind === 'internal_connection') {
+      const sourceInterface = interfaceContext?.interfaceById?.get(relation.sourceInterfaceId)
+      const targetInterface = interfaceContext?.interfaceById?.get(relation.targetInterfaceId)
+      if (!sourceInterface || !targetInterface
+        || sourceInterface.status === 'retired'
+        || targetInterface.status === 'retired'
+        || sourceInterface.ownerAssetId !== source.id
+        || targetInterface.ownerAssetId !== target.id
+        || sourceInterface.ownerAssetId !== targetInterface.ownerAssetId) {
+        issues.push(graphIssue(bundle, relation, 'dangling_asset_component_interface_reference', 'error'))
+      }
+      if (relation.serviceDomain === 'power'
+        && !['power_in', 'power_out'].includes(sourceInterface?.interfaceType)
+        && !['power_in', 'power_out'].includes(targetInterface?.interfaceType)) {
+        issues.push(graphIssue(bundle, relation, 'interface_service_domain_mismatch', 'error'))
+      }
+    }
+    if (!['installation_attachment', 'path_termination', 'internal_connection']
+      .includes(relation.relationKind)
+      && !familiesCompatibleForRelation(source, target)
       && !['manual_admin', 'line_label_inference'].includes(relation.provenance)) {
       issues.push(graphIssue(bundle, relation, 'incompatible_family_edge', 'error'))
     }
-    if (relation.sourceAssetId === relation.targetAssetId) {
+    if (relation.sourceAssetId === relation.targetAssetId
+      && relation.relationKind !== 'internal_connection') {
       issues.push(graphIssue(bundle, relation, 'accidental_self_loop', 'error'))
     }
     const key = undirectedKey(relation.sourceAssetId, relation.targetAssetId, relation.relationType)
@@ -1919,21 +4434,26 @@ export function validateConfirmedGraph({
         entityReference: node.id,
         readinessImpact: 'warning',
       }))
-    } else if (degree > nodeCapacity(source)) {
-      issues.push(topologyIssue(bundle, {
-        severity: 'warning',
-        issueCode: 'device_degree_anomaly',
-        scope: 'graph',
-        message: `Degree ${degree} untuk ${node.id} melewati capacity rule.`,
-        entityReference: node.id,
-        readinessImpact: 'warning',
-      }))
     }
+  })
+  interfaceOccupancy.forEach((occupancy, interfaceId) => {
+    const item = interfaceContext?.interfaceById?.get(interfaceId)
+    if (!item || occupancy <= Number(item.capacity ?? 1)) return
+    issues.push(topologyIssue(bundle, {
+      severity: 'error',
+      issueCode: 'interface_capacity_exceeded',
+      scope: 'interface',
+      message: `Interface ${interfaceId} menerima ${occupancy}/${item.capacity} termination.`,
+      entityReference: interfaceId,
+      readinessImpact: 'blocking',
+    }))
   })
   uniqueBy(paths, 'id').forEach((path) => {
     const attachmentCount = confirmedRelations.filter((relation) => (
       relation.verificationStatus === 'confirmed'
       && (relation.sourceAssetId === path.id || relation.targetAssetId === path.id)
+      && ['path_termination', 'path_attachment', 'path_continuation']
+        .includes(relation.relationKind ?? persistedRelationKind(relation))
     )).length
     if (attachmentCount < 2) {
       issues.push(topologyIssue(bundle, {
@@ -1976,7 +4496,14 @@ export function validateConfirmedGraph({
 }
 
 function buildUnresolvedEndpoints(paths, candidates) {
-  const candidateEndpointIds = new Set(candidates.map(({ sourceEndpointId }) => sourceEndpointId))
+  const candidateEndpointIds = new Set(candidates
+    .filter(({ candidateType, proposalStatus, targetInterfaceId }) => (
+      (candidateType === 'cable_termination' || candidateType === 'line_label_attachment')
+        && Boolean(targetInterfaceId)
+        && !['missing_jb_termination', 'incompatible_interface', 'interface_unavailable']
+          .includes(proposalStatus)
+    ))
+    .map(({ sourceEndpointId }) => sourceEndpointId))
   return paths.flatMap(lineEndpoints)
     .filter(({ id }) => !candidateEndpointIds.has(id))
     .map((endpoint) => ({
@@ -2013,7 +4540,7 @@ function buildSummary({
     confirmedDeviceEdgeCount: graph.edges.length,
     confirmedRelationCount: confirmed.length,
     confirmedPathAttachmentCount: confirmed.filter(({ relationKind }) => (
-      relationKind === 'path_attachment'
+      ['path_attachment', 'path_termination'].includes(relationKind)
     )).length,
     confirmedPathContinuationCount: confirmed.filter(({ relationKind }) => (
       relationKind === 'path_continuation'
@@ -2028,11 +4555,31 @@ function buildSummary({
     falseComponentMergeCount: validation.issues.filter(({ issueCode }) => (
       ['cross_site_edge', 'incompatible_family_edge'].includes(issueCode)
     )).length,
+    cableTerminationCandidateCount: candidates.filter(({ candidateType }) => (
+      candidateType === 'cable_termination'
+    )).length,
+    mountingCandidateCount: candidates.filter(({ candidateType }) => (
+      candidateType === 'mounting_attachment'
+    )).length,
+    internalConnectionCandidateCount: candidates.filter(({ candidateType }) => (
+      candidateType === 'jb_internal_connection'
+    )).length,
+    missingJbTerminationCount: candidates.filter(({ proposalStatus }) => (
+      proposalStatus === 'missing_jb_termination'
+    )).length,
+    interfaceCapacityConflictCount: validation.issues.filter(({ issueCode }) => (
+      issueCode === 'interface_capacity_exceeded'
+    )).length,
+    cableToPoleDiagnosticCount: validation.issues.filter(({ issueCode }) => (
+      issueCode === 'cable_terminated_at_pole'
+    )).length,
   }
 }
 
 function evaluateTopologyReadiness({
   bundle,
+  nodes,
+  paths,
   candidates,
   confirmedRelations,
   validation,
@@ -2052,6 +4599,13 @@ function evaluateTopologyReadiness({
     )).length / identities.length
     : 0
   const accuracyReady = accuracyGate.approved
+  const requiredTopology = evaluateRequiredTopologyReadiness({
+    bundle,
+    nodes,
+    paths,
+    candidates,
+    confirmedRelations,
+  })
   const blockingReasons = []
   if (stableIdentityCoverage < 1) blockingReasons.push('stable_identity_coverage')
   if (validation.summary.errors > 0) blockingReasons.push('confirmed_graph_invalid')
@@ -2059,6 +4613,15 @@ function evaluateTopologyReadiness({
   if (!TOPOLOGY_RULE_SET_VERSION) blockingReasons.push('rule_set_version_missing')
   if (candidates.some(({ candidateStatus }) => candidateStatus === 'confirmed')
     && !confirmedRelations.length) blockingReasons.push('confirmed_decision_not_materialized')
+  if (requiredTopology.unresolvedNodeCount > 0) {
+    blockingReasons.push('topology_required_node_unresolved')
+  }
+  if (requiredTopology.unresolvedEndpointCount > 0) {
+    blockingReasons.push('topology_required_endpoint_unresolved')
+  }
+  if (requiredTopology.ambiguousCount > 0) {
+    blockingReasons.push('topology_required_ambiguous')
+  }
   return {
     topologyReadiness: blockingReasons.length ? 'not_ready' : 'ready',
     stableIdentityCoverage,
@@ -2076,6 +4639,7 @@ function evaluateTopologyReadiness({
     },
     unresolvedCount: unresolved.length,
     ambiguousCount: candidates.filter(({ candidateStatus }) => candidateStatus === 'ambiguous').length,
+    requiredTopology,
     blockingReasons,
     topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
   }
@@ -2140,6 +4704,81 @@ function buildEvidenceDiagnostics({ nodes, paths, candidates, confirmedRelations
     unresolvedAssetIds,
     unmatchedPathCount: unresolvedAssetIds.filter((id) => pathIds.has(id)).length,
     evidenceComponentCount: components.length,
+  }
+}
+
+function evaluateRequiredTopologyReadiness({
+  bundle,
+  nodes,
+  paths,
+  candidates,
+  confirmedRelations,
+}) {
+  const requiredNodes = asArray(nodes).filter(({ topologyRequired }) => topologyRequired === true)
+  const requiredPaths = asArray(paths).filter(({ topologyRequired }) => topologyRequired === true)
+  const approvedExceptions = asArray(bundle.topologyExceptions).filter((exception) => (
+    exception?.approved === true && String(exception.reason ?? '').trim().length >= 3
+  ))
+  const exceptionKeys = new Set(approvedExceptions.flatMap((exception) => [
+    exception.entityReference,
+    exception.assetId,
+    exception.sourceFeatureId,
+    exception.sourceEndpointId,
+  ].filter(Boolean).map(String)))
+  const confirmedAssetIds = new Set(
+    asArray(confirmedRelations)
+      .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+      .flatMap((relation) => [relation.sourceAssetId, relation.targetAssetId])
+      .filter(Boolean)
+      .map(String),
+  )
+  const unresolvedNodeIds = requiredNodes
+    .map((node) => node.id)
+    .filter((id) => !confirmedAssetIds.has(String(id)) && !exceptionKeys.has(String(id)))
+  const candidateByEndpoint = new Map()
+  asArray(candidates).forEach((candidate) => {
+    if (!candidate.sourceEndpointId) return
+    const list = candidateByEndpoint.get(candidate.sourceEndpointId) ?? []
+    list.push(candidate)
+    candidateByEndpoint.set(candidate.sourceEndpointId, list)
+  })
+  const requiredEndpointIds = requiredPaths.flatMap((path) => (
+    lineEndpoints(path).map(({ id }) => id)
+  ))
+  const unresolvedEndpointIds = []
+  const ambiguousEndpointIds = []
+  const confirmedCandidateIds = new Set(
+    asArray(confirmedRelations)
+      .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+      .map(({ candidateId }) => candidateId)
+      .filter(Boolean),
+  )
+  requiredEndpointIds.forEach((endpointId) => {
+    if (exceptionKeys.has(endpointId)) return
+    const endpointCandidates = candidateByEndpoint.get(endpointId) ?? []
+    const hasConfirmed = endpointCandidates.some((candidate) => (
+      candidate.candidateStatus === 'confirmed'
+        && confirmedCandidateIds.has(candidate.candidateId)
+    ))
+    if (hasConfirmed) return
+    if (endpointCandidates.some(({ candidateStatus, proposalStatus }) => (
+      candidateStatus === 'ambiguous' || proposalStatus === 'ambiguous'
+    ))) {
+      ambiguousEndpointIds.push(endpointId)
+    }
+    unresolvedEndpointIds.push(endpointId)
+  })
+  return {
+    requiredNodeCount: requiredNodes.length,
+    requiredPathCount: requiredPaths.length,
+    requiredEndpointCount: requiredEndpointIds.length,
+    unresolvedNodeCount: unresolvedNodeIds.length,
+    unresolvedEndpointCount: unresolvedEndpointIds.length,
+    ambiguousCount: ambiguousEndpointIds.length,
+    approvedExceptionCount: approvedExceptions.length,
+    unresolvedNodeIds,
+    unresolvedEndpointIds,
+    ambiguousEndpointIds,
   }
 }
 
@@ -2443,24 +5082,52 @@ function compatiblePathNode(path, node) {
   if (path.siteId !== node.siteId) {
     return { compatible: false, score: 0, ruleId: 'hard-gate.site' }
   }
+  if (isPoleNode(node)) {
+    return {
+      compatible: false,
+      score: 0,
+      ruleId: 'hard-gate.forbidden-target-role',
+      explanation: 'Tiang adalah host pemasangan dan bukan endpoint kabel.',
+    }
+  }
   const type = nodeSemanticText(node)
-  if (path.networkFamily === node.networkFamily) {
+  const pathDomain = path.serviceDomain ?? deriveTopologyDimensions(path).serviceDomain
+  const nodeDomain = node.serviceDomain ?? deriveTopologyDimensions(node).serviceDomain
+  const nodeServiceDomains = unique([
+    ...asArray(node.serviceDomains),
+    nodeDomain,
+  ].map((value) => normalizeServiceDomain(value)))
+  if (pathDomain !== 'unknown' && nodeDomain !== 'unknown'
+    && pathDomain !== 'mounting' && nodeDomain !== 'mounting'
+    && pathDomain === nodeDomain
+    && path.networkFamily === node.networkFamily) {
     return {
       compatible: true,
       score: 1,
-      ruleId: 'compatibility.same-family',
-      explanation: 'Path dan device berada pada network family yang sama.',
+      ruleId: 'compatibility.same-domain-family',
+      explanation: 'Path dan device berada pada service domain serta network family yang sama.',
+    }
+  }
+  if (pathDomain !== 'unknown'
+    && pathDomain !== 'mounting'
+    && nodeServiceDomains.includes(pathDomain)
+    && (isJunctionBoxNode(node) || (pathDomain === 'data' && isRackNode(node)))) {
+    return {
+      compatible: true,
+      score: 0.95,
+      ruleId: 'compatibility.service-domain-cross-family',
+      explanation: 'Device mendukung service domain path meskipun network family canonical berbeda; interface compatibility menjadi hard gate berikutnya.',
     }
   }
   const approved = {
-    cctv: /junction|\bjb\b|switch|nvr|server|router|camera|cctv|tiang|pole/,
-    fiber_optic: /otb|junction|\bjb\b|switch|router|core|fiber|\bfo\b|tiang|pole/,
-    lan: /switch|router|access point|\bap\b|printer|server|device|lan|tiang|pole/,
-    infrastructure: /switch|router|server|junction|\bjb\b|otb|core|tiang|pole/,
+    cctv: /junction|\bjb\b|switch|nvr|server|router|camera|cctv/,
+    fiber_optic: /otb|junction|\bjb\b|switch|router|core|fiber|\bfo\b/,
+    lan: /switch|router|access point|\bap\b|printer|server|device|lan/,
+    infrastructure: /switch|router|server|junction|\bjb\b|otb|core|patch|rack|pln|power/,
   }[path.networkFamily]
   const compatible = (
     node.networkFamily === 'infrastructure' && approved?.test(type)
-  ) || (
+  ) || (isRackNode(node) && pathDomain === 'data') || (
     path.networkFamily === 'lan'
       && node.networkFamily === 'cctv'
       && /camera|cctv|junction|\bjb\b|nvr/.test(type)
@@ -2480,6 +5147,7 @@ function compatiblePathNode(path, node) {
 }
 
 function familiesCompatibleForRelation(source, target) {
+  if (isPoleNode(source) || isPoleNode(target)) return false
   if (source.networkFamily === target.networkFamily) return true
   if (source.objectRole === 'cable_path') return compatiblePathNode(source, target).compatible
   if (target.objectRole === 'cable_path') return compatiblePathNode(target, source).compatible
@@ -2487,12 +5155,16 @@ function familiesCompatibleForRelation(source, target) {
 }
 
 function inlineNodeAllowed(node) {
-  return /junction|\bjb\b|switch|router|otb|splitter|coupler|core|tiang|pole/
-    .test(nodeSemanticText(node))
+  return !isPoleNode(node) && (
+    isRackNode(node)
+      || /junction|\bjb\b|switch|router|otb|splitter|coupler|core|patch|rack/
+        .test(nodeSemanticText(node))
+  )
 }
 
 function nodeCapacity(node) {
   const type = nodeSemanticText(node)
+  if (isRackNode(node)) return 48
   if (/core|switch|router|nvr|server/.test(type)) return 48
   if (/junction|\bjb\b|otb|splitter|coupler/.test(type)) return 12
   if (/camera|cctv|access point|\bap\b|printer|terminal/.test(type)) return 1
@@ -2503,7 +5175,7 @@ function endpointRoleScore(node, inline) {
   const type = nodeSemanticText(node)
   if (inline) return inlineNodeAllowed(node) ? 1 : 0
   if (/camera|cctv|access point|\bap\b|printer|terminal/.test(type)) return 1
-  if (/junction|\bjb\b|switch|router|otb|core|nvr/.test(type)) return 0.9
+  if (isRackNode(node) || /junction|\bjb\b|switch|router|otb|core|nvr/.test(type)) return 0.9
   return 0.5
 }
 
@@ -2556,6 +5228,11 @@ function scoreEvidence(components) {
 
 function relationTypeForCandidate(type) {
   return {
+    cable_termination: 'terminates_at',
+    mounting_attachment: 'mounted_on',
+    jb_internal_connection: 'internally_connected_to',
+    path_continuation: 'path-continuation',
+    unresolved_termination: 'unresolved',
     endpoint_device: 'path-endpoint',
     inline_device: 'path-inline-device',
     endpoint_endpoint: 'path-continuation',
@@ -2567,6 +5244,10 @@ function relationTypeForCandidate(type) {
 }
 
 function relationKindForCandidate(candidate) {
+  if (candidate.candidateType === 'cable_termination') return 'path_termination'
+  if (candidate.candidateType === 'mounting_attachment') return 'installation_attachment'
+  if (candidate.candidateType === 'jb_internal_connection') return 'internal_connection'
+  if (candidate.candidateType === 'path_continuation') return 'path_continuation'
   if (candidate.sourceObjectRole === 'device_node'
     && candidate.targetObjectRole === 'device_node') {
     return 'device_edge'
@@ -2576,6 +5257,9 @@ function relationKindForCandidate(candidate) {
 }
 
 function persistedRelationKind(relation) {
+  if (relation.relationType === 'terminates_at') return 'path_termination'
+  if (relation.relationType === 'mounted_on') return 'installation_attachment'
+  if (relation.relationType === 'internally_connected_to') return 'internal_connection'
   if (relation.relationType === 'path-continuation') return 'path_continuation'
   if (String(relation.relationType ?? '').startsWith('path-')) return 'path_attachment'
   return 'device_edge'
@@ -2628,6 +5312,16 @@ function invalidBundle(message, details) {
     statusCode: 422,
     details,
   })
+}
+
+function legacyCandidateTypeFor(candidateType) {
+  return {
+    cable_termination: 'endpoint_device',
+    mounting_attachment: 'mounting_attachment',
+    jb_internal_connection: 'jb_internal_connection',
+    path_continuation: 'endpoint_endpoint',
+    unresolved_termination: 'unresolved_termination',
+  }[candidateType] ?? candidateType
 }
 
 function candidateLimitExceeded(budget, stage) {
@@ -2708,7 +5402,220 @@ function normalizeConfig(config) {
       value.maxGenerationMilliseconds,
       DEFAULT_RELATION_ENGINE_CONFIG.maxGenerationMilliseconds,
     ),
+    topologyPolicy: normalizeTopologyPolicy(value.topologyPolicy),
   }
+}
+
+function normalizeTopologyPolicy(value = {}) {
+  const input = value && typeof value === 'object' && !Array.isArray(value)
+    ? value
+    : {}
+  return {
+    ...DEFAULT_TOPOLOGY_POLICY,
+    ...structuredClone(input),
+    version: readString(input.version, input.policyVersion) ?? TOPOLOGY_POLICY_VERSION,
+    requireJbTermination: input.requireJbTermination !== false,
+    allowDirectCameraTermination: input.allowDirectCameraTermination !== false,
+    allowCableToPole: input.allowCableToPole === true,
+    allowOpaqueJbInternalBridge: input.allowOpaqueJbInternalBridge === true,
+    allowDirectRackEnclosureTermination: input.allowDirectRackEnclosureTermination === true,
+  }
+}
+
+function compatibleInterfacesForPath(path, node, interfaceContext, endpointRole = null) {
+  if (path.siteId !== node.siteId
+    || (isPoleNode(node) && interfaceContext.topologyPolicy.allowCableToPole !== true)) return []
+  const interfaces = interfaceContext.interfacesByAssetId.get(node.id) ?? []
+  return interfaces.flatMap((item) => {
+    const compatibility = interfaceCompatibility(
+      path,
+      node,
+      item,
+      interfaceContext.topologyPolicy,
+      endpointRole,
+    )
+    return compatibility ? [{ item, ...compatibility }] : []
+  }).sort((left, right) => (
+    right.score - left.score || compareInterface(left.item, right.item)
+  ))
+}
+
+function interfaceCompatibility(path, node, item, policy, endpointRole = null) {
+  const serviceDomain = normalizeServiceDomain(
+    path.serviceDomain ?? deriveTopologyDimensions(path).serviceDomain,
+  )
+  const mediaType = normalizeMediaType(
+    path.mediaType ?? deriveTopologyDimensions(path).mediaType,
+  )
+  const cableRole = path.cableRole ?? deriveTopologyDimensions(path).cableRole
+  if (serviceDomain === 'mounting' || item.serviceDomain !== serviceDomain) return null
+  if (mediaType !== 'unknown' && item.mediaType !== 'unknown' && item.mediaType !== mediaType) {
+    return null
+  }
+  if (isRackNode(node) && !item.isProxy && policy.allowDirectRackEnclosureTermination !== true) {
+    return null
+  }
+  const interfaceType = item.interfaceType
+  if (serviceDomain === 'power') {
+    if (cableRole === 'feeder') {
+      if (isJunctionBoxNode(node) && interfaceType === 'power_in') {
+        return interfaceMatch(item, 'compatibility.power-feeder-to-jb-input')
+      }
+      if (isPowerSourceNode(node) && interfaceType === 'power_out') {
+        return interfaceMatch(item, 'compatibility.power-origin-output')
+      }
+      return null
+    }
+    if (cableRole === 'distribution') {
+      if (isJunctionBoxNode(node)) {
+        const expectedInterfaceType = endpointRole === 'end'
+          ? 'power_in'
+          : endpointRole === 'start'
+            ? 'power_out'
+            : isExtendedJunctionBoxNode(node) ? 'power_in' : 'power_out'
+        if (interfaceType === expectedInterfaceType) {
+          return interfaceMatch(
+            item,
+            expectedInterfaceType === 'power_in'
+              ? 'compatibility.power-distribution-to-jb-input'
+              : 'compatibility.power-jb-output',
+          )
+        }
+        return null
+      }
+      if (interfaceType === 'power_in') {
+        return interfaceMatch(item, 'compatibility.power-load-input')
+      }
+      return null
+    }
+    if (interfaceType === 'power_in' || interfaceType === 'power_out') {
+      return interfaceMatch(item, 'compatibility.power-domain')
+    }
+    return null
+  }
+  if (mediaType === 'fiber') {
+    if (!['fiber_port', 'splice_slot', 'patch_port'].includes(interfaceType)) return null
+    if (cableRole === 'access' && isJunctionBoxNode(node) && interfaceType === 'splice_slot') return null
+    return interfaceMatch(item, 'compatibility.fiber-interface')
+  }
+  if (cableRole === 'backbone' || cableRole === 'uplink') {
+    if (!['uplink_port', 'fiber_port', 'patch_port', 'lan_port', 'server_nic'].includes(interfaceType)) return null
+    return interfaceMatch(item, 'compatibility.data-uplink-interface')
+  }
+  if (!['lan_port', 'uplink_port', 'patch_port', 'server_nic'].includes(interfaceType)) return null
+  if (isJunctionBoxNode(node) && interfaceType === 'uplink_port' && cableRole === 'access') return null
+  if (isCameraNode(node) && !policy.allowDirectCameraTermination) return null
+  return interfaceMatch(item, 'compatibility.data-access-interface')
+}
+
+function interfaceMatch(item, ruleId) {
+  return {
+    score: item.virtual || item.isProxy ? 0.85 : 1,
+    ruleId,
+    explanation: `Interface ${item.interfaceType} compatible dengan service domain/media kabel.`,
+    capacityAvailable: Number(item.occupancy ?? 0) < Number(item.capacity ?? 1),
+  }
+}
+
+function nodeHasTopologyInterface(node, interfaceContext) {
+  return (interfaceContext.interfacesByAssetId.get(node.id) ?? []).length > 0
+}
+
+function isPoleNode(node) {
+  const type = normalizeToken([
+    node?.assetType,
+    node?.category,
+    node?.sourceName,
+  ].filter(Boolean).join(' '))
+  return node?.assetType === 'pole'
+    || /(^|\s)(tiang|pole|pylon)(\s|$)/.test(type)
+}
+
+function isJunctionBoxNode(node) {
+  const type = normalizeToken([
+    node?.assetType,
+    node?.category,
+    node?.sourceName,
+  ].filter(Boolean).join(' '))
+  if (isOtbNode(node) || isRackNode(node)) return false
+  return node?.assetType === 'junction_box'
+    || /junction|\bjb\b/.test(type)
+}
+
+function isExtendedJunctionBoxNode(node) {
+  if (!isJunctionBoxNode(node)) return false
+  const type = normalizeToken([
+    node?.assetType,
+    node?.category,
+    node?.sourceName,
+  ].filter(Boolean).join(' '))
+  const rawName = String(node?.sourceName ?? '')
+  const profile = normalizeToken(node?.jbProfileId)
+  return /\bextended\b/.test(type)
+    || isExtendedFolderPath(node?.sourceFolderPath)
+    || /\bjb\s*[-_ ]*\d+\s*\.\s*\d+(?:\s|[-_]|$)/i.test(rawName)
+    || /\bextended(?:\s|_|-)?(?:passive|poe)?\b/.test(profile)
+}
+
+function isOtbNode(node) {
+  const type = normalizeToken([
+    node?.assetType,
+    node?.category,
+    node?.sourceName,
+  ].filter(Boolean).join(' '))
+  return node?.assetType === 'otb'
+    || /(^|\s)(otb|optical termination box)(\s|$)/.test(type)
+}
+
+function isRackNode(node) {
+  const type = normalizeToken([
+    node?.assetType,
+    node?.category,
+    node?.sourceName,
+  ].filter(Boolean).join(' '))
+  return ['rack', 'server_rack'].includes(node?.assetType)
+    || /server.?rack|rack.?server/.test(type)
+    || isRackServerAlias(node?.sourceName)
+    || isRackServerAlias(node?.assetType)
+    || isRackServerAlias(node?.category)
+}
+
+function isRackServerAlias(value) {
+  const normalized = normalizeToken(value)
+  return /^(rs|cr)(?:\s|$)/.test(normalized)
+    || /^svr\s+office(?:\s|$)/.test(normalized)
+}
+
+function isExtendedFolderPath(value) {
+  return String(value ?? '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((segment) => normalizeToken(segment))
+    .some((segment) => segment === 'extended')
+}
+
+function isCameraNode(node) {
+  const type = normalizeToken([
+    node?.assetType,
+    node?.category,
+    node?.sourceName,
+  ].filter(Boolean).join(' '))
+  return ['cctv_fixed', 'cctv_camera', 'cctv_ptz', 'cctv_dome'].includes(node?.assetType)
+    || /camera|cctv|kamera/.test(type)
+}
+
+function isPowerSourceNode(node) {
+  const type = normalizeToken([
+    node?.assetType,
+    node?.category,
+    node?.sourceName,
+  ].filter(Boolean).join(' '))
+  return ['pln_source', 'power_panel'].includes(node?.assetType)
+    || /pln|power source|power panel/.test(type)
+}
+
+function isMountableAsset(node) {
+  return isCameraNode(node) || isJunctionBoxNode(node)
 }
 
 function normalizeAccuracyArtifact(value) {
@@ -2777,15 +5684,9 @@ function connectedComponents(nodes, edges) {
   return components
 }
 
-function candidateGroupKey(candidate) {
-  if (candidate.candidateType === 'inline_device') {
-    return `inline:${candidate.targetAssetId}|${candidate.sourcePathAssetId}`
-  }
-  return candidate.sourceEndpointId
-}
-
 function isLineLabelCandidate(candidate) {
   return ['line_label_connection', 'line_label_attachment'].includes(candidate.candidateType)
+    || candidate.lineLabelEvidence === true
 }
 
 function coordinateSequenceKey(coordinates) {

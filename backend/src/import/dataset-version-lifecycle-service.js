@@ -2,14 +2,17 @@ import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { AppError } from '../errors.js'
 import {
+  AUTOMATIC_IDENTITY_ACTOR,
   buildCanonicalAssetIdentityMap,
   buildAssetIdentityMapFromRecord,
   createAssetIdentityResolver,
+  createAutomaticIdentityRegistry,
 } from '../domain/canonical-asset-identity.js'
 import {
   buildIdentityIssues,
   buildTopologyInputBundle,
 } from '../domain/parser-contract.js'
+
 import {
   buildReadinessContract as buildPublicationReadinessContract,
   isProfilePublishable,
@@ -20,8 +23,25 @@ import {
   compareCanonicalDatasetVersions,
   paginateDatasetDiff,
 } from '../domain/dataset-version-diff.js'
-import { normalizeTopologySummary } from '../topology/semantic-relation-engine.js'
+import {
+  normalizeTopologySummary,
+  TOPOLOGY_RULE_SET_VERSION,
+} from '../topology/semantic-relation-engine.js'
 import { withTopologyGraphRevision } from '../topology/topology-graph-revision.js'
+import {
+  buildActiveAssetCatalog,
+  buildActiveCapabilities,
+  buildActiveOverlayDescriptors,
+  buildActiveSites,
+  buildActiveSummary,
+  queryActiveAssets,
+} from '../domain/active-dataset-query.js'
+import {
+  safeActiveKmlFilename,
+  serializeActiveDatasetKml,
+} from '../domain/active-dataset-kml.js'
+
+const AUTOMATIC_IDENTITY_ASSIGNMENT_LIMIT = 5000
 
 export class DatasetVersionLifecycleService {
   constructor({
@@ -29,11 +49,13 @@ export class DatasetVersionLifecycleService {
     auditLog,
     activeDatasetCache = null,
     clock = () => new Date(),
+    siteBoundaries = {},
   }) {
     this.repository = repository
     this.auditLog = auditLog
     this.activeDatasetCache = activeDatasetCache
     this.clock = clock
+    this.siteBoundaries = siteBoundaries
   }
 
   async getPreview(datasetVersionId) {
@@ -112,8 +134,9 @@ export class DatasetVersionLifecycleService {
     expectedRecordRevision,
     idempotencyKey = null,
     correlationId = null,
+    maxItems = 500,
   } = {}) {
-    const normalizedAssignments = normalizeIdentityAssignments(assignments)
+    const normalizedAssignments = normalizeIdentityAssignments(assignments, { maxItems })
     const requestFingerprint = fingerprint(normalizedAssignments)
     const current = await this.repository.get(datasetVersionId)
     const existingReceipt = findIdentityAssignmentReceipt(
@@ -209,6 +232,65 @@ export class DatasetVersionLifecycleService {
     return response
   }
 
+  async autoAssignUniqueIdentityAssignments(datasetVersionId, {
+    expectedRecordRevision,
+    idempotencyKey = null,
+    correlationId = null,
+  } = {}) {
+    const current = await this.repository.get(datasetVersionId)
+    const proposal = createAutomaticIdentityRegistry({
+      datasetVersion: current.datasetVersion,
+      sourceFeatures: current.sourceFeatures ?? [],
+      classifiedObjects: current.classifiedObjects ?? [],
+      identityRegistry: current.assetIdentityRegistry ?? current.identityRegistry ?? [],
+    })
+    const assignments = [
+      ...proposal.assignments,
+      ...proposal.linkedAssignments,
+      ...proposal.backfillAssignments,
+    ]
+    if (!assignments.length) {
+      return {
+        datasetVersionId,
+        recordRevision: normalizeRecordRevision(current.recordRevision),
+        state: 'no_changes',
+        automaticIdentity: {
+          generatedCount: 0,
+          linkedCount: 0,
+          backfilledCount: 0,
+          skipped: structuredClone(proposal.skipped),
+        },
+        identityCoverage: current.readiness?.inventory?.coverage ?? {},
+        readiness: current.readiness ?? null,
+      }
+    }
+    const requestKey = idempotencyKey
+      ?? `identity-auto:${datasetVersionId}:${normalizeRecordRevision(current.recordRevision)}:${fingerprint(
+        assignments,
+      )}`
+    const result = await this.assignIdentityAssignments(
+      datasetVersionId,
+      AUTOMATIC_IDENTITY_ACTOR,
+      {
+        assignments,
+        expectedRecordRevision: expectedRecordRevision
+          ?? normalizeRecordRevision(current.recordRevision),
+        idempotencyKey: requestKey,
+        correlationId,
+        maxItems: AUTOMATIC_IDENTITY_ASSIGNMENT_LIMIT,
+      },
+    )
+    return {
+      ...result,
+      automaticIdentity: {
+        generatedCount: proposal.assignments.length,
+        linkedCount: proposal.linkedAssignments.length,
+        backfilledCount: proposal.backfillAssignments.length,
+        skipped: structuredClone(proposal.skipped),
+      },
+    }
+  }
+
   async getActiveDataset({ datasetId, branchId } = {}) {
     const resolved = await this.#resolveActive(datasetId, branchId)
     const record = resolved.record
@@ -216,14 +298,29 @@ export class DatasetVersionLifecycleService {
     const resolver = createAssetIdentityResolver(identityMap)
     const topology = normalizeTopologyGraph(record, identityMap)
     const readinessContract = buildReadinessContract(record, topology.graph)
+    const publicationProfile = activePublicationProfile(record, resolved.pointer)
+    const catalog = buildActiveAssetCatalog({
+      record,
+      identityMap,
+      topologyGraph: topology.graph,
+      publicationProfile,
+    })
+    const sites = buildActiveSites({
+      catalog,
+      record,
+      siteBoundaries: this.siteBoundaries,
+    })
+    const overlays = buildActiveOverlayDescriptors({
+      record,
+      datasetVersionId: record.datasetVersion.id,
+    })
+    const capabilities = buildActiveCapabilities({
+      publicationProfile,
+      readiness: readinessContract,
+    })
     return {
       activePointer: resolved.pointer,
-      datasetVersion: {
-        ...record.datasetVersion,
-        status: 'active',
-        publicationStatus: 'published',
-        activePointerRevision: resolved.pointer.revision,
-      },
+      datasetVersion: publicDatasetVersion(record.datasetVersion, resolved.pointer),
       layers: record.layers ?? [],
       assets: (record.assets ?? []).map((asset) => (
         projectAssetIdentity(asset, identityMap, resolver)
@@ -245,66 +342,273 @@ export class DatasetVersionLifecycleService {
       inventoryReady: readinessContract.inventoryReady !== 'not_ready',
       topologyReady: readinessContract.topologyReady === 'ready',
       publicationStatus: readinessContract.publicationStatus,
+      context: activeContext(record, resolved.pointer, null, publicationProfile),
+      publicationProfile,
+      sites,
+      overlays,
+      summary: buildActiveSummary({
+        catalog,
+        sites,
+        record,
+        topologyGraph: topology.graph,
+        overlays,
+      }),
+      capabilities,
     }
   }
 
-  async getActiveMapDataset({ datasetId, branchId } = {}) {
+  async getActiveMapDataset({ datasetId, branchId, siteId = null } = {}) {
     const resolved = await this.#resolveActive(datasetId, branchId)
-    return toActiveMapDataset(resolved)
+    return toActiveMapDataset(resolved, {
+      siteId,
+      siteBoundaries: this.siteBoundaries,
+    })
   }
 
-  async getActiveAssetDetail({ datasetId, branchId, assetId } = {}) {
+  async getActiveAssetDetail({
+    datasetId,
+    branchId,
+    assetId,
+    siteId = null,
+    isAdministrator = false,
+    canViewSensitive = false,
+  } = {}) {
     const resolved = await this.#resolveActive(datasetId, branchId)
     const record = resolved.record
     const identityMap = buildAssetIdentityMapFromRecord(record)
     const resolver = createAssetIdentityResolver(identityMap)
-    const canonicalAssetId = resolver.resolve(assetId)
-    const asset = (record.assets ?? []).find((item) => (
-      resolver.resolve(item.canonicalAssetId ?? item.assetId ?? item.id) === canonicalAssetId
-    ))
-    if (!asset) {
+    const topology = normalizeTopologyGraph(record, identityMap)
+    const readinessContract = buildReadinessContract(record, topology.graph)
+    const publicationProfile = activePublicationProfile(record, resolved.pointer)
+    const catalog = buildActiveAssetCatalog({
+      record,
+      identityMap,
+      topologyGraph: topology.graph,
+      publicationProfile,
+    })
+    const item = catalog.find((candidate) => candidate._aliases.has(String(assetId)))
+    if (!item) {
       throw new AppError('Aset tidak ditemukan pada dataset aktif.', {
-        code: 'active_asset_not_found',
+        code: 'asset_not_present_in_active_version',
         statusCode: 404,
       })
     }
+    if (siteId && item.siteId !== siteId) {
+      throw new AppError('Aset tidak tersedia pada site aktif yang dipilih.', {
+        code: 'active_asset_not_present_in_site',
+        statusCode: 404,
+      })
+    }
+    const canonicalAssetId = item.canonicalAssetId
+    const asset = item.rawAsset
     const relations = filterResolvedRelations(record, resolver)
       .filter((relation) => (
         relation.sourceAssetId === canonicalAssetId
           || relation.targetAssetId === canonicalAssetId
       ))
-    const topology = normalizeTopologyGraph(record, identityMap)
-    const readinessContract = buildReadinessContract(record, topology.graph)
+    const directConnections = publicationProfile === 'operational_topology'
+      ? item.confirmedConnections
+      : []
+    const capabilities = buildActiveCapabilities({
+      publicationProfile,
+      readiness: readinessContract,
+    })
     return {
       activePointer: resolved.pointer,
       datasetVersion: publicDatasetVersion(record.datasetVersion, resolved.pointer),
-      asset: projectAssetIdentity(asset, identityMap, resolver),
-      identity: structuredClone(
+      asset: sanitizePublicObject({
+        ...projectAssetIdentity(asset, identityMap, resolver),
+        assetId: item.assetId,
+        canonicalAssetId: item.canonicalAssetId,
+        stableAssetId: item.stableAssetId,
+        identityStatus: item.identityStatus,
+        name: item.name,
+        category: item.category,
+        type: item.assetType,
+        networkFamily: item.networkFamily,
+        siteId: item.siteId,
+        location: item.locationText,
+        hostname: canViewSensitive ? item.hostname : null,
+        ipAddress: canViewSensitive ? item.ipAddress : null,
+        sourceStatus: item.sourceStatus,
+        objectRole: item.objectRole,
+      }),
+      identity: sanitizePublicObject(structuredClone(
         identityMap.items.find(({ canonicalAssetId: id }) => id === canonicalAssetId) ?? null,
-      ),
-      geometries: (record.geometries ?? [])
-        .filter((geometry) => geometry.assetNodeId === asset.id)
-        .map((geometry) => structuredClone(geometry)),
-      relations: relations.map((relation) => structuredClone(relation)),
+      )),
+      geometries: item.geometries.map((geometry) => sanitizePublicObject(geometry)),
+      geometryReferences: item.geometryReferences.map((geometry) => sanitizePublicObject(geometry)),
+      relations: relations.map((relation) => sanitizePublicObject(relation)),
+      directConnections: sanitizePublicObject(directConnections),
+      connectionAvailabilityReason: publicationProfile === 'operational_topology'
+        ? null
+        : 'topology_not_published',
+      candidateCount: isAdministrator ? item.candidateCount : undefined,
+      provenance: sanitizePublicObject({
+        datasetVersionId: record.datasetVersion.id,
+        versionName: record.datasetVersion.versionName,
+        sourceFeatureId: item.sourceFeatureId,
+        sourceKmlId: item.sourceKmlId,
+        sourceFingerprint: item.sourceFingerprint,
+        sourceFolderPath: item.sourceFolderPath,
+        sourceElementType: item.sourceElementType,
+        layerId: item.layerId,
+        layerName: item.layerName,
+      }),
+      fieldAvailability: {
+        hostname: canViewSensitive
+          ? item.hostname ? 'available' : 'not_available_in_source'
+          : 'not_authorized',
+        ipAddress: canViewSensitive
+          ? item.ipAddress ? 'available' : 'not_available_in_source'
+          : 'not_authorized',
+        location: item.locationText ? 'available' : 'not_available_in_source',
+      },
       topologyReadiness: record.topologyReadiness ?? null,
       topologyIdentity: topology.identity,
       readiness: record.readiness ?? null,
       readinessContract,
+      context: activeContext(record, resolved.pointer, siteId, publicationProfile),
+      capabilities,
+    }
+  }
+
+  async getActiveAssetSearch({
+    datasetId,
+    branchId,
+    query = {},
+    isAdministrator = false,
+    canViewSensitive = false,
+  } = {}) {
+    const resolved = await this.#resolveActive(datasetId, branchId)
+    const record = resolved.record
+    const identityMap = buildAssetIdentityMapFromRecord(record)
+    const topology = normalizeTopologyGraph(record, identityMap)
+    const publicationProfile = activePublicationProfile(record, resolved.pointer)
+    const catalog = buildActiveAssetCatalog({
+      record,
+      identityMap,
+      topologyGraph: topology.graph,
+      publicationProfile,
+    })
+    return queryActiveAssets({
+      catalog,
+      revision: resolved.pointer.revision,
+      query,
+      isAdministrator,
+      canViewSensitive,
+    })
+  }
+
+  async getActiveSites({ datasetId, branchId } = {}) {
+    const resolved = await this.#resolveActive(datasetId, branchId)
+    const record = resolved.record
+    const identityMap = buildAssetIdentityMapFromRecord(record)
+    const topology = normalizeTopologyGraph(record, identityMap)
+    const catalog = buildActiveAssetCatalog({
+      record,
+      identityMap,
+      topologyGraph: topology.graph,
+      publicationProfile: activePublicationProfile(record, resolved.pointer),
+    })
+    return {
+      datasetVersionId: record.datasetVersion.id,
+      activePointerRevision: resolved.pointer.revision,
+      sites: buildActiveSites({
+        catalog,
+        record,
+        siteBoundaries: this.siteBoundaries,
+      }),
+    }
+  }
+
+  async getActiveOverlays({ datasetId, branchId, siteId = null } = {}) {
+    const resolved = await this.#resolveActive(datasetId, branchId)
+    return {
+      datasetVersionId: resolved.record.datasetVersion.id,
+      activePointerRevision: resolved.pointer.revision,
+      overlays: buildActiveOverlayDescriptors({
+        record: resolved.record,
+        datasetVersionId: resolved.record.datasetVersion.id,
+        siteId,
+      }),
+    }
+  }
+
+  async exportActiveDatasetKml({
+    datasetId,
+    branchId,
+    query = {},
+    isAdministrator = false,
+  } = {}) {
+    const resolved = await this.#resolveActive(datasetId, branchId)
+    const record = resolved.record
+    const identityMap = buildAssetIdentityMapFromRecord(record)
+    const topology = normalizeTopologyGraph(record, identityMap)
+    const publicationProfile = activePublicationProfile(record, resolved.pointer)
+    const catalog = buildActiveAssetCatalog({
+      record,
+      identityMap,
+      topologyGraph: topology.graph,
+      publicationProfile,
+    })
+    const result = queryActiveAssets({
+      catalog,
+      revision: resolved.pointer.revision,
+      query: { ...query, limit: Math.max(catalog.length, 1) },
+      isAdministrator,
+      allowLargeLimit: true,
+    })
+    const selectedIds = new Set(result.items.map((item) => item.canonicalAssetId))
+    const items = catalog.filter((item) => selectedIds.has(item.canonicalAssetId))
+    const datasetVersion = {
+      ...record.datasetVersion,
+      publicationProfile,
+    }
+    const generatedAt = this.clock().toISOString()
+    return {
+      content: serializeActiveDatasetKml({
+        datasetVersion,
+        activePointer: resolved.pointer,
+        items,
+        filter: query,
+        generatedAt,
+      }),
+      filename: safeActiveKmlFilename({
+        datasetVersion,
+        siteId: query.siteId ?? null,
+      }),
+      datasetVersionId: record.datasetVersion.id,
+      activePointerRevision: resolved.pointer.revision,
+      generatedAt,
+      totalMatched: result.totalMatched,
     }
   }
 
   async #resolveActive(datasetId, branchId) {
-    const resolved = await this.repository.resolveActiveVersion({
-      datasetId,
-      branchId,
-    })
-    if (!resolved) {
-      throw new AppError('Dataset aktif belum tersedia.', {
-        code: 'active_dataset_not_found',
-        statusCode: 404,
+    try {
+      const resolved = await this.repository.resolveActiveVersion({
+        datasetId,
+        branchId,
       })
+      if (!resolved) {
+        throw new AppError('Dataset aktif belum tersedia.', {
+          code: 'active_dataset_not_found',
+          statusCode: 404,
+        })
+      }
+      return resolved
+    } catch (error) {
+      if (['active_pointer_integrity_error', 'active_version_integrity_error']
+        .includes(error?.code)) {
+        throw new AppError('Pointer dataset aktif tidak konsisten.', {
+          code: 'active_dataset_integrity_error',
+          statusCode: 409,
+          details: error.details,
+        })
+      }
+      throw error
     }
-    return resolved
   }
 
   async activate(datasetVersionId, actorId, {
@@ -424,6 +728,29 @@ export class DatasetVersionLifecycleService {
           highRiskChangeCount: comparison.summary.byRisk?.high ?? 0,
         },
       }).catch(() => null)
+      const topologyPublicationEvent = transaction.activated.topologyRuleSetVersion
+        === TOPOLOGY_RULE_SET_VERSION
+        ? await this.auditLog.record(
+          operation === 'rollback'
+            ? 'topology.v2_rolled_back'
+            : 'topology.v2_published',
+          {
+            actorId,
+            datasetVersionId,
+            branchId: transaction.pointer.branchId,
+            correlationId,
+            outcome: operation === 'rollback' ? 'rolled_back' : 'published',
+            details: {
+              datasetId: transaction.pointer.datasetId,
+              previousVersionId: transaction.pointer.previousVersionId,
+              graphRevision: transaction.activated.topologyGraph?.graphRevision ?? null,
+              activePointerRevision: transaction.pointer.revision,
+              publicationProfile: normalizedProfile,
+              operation,
+            },
+          },
+        ).catch(() => null)
+        : null
       return {
         operation,
         datasetVersion: withoutInternalStorage(transaction.activated.datasetVersion),
@@ -433,6 +760,7 @@ export class DatasetVersionLifecycleService {
         activePointer: transaction.pointer,
         datasetVersionId,
         auditEventId: auditEntry?.id ?? null,
+        topologyAuditEventId: topologyPublicationEvent?.id ?? null,
         publicationProfile: normalizedProfile,
         capabilities: publicationCapabilities(
           transaction.activated,
@@ -656,16 +984,84 @@ export function compareDatasetVersions(candidate, active) {
   }
 }
 
-function toActiveMapDataset(resolved) {
+function toActiveMapDataset(resolved, { siteId = null, siteBoundaries = {} } = {}) {
   const record = resolved.record
   const assetIdentityMap = buildAssetIdentityMapFromRecord(record)
   const resolver = createAssetIdentityResolver(assetIdentityMap)
   const topology = normalizeTopologyGraph(record, assetIdentityMap)
-  const renderableGeometries = (record.geometries ?? []).filter(isRenderableGeometry)
-  const renderableNodeIds = new Set(renderableGeometries.map(({ assetNodeId }) => assetNodeId))
-  const relations = filterResolvedRelations(record, resolver)
   const sourceIconIndex = buildSourceIconIndex(record)
+  const publicationProfile = activePublicationProfile(record, resolved.pointer)
+  const catalog = buildActiveAssetCatalog({
+    record,
+    identityMap: assetIdentityMap,
+    topologyGraph: topology.graph,
+    publicationProfile,
+  })
+  const visibleCatalog = siteId
+    ? catalog.filter((item) => item.siteId === siteId)
+    : catalog
+  const visibleNodeIds = new Set(visibleCatalog.map((item) => item.nodeId))
+  const visibleCanonicalIds = new Set(visibleCatalog.map((item) => item.canonicalAssetId))
+  const renderableGeometries = visibleCatalog
+    .flatMap((item) => item.geometries)
+    .filter(isRenderableGeometry)
+  const visibleGeometries = renderableGeometries.filter((geometry) => (
+    !siteId || visibleNodeIds.has(geometry.assetNodeId)
+  ))
+  const renderableNodeIds = new Set(visibleGeometries.map(({ assetNodeId }) => assetNodeId))
+  const relations = filterResolvedRelations(record, resolver).filter((relation) => (
+    !siteId || (
+      visibleCanonicalIds.has(relation.sourceAssetId)
+      && visibleCanonicalIds.has(relation.targetAssetId)
+    )
+  ))
+  const mapTopologyGraph = siteId
+    ? filterTopologyGraphByCanonicalIds(topology.graph, visibleCanonicalIds)
+    : topology.graph
   const readinessContract = buildReadinessContract(record, topology.graph)
+  const sites = buildActiveSites({ catalog, record, siteBoundaries })
+  const overlays = buildActiveOverlayDescriptors({
+    record,
+    datasetVersionId: record.datasetVersion.id,
+    siteId,
+  })
+  const capabilities = buildActiveCapabilities({
+    publicationProfile,
+    readiness: readinessContract,
+  })
+  const baseAssets = (record.assets ?? []).map((asset) => {
+    const identity = identityForAsset(asset, assetIdentityMap, resolver)
+    const sourceIcon = resolveAssetSourceIcon(asset, sourceIconIndex)
+    const sourceIconUrl = sourceIcon?.resource?.resourceId
+      ? `/api/dataset-versions/${encodeURIComponent(record.datasetVersion.id)}`
+        + `/source-resources/${encodeURIComponent(sourceIcon.resource.resourceId)}`
+      : null
+    return {
+      id: asset.id,
+      datasetVersionId: asset.datasetVersionId,
+      layerId: asset.layerId,
+      assetId: asset.assetId,
+      canonicalAssetId: identity?.canonicalAssetId ?? asset.canonicalAssetId ?? asset.assetId,
+      stableAssetId: identity?.stableAssetId ?? asset.stableAssetId ?? null,
+      onboardingIdentity: identity?.onboardingId ?? asset.onboardingIdentity ?? null,
+      legacyAssetId: identity?.legacyId ?? asset.legacyAssetId ?? asset.assetId,
+      identityStatus: identity?.identityStatus ?? asset.identityStatus ?? 'legacy',
+      identityAliases: structuredClone(identity?.aliases ?? asset.identityAliases ?? {}),
+      sourceFeatureId: asset.sourceFeatureId ?? asset.properties?.sourceFeatureId,
+      sourceStyleId: sourceIcon?.styleId ?? null,
+      sourceIconHref: sourceIcon?.href ?? null,
+      sourceIconResourceId: sourceIcon?.resource?.resourceId ?? null,
+      sourceIconUrl,
+      name: asset.name,
+      category: asset.category,
+      type: asset.type,
+      branchId: asset.branchId,
+      location: asset.location,
+      status: readAssetProperty(asset, 'status') ?? null,
+      visibility: readAssetProperty(asset, 'visibility') ?? null,
+      hasRenderableGeometry: renderableNodeIds.has(asset.id),
+    }
+  })
   return {
     mapView: true,
     activePointer: resolved.pointer,
@@ -680,40 +1076,10 @@ function toActiveMapDataset(resolved) {
       displayOrder: layer.displayOrder,
       defaultVisible: layer.defaultVisible,
     })),
-    assets: (record.assets ?? []).map((asset) => {
-      const identity = identityForAsset(asset, assetIdentityMap, resolver)
-      const sourceIcon = resolveAssetSourceIcon(asset, sourceIconIndex)
-      const sourceIconUrl = sourceIcon?.resource?.resourceId
-        ? `/api/dataset-versions/${encodeURIComponent(record.datasetVersion.id)}`
-          + `/source-resources/${encodeURIComponent(sourceIcon.resource.resourceId)}`
-        : null
-      return {
-        id: asset.id,
-        datasetVersionId: asset.datasetVersionId,
-        layerId: asset.layerId,
-        assetId: asset.assetId,
-        canonicalAssetId: identity?.canonicalAssetId ?? asset.canonicalAssetId ?? asset.assetId,
-        stableAssetId: identity?.stableAssetId ?? asset.stableAssetId ?? null,
-        onboardingIdentity: identity?.onboardingId ?? asset.onboardingIdentity ?? null,
-        legacyAssetId: identity?.legacyId ?? asset.legacyAssetId ?? asset.assetId,
-        identityStatus: identity?.identityStatus ?? asset.identityStatus ?? 'legacy',
-        identityAliases: structuredClone(identity?.aliases ?? asset.identityAliases ?? {}),
-        sourceFeatureId: asset.sourceFeatureId ?? asset.properties?.sourceFeatureId,
-        sourceStyleId: sourceIcon?.styleId ?? null,
-        sourceIconHref: sourceIcon?.href ?? null,
-        sourceIconResourceId: sourceIcon?.resource?.resourceId ?? null,
-        sourceIconUrl,
-        name: asset.name,
-        category: asset.category,
-        type: asset.type,
-        branchId: asset.branchId,
-        location: asset.location,
-        status: readAssetProperty(asset, 'status') ?? null,
-        visibility: readAssetProperty(asset, 'visibility') ?? null,
-        hasRenderableGeometry: renderableNodeIds.has(asset.id),
-      }
-    }),
-    geometries: renderableGeometries.map((geometry) => ({
+    assets: baseAssets.filter((asset) => (
+      !siteId || visibleCanonicalIds.has(asset.canonicalAssetId) || visibleNodeIds.has(asset.id)
+    )),
+    geometries: visibleGeometries.map((geometry) => ({
       id: geometry.id,
       assetNodeId: geometry.assetNodeId,
       sourceGeometryId: geometry.sourceGeometryId,
@@ -742,10 +1108,10 @@ function toActiveMapDataset(resolved) {
       distanceMeters: relation.distanceMeters,
       metadata: relation.metadata ? structuredClone(relation.metadata) : undefined,
     })),
-    topologyGraph: topology.graph,
+    topologyGraph: mapTopologyGraph,
     topologySummary: normalizeTopologySummary(
       record.topologySummary,
-      topology.graph,
+      mapTopologyGraph,
       record.confirmedRelations,
     ),
     topologyReadiness: record.topologyReadiness ?? null,
@@ -764,17 +1130,32 @@ function toActiveMapDataset(resolved) {
     topologyReady: readinessContract.topologyReady === 'ready',
     publicationStatus: readinessContract.publicationStatus,
     renderingSummary: {
-      totalAssets: (record.assets ?? []).length,
-      assetsWithoutGeometry: (record.assets ?? []).length - renderableNodeIds.size,
-      renderedGeometries: renderableGeometries.length,
-      invalidGeometriesOmitted: (record.geometries ?? []).length - renderableGeometries.length,
+      totalAssets: visibleCatalog.length,
+      assetsWithoutGeometry: visibleCatalog.length - renderableNodeIds.size,
+      renderedGeometries: visibleGeometries.length,
+      invalidGeometriesOmitted: visibleCatalog.reduce(
+        (count, item) => count + item.geometries.filter((geometry) => !geometry.valid).length,
+        0,
+      ),
       resolvedRelations: relations.length,
       unresolvedRelationsOmitted: (record.relations ?? []).length - relations.length,
-      topologyNodes: topology.graph.nodes.length,
-      topologyEdges: topology.graph.edges.length,
+      topologyNodes: mapTopologyGraph.nodes.length,
+      topologyEdges: mapTopologyGraph.edges.length,
       topologyIdentityUnresolved: topology.identity.unresolvedNodeCount
         + topology.identity.unresolvedEdgeCount,
     },
+    context: activeContext(record, resolved.pointer, siteId, publicationProfile),
+    publicationProfile,
+    sites,
+    overlays,
+    summary: buildActiveSummary({
+      catalog: visibleCatalog,
+      sites: siteId ? sites.filter((site) => site.siteId === siteId) : sites,
+      record,
+      topologyGraph: mapTopologyGraph,
+      overlays,
+    }),
+    capabilities,
   }
 }
 
@@ -1181,10 +1562,81 @@ function publicDatasetVersion(datasetVersion, pointer) {
     versionName: datasetVersion.versionName,
     sourceFilename: datasetVersion.sourceFilename,
     activatedAt: datasetVersion.activatedAt ?? pointer.activatedAt,
+    publishedAt: datasetVersion.publishedAt
+      ?? datasetVersion.activatedAt
+      ?? pointer.activatedAt
+      ?? null,
+    publicationProfile: datasetVersion.publicationProfile
+      ?? pointer.publicationProfile
+      ?? 'map_only',
     status: 'active',
     publicationStatus: 'published',
     activePointerRevision: pointer.revision,
   }
+}
+
+function activePublicationProfile(record, pointer) {
+  return record.datasetVersion?.publicationProfile
+    ?? pointer?.publicationProfile
+    ?? 'map_only'
+}
+
+function activeContext(record, pointer, siteId, publicationProfile) {
+  return {
+    datasetId: record.datasetVersion?.datasetId ?? pointer?.datasetId ?? null,
+    datasetVersionId: record.datasetVersion?.id ?? pointer?.datasetVersionId ?? null,
+    branchId: record.datasetVersion?.branchId ?? pointer?.branchId ?? null,
+    siteId: siteId ?? null,
+    publicationProfile,
+    activePointerRevision: pointer?.revision ?? null,
+  }
+}
+
+function filterTopologyGraphByCanonicalIds(graph, allowedIds) {
+  const nodes = (graph.nodes ?? []).filter((node) => allowedIds.has(
+    node.canonicalAssetId ?? node.assetId ?? node.id,
+  ))
+  const edges = (graph.edges ?? []).filter((edge) => (
+    allowedIds.has(edge.sourceAssetId ?? edge.sourceNodeId)
+      && allowedIds.has(edge.targetAssetId ?? edge.targetNodeId)
+  ))
+  const degreeByNode = Object.fromEntries(nodes.map(({ id, canonicalAssetId, assetId }) => [
+    canonicalAssetId ?? assetId ?? id,
+    0,
+  ]))
+  edges.forEach((edge) => {
+    const source = edge.sourceAssetId ?? edge.sourceNodeId
+    const target = edge.targetAssetId ?? edge.targetNodeId
+    if (source in degreeByNode) degreeByNode[source] += 1
+    if (target in degreeByNode) degreeByNode[target] += 1
+  })
+  return {
+    ...structuredClone(graph),
+    nodes,
+    edges,
+    components: (graph.components ?? []).map((component) => ({
+      ...structuredClone(component),
+      nodeIds: (component.nodeIds ?? []).filter((id) => allowedIds.has(id)),
+      edgeIds: (component.edgeIds ?? []).filter((id) => edges.some((edge) => edge.id === id)),
+    })).filter((component) => component.nodeIds.length),
+    degreeByNode,
+    isolatedNodeIds: nodes
+      .map((node) => node.canonicalAssetId ?? node.assetId ?? node.id)
+      .filter((id) => degreeByNode[id] === 0),
+  }
+}
+
+function sanitizePublicObject(value) {
+  if (Array.isArray(value)) return value.map(sanitizePublicObject)
+  if (!value || typeof value !== 'object') {
+    return typeof value === 'string'
+      ? value.replace(/[<>]/g, '').normalize('NFKC')
+      : value
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [
+    key,
+    sanitizePublicObject(child),
+  ]))
 }
 
 function withoutInternalStorage(datasetVersion) {
@@ -1314,9 +1766,9 @@ function stableAssetIdForAsset(asset = {}) {
   return null
 }
 
-function normalizeIdentityAssignments(assignments) {
-  if (!Array.isArray(assignments) || assignments.length === 0 || assignments.length > 500) {
-    throw new AppError('Identity assignment harus berisi 1 sampai 500 item.', {
+function normalizeIdentityAssignments(assignments, { maxItems = 500 } = {}) {
+  if (!Array.isArray(assignments) || assignments.length === 0 || assignments.length > maxItems) {
+    throw new AppError(`Identity assignment harus berisi 1 sampai ${maxItems} item.`, {
       code: 'invalid_identity_assignment_batch',
       statusCode: 400,
     })
@@ -1386,13 +1838,20 @@ function validateIdentityAssignmentBatch(record, assignments) {
     seenFeatures.add(assignment.sourceFeatureId)
     if (assignment.action === 'assign') {
       if (knownAssetIds.has(assignment.assetId)) {
-        const previous = (record.assetIdentityRegistry ?? record.identityRegistry ?? [])
-          .find(({ assetId, status }) => assetId === assignment.assetId && status === 'active')
         const sourceFeature = (record.sourceFeatures ?? []).find(({ sourceFeatureId }) => (
           sourceFeatureId === assignment.sourceFeatureId
         ))
-        const matchValue = sourceFeature?.sourceKmlId ?? assignment.sourceFeatureId
-        if (previous?.sourceMatchValue !== matchValue) {
+        const sourceMatchValues = identitySourceMatches(
+          sourceFeature,
+          assignment.sourceFeatureId,
+        ).map(({ sourceMatchValue }) => sourceMatchValue)
+        const previous = (record.assetIdentityRegistry ?? record.identityRegistry ?? [])
+          .find(({ assetId, status, sourceMatchValue }) => (
+            assetId === assignment.assetId
+              && status === 'active'
+              && sourceMatchValues.includes(sourceMatchValue)
+          ))
+        if (!previous) {
           throw new AppError('Asset ID sudah dipakai oleh source feature lain.', {
             code: 'identity_asset_id_conflict',
             statusCode: 409,
@@ -1438,35 +1897,41 @@ function applyIdentityAssignmentBatch({
   assignments.forEach((assignment) => {
     const feature = featureById.get(assignment.sourceFeatureId)
     const object = objectByFeature.get(assignment.sourceFeatureId)
-    const sourceMatchType = feature?.sourceKmlId ? 'source_kml_id' : 'source_feature_id'
-    const sourceMatchValue = feature?.sourceKmlId ?? assignment.sourceFeatureId
-    const key = identityRegistryKey(sourceMatchType, sourceMatchValue)
-    const existing = registryBySource.get(key)
-    if (existing && assignment.action !== 'reject_match') {
-      existing.status = 'superseded'
-      existing.validToDatasetVersionId = record.datasetVersion.id
-    }
-    if (assignment.action === 'assign') {
-      const entry = {
-        registryId: `identity-registry:${randomUUID()}`,
-        datasetId: record.datasetVersion.datasetId,
-        branchId: record.datasetVersion.branchId,
-        assetId: assignment.assetId,
-        sourceMatchType,
-        sourceMatchValue,
-        validFromDatasetVersionId: record.datasetVersion.id,
-        validToDatasetVersionId: null,
-        status: 'active',
-        approvedBy: actorId,
-        approvedAt,
-        evidence: {
-          reason: assignment.reason,
-          evidenceRefs: assignment.evidenceRefs,
-        },
-        auditEventId,
+    const sourceMatches = identitySourceMatches(feature, assignment.sourceFeatureId)
+    sourceMatches.forEach(({ sourceMatchType, sourceMatchValue }) => {
+      const key = identityRegistryKey(sourceMatchType, sourceMatchValue)
+      const existing = registryBySource.get(key)
+      if (existing && assignment.action !== 'reject_match') {
+        existing.status = 'superseded'
+        existing.validToDatasetVersionId = record.datasetVersion.id
       }
-      registryById.set(entry.registryId, entry)
-      registryBySource.set(key, entry)
+      if (assignment.action === 'assign') {
+        const entry = {
+          registryId: `identity-registry:${randomUUID()}`,
+          datasetId: record.datasetVersion.datasetId,
+          branchId: record.datasetVersion.branchId,
+          assetId: assignment.assetId,
+          sourceMatchType,
+          sourceMatchValue,
+          validFromDatasetVersionId: record.datasetVersion.id,
+          validToDatasetVersionId: null,
+          status: 'active',
+          approvedBy: actorId,
+          approvedAt,
+          evidence: {
+            reason: assignment.reason,
+            evidenceRefs: assignment.evidenceRefs,
+            sourceFeatureId: assignment.sourceFeatureId,
+          },
+          auditEventId,
+        }
+        registryById.set(entry.registryId, entry)
+        registryBySource.set(key, entry)
+      } else if (assignment.action === 'mark_non_asset') {
+        registryBySource.delete(key)
+      }
+    })
+    if (assignment.action === 'assign') {
       if (object) {
         object.assetId = null
         object.identityResolutionStatus = 'stable_registry'
@@ -1599,8 +2064,40 @@ function affectedAssetIds(record, assignments) {
   )).filter(Boolean)
 }
 
+function identitySourceMatches(feature, sourceFeatureId) {
+  const sourceKmlId = String(feature?.sourceKmlId ?? '').trim()
+  const sourceIdentityKey = stableSourceIdentityKey(feature)
+  const primary = sourceKmlId
+    ? { sourceMatchType: 'source_kml_id', sourceMatchValue: sourceKmlId }
+    : sourceIdentityKey
+      ? { sourceMatchType: 'source_feature_key', sourceMatchValue: sourceIdentityKey }
+      : { sourceMatchType: 'source_feature_id', sourceMatchValue: sourceFeatureId }
+  if (primary.sourceMatchType === 'source_feature_id') return [primary]
+  return [
+    primary,
+    { sourceMatchType: 'source_feature_id', sourceMatchValue: sourceFeatureId },
+  ]
+}
+
+function stableSourceIdentityKey(feature) {
+  const explicit = String(feature?.sourceIdentityKey ?? '').trim()
+  if (explicit) return explicit
+  const sourceName = String(feature?.sourceName ?? '').trim()
+  if (!sourceName) return null
+  return [
+    String(feature?.sourceFolderPath ?? '/').trim().toLowerCase(),
+    sourceName.toLowerCase(),
+    String(feature?.sourceElementType ?? 'Placemark').trim().toLowerCase(),
+  ].join('|')
+}
+
 function identityRegistryKey(type, value) {
   return `${type ?? ''}:${value ?? ''}`
+}
+
+function normalizeRecordRevision(value) {
+  const revision = Number(value)
+  return Number.isInteger(revision) && revision >= 0 ? revision : 0
 }
 
 function normalizeEvidenceRefs(value) {

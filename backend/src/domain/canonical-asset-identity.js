@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto'
 
 export const CANONICAL_ASSET_ID_VERSION = 'canonical-asset-identity/1.0.0'
+export const AUTOMATIC_IDENTITY_ACTOR = 'system:auto-identity'
+
+const AUTOMATIC_IDENTITY_ROLES = new Set(['device_node', 'cable_path'])
 
 /**
  * Builds the versioned identity map shared by the importer and topology
@@ -36,7 +39,7 @@ export function buildCanonicalAssetIdentityMap({
   const items = records.map(({ object, feature }) => {
     const sourceFeatureId = object.sourceFeatureId
     const nonAsset = object.identityResolutionStatus === 'not_applicable'
-    const explicitAssetId = readString(object.assetId)
+    const explicitAssetId = businessAssetId(object.assetId)
     const registryMatch = nonAsset || explicitAssetId
       ? null
       : registryMatchFor({ feature, sourceFeatureId, registryMatches })
@@ -113,6 +116,315 @@ function scopedSourceKmlId(feature) {
   return feature.sourceDocumentPath
     ? `${feature.sourceDocumentPath}#${feature.sourceKmlId}`
     : feature.sourceKmlId
+}
+
+/**
+ * Proposes internal stable IDs only when the source identity is unique and
+ * deterministic inside the current version. Official IDs and ambiguous
+ * mappings remain untouched for administrator review.
+ */
+export function hydrateIdentityRegistrySourceAliases({
+  datasetVersion,
+  sourceFeatures = [],
+  classifiedObjects = [],
+  identityRegistry = [],
+  approvedAt = null,
+} = {}) {
+  const normalizedRegistry = normalizeIdentityRegistry(identityRegistry, datasetVersion)
+  const activeRegistry = normalizedRegistry.filter(({ status }) => status === 'active')
+  const featureById = new Map(
+    sourceFeatures
+      .filter((feature) => feature?.sourceFeatureId)
+      .map((feature) => [feature.sourceFeatureId, feature]),
+  )
+  const objectByFeatureId = new Map(
+    classifiedObjects
+      .filter((object) => object?.sourceFeatureId)
+      .map((object) => [object.sourceFeatureId, object]),
+  )
+  const matchGroups = new Map()
+  sourceFeatures.forEach((feature) => {
+    const match = automaticIdentityMatch(feature)
+    if (!match) return
+    const key = identityRegistryKey(match.sourceMatchType, match.sourceMatchValue)
+    const group = matchGroups.get(key) ?? []
+    group.push(feature.sourceFeatureId)
+    matchGroups.set(key, group)
+  })
+  const activeMatchesByKey = new Map(
+    activeRegistry.map((entry) => [
+      identityRegistryKey(entry.sourceMatchType, entry.sourceMatchValue),
+      entry,
+    ]),
+  )
+  const addedEntries = []
+  const assignments = []
+  const skipped = []
+  activeRegistry
+    .filter(({ sourceMatchType }) => sourceMatchType === 'source_feature_id')
+    .forEach((entry) => {
+      const feature = featureById.get(entry.sourceMatchValue)
+      const object = objectByFeatureId.get(entry.sourceMatchValue)
+      if (!feature || !object || !AUTOMATIC_IDENTITY_ROLES.has(object.objectRole)) return
+      const match = automaticIdentityMatch(feature)
+      if (!match) return
+      const key = identityRegistryKey(match.sourceMatchType, match.sourceMatchValue)
+      const group = matchGroups.get(key) ?? []
+      if (group.length !== 1) {
+        skipped.push({
+          sourceFeatureId: entry.sourceMatchValue,
+          reason: 'ambiguous_source_key',
+        })
+        return
+      }
+      const objectAssetId = businessAssetId(object.stableAssetId, object.assetId)
+      if (objectAssetId && objectAssetId !== entry.assetId) {
+        skipped.push({
+          sourceFeatureId: entry.sourceMatchValue,
+          reason: 'identity_registry_alias_conflict',
+        })
+        return
+      }
+      const existing = activeMatchesByKey.get(key)
+      if (existing) {
+        if (existing.assetId !== entry.assetId) {
+          skipped.push({
+            sourceFeatureId: entry.sourceMatchValue,
+            reason: 'identity_registry_alias_conflict',
+          })
+        }
+        return
+      }
+      const identityHash = identityHashFor(datasetVersion, match)
+      const reason = 'Identity registry source key dilengkapi otomatis dari mapping source_feature_id yang sudah stabil.'
+      const evidence = {
+        assignmentMode: 'automatic_identity_alias_backfill',
+        sourceFeatureId: entry.sourceMatchValue,
+        sourceFeatureKey: feature.sourceFeatureKey ?? null,
+        sourceKmlId: feature.sourceKmlId ?? null,
+        reason,
+      }
+      const aliasEntry = {
+        ...automaticRegistryEntry({
+          datasetVersion,
+          assetId: entry.assetId,
+          sourceMatchType: match.sourceMatchType,
+          sourceMatchValue: match.sourceMatchValue,
+          identityHash,
+          approvedAt,
+          evidence,
+          suffix: 'alias',
+        }),
+        datasetId: entry.datasetId ?? datasetVersion?.datasetId ?? null,
+        branchId: entry.branchId ?? datasetVersion?.branchId ?? null,
+        validFromDatasetVersionId: entry.validFromDatasetVersionId
+          ?? datasetVersion?.id
+          ?? null,
+        approvedBy: entry.approvedBy ?? AUTOMATIC_IDENTITY_ACTOR,
+        approvedAt: entry.approvedAt ?? approvedAt ?? datasetVersion?.importedAt ?? null,
+      }
+      addedEntries.push(aliasEntry)
+      assignments.push({
+        sourceFeatureId: entry.sourceMatchValue,
+        action: 'assign',
+        assetId: entry.assetId,
+        reason,
+        evidenceRefs: [
+          `identity-source:${match.sourceMatchType}:${match.sourceMatchValue}`,
+          `identity-source:source_feature_id:${entry.sourceMatchValue}`,
+        ],
+      })
+      activeMatchesByKey.set(key, aliasEntry)
+    })
+  return {
+    identityRegistry: [...normalizedRegistry, ...addedEntries],
+    addedEntries,
+    assignments,
+    skipped,
+  }
+}
+
+export function createAutomaticIdentityRegistry({
+  datasetVersion,
+  sourceFeatures = [],
+  classifiedObjects = [],
+  identityRegistry = [],
+  approvedAt = null,
+} = {}) {
+  const hydrated = hydrateIdentityRegistrySourceAliases({
+    datasetVersion,
+    sourceFeatures,
+    classifiedObjects,
+    identityRegistry,
+    approvedAt,
+  })
+  const normalizedRegistry = hydrated.identityRegistry
+  const activeRegistry = normalizedRegistry.filter(({ status }) => status === 'active')
+  const featureById = new Map(
+    sourceFeatures
+      .filter((feature) => feature?.sourceFeatureId)
+      .map((feature) => [feature.sourceFeatureId, feature]),
+  )
+  const records = classifiedObjects
+    .filter((object) => object?.sourceFeatureId)
+    .map((object) => ({
+      object,
+      feature: featureById.get(object.sourceFeatureId),
+    }))
+  const matchGroups = new Map()
+  records.forEach(({ feature, object }) => {
+    const match = automaticIdentityMatch(feature, object)
+    if (!match) return
+    const key = identityRegistryKey(match.sourceMatchType, match.sourceMatchValue)
+    const group = matchGroups.get(key) ?? []
+    group.push({ feature, object, match })
+    matchGroups.set(key, group)
+  })
+
+  const activeMatchesByKey = new Map()
+  activeRegistry.forEach((entry) => {
+    activeMatchesByKey.set(
+      identityRegistryKey(entry.sourceMatchType, entry.sourceMatchValue),
+      entry,
+    )
+  })
+  const usedAssetIds = new Set([
+    ...activeRegistry.map(({ assetId }) => assetId),
+    ...records.map(({ object }) => businessAssetId(object.stableAssetId, object.assetId)).filter(Boolean),
+  ])
+  const generatedEntries = []
+  const assignments = []
+  const linkedEntries = []
+  const linkedAssignments = []
+  const backfilledEntries = hydrated.addedEntries
+  const backfillAssignments = hydrated.assignments
+  const skipped = [...hydrated.skipped]
+  records.forEach(({ feature, object }) => {
+    if (!AUTOMATIC_IDENTITY_ROLES.has(object.objectRole)
+      || object.sourceStatus === 'retired'
+      || object.identityResolutionStatus === 'not_applicable'
+      || businessAssetId(object.stableAssetId, object.assetId)
+      || ['stable', 'stable_explicit', 'stable_registry'].includes(
+        String(object.identityStatus ?? object.identityResolutionStatus ?? '').toLowerCase(),
+      )) {
+      return
+    }
+    if (object.identityResolutionStatus === 'conflict') {
+      skipped.push({ sourceFeatureId: object.sourceFeatureId, reason: 'identity_conflict' })
+      return
+    }
+    const match = automaticIdentityMatch(feature, object)
+    if (!match) {
+      skipped.push({ sourceFeatureId: object.sourceFeatureId, reason: 'stable_source_key_missing' })
+      return
+    }
+    const key = identityRegistryKey(match.sourceMatchType, match.sourceMatchValue)
+    const existing = activeMatchesByKey.get(key)
+    if (existing) {
+      const featureKey = identityRegistryKey('source_feature_id', object.sourceFeatureId)
+      const existingFeatureMatch = activeMatchesByKey.get(featureKey)
+      if (!existingFeatureMatch) {
+        const identityHash = identityHashFor(datasetVersion, match)
+        const reason = 'Source feature otomatis ditautkan ke identity internal yang sudah terdaftar.'
+        const evidence = {
+          assignmentMode: 'automatic_registry_match',
+          sourceFeatureId: object.sourceFeatureId,
+          sourceFeatureKey: feature?.sourceFeatureKey ?? null,
+          sourceKmlId: feature?.sourceKmlId ?? null,
+          reason,
+        }
+        const linkedEntry = automaticRegistryEntry({
+          datasetVersion,
+          assetId: existing.assetId,
+          sourceMatchType: 'source_feature_id',
+          sourceMatchValue: object.sourceFeatureId,
+          identityHash,
+          approvedAt,
+          evidence,
+          suffix: 'feature',
+        })
+        linkedEntries.push(linkedEntry)
+        linkedAssignments.push({
+          sourceFeatureId: object.sourceFeatureId,
+          action: 'assign',
+          assetId: existing.assetId,
+          reason,
+          evidenceRefs: [
+            `identity-source:${match.sourceMatchType}:${match.sourceMatchValue}`,
+          ],
+        })
+        activeMatchesByKey.set(featureKey, linkedEntry)
+      } else if (existingFeatureMatch.assetId !== existing.assetId) {
+        skipped.push({
+          sourceFeatureId: object.sourceFeatureId,
+          reason: 'identity_registry_alias_conflict',
+        })
+      }
+      return
+    }
+    const group = matchGroups.get(key) ?? []
+    if (group.length !== 1) {
+      skipped.push({ sourceFeatureId: object.sourceFeatureId, reason: 'ambiguous_source_key' })
+      return
+    }
+    const assetId = automaticAssetId(datasetVersion, match)
+    if (usedAssetIds.has(assetId)) {
+      skipped.push({ sourceFeatureId: object.sourceFeatureId, reason: 'generated_asset_id_conflict' })
+      return
+    }
+    const identityHash = identityHashFor(datasetVersion, match)
+    const reason = 'Identity internal dibuat otomatis karena source identity unik dan tidak konflik.'
+    const evidence = {
+      assignmentMode: 'automatic_unique_onboarding',
+      sourceFeatureId: object.sourceFeatureId,
+      sourceFeatureKey: feature?.sourceFeatureKey ?? null,
+      sourceKmlId: feature?.sourceKmlId ?? null,
+      reason,
+    }
+    generatedEntries.push(
+      automaticRegistryEntry({
+        datasetVersion,
+        assetId,
+        sourceMatchType: match.sourceMatchType,
+        sourceMatchValue: match.sourceMatchValue,
+        identityHash,
+        approvedAt,
+        evidence,
+      }),
+      automaticRegistryEntry({
+        datasetVersion,
+        assetId,
+        sourceMatchType: 'source_feature_id',
+        sourceMatchValue: object.sourceFeatureId,
+        identityHash,
+        approvedAt,
+        evidence,
+        suffix: 'feature',
+      }),
+    )
+    activeMatchesByKey.set(key, generatedEntries.at(-2))
+    assignments.push({
+      sourceFeatureId: object.sourceFeatureId,
+      action: 'assign',
+      assetId,
+      reason,
+      evidenceRefs: [
+        `identity-source:${match.sourceMatchType}:${match.sourceMatchValue}`,
+      ],
+    })
+    usedAssetIds.add(assetId)
+  })
+
+  return {
+    identityRegistry: [...normalizedRegistry, ...linkedEntries, ...generatedEntries],
+    generatedEntries,
+    assignments,
+    linkedEntries,
+    linkedAssignments,
+    backfilledEntries,
+    backfillAssignments,
+    skipped,
+  }
 }
 
 /**
@@ -350,6 +662,16 @@ function readString(...values) {
   return values.find((value) => typeof value === 'string' && value.trim())?.trim()
 }
 
+function businessAssetId(...values) {
+  return values
+    .map((value) => readString(value))
+    .find((value) => value && !isOnboardingIdentity(value)) ?? null
+}
+
+function isOnboardingIdentity(value) {
+  return String(value ?? '').startsWith('onboarding-identity:')
+}
+
 function buildRegistryMatches(identityRegistry, datasetVersion) {
   return normalizeIdentityRegistry(identityRegistry, datasetVersion)
     .filter((entry) => entry.status === 'active')
@@ -361,8 +683,10 @@ function registryMatchFor({ feature, sourceFeatureId, registryMatches }) {
       ? entry.sourceMatchValue && entry.sourceMatchValue === feature?.sourceKmlId
       : entry.sourceMatchType === 'source_feature_id'
         ? entry.sourceMatchValue === sourceFeatureId
-        : entry.sourceMatchType === 'source_feature_key'
-          ? entry.sourceMatchValue === feature?.sourceFeatureKey
+      : entry.sourceMatchType === 'source_feature_key'
+          ? entry.sourceMatchValue === (
+            feature?.sourceIdentityKey ?? feature?.sourceFeatureKey
+          )
           : false
   ))
   if (!matches.length) return null
@@ -375,6 +699,85 @@ function registryMatchFor({ feature, sourceFeatureId, registryMatches }) {
     }
   }
   return matches[0]
+}
+
+function automaticIdentityMatch(feature) {
+  const sourceKmlId = readString(feature?.sourceKmlId)
+  if (sourceKmlId) {
+    return {
+      sourceMatchType: 'source_kml_id',
+      sourceMatchValue: sourceKmlId,
+    }
+  }
+  const sourceIdentityKey = stableSourceIdentityKeyFor(feature)
+  if (sourceIdentityKey) {
+    return {
+      sourceMatchType: 'source_feature_key',
+      sourceMatchValue: sourceIdentityKey,
+    }
+  }
+  // Geometry/source fingerprints are evidence only. They can change when a
+  // source file is edited and must never become an automatic stable identity.
+  return null
+}
+
+function stableSourceIdentityKeyFor(feature) {
+  const explicit = readString(feature?.sourceIdentityKey)
+  if (explicit) return explicit
+  const sourceName = readString(feature?.sourceName)
+  if (!sourceName) return null
+  return [
+    String(feature?.sourceFolderPath ?? '/').trim().toLowerCase(),
+    sourceName.toLowerCase(),
+    String(feature?.sourceElementType ?? 'Placemark').trim().toLowerCase(),
+  ].join('|')
+}
+
+function identityHashFor(datasetVersion, match) {
+  return createHash('sha256')
+    .update(stableStringify([
+      datasetVersion?.datasetId ?? null,
+      datasetVersion?.branchId ?? null,
+      match.sourceMatchType,
+      match.sourceMatchValue,
+    ]))
+    .digest('hex')
+    .slice(0, 24)
+}
+
+function automaticAssetId(datasetVersion, match) {
+  return `AUTO-${identityHashFor(datasetVersion, match).toUpperCase()}`
+}
+
+function automaticRegistryEntry({
+  datasetVersion,
+  assetId,
+  sourceMatchType,
+  sourceMatchValue,
+  identityHash,
+  approvedAt,
+  evidence,
+  suffix = 'source',
+}) {
+  return {
+    registryId: `identity-registry:auto:${identityHash}:${suffix}`,
+    datasetId: datasetVersion?.datasetId ?? null,
+    branchId: datasetVersion?.branchId ?? null,
+    assetId,
+    sourceMatchType,
+    sourceMatchValue,
+    validFromDatasetVersionId: datasetVersion?.id ?? null,
+    validToDatasetVersionId: null,
+    status: 'active',
+    approvedBy: AUTOMATIC_IDENTITY_ACTOR,
+    approvedAt: approvedAt ?? datasetVersion?.importedAt ?? null,
+    evidence,
+    auditEventId: `identity-auto:${identityHash}`,
+  }
+}
+
+function identityRegistryKey(type, value) {
+  return `${type ?? ''}:${value ?? ''}`
 }
 
 function normalizeIdentityRegistry(entries, datasetVersion = {}) {

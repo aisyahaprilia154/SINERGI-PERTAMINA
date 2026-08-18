@@ -69,6 +69,23 @@ export function requireDatasetSourceDownload(user, datasetVersion) {
   return user
 }
 
+export function requireBranchAccess(user, { datasetId, branchId } = {}) {
+  if (user.role.toLowerCase() === 'administrator') return user
+  const hasExplicitScope = user.branchIds.length > 0 || user.datasetIds.length > 0
+  if (!hasExplicitScope) return user
+  const allowed = user.branchIds.includes('*')
+    || user.branchIds.includes(branchId)
+    || user.datasetIds.includes('*')
+    || user.datasetIds.includes(datasetId)
+  if (!allowed) {
+    throw new AppError('Anda tidak mempunyai akses ke branch dataset aktif ini.', {
+      code: 'forbidden_branch',
+      statusCode: 403,
+    })
+  }
+  return user
+}
+
 function normalizeStringList(value) {
   return Array.isArray(value)
     ? value.map((item) => String(item).trim()).filter(Boolean)
