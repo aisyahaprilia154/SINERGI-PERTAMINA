@@ -31,6 +31,9 @@ export function createBaselineTopologyBundle() {
       relationType: 'connected-to',
       direction: 'undirected',
     }],
+    topologyPolicy: {
+      requireJbTermination: false,
+    },
     semanticRuleSetVersion: 'semantic-classifier/1.0.0',
     topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
   }
@@ -60,6 +63,9 @@ export function createBenchmarkTopologyBundle(pathCount) {
     classifiedPaths: paths.map(({ object }) => object),
     geometries: paths.map(({ geometry }) => geometry),
     explicitRelations: [],
+    topologyPolicy: {
+      requireJbTermination: false,
+    },
     semanticRuleSetVersion: 'semantic-classifier/1.0.0',
     topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
   }
@@ -79,6 +85,12 @@ function node(assetId, networkFamily, assetType, coordinates) {
       category: assetType,
       classificationStatus: 'classified',
       classificationEvidence: evidence(assetType),
+      interfaceDefinitions: [{
+        interfaceType: 'lan_port',
+        ordinal: 1,
+        serviceDomain: 'data',
+        mediaType: 'copper_lan',
+      }],
       geometryIds: [geometryId],
     },
     geometry: {

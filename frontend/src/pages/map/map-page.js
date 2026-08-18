@@ -7,6 +7,7 @@ import {
   loadActiveAssetDetail,
   loadActiveDataset,
   loadAllTopologyCandidates,
+  loadActiveOverlays,
   loadDatasetProjection,
   loadTopologyProjection,
   reviewTopologyCandidate,
@@ -78,12 +79,21 @@ export async function renderMapPage(container) {
     return
   }
 
-  const overlayResult = await Promise.allSettled([
-    loadDatasetProjection({
-      datasetVersionId: mapData.activeContext.datasetVersionId,
-      projection: 'overlays',
-    }),
-  ])
+  const overlayResult = Array.isArray(mapData.overlays)
+    ? [{
+      status: 'fulfilled',
+      value: { overlays: mapData.overlays },
+    }]
+    : await Promise.allSettled([
+      loadActiveOverlays({
+        datasetId: mapData.activeContext.datasetId,
+        branchId: mapData.activeContext.branchId,
+        siteId: mapData.activeContext.siteId,
+      }).catch(() => loadDatasetProjection({
+        datasetVersionId: mapData.activeContext.datasetVersionId,
+        projection: 'overlays',
+      })),
+    ])
 
   const {
     activeContext,
@@ -141,7 +151,7 @@ export async function renderMapPage(container) {
   const hasRenderableData = geometries.length > 0
   let diagramCandidateProjectionPromise = null
   const resolvedOverlays = (overlayResult[0].status === 'fulfilled'
-    ? overlayResult[0].value.items ?? []
+    ? overlayResult[0].value.overlays ?? overlayResult[0].value.items ?? []
     : [])
     .filter((overlay) => (
       overlay.valid
@@ -157,6 +167,10 @@ export async function renderMapPage(container) {
   const validIds = {
     networkIds: networks.map((network) => network.id),
     assetIds: assets.map((asset) => asset.id),
+    assetAliases: Object.fromEntries(assets.map((asset) => [
+      stableUrlAssetId(asset),
+      asset.id,
+    ])),
     defaultNetworkIds,
   }
   const initialUrlState = parseMapUrlState(window.location.search, validIds)
@@ -279,10 +293,17 @@ export async function renderMapPage(container) {
 
   function updateUrl(mode = 'push') {
     const query = new URLSearchParams(serializeMapUrlState(window.location.search, {
+      datasetId: activeContext.datasetId,
+      branchId: activeContext.branchId,
+      siteId: activeContext.siteId,
       selectedNetworkIds: selection.selectedNetworkIds,
-      selectedAssetId: selection.selectedAssetId,
+      selectedAssetId: stableUrlAssetId(assetById[selection.selectedAssetId]),
       traceFrom: state.traceFromId,
       traceTo: state.traceToId,
+      networkFamily: initialUrlState.networkFamily,
+      category: initialUrlState.category,
+      assetType: initialUrlState.assetType,
+      topologyStatus: initialUrlState.topologyStatus,
     }))
     if (selectedArea?.key) query.set('area', selectedArea.key)
     const nextUrl = `${window.location.pathname}?${query}${window.location.hash}`
@@ -1360,7 +1381,16 @@ function readRequestedDatasetContext() {
     branchId: query.get('branchId')
       || window.sessionStorage.getItem('sinergiActiveBranchId')
       || 'semarang',
+    siteId: query.get('siteId') || null,
   }
+}
+
+function stableUrlAssetId(asset) {
+  return asset?.stableAssetId
+    ?? asset?.assetId
+    ?? asset?.canonicalAssetId
+    ?? asset?.id
+    ?? null
 }
 
 function renderDatasetState(container, {

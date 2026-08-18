@@ -126,6 +126,101 @@ test('canonical evidence is deterministic, versioned, and topology bundle only c
   assert.ok(first.sourceGeometries.some(({ valid }) => valid === false))
 })
 
+test('specific rack evidence overrides a generic JUNCTION BOX folder and JB power pairs are distribution', () => {
+  const parserOutput = parseKmlText(`<?xml version="1.0"?>
+    <kml><Document>
+      <Folder><name>JUNCTION BOX</name>
+        <Placemark id="rack"><name>JB-Rack Server</name>
+          <Point><coordinates>110,-7</coordinates></Point>
+        </Placemark>
+      </Folder>
+      <Folder><name>POWER PLN</name>
+        <Placemark id="jb-power"><name>JB-015_JB-015.1</name>
+          <LineString><coordinates>110,-7 110.001,-7</coordinates></LineString>
+        </Placemark>
+      </Folder>
+    </Document></kml>`)
+  const result = buildCanonicalParserResult({
+    parserOutput,
+    datasetVersion: DATASET_VERSION,
+    sourceSelection: { selectedKmlPath: 'doc.kml', resources: [] },
+  })
+
+  const rack = result.classifiedObjects.find(({ assetName }) => assetName === 'JB-Rack Server')
+  const powerPair = result.classifiedObjects.find(({ assetName }) => assetName === 'JB-015_JB-015.1')
+  assert.equal(rack.canonicalAssetType, 'server_rack')
+  assert.equal(rack.canonicalCategory, 'server_rack')
+  assert.equal(rack.jbProfileId, 'builtin:server_rack')
+  assert.equal(powerPair.objectRole, 'cable_path')
+  assert.equal(powerPair.cableRole, 'distribution')
+})
+
+test('WP and EXP are not Extended markers without structural or explicit profile evidence', () => {
+  const parserOutput = parseKmlText(`<?xml version="1.0"?>
+    <kml><Document>
+      <Folder><name>JUNCTION BOX</name>
+        <Placemark id="wp-main"><name>JB-001-WP</name>
+          <Point><coordinates>110,-7</coordinates></Point>
+        </Placemark>
+        <Placemark id="exp-main"><name>JB-002-EXP</name>
+          <Point><coordinates>110.001,-7</coordinates></Point>
+        </Placemark>
+        <Placemark id="child"><name>JB-003.1-WP</name>
+          <Point><coordinates>110.002,-7</coordinates></Point>
+        </Placemark>
+        <Placemark id="explicit"><name>JB-004-WP</name>
+          <ExtendedData><Data name="profile_id"><value>extended_passive</value></Data></ExtendedData>
+          <Point><coordinates>110.003,-7</coordinates></Point>
+        </Placemark>
+      </Folder>
+      <Folder><name>Extended</name>
+        <Placemark id="folder"><name>JB-005-WP</name>
+          <Point><coordinates>110.004,-7</coordinates></Point>
+        </Placemark>
+      </Folder>
+    </Document></kml>`)
+  const result = buildCanonicalParserResult({
+    parserOutput,
+    datasetVersion: DATASET_VERSION,
+    sourceSelection: { selectedKmlPath: 'doc.kml', resources: [] },
+  })
+  const profileByName = new Map(result.classifiedObjects.map((object) => [
+    object.assetName,
+    object.jbProfileId,
+  ]))
+
+  assert.equal(profileByName.get('JB-001-WP'), 'builtin:main_jb')
+  assert.equal(profileByName.get('JB-002-EXP'), 'builtin:main_jb')
+  assert.equal(profileByName.get('JB-003.1-WP'), 'builtin:extended_passive')
+  assert.equal(profileByName.get('JB-004-WP'), 'builtin:extended_passive')
+  assert.equal(profileByName.get('JB-005-WP'), 'builtin:extended_passive')
+})
+
+test('RS, CR, and SVR-OFFICE are Rack Server aliases', () => {
+  const parserOutput = parseKmlText(`<?xml version="1.0"?>
+    <kml><Document><Folder><name>JUNCTION BOX</name>
+      <Placemark id="rs"><name>RS_JB-019</name>
+        <Point><coordinates>110,-7</coordinates></Point>
+      </Placemark>
+      <Placemark id="cr"><name>CR_JB-001</name>
+        <Point><coordinates>110.001,-7</coordinates></Point>
+      </Placemark>
+      <Placemark id="svr"><name>SVR-OFFICE_JB-017</name>
+        <Point><coordinates>110.002,-7</coordinates></Point>
+      </Placemark>
+    </Folder></Document></kml>`)
+  const result = buildCanonicalParserResult({
+    parserOutput,
+    datasetVersion: DATASET_VERSION,
+    sourceSelection: { selectedKmlPath: 'doc.kml', resources: [] },
+  })
+
+  result.classifiedObjects.forEach((object) => {
+    assert.equal(object.canonicalAssetType, 'server_rack')
+    assert.equal(object.jbProfileId, 'builtin:server_rack')
+  })
+})
+
 test('canonical coverage is fail-closed when parser structure and preserved features diverge', () => {
   const parserOutput = parseKmlText(`<?xml version="1.0"?>
     <kml><Document>
@@ -211,6 +306,40 @@ test('stored topology rebuild refreshes stale known classifications from source 
   assert.equal(node.assetType, 'junction box')
   assert.equal(node.classificationRuleSetVersion, CLASSIFICATION_RULE_SET_VERSION)
   assert.ok(repaired.changed)
+})
+
+test('stored topology rebuild preserves manual relation evidence without a source feature', () => {
+  const parserOutput = parseKmlText(`<?xml version="1.0"?>
+    <kml><Document>
+      <Folder><name>Fiber Optic</name>
+        <Placemark id="fo-manual"><name>FO-Manual</name>
+          <ExtendedData><Data name="asset_id"><value>FO-01</value></Data></ExtendedData>
+          <LineString><coordinates>110,-7 111,-7</coordinates></LineString>
+        </Placemark>
+      </Folder>
+    </Document></kml>`)
+  const parsed = buildCanonicalParserResult({
+    parserOutput,
+    datasetVersion: DATASET_VERSION,
+    sourceSelection: { selectedKmlPath: 'doc.kml', resources: [] },
+  })
+  const manualRelation = {
+    explicitRelationEvidenceId: 'manual:relation-1',
+    datasetVersionId: DATASET_VERSION.id,
+    sourceReference: 'FO-01',
+    targetReference: 'FO-02',
+    source: 'manual_admin',
+    sourceKey: 'manual_device_connection',
+  }
+  const repaired = rebuildStoredTopologyInputBundle({
+    ...structuredClone(parsed),
+    topologyInputBundle: {
+      ...structuredClone(parsed.topologyInputBundle),
+      explicitRelations: [manualRelation],
+    },
+  })
+
+  assert.deepEqual(repaired.topologyInputBundle.explicitRelations, [manualRelation])
 })
 
 test('overlay resources resolve relative to selected KML, deduplicate by checksum, and never fetch URLs', () => {

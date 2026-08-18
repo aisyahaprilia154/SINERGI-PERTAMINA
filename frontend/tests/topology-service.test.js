@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  autoAssignUniqueIdentityAssignments,
+  loadImportStatus,
+} from '../src/services/import-dataset-service.js'
+import {
   createTopologyRelation,
+  analyzeTopologyImpact,
   loadAllTopologyCandidates,
   loadTopologyProjection,
+  loadTopologyRoots,
   reviewTopologyBulk,
   reviewTopologyCandidate,
   traceTopology,
@@ -77,6 +83,7 @@ test('all candidate pages are combined only when their revisions remain stable',
         nextCursor: 'next-page',
         graphRevision: 'topology-graph:one',
         candidateRevision: 'topology-candidates:one',
+        history: [{ candidateId: 'candidate-a', supersededAt: '2026-08-13T00:00:00.000Z' }],
         pageInfo: { total: 3 },
       }
       : {
@@ -84,6 +91,7 @@ test('all candidate pages are combined only when their revisions remain stable',
         nextCursor: null,
         graphRevision: 'topology-graph:one',
         candidateRevision: 'topology-candidates:one',
+        history: [{ candidateId: 'candidate-c', supersededAt: '2026-08-13T00:01:00.000Z' }],
         pageInfo: { total: 3 },
       }
     return new Response(JSON.stringify(page), {
@@ -103,8 +111,12 @@ test('all candidate pages are combined only when their revisions remain stable',
     ])
     assert.equal(result.pageInfo.hasNextPage, false)
     assert.equal(result.pageInfo.total, 3)
-    assert.match(requests[0].url, /[?]limit=500$/)
-    assert.match(requests[1].url, /[?]cursor=next-page&limit=500$/)
+    assert.deepEqual(result.history, [
+      { candidateId: 'candidate-a', supersededAt: '2026-08-13T00:00:00.000Z' },
+      { candidateId: 'candidate-c', supersededAt: '2026-08-13T00:01:00.000Z' },
+    ])
+    assert.match(requests[0].url, /[?]limit=250$/)
+    assert.match(requests[1].url, /[?]cursor=next-page&limit=250$/)
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -115,7 +127,7 @@ test('all candidate pages reduce their limit when a response exceeds the byte bu
   const requests = []
   globalThis.fetch = async (url) => {
     requests.push(url)
-    if (url.endsWith('limit=500')) {
+    if (url.endsWith('limit=250')) {
       return new Response(JSON.stringify({
         error: {
           code: 'topology_candidate_response_too_large',
@@ -143,8 +155,8 @@ test('all candidate pages reduce their limit when a response exceeds the byte bu
       token: 'admin',
     })
     assert.deepEqual(result.items.map(({ candidateId }) => candidateId), ['candidate-a'])
-    assert.match(requests[0], /[?]limit=500$/)
-    assert.match(requests[1], /[?]limit=250$/)
+    assert.match(requests[0], /[?]limit=250$/)
+    assert.match(requests[1], /[?]limit=125$/)
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -279,6 +291,121 @@ test('manual topology relation sends the selected device pair and audit reason',
   }
 })
 
+test('automatic identity assignment uses the admin lifecycle endpoint', async () => {
+  const originalFetch = globalThis.fetch
+  let request
+  globalThis.fetch = async (url, options) => {
+    request = { url, options }
+    return new Response(JSON.stringify({ state: 'no_changes' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    await autoAssignUniqueIdentityAssignments({
+      datasetVersionId: 'dv-auto',
+      token: 'admin',
+    })
+    assert.equal(request.url, '/api/admin/imports/dv-auto/identity-assignments/auto')
+    assert.equal(request.options.method, 'POST')
+    assert.deepEqual(JSON.parse(request.options.body), {})
+    assert.equal(request.options.headers.Authorization, 'Bearer admin')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('identity regeneration polling keeps the admin authorization header', async () => {
+  const originalFetch = globalThis.fetch
+  let request
+  globalThis.fetch = async (url, options) => {
+    request = { url, options }
+    return new Response(JSON.stringify({ job: { status: 'succeeded' } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    await loadImportStatus({
+      statusUrl: '/api/admin/jobs/job-auto-1',
+      token: 'admin',
+    })
+    assert.equal(request.url, '/api/admin/jobs/job-auto-1')
+    assert.equal(request.options.headers.Authorization, 'Bearer admin')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('missing bulk route is reported as frontend/backend deployment skew', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    error: {
+      code: 'not_found',
+      message: 'Endpoint tidak ditemukan.',
+    },
+  }), {
+    status: 404,
+    headers: {
+      'content-type': 'application/json',
+      'x-correlation-id': 'corr-review-skew',
+    },
+  })
+  try {
+    await assert.rejects(
+      reviewTopologyBulk({
+        datasetVersionId: 'dv-1',
+        action: 'confirm-selected',
+        candidateIds: ['candidate-1'],
+        reason: 'Sudah diperiksa.',
+        token: 'admin',
+      }),
+      (error) => error.code === 'topology_review_api_unavailable'
+        && error.details.correlationId === 'corr-review-skew',
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('manual topology relation forwards optional graph evidence references', async () => {
+  const originalFetch = globalThis.fetch
+  let request
+  globalThis.fetch = async (url, options) => {
+    request = { url, options }
+    return new Response(JSON.stringify({ relation: {} }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    await createTopologyRelation({
+      datasetVersionId: 'dv-1',
+      sourceAssetId: 'asset-a',
+      targetAssetId: 'asset-b',
+      relationKind: 'service_link',
+      pathAssetIds: ['FO-01'],
+      sourceGeometryIds: ['geometry:fo-01'],
+      evidenceRefs: ['document:network-plan:page-3'],
+      reason: 'Diverifikasi dari dokumentasi resmi.',
+      token: 'admin',
+    })
+    assert.deepEqual(JSON.parse(request.options.body), {
+      sourceAssetId: 'asset-a',
+      targetAssetId: 'asset-b',
+      relationType: 'connected-to',
+      relationKind: 'service_link',
+      direction: 'undirected',
+      pathAssetIds: ['FO-01'],
+      sourceGeometryIds: ['geometry:fo-01'],
+      reason: 'Diverifikasi dari dokumentasi resmi.',
+      evidenceRefs: ['document:network-plan:page-3'],
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('authoritative trace request includes source, target, direction, and graph revision', async () => {
   const originalFetch = globalThis.fetch
   let request
@@ -310,6 +437,82 @@ test('authoritative trace request includes source, target, direction, and graph 
       targetAssetId: 'asset-b',
       graphRevision: 'topology-graph:abc',
       direction: 'both',
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('fase 4 trace client adds explicit mode and bounded depth without changing legacy payloads', async () => {
+  const originalFetch = globalThis.fetch
+  let request
+  globalThis.fetch = async (url, options) => {
+    request = { url, options }
+    return new Response(JSON.stringify({ status: 'found' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    await traceTopology({
+      datasetVersionId: 'dv-1',
+      sourceAssetId: 'cam-1',
+      targetAssetId: 'core-1',
+      graphRevision: 'topology-graph:abc',
+      mode: 'point_to_point',
+      direction: 'upstream',
+      maxDepth: 25,
+      token: 'viewer',
+    })
+    assert.deepEqual(JSON.parse(request.options.body), {
+      sourceAssetId: 'cam-1',
+      targetAssetId: 'core-1',
+      graphRevision: 'topology-graph:abc',
+      direction: 'upstream',
+      mode: 'point_to_point',
+      maxDepth: 25,
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('fase 4 roots and impact clients use the versioned operational endpoints', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options })
+    return new Response(JSON.stringify({ status: 'completed' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    await loadTopologyRoots({
+      datasetVersionId: 'dv-1',
+      graphRevision: 'topology-graph:abc',
+      token: 'viewer',
+    })
+    await analyzeTopologyImpact({
+      datasetVersionId: 'dv-1',
+      failureType: 'relation',
+      failureId: 'relation-1',
+      graphRevision: 'topology-graph:abc',
+      rootAssetIds: ['core-1'],
+      networkFamily: 'cctv',
+      scopeAssetIds: ['core-1', 'switch-1'],
+      token: 'viewer',
+    })
+    assert.equal(requests[0].url,
+      '/api/dataset-versions/dv-1/topology/roots?graphRevision=topology-graph%3Aabc')
+    assert.equal(requests[1].url, '/api/dataset-versions/dv-1/topology/impact')
+    assert.deepEqual(JSON.parse(requests[1].options.body), {
+      failureType: 'relation',
+      failureId: 'relation-1',
+      graphRevision: 'topology-graph:abc',
+      rootAssetIds: ['core-1'],
+      networkFamily: 'cctv',
+      scopeAssetIds: ['core-1', 'switch-1'],
     })
   } finally {
     globalThis.fetch = originalFetch

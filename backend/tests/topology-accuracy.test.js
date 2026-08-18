@@ -151,3 +151,55 @@ test('held-out evaluation reports precision, recall, coverage, paths, and false 
   assert.equal(result.heldOut.distanceStrata['0_2m'].correct, 1)
   assert.equal(result.heldOut.distanceStrata['4_6m'].correct, 0)
 })
+
+test('held-out evaluation keeps inline device labels separate per path', () => {
+  const result = evaluateTopologyAccuracy({
+    candidates: [{
+      candidateId: 'candidate-inline-a',
+      candidateType: 'inline_device',
+      sourceEndpointId: 'inline:T-021',
+      sourcePathAssetId: 'FO-A',
+      targetAssetId: 'T-021',
+      distanceMeters: 1,
+      score: 0.9,
+      proposalStatus: 'recommended',
+      candidateStatus: 'candidate',
+    }, {
+      candidateId: 'candidate-inline-b',
+      candidateType: 'inline_device',
+      sourceEndpointId: 'inline:T-021',
+      sourcePathAssetId: 'FO-B',
+      targetAssetId: 'T-021',
+      distanceMeters: 5,
+      score: 0.8,
+      proposalStatus: 'recommended',
+      candidateStatus: 'candidate',
+    }],
+    graph: { nodes: [], edges: [], components: [] },
+    goldSet: {
+      version: 'gold-set/1.0.0',
+      endpointConnections: [{
+        labelId: 'inline-label-a',
+        split: 'held_out',
+        candidateType: 'inline_device',
+        sourceEndpointId: 'inline:T-021',
+        sourcePathAssetId: 'FO-A',
+        expectedTargetAssetId: 'T-021',
+      }, {
+        labelId: 'inline-label-b',
+        split: 'held_out',
+        candidateType: 'inline_device',
+        sourceEndpointId: 'inline:T-021',
+        sourcePathAssetId: 'FO-B',
+        expectedTargetAssetId: 'T-021',
+      }],
+      paths: [],
+      componentAssertions: [],
+    },
+  })
+
+  assert.equal(result.heldOut.predictedCount, 2)
+  assert.equal(result.heldOut.precision, 1)
+  assert.equal(result.heldOut.distanceStrata['0_2m'].labels, 1)
+  assert.equal(result.heldOut.distanceStrata['4_6m'].labels, 1)
+})
