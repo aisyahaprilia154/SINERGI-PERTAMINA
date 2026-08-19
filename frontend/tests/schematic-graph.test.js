@@ -99,6 +99,39 @@ test('diagram uses the same confirmed topology edges as tracing and map', () => 
   assert.equal(graph.edges[0].relationSource, 'inferred_endpoint')
 })
 
+test('diagram carries physical pole groups separately from network edges', () => {
+  const graph = buildSchematicGraph({
+    assets: [
+      ...assets,
+      { id: 'pole', name: 'Tiang-01', type: 'Tiang', location: 'Gerbang' },
+    ],
+    networks,
+    poleGroups: [{
+      id: 'pole-group:pole',
+      poleAssetId: 'pole',
+      assetIds: ['pole', 'cam'],
+      assets: [
+        { id: 'pole', name: 'Tiang-01', type: 'Tiang' },
+        { id: 'cam', name: 'CCTV-GATE-01', type: 'CCTV' },
+      ],
+      childCount: 1,
+    }],
+    scope: 'all-assets',
+  })
+
+  assert.equal(graph.status, 'ready')
+  assert.deepEqual(graph.poleGroups.map(({ poleAssetId, assetIds }) => ({
+    poleAssetId,
+    assetIds,
+  })), [{
+    poleAssetId: 'pole',
+    assetIds: ['pole', 'cam'],
+  }])
+  assert.equal(graph.edges.some(({ sourceId, targetId }) => (
+    [sourceId, targetId].includes('pole') && [sourceId, targetId].includes('cam')
+  )), false)
+})
+
 test('builder keeps the complete branch scope without an arbitrary asset limit', () => {
   const manyAssets = Array.from({ length: 31 }, (_, index) => ({
     id: `asset-${index}`,

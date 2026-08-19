@@ -890,6 +890,8 @@ export function buildTopologyInputBundle({
     sourceFolderPath: sourceFeaturesById.get(object.sourceFeatureId)?.sourceFolderPath ?? null,
     assetId: object.canonicalAssetId ?? object.assetId,
     canonicalAssetId: object.canonicalAssetId ?? object.assetId,
+    canonicalAssetType: object.canonicalAssetType ?? object.assetType ?? null,
+    canonicalCategory: object.canonicalCategory ?? object.category ?? null,
     stableAssetId: object.stableAssetId ?? object.assetId ?? null,
     onboardingIdentity: object.onboardingIdentity
       ?? deterministicId('onboarding-identity', datasetVersion.id, object.sourceFeatureId),
@@ -897,7 +899,9 @@ export function buildTopologyInputBundle({
     identityStatus: object.identityStatus ?? (object.assetId ? 'stable' : 'onboarding'),
     identityAliases: structuredClone(object.identityAliases ?? {}),
     sourceFeatureId: object.sourceFeatureId,
+    branchId: object.branchId ?? datasetVersion.branchId ?? null,
     siteId: object.siteId,
+    locationGroupKey: object.locationGroupKey ?? null,
     objectRole: object.objectRole,
     networkFamily: object.networkFamily,
     assetType: object.assetType,

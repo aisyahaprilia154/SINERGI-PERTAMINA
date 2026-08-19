@@ -58,6 +58,62 @@ test('active dataset adapter preserves source coordinates and uses explicit rela
   )))
 })
 
+test('mounting relations build pole groups without becoming traversable network edges', () => {
+  const payload = activePayload({
+    layers: [layer('layer-network', 'Network', 'Infrastructure')],
+    assets: [
+      { ...asset('node-pole', 'POLE-01', 'Infrastructure'), type: 'Tiang CCTV' },
+      { ...asset('node-cctv', 'CAM-01', 'CCTV') },
+      { ...asset('node-jb', 'JB-01', 'CCTV'), type: 'Junction box' },
+    ],
+    geometries: [
+      point('point-pole', 'node-pole', 110, -7),
+      point('point-cctv', 'node-cctv', 110.00001, -7),
+      point('point-jb', 'node-jb', 110.00002, -7),
+    ],
+    relations: [{
+      id: 'legacy-mounted-edge',
+      sourceAssetId: 'POLE-01',
+      targetAssetId: 'CAM-01',
+      relationType: 'mounted_on',
+    }],
+    mountingRelations: [{
+      relationId: 'mounting-pole-cam',
+      sourceAssetId: 'CAM-01',
+      targetAssetId: 'POLE-01',
+      relationType: 'mounted_on',
+      verificationStatus: 'confirmed',
+    }],
+    mountingOptions: [{
+      optionId: 'mounting-option-cam-pole',
+      assetId: 'CAM-01',
+      targetAssetId: 'POLE-01',
+      distanceMeters: 0.8,
+    }],
+  })
+
+  const result = adaptActiveDatasetForMap(payload)
+
+  assert.equal(result.mountingRelations.length, 1)
+  assert.deepEqual(result.mountingRelations[0], {
+    relationId: 'mounting-pole-cam',
+    sourceAssetId: 'CAM-01',
+    targetAssetId: 'POLE-01',
+    relationType: 'mounted_on',
+    relationKind: 'installation_attachment',
+    verificationStatus: 'confirmed',
+  })
+  assert.equal(result.poleGroups.length, 1)
+  assert.equal(result.mountingOptions.length, 1)
+  assert.equal(result.mountingOptions[0].targetAssetName, 'POLE-01')
+  assert.deepEqual(result.poleGroups[0].assetIds, ['POLE-01', 'CAM-01'])
+  assert.equal(result.assetById['CAM-01'].mountedOnAssetId, 'POLE-01')
+  assert.deepEqual(result.assetById['POLE-01'].mountedAssetIds, ['CAM-01'])
+  assert.equal(result.networks.flatMap(({ edges }) => edges).some(([source, target]) => (
+    [source, target].includes('POLE-01') && [source, target].includes('CAM-01')
+  )), false)
+})
+
 test('active map layers preserve normalized line and polygon coordinates separately from display space', () => {
   const payload = {
     activePointer: {
@@ -629,6 +685,9 @@ function activePayload({
   assets = [],
   geometries = [],
   relations = [],
+  mountingRelations = [],
+  mountingCandidates = [],
+  mountingOptions = [],
 } = {}) {
   return {
     activePointer: {
@@ -645,6 +704,9 @@ function activePayload({
     assets,
     geometries,
     relations,
+    mountingRelations,
+    mountingCandidates,
+    mountingOptions,
   }
 }
 

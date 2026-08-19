@@ -4,6 +4,8 @@ import {
   evaluateAccuracyGate,
   MINIMUM_HELD_OUT_SAMPLE_SIZE,
 } from './topology-accuracy.js'
+import { generateMountingArtifacts } from './mounting-relations.js'
+import { demoteConflictingCameraCandidates } from './device-edge-policy.js'
 
 const EARTH_RADIUS_METERS = 6371008.8
 
@@ -49,6 +51,8 @@ export function generateRelationArtifacts(topologyInputBundle, {
   config = {},
   previousCandidates = [],
   previousRelations = [],
+  previousMountingRelations = [],
+  previousMountingOverrides = [],
   generatedAt = new Date().toISOString(),
 } = {}) {
   const settings = normalizeConfig(config)
@@ -73,7 +77,7 @@ export function generateRelationArtifacts(topologyInputBundle, {
     ...generateLineLabelAttachmentCandidates(nodes, paths, settings, candidateBudget),
     ...generateExplicitCandidates(bundle, nodes, paths, eligibilityIssues, candidateBudget),
   ]
-  const candidates = scoreAndProposeCandidates(
+  let candidates = scoreAndProposeCandidates(
     rawCandidates,
     settings,
     generatedAt,
@@ -84,6 +88,7 @@ export function generateRelationArtifacts(topologyInputBundle, {
   })
   reconcilePreviousDecisions(candidates, previousCandidates)
   applyCapacityConstraints(candidates, nodes, settings, eligibilityIssues, accuracyGate)
+  candidates = demoteConflictingCameraCandidates(candidates, nodes)
 
   const confirmedRelations = buildConfirmedRelations({
     bundle,
@@ -126,6 +131,12 @@ export function generateRelationArtifacts(topologyInputBundle, {
     unresolved,
     accuracyGate,
   })
+  const mounting = generateMountingArtifacts(bundle, {
+    config,
+    previousRelations: previousMountingRelations,
+    previousOverrides: previousMountingOverrides,
+    generatedAt,
+  })
 
   return {
     schemaVersion: '1.0.0',
@@ -144,6 +155,11 @@ export function generateRelationArtifacts(topologyInputBundle, {
     unresolved,
     summary,
     readiness,
+    mountingRelations: mounting.relations,
+    mountingCandidates: mounting.candidates,
+    mountingOptions: mounting.options,
+    mountingOverrides: mounting.overrides,
+    mountingSummary: mounting.summary,
   }
 }
 
@@ -157,6 +173,8 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
   candidates = [],
   previousRelations = [],
   previousGraph = {},
+  previousMountingRelations = [],
+  previousMountingOverrides = [],
   affectedAssetIds = [],
   eligibilityIssues = [],
   lineworkIssues = [],
@@ -177,7 +195,10 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
     lineworkIssues,
     computedLineworkIssues,
   )
-  const normalizedCandidates = structuredClone(asArray(candidates))
+  const normalizedCandidates = demoteConflictingCameraCandidates(
+    structuredClone(asArray(candidates)),
+    nodes,
+  )
   const confirmedRelations = buildConfirmedRelations({
     bundle,
     candidates: normalizedCandidates,
@@ -222,6 +243,12 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
     unresolved,
     accuracyGate,
   })
+  const mounting = generateMountingArtifacts(bundle, {
+    config,
+    previousRelations: previousMountingRelations,
+    previousOverrides: previousMountingOverrides,
+    generatedAt,
+  })
 
   return {
     schemaVersion: '1.0.0',
@@ -240,6 +267,11 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
     unresolved,
     summary,
     readiness,
+    mountingRelations: mounting.relations,
+    mountingCandidates: mounting.candidates,
+    mountingOptions: mounting.options,
+    mountingOverrides: mounting.overrides,
+    mountingSummary: mounting.summary,
   }
 }
 
