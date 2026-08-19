@@ -243,6 +243,11 @@ export function createConfig(env = process.env, overrides = {}) {
         ),
       autoConfirmSpatialInference: overrides.topology?.autoConfirmSpatialInference
         ?? booleanFrom(env.SINERGI_TOPOLOGY_AUTO_CONFIRM_SPATIAL, false),
+      automaticRelationConfirmation: overrides.topology?.automaticRelationConfirmation
+        // Strong, unique spatial relations are operational facts in the
+        // source-first map. Keep the environment override so deployments can
+        // temporarily opt out without bringing back the review UI.
+        ?? booleanFrom(env.SINERGI_AUTOMATIC_RELATIONS, true),
       autoConfirmExplicitMetadata: overrides.topology?.autoConfirmExplicitMetadata
         ?? booleanFrom(env.SINERGI_TOPOLOGY_AUTO_CONFIRM_EXPLICIT, true),
       // Accuracy approval is loaded from an explicit versioned artifact by the

@@ -240,6 +240,7 @@ export function createMapLibreSurface(element, {
     map.addSource('sinergi-overlays', emptyGeoJsonSource())
     map.addSource('sinergi-lines', emptyGeoJsonSource())
     map.addSource('sinergi-focus-lines', emptyGeoJsonSource())
+    map.addSource('sinergi-asset-relations', emptyGeoJsonSource())
     map.addSource('sinergi-candidates', emptyGeoJsonSource())
     map.addSource('sinergi-points', emptyGeoJsonSource())
     groundOverlayLayers = addGroundOverlayImages(map, overlays)
@@ -314,6 +315,7 @@ export function createMapLibreSurface(element, {
     map.getSource('sinergi-overlays').setData(featureCollections.overlays)
     map.getSource('sinergi-lines').setData(featureCollections.lines)
     map.getSource('sinergi-focus-lines').setData(featureCollections.focusLines)
+    map.getSource('sinergi-asset-relations').setData(featureCollections.relations)
     map.getSource('sinergi-candidates').setData(featureCollections.candidates)
     map.getSource('sinergi-points').setData(featureCollections.points)
     syncGroundOverlayVisibility()
@@ -893,6 +895,29 @@ function addOperationalLayers(map) {
     paint: { 'line-color': 'rgba(0,0,0,0)', 'line-width': 14 },
   })
   map.addLayer({
+    id: 'asset-relations-casing',
+    type: 'line',
+    source: 'sinergi-asset-relations',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: {
+      'line-color': '#ffffff',
+      'line-opacity': ['get', 'opacity'],
+      'line-width': ['interpolate', ['linear'], ['zoom'], 13, 4, 19, 8],
+    },
+  })
+  map.addLayer({
+    id: 'asset-relations',
+    type: 'line',
+    source: 'sinergi-asset-relations',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: {
+      'line-color': ['get', 'color'],
+      'line-opacity': ['get', 'opacity'],
+      'line-width': ['interpolate', ['linear'], ['zoom'], 13, 2, 19, 4],
+      'line-dasharray': [1.5, 1.5],
+    },
+  })
+  map.addLayer({
     id: 'asset-selection-halo',
     type: 'circle',
     source: 'sinergi-points',
@@ -995,6 +1020,22 @@ function geometryIdsForCandidate(candidate) {
   return candidate.mapGeometryIds?.length
     ? candidate.mapGeometryIds
     : candidate.sourceGeometryIds ?? []
+}
+
+function isConfirmedMapRelation(relation) {
+  if (relation?.verificationStatus !== undefined) {
+    return relation.verificationStatus === 'confirmed'
+  }
+  if (relation?.candidateStatus !== undefined) {
+    return relation.candidateStatus === 'confirmed'
+  }
+  if (relation?.relationStatus !== undefined) {
+    return relation.relationStatus === 'confirmed'
+  }
+  return relation?.relationSource === undefined
+    || ['explicit', 'explicit_kml_metadata', 'manual_review', 'automatic'].includes(
+      relation.relationSource,
+    )
 }
 
 function drawProjectedLine(context, map, {
@@ -1195,6 +1236,12 @@ function buildFeatureCollections({
   const confirmedGeometryIds = new Set((topologyGraph.edges ?? []).flatMap(
     (edge) => edge.sourceGeometryIds ?? edge.sourceGeometryId ?? [],
   ))
+  const availableLineGeometryIds = new Set(geometries
+    .filter((geometry) => geometry.geometryType === 'line_string')
+    .flatMap((geometry) => [
+      geometry.id,
+      geometry.sourceGeometryId,
+    ].filter(Boolean)))
   const candidateGeometryIds = new Set(candidates.flatMap(
     (candidate) => geometryIdsForCandidate(candidate),
   ))
@@ -1226,6 +1273,7 @@ function buildFeatureCollections({
     points: [],
     lines: [],
     focusLines: [],
+    relations: [],
     polygons: [],
     candidates: [],
     overlays: [],
@@ -1314,6 +1362,59 @@ function buildFeatureCollections({
     }
     else collections.polygons.push(feature)
   })
+
+  const seenRelationKeys = new Set()
+  ;(topologyGraph.edges ?? []).forEach((edge) => {
+    if (!isConfirmedMapRelation(edge)) return
+    const sourceAssetId = edge.sourceAssetId ?? edge.sourceNodeId
+    const targetAssetId = edge.targetAssetId ?? edge.targetNodeId
+    const sourceAsset = assetById.get(sourceAssetId)
+    const targetAsset = assetById.get(targetAssetId)
+    if (!sourceAsset || !targetAsset
+      || !validPosition(sourceAsset.coordinate)
+      || !validPosition(targetAsset.coordinate)
+      || sourceAssetId === targetAssetId) return
+    const sourceGeometryIds = Array.isArray(edge.sourceGeometryIds)
+      ? edge.sourceGeometryIds
+      : [edge.sourceGeometryId].filter(Boolean)
+    // A KML/KMZ line already communicates this relation. Only add a
+    // lightweight operational connector when the relation has no matching
+    // source geometry (automatic spatial match or manual override).
+    if (sourceGeometryIds.some((id) => availableLineGeometryIds.has(id))) return
+    const relationKey = edge.id || edge.edgeId || edge.relationId
+      || [sourceAssetId, targetAssetId].sort().join('|')
+    if (seenRelationKeys.has(relationKey)) return
+    seenRelationKeys.add(relationKey)
+    const endpointNetworkIds = [
+      ...(assetNetworkIds.get(sourceAssetId) ?? []),
+      ...(assetNetworkIds.get(targetAssetId) ?? []),
+      edge.networkId,
+    ].filter(Boolean)
+    const active = !endpointNetworkIds.length
+      || endpointNetworkIds.some((networkId) => state.selectedNetworkIds.has(networkId))
+    const focused = Boolean(
+      state.focusedNetworkId && endpointNetworkIds.includes(state.focusedNetworkId),
+    )
+    const selected = state.selectedAssetId === sourceAssetId
+      || state.selectedAssetId === targetAssetId
+    collections.relations.push({
+      type: 'Feature',
+      id: relationKey,
+      properties: {
+        relationId: edge.relationId || edge.id || edge.edgeId || relationKey,
+        sourceAssetId,
+        targetAssetId,
+        relationSource: edge.relationSource || 'automatic',
+        color: focused || selected ? '#1367d1' : '#4b78a8',
+        opacity: active ? (focused || selected ? 0.96 : 0.82) : 0,
+      },
+      geometry: {
+        type: 'LineString',
+        coordinates: [sourceAsset.coordinate.slice(0, 2), targetAsset.coordinate.slice(0, 2)],
+      },
+    })
+  })
+
   candidates.filter((candidate) => (
     ['candidate', 'ambiguous'].includes(candidate.candidateStatus)
     && validPosition(candidate.sourceCoordinate)
@@ -1363,6 +1464,7 @@ function buildFeatureCollections({
     points: featureCollection(collections.points),
     lines: featureCollection(collections.lines),
     focusLines: featureCollection(collections.focusLines),
+    relations: featureCollection(collections.relations),
     polygons: featureCollection(collections.polygons),
     candidates: featureCollection(collections.candidates),
     overlays: featureCollection(collections.overlays),

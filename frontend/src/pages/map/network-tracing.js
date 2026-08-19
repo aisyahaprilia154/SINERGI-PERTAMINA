@@ -31,13 +31,17 @@ export function buildExplicitRelationGraph({ networks, assetIds, topologyGraph =
       if (!validAssetIds.has(sourceAssetId) || !validAssetIds.has(targetAssetId)) continue
       if (sourceAssetId === targetAssetId) continue
 
-      const relationKey = relation.id
+      const relationId = topologyRelations.length
+        ? relationMutationId(relation)
+        : relationMutationId(relation) || relation.id || relation.edgeId || null
+      const relationKey = relation.id || relation.edgeId || relationId
         || [network.id, relation.relationType, sourceAssetId, targetAssetId].join('|')
       if (seenRelations.has(relationKey)) continue
       seenRelations.add(relationKey)
 
       graph.get(sourceAssetId).push({
-        id: relation.id,
+        id: relationId,
+        edgeId: relation.id || relation.edgeId || null,
         sourceAssetId,
         targetAssetId,
         networkId: relation.networkId || network.id,
@@ -48,7 +52,8 @@ export function buildExplicitRelationGraph({ networks, assetIds, topologyGraph =
         relationStatus: relation.relationStatus || 'confirmed',
       })
       graph.get(targetAssetId).push({
-        id: relation.id,
+        id: relationId,
+        edgeId: relation.id || relation.edgeId || null,
         sourceAssetId: targetAssetId,
         targetAssetId: sourceAssetId,
         networkId: relation.networkId || network.id,
@@ -62,6 +67,20 @@ export function buildExplicitRelationGraph({ networks, assetIds, topologyGraph =
   }
 
   return graph
+}
+
+/**
+ * Returns the persisted relation identity that the revoke API accepts.
+ * A graph edge can collapse multiple source relations into one visual edge;
+ * that aggregate must remain read-only until a single relation identity is
+ * available. Manual/device edges always carry one source relation ID.
+ */
+export function relationMutationId(relation) {
+  if (relation?.relationId) return relation.relationId
+  const sourceRelationIds = Array.isArray(relation?.sourceRelationIds)
+    ? relation.sourceRelationIds.filter(Boolean)
+    : []
+  return sourceRelationIds.length === 1 ? sourceRelationIds[0] : null
 }
 
 function isConfirmedRelation(relation) {

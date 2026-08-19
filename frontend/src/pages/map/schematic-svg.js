@@ -319,10 +319,10 @@ function renderDiagramHeading(graph, layout, context, dividerY) {
         ${coveragePercent}% tercakup
       </text>
       <text class="diagram-meta" x="32" y="54">
-        ${connectedCount} memiliki evidence · ${isolatedCount} belum terhubung · ${summary.componentCount ?? 0} komponen
+        ${connectedCount} aset terhubung · ${isolatedCount} aset tanpa relasi · ${summary.componentCount ?? 0} komponen
       </text>
       <text class="diagram-meta" x="32" y="76">
-        ${summary.confirmedCount ?? 0} aset evidence terkonfirmasi · ${summary.recommendedCount ?? 0} rekomendasi kuat · ${summary.reviewCount ?? 0} perlu ditinjau · ${summary.unresolvedCount ?? 0} tanpa evidence
+        ${summary.confirmedCount ?? 0} aset memiliki relasi otomatis · ${summary.unresolvedCount ?? isolatedCount} aset belum tersambung
       </text>
       <line class="diagram-divider" x1="32" y1="${dividerY}"
         x2="${layout.width - 32}" y2="${dividerY}"/>
@@ -331,26 +331,14 @@ function renderDiagramHeading(graph, layout, context, dividerY) {
 }
 
 function renderResolutionBadge(node, x, y) {
-  if (node.resolutionStatus === 'review') {
-    return `<circle class="status-alert" cx="${x}" cy="${y}" r="6"/>
-      <text class="status-alert-text" x="${x}" y="${y + 2.5}" text-anchor="middle">?</text>`
-  }
-  if (node.resolutionStatus === 'unresolved') {
-    return `<circle cx="${x}" cy="${y}" r="6" fill="${SVG_THEME.textMuted}"
-      stroke="${SVG_THEME.background}" stroke-width="1.5"/>
-      <text class="status-alert-text" x="${x}" y="${y + 2.5}" text-anchor="middle">!</text>`
-  }
-  if (node.resolutionStatus === 'recommended') {
-    return `<circle class="status-alert" cx="${x}" cy="${y}" r="5"/>
-      <text class="status-alert-text" x="${x}" y="${y + 2}" text-anchor="middle">R</text>`
-  }
+  // Unconnected assets are already grouped in the dedicated "Aset tanpa
+  // relasi" section. Avoid putting review/recommendation badges on every
+  // node now that the operational graph is automatically confirmed.
   return ''
 }
 
 function describeEdgeEvidence(edge) {
-  const status = edge.relationStatus === 'recommended'
-    ? 'rekomendasi kuat'
-    : 'terkonfirmasi'
+  const status = 'terkonfirmasi otomatis'
   const confidence = Number.isFinite(edge.confidence)
     ? ` · confidence ${Math.round(edge.confidence * 100)}%`
     : ''
@@ -362,10 +350,8 @@ function describeEdgeEvidence(edge) {
 }
 
 function resolutionLabel(status) {
-  if (status === 'confirmed') return 'Evidence terkonfirmasi'
-  if (status === 'recommended') return 'Rekomendasi kuat'
-  if (status === 'review') return 'Perlu Konfirmasi Koneksi'
-  return 'Belum ada evidence'
+  if (status === 'confirmed') return 'Relasi otomatis terkonfirmasi'
+  return 'Belum tersambung'
 }
 
 function renderLegend(categories, networks, diagramBottom) {

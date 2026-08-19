@@ -303,24 +303,28 @@ export class TopologyService {
     const reviewItems = page.items.map((candidate) => (
       annotateTopologyCandidateForReview(record, candidate, eligibilityContext)
     ))
-    const filteredReviewCandidates = page.filteredCandidates.map((candidate) => (
-      annotateTopologyCandidateForReview(record, candidate, eligibilityContext)
-    ))
-    const reviewCandidates = candidates.map((candidate) => (
-      annotateTopologyCandidateForReview(record, candidate, eligibilityContext)
-    ))
     return {
       datasetVersionId,
       topologyRuleSetVersion: record.topologyRuleSetVersion ?? null,
       topologyPolicy: structuredClone(record.topologyPolicy ?? null),
-      interfaceRegistry: structuredClone(
-        record.topologyInterfaceRegistry ?? graph.interfaceRegistry ?? [],
-      ),
+      // The review queue only needs interface data attached to the selected
+      // candidate. Do not repeat the full dataset-level registry in every
+      // paginated response.
+      interfaceRegistry: [],
+      interfaceRegistryCount: (
+        record.topologyInterfaceRegistry ?? graph.interfaceRegistry ?? []
+      ).length,
       items: reviewItems,
       nextCursor: page.nextCursor,
       pageInfo: page.pageInfo,
-      summary: summarizeCandidates(filteredReviewCandidates),
-      datasetSummary: summarizeCandidates(reviewCandidates),
+      // The list response must stay bounded by the page size. The previous
+      // implementation annotated every matching and dataset candidate here,
+      // which duplicated evidence/identity metadata outside `items` and made
+      // the response exceed the 2 MiB candidate response budget even for
+      // `limit=1`. Summaries only need candidate status counts, so calculate
+      // them from the canonical records without cloning or annotating them.
+      summary: summarizeCandidates(page.filteredCandidates),
+      datasetSummary: summarizeCandidates(candidates),
       query: {
         status: normalizedQuery.status,
         site: normalizedQuery.site,
@@ -336,9 +340,9 @@ export class TopologyService {
       },
       graphRevision: graph.graphRevision,
       candidateRevision,
-      unresolved: structuredClone(record.topologyUnresolved ?? []),
-      eligibilityIssues: structuredClone(record.topologyEligibilityIssues ?? []),
-      lineworkIssues: structuredClone(record.topologyLineworkIssues ?? []),
+      unresolved: projectTopologyUnresolved(record.topologyUnresolved ?? []),
+      eligibilityIssues: projectTopologyIssues(record.topologyEligibilityIssues ?? []),
+      lineworkIssues: projectTopologyIssues(record.topologyLineworkIssues ?? []),
       history: projectCandidateHistory(
         record.topologyCandidateHistory ?? [],
         new Set(page.items.map(({ candidateId }) => candidateId)),
@@ -2943,6 +2947,27 @@ function projectCandidateHistory(history = [], candidateIds = null) {
         },
       } : {}),
     }))
+}
+
+function projectTopologyIssues(issues = []) {
+  return issues.map((issue) => ({
+    issueCode: issue.issueCode ?? null,
+    severity: issue.severity ?? null,
+    scope: issue.scope ?? null,
+    message: issue.message ?? null,
+    entityReference: issue.entityReference ?? null,
+    readinessImpact: issue.readinessImpact ?? null,
+  }))
+}
+
+function projectTopologyUnresolved(items = []) {
+  return items.map((item) => ({
+    sourceEndpointId: item.sourceEndpointId ?? null,
+    sourcePathAssetId: item.sourcePathAssetId ?? null,
+    sourceGeometryId: item.sourceGeometryId ?? null,
+    coordinate: item.coordinate ?? null,
+    reason: item.reason ?? null,
+  }))
 }
 
 function candidateReviewEligibility(record, candidate, eligibilityContext = null) {

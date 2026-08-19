@@ -43,7 +43,7 @@ test('drawer exposes read-only asset, network, relation, and action details', ()
   assert.match(html, /SMG Network Master/)
   assert.match(html, /JB-CCTV-01/)
   assert.match(html, /Telusuri koneksi/)
-  assert.match(html, /Kesiapan topologi/)
+  assert.match(html, /Relasi aset/)
   assert.match(html, /Buka detail aset/)
   assert.match(html, /Buat diagram 2D/)
   assert.match(html, /asset-status success/)
@@ -126,22 +126,62 @@ test('drawer supports loading and error states', () => {
   assert.match(error, /Coba lagi/)
 })
 
-test('drawer explains missing relations and keeps topology actions unavailable', () => {
+test('drawer keeps missing relations actionable without the retired review warning', () => {
   const html = renderAssetDetailDrawer({
     asset,
     assetNetworks: [network],
     connectedAssets: [],
     activeContext,
-    topologyReady: false,
-    topologyMessage: 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.',
+    relationOptions: [{
+      asset: { id: 'jb-02', name: 'JB-02', type: 'Junction box' },
+      reason: 'Junction box terdekat',
+    }],
     trace: { status: 'idle' },
   })
 
-  assert.match(html, /Topologi perlu diperiksa/)
-  assert.match(html, /class="drawer-topology-readiness" role="status"/)
-  assert.match(html, /material-symbols-outlined" aria-hidden="true">warning/)
+  assert.doesNotMatch(html, /Topologi perlu diperiksa/)
+  assert.doesNotMatch(html, /drawer-topology-readiness/)
   assert.match(html, /Relasi aset belum tersedia\./)
   assert.doesNotMatch(html, /class="button primary trace-from"/)
-  assert.match(html, /class="button secondary open-schematic"[^>]*disabled aria-disabled="true"/)
-  assert.match(html, /Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\./)
+  assert.match(html, /data-open-relation-picker/)
+  assert.match(html, /Sambungkan aset/)
+  assert.doesNotMatch(html, /Kandidat relasi|Konfirmasi Koneksi/)
+})
+
+test('drawer renders the direct relation editor and replacement action', () => {
+  const html = renderAssetDetailDrawer({
+    asset,
+    connectedAssets: [{
+      asset: { id: 'jb-01', name: 'JB-01', type: 'Junction box' },
+      network,
+      relation: { id: 'rel-01' },
+    }],
+    activeContext,
+    relationOptions: [{
+      asset: { id: 'jb-02', name: 'JB-02', type: 'Junction box' },
+      reason: 'Junction box terdekat',
+    }],
+    relationEditorOpen: true,
+    relationTargetId: 'jb-02',
+    relationReplaceId: 'rel-01',
+    trace: { status: 'idle' },
+  })
+
+  assert.match(html, /Ganti hubungan aset/)
+  assert.match(html, /data-relation-target/)
+  assert.match(html, /value="jb-02"/)
+  assert.match(html, /data-save-relation/)
+  assert.match(html, /data-replace-relation="rel-01"/)
+})
+
+test('drawer confirms that a saved relation is already visible on the map', () => {
+  const html = renderAssetDetailDrawer({
+    asset,
+    activeContext,
+    relationStatus: 'saved',
+    trace: { status: 'idle' },
+  })
+
+  assert.match(html, /drawer-relation-success/)
+  assert.match(html, /Hubungan tersimpan dan sudah ditampilkan pada peta/)
 })

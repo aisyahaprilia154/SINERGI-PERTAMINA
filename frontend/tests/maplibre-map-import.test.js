@@ -52,6 +52,18 @@ test('user map mounts MapLibre with area scope and never loads review candidates
   assert.doesNotMatch(source, /createFlatNetworkMap\(/)
 })
 
+test('manual relation connectors are suppressed only by matching KML line geometry', async () => {
+  const source = await readFile(
+    new URL('../src/pages/map/maplibre-map.js', import.meta.url),
+    'utf8',
+  )
+
+  assert.match(source, /availableLineGeometryIds/)
+  assert.match(source, /geometry\.geometryType === 'line_string'/)
+  assert.match(source, /sourceGeometryIds\.some\(\(id\) => availableLineGeometryIds\.has\(id\)\)/)
+  assert.doesNotMatch(source, /sourceGeometryIds\.some\(\(id\) => availableGeometryIds\.has\(id\)\)/)
+})
+
 test('connection review keeps the decision beside a candidate-focused asset map', async () => {
   const reviewSource = await readFile(
     new URL('../src/pages/admin/topology-review-page.js', import.meta.url),

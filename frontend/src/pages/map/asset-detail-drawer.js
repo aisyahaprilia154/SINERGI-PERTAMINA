@@ -7,12 +7,15 @@ export function renderAssetDetailDrawer({
   activeContext,
   trace = {},
   showAdditionalMetadata = false,
-  topologyReady = true,
-  traceAvailable = topologyReady,
-  diagramAvailable = topologyReady,
+  traceAvailable = true,
+  diagramAvailable = true,
   topologySummary = {},
-  reviewUrl = null,
-  topologyMessage = 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.',
+  relationOptions = [],
+  relationEditorOpen = false,
+  relationTargetId = '',
+  relationReplaceId = null,
+  relationStatus = 'idle',
+  relationError = null,
 }) {
   if (status === 'loading') return renderLoadingState()
   if (status === 'error') return renderErrorState(errorMessage)
@@ -60,31 +63,37 @@ export function renderAssetDetailDrawer({
 
       ${renderTraceSection(trace)}
 
-      ${!traceAvailable ? `
-        <section class="drawer-topology-readiness" role="status">
-          <span class="material-symbols-outlined" aria-hidden="true">warning</span>
-          <span>
-            <strong>Topologi perlu diperiksa</strong>
-            <span>${escapeHtml(topologyMessage)}</span>
-          </span>
-        </section>
-      ` : ''}
-
       <section class="drawer-section drawer-topology-summary" aria-labelledby="asset-topology-title">
         <div class="drawer-section-heading">
-          <h3 id="asset-topology-title">Kesiapan topologi</h3>
+          <h3 id="asset-topology-title">Relasi aset</h3>
           <span class="count-badge">${connectedAssets.length}</span>
         </div>
         <p>${hasDirectRelations
           ? `${connectedAssets.length} relasi langsung terkonfirmasi untuk aset ini.`
           : 'Relasi aset belum tersedia.'}</p>
-        <small>${Number(topologySummary.confirmedConnectionCount) || 0} koneksi terkonfirmasi pada area aktif.</small>
-        ${reviewUrl ? `
-          <a class="drawer-review-link" href="${escapeAttribute(reviewUrl)}">
-            Periksa kandidat relasi
-            <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
-          </a>
+        <small>${Number(topologySummary.confirmedConnectionCount) || 0} relasi otomatis terkonfirmasi pada area aktif.</small>
+        ${relationStatus === 'saved' ? `
+          <p class="drawer-relation-success" role="status">
+            <span class="material-symbols-outlined" aria-hidden="true">check_circle</span>
+            Hubungan tersimpan dan sudah ditampilkan pada peta.
+          </p>
         ` : ''}
+        ${relationOptions.length ? `
+          <button class="drawer-relation-add" type="button" data-open-relation-picker>
+            <span class="material-symbols-outlined" aria-hidden="true">add_link</span>
+            ${hasDirectRelations ? 'Tambah atau ganti relasi' : 'Sambungkan aset'}
+            <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
+          </button>
+        ` : `
+          <small class="drawer-relation-hint">Tidak ada aset kompatibel lain yang tersedia di area ini.</small>
+        `}
+        ${relationEditorOpen ? renderRelationEditor({
+          relationOptions,
+          relationTargetId,
+          relationReplaceId,
+          relationStatus,
+          relationError,
+        }) : ''}
       </section>
 
       <section class="drawer-section" aria-labelledby="asset-information-title">
@@ -142,18 +151,26 @@ export function renderAssetDetailDrawer({
         </div>
         ${connectedAssets.length ? `
           <ul class="relation-list">
-            ${connectedAssets.map(({ asset: connectedAsset, network }) => `
+            ${connectedAssets.map(({ asset: connectedAsset, network, relation }) => `
               <li>
-                <button type="button" data-connected-asset="${escapeAttribute(connectedAsset.id)}">
-                  <span class="relation-icon material-symbols-outlined" aria-hidden="true">
-                    ${assetIcon(connectedAsset.type)}
-                  </span>
-                  <span>
-                    <strong>${escapeHtml(displayAssetName(connectedAsset))}</strong>
-                    <small>${escapeHtml(connectedAsset.id)} · ${escapeHtml(network?.shortName || network?.name || 'Topologi terkonfirmasi')}</small>
-                  </span>
-                  <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
-                </button>
+                <div class="relation-item-row">
+                  <button type="button" data-connected-asset="${escapeAttribute(connectedAsset.id)}">
+                    <span class="relation-icon material-symbols-outlined" aria-hidden="true">
+                      ${assetIcon(connectedAsset.type)}
+                    </span>
+                    <span>
+                      <strong>${escapeHtml(displayAssetName(connectedAsset))}</strong>
+                      <small>${escapeHtml(connectedAsset.id)} · ${escapeHtml(network?.shortName || network?.name || 'Relasi terkonfirmasi')}</small>
+                    </span>
+                    <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+                  </button>
+                  ${relation?.id ? `
+                    <button class="relation-replace-button" type="button"
+                      data-replace-relation="${escapeAttribute(relation.id)}">
+                      Ganti
+                    </button>
+                  ` : ''}
+                </div>
               </li>
             `).join('')}
           </ul>
@@ -179,7 +196,7 @@ export function renderAssetDetailDrawer({
 
       <p class="read-only-note">
         <span class="material-symbols-outlined" aria-hidden="true">lock</span>
-        Detail dan relasi ini hanya dapat dibaca.
+        Geometri sumber tetap read-only; hubungan operasional dapat diperbarui.
       </p>
     </div>
 
@@ -203,12 +220,49 @@ export function renderAssetDetailDrawer({
           Buka detail aset
         </button>
         <button class="button secondary open-schematic" type="button"
-          ${diagramAvailable ? '' : `disabled aria-disabled="true" title="${escapeAttribute(topologyMessage)}"`}>
+          ${diagramAvailable ? '' : 'disabled aria-disabled="true" title="Belum ada aset yang dapat ditampilkan pada diagram."'}>
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
           Buat diagram 2D
         </button>
       </div>
     </footer>
+  `
+}
+
+function renderRelationEditor({
+  relationOptions = [],
+  relationTargetId = '',
+  relationReplaceId = null,
+  relationStatus = 'idle',
+  relationError = null,
+}) {
+  const saving = relationStatus === 'saving'
+  const selectedTargetId = relationTargetId || relationOptions[0]?.asset?.id || ''
+  return `
+    <div class="drawer-relation-editor" role="group" aria-labelledby="relation-editor-title">
+      <strong id="relation-editor-title">${relationReplaceId ? 'Ganti hubungan aset' : 'Sambungkan ke aset'}</strong>
+      <label for="relation-target-select">Pilih aset tujuan</label>
+      <select id="relation-target-select" data-relation-target ${saving ? 'disabled' : ''}>
+        <option value="">Pilih aset</option>
+        ${relationOptions.map(({ asset: optionAsset, reason }) => `
+          <option value="${escapeAttribute(optionAsset.id)}"
+            ${optionAsset.id === selectedTargetId ? 'selected' : ''}>
+            ${escapeHtml(displayAssetName(optionAsset))} · ${escapeHtml(reason)}
+          </option>
+        `).join('')}
+      </select>
+      <small>Relasi yang disimpan langsung menjadi terkonfirmasi dan garisnya ditampilkan pada peta.</small>
+      ${relationError ? `<p class="drawer-relation-error" role="alert">${escapeHtml(relationError)}</p>` : ''}
+      <div class="drawer-relation-editor-actions">
+        <button class="button secondary" type="button" data-cancel-relation ${saving ? 'disabled' : ''}>
+          Batal
+        </button>
+        <button class="button primary" type="button" data-save-relation
+          ${!selectedTargetId || saving ? 'disabled' : ''}>
+          ${saving ? 'Menyimpan…' : 'Simpan hubungan'}
+        </button>
+      </div>
+    </div>
   `
 }
 

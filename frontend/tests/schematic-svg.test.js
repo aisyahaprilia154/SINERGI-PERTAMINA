@@ -168,7 +168,7 @@ test('all-assets SVG renders every asset on one canvas with evidence status', ()
 
   assert.match(svg, /Seluruh aset · 4/)
   assert.match(svg, /100% tercakup/)
-  assert.match(svg, /2 memiliki evidence · 2 belum terhubung · 1 komponen/)
+  assert.match(svg, /2 aset terhubung · 2 aset tanpa relasi · 1 komponen/)
   assert.match(svg, /KOMPONEN TERHUBUNG/)
   assert.match(svg, /ASET TANPA RELASI/)
   assert.match(svg, /Rekomendasi/)

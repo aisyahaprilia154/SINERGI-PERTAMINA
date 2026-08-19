@@ -450,10 +450,10 @@ function deduplicateEvidenceEdges(edges) {
 
 function networkFamilyLabel(value) {
   const normalized = String(value || '').toLowerCase()
-  if (normalized === 'fiber_optic') return 'Fiber Optic (evidence)'
-  if (normalized === 'lan') return 'LAN (evidence)'
-  if (normalized === 'cctv') return 'CCTV (evidence)'
-  return 'Evidence topologi'
+  if (normalized === 'fiber_optic') return 'Fiber Optic'
+  if (normalized === 'lan') return 'LAN'
+  if (normalized === 'cctv') return 'CCTV'
+  return 'Relasi topologi'
 }
 
 function buildTraceEdges(tracePath, traceRelations, networks) {

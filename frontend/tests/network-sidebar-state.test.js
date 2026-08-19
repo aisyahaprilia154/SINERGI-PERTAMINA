@@ -175,10 +175,10 @@ test('sidebar prioritizes area, search, filters, and networks before compact con
   assert.doesNotMatch(html, /<details class="sidebar-topology-readiness ready" open>/)
   assert.match(html, /class="text-button show-all-networks active" type="button"\s+aria-pressed="true"/)
   assert.match(html, /class="text-button hide-all-networks" type="button"\s+aria-pressed="false"/)
-  assert.match(html, /Status topologi/)
-  assert.match(html, /34 terkonfirmasi · 16 tanpa relasi/)
-  assert.match(html, /1\.148<\/b> perlu diperiksa/)
-  assert.match(html, /Tracing menggunakan graph koneksi terkonfirmasi\./)
+  assert.match(html, /Relasi aset/)
+  assert.match(html, /34 otomatis terkonfirmasi · 16 tanpa relasi/)
+  assert.match(html, /Relasi kuat dibaca otomatis\. Hubungan aset dapat disambungkan atau diganti dari Detail aset\./)
+  assert.doesNotMatch(html, /Status topologi|perlu diperiksa|Tracing menggunakan graph koneksi terkonfirmasi/)
 })
 
 test('network cards expose compact metadata and clear action tooltips', () => {
