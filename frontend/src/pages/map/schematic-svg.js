@@ -9,11 +9,24 @@ export function renderSchematicSvg({
   context,
   selectedAssetId = null,
   sourceIconDataByUrl = null,
+  collapsedPoleGroupIds = new Set(),
 }) {
   if (graph.status !== 'ready' || layout.status !== 'ready') return ''
 
   const legendCategories = uniqueNodeTypes(layout.nodes)
   const legendNetworks = uniqueNetworks(layout.edges, graph.mode)
+  const poleGroupState = buildPoleGroupState({
+    groups: graph.poleGroups ?? [],
+    layoutNodes: layout.nodes,
+    collapsedPoleGroupIds,
+    selectedAssetId,
+  })
+  const renderedEdges = layout.edges.flatMap((edge) => (
+    remapCollapsedEdge(edge, poleGroupState)
+  ))
+  const renderedNodes = layout.nodes.filter((node) => (
+    !poleGroupState.hiddenAssetIds.has(node.id)
+  ))
   const diagramBottom = layout.height - layout.options.footerHeight
   const headingDividerY = graph.mode === 'all-assets' ? 96 : 78
   const diagramTop = headingDividerY + 4
@@ -46,6 +59,11 @@ export function renderSchematicSvg({
           .diagram-edge.logical{stroke-dasharray:6 5;stroke-width:2}
           .diagram-edge.recommended{stroke-dasharray:9 7;stroke-width:2.5}
           .diagram-edge.recommended-underlay{stroke-dasharray:9 7}
+          .diagram-pole-group{fill:${SVG_THEME.backgroundSubtle};fill-opacity:.58;stroke:#7c8794;stroke-width:1.4;stroke-dasharray:7 5}
+          .diagram-pole-group-toggle{cursor:pointer}
+          .diagram-pole-group-toggle:hover .diagram-pole-group,.diagram-pole-group-toggle:focus .diagram-pole-group{stroke:${SVG_THEME.selected};stroke-width:2}
+          .diagram-pole-group-label{font:700 9px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.textSecondary};letter-spacing:.02em}
+          .diagram-pole-group-label-backdrop{fill:${SVG_THEME.background};stroke:#7c8794;stroke-width:1}
           .diagram-node{cursor:pointer;outline:none}
           .node-card{fill:${SVG_THEME.backgroundSubtle};stroke:${SVG_THEME.border};stroke-width:1.5}
           .diagram-node.anchor .node-card,.diagram-node.selected .node-card{stroke:${SVG_THEME.selected};stroke-width:2.5}
@@ -84,12 +102,16 @@ export function renderSchematicSvg({
         ${renderCategorySections(layout.sections ?? [])}
       </g>
 
+      <g class="diagram-pole-groups" aria-label="Kelompok pemasangan fisik">
+        ${renderPoleGroups(graph.poleGroups ?? [], layout.nodes, poleGroupState)}
+      </g>
+
       <g class="diagram-edges" aria-label="Relasi aset">
-        ${layout.edges.map((edge) => renderEdge(edge, graph.mode)).join('')}
+        ${renderedEdges.map((edge) => renderEdge(edge, graph.mode)).join('')}
       </g>
 
       <g class="diagram-nodes" aria-label="Aset">
-        ${layout.nodes.map((node) => renderNode(
+        ${renderedNodes.map((node) => renderNode(
           node,
           selectedAssetId,
           sourceIconDataByUrl,
@@ -104,6 +126,86 @@ export function renderSchematicSvg({
       </text>
     </svg>
   `
+}
+
+function buildPoleGroupState({
+  groups = [],
+  layoutNodes = [],
+  collapsedPoleGroupIds = new Set(),
+  selectedAssetId = null,
+} = {}) {
+  const nodeById = new Map(layoutNodes.map((node) => [node.id, node]))
+  const hiddenAssetIds = new Set()
+  const collapsedByAssetId = new Map()
+  const renderedGroups = groups.flatMap((group) => {
+    const groupId = group.id || group.poleAssetId
+    const nodes = (group.assetIds ?? [])
+      .map((assetId) => nodeById.get(assetId))
+      .filter((node) => node?.diagram)
+    if (nodes.length < 2) return []
+    const collapsed = collapsedPoleGroupIds.has(groupId)
+      && !(group.assetIds ?? []).includes(selectedAssetId)
+    const poleNode = nodeById.get(group.poleAssetId)
+    if (collapsed) {
+      group.assetIds
+        .filter((assetId) => assetId !== group.poleAssetId)
+        .forEach((assetId) => {
+          hiddenAssetIds.add(assetId)
+          collapsedByAssetId.set(assetId, poleNode)
+        })
+    }
+    return [{ group, groupId, nodes, collapsed }]
+  })
+  return { nodeById, hiddenAssetIds, collapsedByAssetId, renderedGroups }
+}
+
+function remapCollapsedEdge(edge, state) {
+  const sourceAnchor = state.collapsedByAssetId.get(edge.sourceId)
+  const targetAnchor = state.collapsedByAssetId.get(edge.targetId)
+  const sourceId = sourceAnchor?.id ?? edge.sourceId
+  const targetId = targetAnchor?.id ?? edge.targetId
+  if (sourceId === targetId) return []
+  const routePoints = (edge.routePoints ?? []).map((point, index, points) => {
+    if (index === 0 && sourceAnchor?.diagram) return nodeCenter(sourceAnchor)
+    if (index === points.length - 1 && targetAnchor?.diagram) return nodeCenter(targetAnchor)
+    return point
+  })
+  return [{ ...edge, sourceId, targetId, routePoints }]
+}
+
+function renderPoleGroups(groups, layoutNodes, state = buildPoleGroupState({ groups, layoutNodes })) {
+  return state.renderedGroups.flatMap(({ group, groupId, nodes, collapsed }) => {
+    const visibleNodes = collapsed
+      ? nodes.filter((node) => node.id === group.poleAssetId)
+      : nodes
+    const minX = Math.min(...visibleNodes.map((node) => node.diagram.x)) - 18
+    const minY = Math.min(...visibleNodes.map((node) => node.diagram.y)) - 34
+    const maxX = Math.max(...visibleNodes.map((node) => node.diagram.x + node.diagram.width)) + 18
+    const maxY = Math.max(...visibleNodes.map((node) => node.diagram.y + node.diagram.height)) + 18
+    const label = `Tiang ${shortenGroupLabel(group.pole?.name || group.poleAssetId)} · ${Math.max(0, nodes.length - 1)} aset`
+    const labelWidth = Math.min(250, Math.max(116, label.length * 5.5 + 22))
+    return [`
+      <g class="diagram-pole-group-toggle" data-pole-group-toggle="${escapeAttribute(groupId)}"
+        data-pole-group-id="${escapeAttribute(groupId)}" tabindex="0" role="button"
+        aria-expanded="${String(!collapsed)}" aria-label="${escapeAttribute(
+          `${collapsed ? 'Buka' : 'Ringkas'} kelompok ${label}`,
+        )}">
+        <title>${escapeXml(label)} · relasi pemasangan fisik · ${collapsed ? 'ringkas' : 'terbuka'}</title>
+        <rect class="diagram-pole-group" x="${minX}" y="${minY}" width="${maxX - minX}" height="${maxY - minY}" rx="16"/>
+        <rect class="diagram-pole-group-label-backdrop" x="${minX + 10}" y="${minY - 1}"
+          width="${labelWidth}" height="18" rx="8"/>
+        <text class="diagram-pole-group-label" x="${minX + 19}" y="${minY + 12}">${escapeXml(label)}</text>
+        ${collapsed ? `<text class="diagram-pole-group-label" x="${maxX - 12}" y="${minY + 12}" text-anchor="end">+</text>` : ''}
+      </g>
+    `]
+  }).join('')
+}
+
+function nodeCenter(node) {
+  return {
+    x: node.diagram.x + node.diagram.width / 2,
+    y: node.diagram.y + node.diagram.height / 2,
+  }
 }
 
 function renderEdge(edge, mode) {
@@ -472,6 +574,11 @@ function shortenNodeLabel(value = '') {
 
 function shortenCompactLabel(value = '') {
   return value.length > 16 ? `${value.slice(0, 14)}…` : value
+}
+
+function shortenGroupLabel(value = '') {
+  const normalized = String(value || '').trim() || 'tanpa nama'
+  return normalized.length > 30 ? `${normalized.slice(0, 28)}…` : normalized
 }
 
 function shortAssetId(value = '') {

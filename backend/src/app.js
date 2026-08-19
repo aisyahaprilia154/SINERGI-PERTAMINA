@@ -589,6 +589,31 @@ export function createApp({
           ),
         )
       }
+      const mountingRelationMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/mounting-relations$/,
+        )
+        : null
+      if (mountingRelationMatch) {
+        const user = requireAdministrator(request, authenticator)
+        assertTopologyService(topologyService)
+        const body = await readJsonBody(request)
+        return sendJson(
+          response,
+          200,
+          await topologyService.setMountingRelation(
+            mountingRelationMatch[1],
+            user.id,
+            {
+              ...body,
+              correlationId,
+              ...(request.headers['idempotency-key'] !== undefined
+                ? { idempotencyKey: request.headers['idempotency-key'] }
+                : {}),
+            },
+          ),
+        )
+      }
       const candidateActionMatch = request.method === 'POST'
         ? url.pathname.match(
           /^\/api\/topology\/candidates\/([^/]+)\/(confirm|reject|skip|select-target)$/,

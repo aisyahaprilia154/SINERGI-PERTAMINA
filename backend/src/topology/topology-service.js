@@ -17,6 +17,13 @@ import {
   TOPOLOGY_RULE_SET_VERSION,
 } from './semantic-relation-engine.js'
 import {
+  generateMountingArtifacts,
+  isMountableNode,
+  isPoleNode,
+  sameFacilityScope,
+} from './mounting-relations.js'
+import { filterConflictingCameraEdges } from './device-edge-policy.js'
+import {
   withTopologyGraphRevision,
 } from './topology-graph-revision.js'
 import {
@@ -99,6 +106,8 @@ export class TopologyService {
         previousInterfaceRegistry: current.topologyInterfaceRegistry
           ?? current.topologyGraph?.interfaceRegistry
           ?? [],
+        previousMountingRelations: current.mountingRelations,
+        previousMountingOverrides: current.mountingOverrides,
         generatedAt,
       })
       assertPublishableTopologyArtifacts(artifacts, datasetVersionId)
@@ -235,6 +244,10 @@ export class TopologyService {
     const record = await this.repository.get(datasetVersionId)
     const graph = this.normalizedTraceGraph(record)
     const reviewContract = topologyReviewContract(record)
+    const confirmedRelations = filterConflictingCameraEdges(
+      record.confirmedRelations,
+      graph.nodes,
+    ).edges
     return {
       datasetVersionId,
       topologyRuleSetVersion: record.topologyRuleSetVersion ?? null,
@@ -242,7 +255,7 @@ export class TopologyService {
       summary: normalizeTopologySummary(
         record.topologySummary ?? emptySummary(),
         graph,
-        record.confirmedRelations,
+        confirmedRelations,
       ),
       readiness: record.topologyReadiness ?? {
         topologyReadiness: 'not_ready',
@@ -370,12 +383,16 @@ export class TopologyService {
   async getGraph(datasetVersionId) {
     const record = await this.repository.get(datasetVersionId)
     const graph = this.normalizedTraceGraph(record)
+    const confirmedRelations = filterConflictingCameraEdges(
+      record.confirmedRelations,
+      graph.nodes,
+    ).edges
     return {
       datasetVersionId,
       graph: structuredClone(graph),
       validation: structuredClone(record.topologyValidation ?? null),
       topologyDiagnostics: structuredClone(record.topologyDiagnostics ?? []),
-      confirmedRelations: structuredClone(record.confirmedRelations ?? []),
+      confirmedRelations: structuredClone(confirmedRelations),
     }
   }
 
@@ -1668,7 +1685,7 @@ export class TopologyService {
     const initialSource = resolveManualDevice(current, normalizedSourceReference, 'sourceAssetId')
     const initialTarget = resolveManualDevice(current, normalizedTargetReference, 'targetAssetId')
     assertDistinctManualDevices(initialSource, initialTarget)
-    assertSameManualDeviceSite(initialSource, initialTarget)
+    assertSameManualDeviceSite(initialSource, initialTarget, current)
     assertManualEvidenceReferences(current, {
       source: initialSource,
       target: initialTarget,
@@ -1685,7 +1702,7 @@ export class TopologyService {
       const source = resolveManualDevice(record, normalizedSourceReference, 'sourceAssetId')
       const target = resolveManualDevice(record, normalizedTargetReference, 'targetAssetId')
       assertDistinctManualDevices(source, target)
-      assertSameManualDeviceSite(source, target)
+      assertSameManualDeviceSite(source, target, record)
       assertManualEvidenceReferences(record, {
         source,
         target,
@@ -1762,6 +1779,8 @@ export class TopologyService {
         previousInterfaceRegistry: record.topologyInterfaceRegistry
           ?? record.topologyGraph?.interfaceRegistry
           ?? [],
+        previousMountingRelations: record.mountingRelations,
+        previousMountingOverrides: record.mountingOverrides,
         affectedAssetIds: [source.topologyAssetId, target.topologyAssetId],
         eligibilityIssues: [
           ...(record.topologyEligibilityIssues ?? []),
@@ -1814,6 +1833,99 @@ export class TopologyService {
       if (replay) return replay
       throw error
     }
+  }
+
+  async setMountingRelation(datasetVersionId, actorId, {
+    assetId,
+    poleAssetId = null,
+    action = poleAssetId ? 'assign' : 'detach',
+    reason,
+    expectedRecordRevision,
+    correlationId,
+  } = {}) {
+    const normalizedAssetReference = normalizeTopologyAssetReference(assetId, 'assetId')
+    const normalizedPoleReference = poleAssetId === null || poleAssetId === undefined
+      ? null
+      : normalizeTopologyAssetReference(poleAssetId, 'poleAssetId')
+    const normalizedAction = normalizeMountingAction(action, normalizedPoleReference)
+    const normalizedReason = normalizeReason(reason, true)
+    const current = await this.repository.get(datasetVersionId)
+    assertTopologyBundle(current)
+    const initialChild = resolveManualDevice(current, normalizedAssetReference, 'assetId')
+    assertMountableAsset(initialChild)
+    const initialPole = normalizedAction === 'assign'
+      ? resolveManualDevice(current, normalizedPoleReference, 'poleAssetId')
+      : null
+    if (initialPole) assertPoleAsset(initialPole)
+    if (initialPole) assertSameManualDeviceSite(initialChild, initialPole, current)
+
+    let event = null
+    const updated = await this.#withMutationTransaction(async ({ repository, auditLog }) => {
+      const record = await repository.get(datasetVersionId)
+      assertTopologyBundle(record)
+      const child = resolveManualDevice(record, normalizedAssetReference, 'assetId')
+      assertMountableAsset(child)
+      const pole = normalizedAction === 'assign'
+        ? resolveManualDevice(record, normalizedPoleReference, 'poleAssetId')
+        : null
+      if (pole) {
+        assertPoleAsset(pole)
+        assertSameManualDeviceSite(child, pole, record)
+      }
+      const updatedAt = this.clock().toISOString()
+      event = await auditLog.record('topology.mounting_override_updated', {
+        actorId,
+        datasetVersionId,
+        branchId: record.datasetVersion.branchId,
+        correlationId,
+        outcome: 'confirmed',
+        details: {
+          assetId: child.canonicalAssetId,
+          poleAssetId: pole?.canonicalAssetId ?? null,
+          action: normalizedAction,
+          reason: normalizedReason,
+        },
+      })
+      const identityResolver = createAssetIdentityResolver(
+        buildAssetIdentityMapFromRecord(record),
+      )
+      const nextOverrides = [
+        ...(record.mountingOverrides ?? []).filter((override) => {
+          const overrideAssetReference = override.assetId ?? override.sourceAssetId
+          const overrideAssetId = identityResolver.resolve(overrideAssetReference)
+            ?? overrideAssetReference
+          return overrideAssetId !== child.canonicalAssetId
+        }),
+        {
+          assetId: child.canonicalAssetId,
+          targetAssetId: pole?.canonicalAssetId ?? null,
+          action: normalizedAction,
+          provenance: 'manual_admin',
+          actorId,
+          updatedAt,
+          reason: normalizedReason,
+          auditEventId: event.id,
+        },
+      ]
+      const mounting = generateMountingArtifacts(record.topologyInputBundle, {
+        config: this.config,
+        previousRelations: record.mountingRelations,
+        previousOverrides: nextOverrides,
+        generatedAt: updatedAt,
+      })
+      return repository.update(datasetVersionId, (currentRecord) => ({
+        ...currentRecord,
+        mountingRelations: mounting.relations,
+        mountingCandidates: mounting.candidates,
+        mountingOptions: mounting.options,
+        mountingOverrides: mounting.overrides,
+        mountingSummary: mounting.summary,
+      }), {
+        expectedRevision: expectedRecordRevision ?? recordRevision(record),
+        projectionMode: 'topology-review',
+      })
+    })
+    return mountingRelationResponse(updated, event?.id ?? null, normalizedAssetReference)
   }
 
   async revokeRelation(relationId, actorId, {
@@ -2457,6 +2569,11 @@ export function applyArtifacts(record, artifacts, {
     topologyLineworkIssues: artifacts.lineworkIssues,
     topologySummary: artifacts.summary,
     topologyReadiness: artifacts.readiness,
+    mountingRelations: structuredClone(artifacts.mountingRelations ?? record.mountingRelations ?? []),
+    mountingCandidates: structuredClone(artifacts.mountingCandidates ?? record.mountingCandidates ?? []),
+    mountingOptions: structuredClone(artifacts.mountingOptions ?? record.mountingOptions ?? []),
+    mountingOverrides: structuredClone(artifacts.mountingOverrides ?? record.mountingOverrides ?? []),
+    mountingSummary: structuredClone(artifacts.mountingSummary ?? record.mountingSummary ?? null),
     topologyCandidateHistory: candidateHistory,
     topologyRuns: topologyRun
       ? [...(record.topologyRuns ?? []), topologyRun]
@@ -2753,6 +2870,8 @@ function rebuildFromReviewedCandidates(
     previousInterfaceRegistry: record.topologyInterfaceRegistry
       ?? record.topologyGraph?.interfaceRegistry
       ?? [],
+    previousMountingRelations: record.mountingRelations,
+    previousMountingOverrides: record.mountingOverrides,
     affectedAssetIds,
     eligibilityIssues: record.topologyEligibilityIssues,
     lineworkIssues: record.topologyLineworkIssues,
@@ -2818,6 +2937,26 @@ function manualRelationResponse(record, auditEventId) {
     readiness: structuredClone(record.topologyReadiness),
     auditEventId,
     ...reviewSnapshot(record),
+  })
+}
+
+function mountingRelationResponse(record, auditEventId, assetReference) {
+  const identityMap = buildAssetIdentityMapFromRecord(record)
+  const resolver = createAssetIdentityResolver(identityMap)
+  const canonicalAssetId = resolver.resolve(assetReference) ?? assetReference
+  return canonicalizeJsonValue({
+    datasetVersionId: record.datasetVersion.id,
+    relation: structuredClone((record.mountingRelations ?? []).find((relation) => (
+      relation.sourceAssetId === canonicalAssetId
+    )) ?? null),
+    mountingRelations: structuredClone(record.mountingRelations ?? []),
+    mountingCandidates: structuredClone(record.mountingCandidates ?? []),
+    mountingOptions: structuredClone(record.mountingOptions ?? []),
+    mountingOverrides: structuredClone(record.mountingOverrides ?? []),
+    mountingSummary: structuredClone(record.mountingSummary ?? null),
+    graph: structuredClone(record.topologyGraph),
+    auditEventId,
+    recordRevision: recordRevision(record),
   })
 }
 
@@ -3753,6 +3892,33 @@ function normalizeTopologyAssetReference(value, field) {
   return normalized
 }
 
+function normalizeMountingAction(value, poleAssetId) {
+  const action = String(value ?? (poleAssetId ? 'assign' : 'detach')).trim().toLowerCase()
+  if (action === 'assign' && poleAssetId) return action
+  if (action === 'detach' && !poleAssetId) return action
+  throw new AppError('Action pemasangan tiang tidak valid.', {
+    code: 'invalid_mounting_action',
+    statusCode: 400,
+    details: { supportedActions: ['assign', 'detach'] },
+  })
+}
+
+function assertMountableAsset(device) {
+  if (isMountableNode(device.object) && !isPoleNode(device.object)) return
+  throw new AppError('Hanya aset CCTV atau Junction Box yang dapat dipasang pada tiang.', {
+    code: 'mounting_asset_not_mountable',
+    statusCode: 400,
+  })
+}
+
+function assertPoleAsset(device) {
+  if (isPoleNode(device.object)) return
+  throw new AppError('Target pemasangan harus berupa aset Tiang.', {
+    code: 'mounting_target_pole_required',
+    statusCode: 400,
+  })
+}
+
 function normalizeManualRelationType(value) {
   const normalized = String(value ?? 'connected-to').trim().toLowerCase()
   if (normalized !== 'connected-to') {
@@ -3982,14 +4148,21 @@ function assertDistinctManualDevices(source, target) {
   })
 }
 
-function assertSameManualDeviceSite(source, target) {
-  if (source.object.siteId === target.object.siteId) return
-  throw new AppError('Koneksi manual lintas site tidak diizinkan.', {
+function assertSameManualDeviceSite(source, target, record) {
+  if (sameFacilityScope(source.object, target.object, {
+    datasetVersion: record.datasetVersion,
+    site: record.datasetVersion?.branchId,
+  })) return
+  throw new AppError('Pemasangan manual lintas site atau fasilitas tidak diizinkan.', {
     code: 'topology_manual_relation_cross_site',
     statusCode: 400,
     details: {
       sourceSiteId: source.object.siteId,
       targetSiteId: target.object.siteId,
+      sourceLocationGroupKey: source.object.locationGroupKey ?? null,
+      targetLocationGroupKey: target.object.locationGroupKey ?? null,
+      sourceFolderPath: source.object.sourceFolderPath ?? null,
+      targetFolderPath: target.object.sourceFolderPath ?? null,
     },
   })
 }
@@ -4404,7 +4577,7 @@ function normalizeTraceGraph(record, identityMap, projection = null) {
   const resolveNodeId = (value) => resolver.resolve(value)
     ?? originalToCanonical.get(value)
     ?? (nodeIds.has(value) ? value : null)
-  const edges = (sourceGraph.edges ?? []).flatMap((edge) => {
+  let edges = (sourceGraph.edges ?? []).flatMap((edge) => {
     if (!isConfirmedGraphEdge(edge)) return []
     const originalSource = edge.sourceAssetId ?? edge.sourceNodeId
     const originalTarget = edge.targetAssetId ?? edge.targetNodeId
@@ -4422,6 +4595,7 @@ function normalizeTraceGraph(record, identityMap, projection = null) {
       canonicalTargetAssetId: targetAssetId,
     }]
   })
+  edges = filterConflictingCameraEdges(edges, nodes).edges
   const degreeByNode = Object.fromEntries([...nodeIds].map((id) => [id, 0]))
   edges.forEach((edge) => {
     degreeByNode[edge.sourceAssetId] += 1

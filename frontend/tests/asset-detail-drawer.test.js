@@ -185,3 +185,36 @@ test('drawer confirms that a saved relation is already visible on the map', () =
   assert.match(html, /drawer-relation-success/)
   assert.match(html, /Hubungan tersimpan dan sudah ditampilkan pada peta/)
 })
+
+test('drawer exposes physical mounting assignment and administrator override controls', () => {
+  const html = renderAssetDetailDrawer({
+    asset,
+    mountedOnAsset: { id: 'pole-01', name: 'Tiang CCTV-01', type: 'Tiang CCTV' },
+    mountingOptions: [{
+      optionId: 'mount-option-01',
+      targetAssetId: 'pole-02',
+      targetAssetName: 'Tiang CCTV-02',
+      distanceMeters: 1.2,
+    }, {
+      optionId: 'mount-option-02',
+      targetAssetId: 'pole-03',
+      targetAssetName: 'Tiang CCTV-03',
+      distanceMeters: 1.8,
+    }],
+    mountingControlsAvailable: true,
+    showMountingCandidates: true,
+    activeContext,
+    trace: { status: 'idle' },
+  })
+
+  assert.match(html, /Pemasangan fisik/)
+  assert.match(html, /Dipasang pada/)
+  assert.match(html, /Tiang CCTV-01/)
+  assert.match(html, /data-mounting-action="change"/)
+  assert.match(html, /data-mounting-action="detach"/)
+  assert.match(html, /data-mounting-pole="pole-02"/)
+  assert.match(html, /data-mounting-pole="pole-03"/)
+  assert.match(html, /1,2 m/)
+  assert.match(html, /data-mounting-search/)
+  assert.match(html, /Tiang CCTV-02/)
+})

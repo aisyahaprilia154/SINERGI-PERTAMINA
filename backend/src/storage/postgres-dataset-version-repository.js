@@ -653,6 +653,11 @@ function topologyReviewPayloadPatch(record) {
     'topologyRuns',
     'topologyMutationReceipts',
     'relations',
+    'mountingRelations',
+    'mountingCandidates',
+    'mountingOptions',
+    'mountingOverrides',
+    'mountingSummary',
     'readiness',
   ]) {
     if (Object.prototype.hasOwnProperty.call(record, key)) patch[key] = record[key]

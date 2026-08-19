@@ -27,6 +27,12 @@ import {
   normalizeTopologySummary,
   TOPOLOGY_RULE_SET_VERSION,
 } from '../topology/semantic-relation-engine.js'
+import {
+  MOUNTING_RELATION_TYPE,
+  normalizeMountingOptions,
+  normalizeMountingRelations,
+} from '../topology/mounting-relations.js'
+import { filterConflictingCameraEdges } from '../topology/device-edge-policy.js'
 import { withTopologyGraphRevision } from '../topology/topology-graph-revision.js'
 import {
   buildActiveAssetCatalog,
@@ -297,6 +303,12 @@ export class DatasetVersionLifecycleService {
     const identityMap = buildAssetIdentityMapFromRecord(record)
     const resolver = createAssetIdentityResolver(identityMap)
     const topology = normalizeTopologyGraph(record, identityMap)
+    const topologyRelations = filterConflictingCameraEdges(
+      record.confirmedRelations,
+      topology.graph.nodes,
+    ).edges
+    const mountingRelations = filterResolvedMountingRelations(record, resolver)
+    const mountingOptions = filterResolvedMountingOptions(record, resolver)
     const readinessContract = buildReadinessContract(record, topology.graph)
     const publicationProfile = activePublicationProfile(record, resolved.pointer)
     const catalog = buildActiveAssetCatalog({
@@ -326,15 +338,20 @@ export class DatasetVersionLifecycleService {
         projectAssetIdentity(asset, identityMap, resolver)
       )),
       geometries: record.geometries ?? [],
-      relations: filterResolvedRelations(record, resolver),
+      relations: filterResolvedRelations(record, resolver, topology.graph.nodes),
       topologyGraph: topology.graph,
       topologySummary: normalizeTopologySummary(
         record.topologySummary,
         topology.graph,
-        record.confirmedRelations,
+        topologyRelations,
       ),
       topologyReadiness: record.topologyReadiness ?? null,
       topologyIdentity: topology.identity,
+      mountingRelations,
+      mountingCandidates: structuredClone(record.mountingCandidates ?? []),
+      mountingOptions,
+      mountingOverrides: structuredClone(record.mountingOverrides ?? []),
+      mountingSummary: structuredClone(record.mountingSummary ?? null),
       assetIdentityMap: identityMap,
       readiness: record.readiness ?? null,
       readinessContract,
@@ -401,7 +418,7 @@ export class DatasetVersionLifecycleService {
     }
     const canonicalAssetId = item.canonicalAssetId
     const asset = item.rawAsset
-    const relations = filterResolvedRelations(record, resolver)
+    const relations = filterResolvedRelations(record, resolver, topology.graph.nodes)
       .filter((relation) => (
         relation.sourceAssetId === canonicalAssetId
           || relation.targetAssetId === canonicalAssetId
@@ -409,6 +426,11 @@ export class DatasetVersionLifecycleService {
     const directConnections = publicationProfile === 'operational_topology'
       ? item.confirmedConnections
       : []
+    const mountingOptions = filterResolvedMountingOptions(record, resolver)
+      .filter((option) => (
+        option.assetId === canonicalAssetId
+          || option.targetAssetId === canonicalAssetId
+      ))
     const capabilities = buildActiveCapabilities({
       publicationProfile,
       readiness: readinessContract,
@@ -464,6 +486,21 @@ export class DatasetVersionLifecycleService {
           : 'not_authorized',
         location: item.locationText ? 'available' : 'not_available_in_source',
       },
+      mountingRelations: filterResolvedMountingRelations(record, resolver)
+        .filter((relation) => (
+          relation.sourceAssetId === canonicalAssetId
+            || relation.targetAssetId === canonicalAssetId
+        )),
+      mountingCandidates: (record.mountingCandidates ?? []).filter((candidate) => (
+        resolver.resolve(candidate.assetId) === canonicalAssetId
+          || resolver.resolve(candidate.targetAssetId) === canonicalAssetId
+      )).map((candidate) => ({
+        ...structuredClone(candidate),
+        assetId: resolver.resolve(candidate.assetId) ?? candidate.assetId,
+        targetAssetId: resolver.resolve(candidate.targetAssetId) ?? candidate.targetAssetId,
+      })),
+      mountingOptions,
+      mountingSummary: structuredClone(record.mountingSummary ?? null),
       topologyReadiness: record.topologyReadiness ?? null,
       topologyIdentity: topology.identity,
       readiness: record.readiness ?? null,
@@ -989,6 +1026,12 @@ function toActiveMapDataset(resolved, { siteId = null, siteBoundaries = {} } = {
   const assetIdentityMap = buildAssetIdentityMapFromRecord(record)
   const resolver = createAssetIdentityResolver(assetIdentityMap)
   const topology = normalizeTopologyGraph(record, assetIdentityMap)
+  const topologyRelations = filterConflictingCameraEdges(
+    record.confirmedRelations,
+    topology.graph.nodes,
+  ).edges
+  const mountingRelations = filterResolvedMountingRelations(record, resolver)
+  const mountingOptions = filterResolvedMountingOptions(record, resolver)
   const sourceIconIndex = buildSourceIconIndex(record)
   const publicationProfile = activePublicationProfile(record, resolved.pointer)
   const catalog = buildActiveAssetCatalog({
@@ -1009,7 +1052,7 @@ function toActiveMapDataset(resolved, { siteId = null, siteBoundaries = {} } = {
     !siteId || visibleNodeIds.has(geometry.assetNodeId)
   ))
   const renderableNodeIds = new Set(visibleGeometries.map(({ assetNodeId }) => assetNodeId))
-  const relations = filterResolvedRelations(record, resolver).filter((relation) => (
+  const relations = filterResolvedRelations(record, resolver, topology.graph.nodes).filter((relation) => (
     !siteId || (
       visibleCanonicalIds.has(relation.sourceAssetId)
       && visibleCanonicalIds.has(relation.targetAssetId)
@@ -1108,11 +1151,16 @@ function toActiveMapDataset(resolved, { siteId = null, siteBoundaries = {} } = {
       distanceMeters: relation.distanceMeters,
       metadata: relation.metadata ? structuredClone(relation.metadata) : undefined,
     })),
+    mountingRelations,
+    mountingCandidates: structuredClone(record.mountingCandidates ?? []),
+    mountingOptions,
+    mountingOverrides: structuredClone(record.mountingOverrides ?? []),
+    mountingSummary: structuredClone(record.mountingSummary ?? null),
     topologyGraph: mapTopologyGraph,
     topologySummary: normalizeTopologySummary(
       record.topologySummary,
       mapTopologyGraph,
-      record.confirmedRelations,
+      topologyRelations,
     ),
     topologyReadiness: record.topologyReadiness ?? null,
     topologyIdentity: topology.identity,
@@ -1334,8 +1382,9 @@ function normalizeTopologyGraph(record, identityMap) {
   })
 
   const unresolvedEdges = []
-  const edges = []
+  let edges = []
   ;(sourceGraph.edges ?? []).forEach((edge) => {
+    if (edge?.relationType === MOUNTING_RELATION_TYPE) return
     const originalSource = edge.sourceAssetId ?? edge.sourceNodeId
     const originalTarget = edge.targetAssetId ?? edge.targetNodeId
     const sourceAssetId = resolver.resolve(originalSource)
@@ -1363,6 +1412,7 @@ function normalizeTopologyGraph(record, identityMap) {
       canonicalTargetAssetId: targetAssetId,
     })
   })
+  edges = filterConflictingCameraEdges(edges, nodes).edges
 
   const degreeByNode = Object.fromEntries(nodes.map(({ id }) => [id, 0]))
   edges.forEach((edge) => {
@@ -1540,6 +1590,7 @@ function buildReadinessContract(record, topologyGraph) {
     capabilities: {
       viewTopology: generated,
       reviewTopology: Boolean(record.topologyInputBundle),
+      editAssetMounting: Boolean(record.topologyInputBundle),
       trace: traceAvailable,
       diagram: traceAvailable,
       autoConfirm: publicationTopologyStatus === 'ready' && traceAvailable,
@@ -1644,10 +1695,14 @@ function withoutInternalStorage(datasetVersion) {
   return publicVersion
 }
 
-function filterResolvedRelations(record, resolver = createAssetIdentityResolver(
-  buildAssetIdentityMapFromRecord(record),
-)) {
-  return (record.relations ?? []).filter((relation) => (
+function filterResolvedRelations(
+  record,
+  resolver = createAssetIdentityResolver(buildAssetIdentityMapFromRecord(record)),
+  nodes = record.topologyGraph?.nodes ?? [],
+) {
+  const resolved = (record.relations ?? []).filter((relation) => (
+    relation?.relationType !== MOUNTING_RELATION_TYPE
+    &&
     (!relation.datasetVersionId || relation.datasetVersionId === record.datasetVersion.id)
     && (relation.verificationStatus === 'confirmed'
       || (!relation.verificationStatus && relation.relationStatus === 'confirmed'))
@@ -1662,6 +1717,36 @@ function filterResolvedRelations(record, resolver = createAssetIdentityResolver(
       ? { pathAssetId: resolver.resolve(relation.pathAssetId) ?? relation.pathAssetId }
       : {}),
   }))
+  return filterConflictingCameraEdges(resolved, nodes).edges
+}
+
+function filterResolvedMountingRelations(record, resolver = createAssetIdentityResolver(
+  buildAssetIdentityMapFromRecord(record),
+)) {
+  const rawRelations = (record.mountingRelations ?? []).length
+    ? record.mountingRelations
+    : (record.relations ?? []).filter((relation) => (
+      relation?.relationType === MOUNTING_RELATION_TYPE
+    ))
+  return normalizeMountingRelations(rawRelations, resolver)
+    .filter((relation) => (
+      relation.relationType === MOUNTING_RELATION_TYPE
+        && (!relation.datasetVersionId || relation.datasetVersionId === record.datasetVersion.id)
+        && relation.verificationStatus === 'confirmed'
+    ))
+}
+
+function filterResolvedMountingOptions(record, resolver = createAssetIdentityResolver(
+  buildAssetIdentityMapFromRecord(record),
+)) {
+  const rawOptions = Array.isArray(record.mountingOptions) && record.mountingOptions.length
+    ? record.mountingOptions
+    : (record.mountingCandidates ?? [])
+  return normalizeMountingOptions(rawOptions, resolver)
+    .filter((option) => (
+      (!option.datasetVersionId || option.datasetVersionId === record.datasetVersion.id)
+        && option.optionStatus !== 'rejected'
+    ))
 }
 
 function isRenderableGeometry(geometry) {

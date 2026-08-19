@@ -26,7 +26,7 @@ export function buildSelectedAssetRelationGraph({
 
   const directEdges = (topologyGraph?.edges ?? [])
     .map(normalizeEdge)
-    .filter(isConfirmedEdge)
+    .filter(isConfirmedTopologyEdge)
     .filter((edge) => edge.sourceId === selectedAssetId || edge.targetId === selectedAssetId)
     .filter((edge) => edge.sourceId !== edge.targetId)
 
@@ -57,7 +57,8 @@ export function normalizeTopologyEdge(edge = {}) {
 }
 
 export function isConfirmedTopologyEdge(edge = {}) {
-  return isConfirmedEdge(normalizeEdge(edge))
+  const normalized = normalizeEdge(edge)
+  return normalized.relationType !== 'mounted_on' && isConfirmedEdge(normalized)
 }
 
 function normalizeEdge(edge) {
