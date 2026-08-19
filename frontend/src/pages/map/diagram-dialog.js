@@ -162,6 +162,7 @@ function bindDialogEvents({
   let panState = null
   let isAutoFit = true
   let renderSequence = 0
+  const collapsedPoleGroupIds = new Set()
   const sourceIconDataByUrl = new Map()
   const sourceIconPromises = new Map()
 
@@ -254,6 +255,17 @@ function bindDialogEvents({
 
   const selectDiagramAsset = (assetId) => {
     if (!assetId) return
+    const current = getCurrentDiagram()
+    const selectedGroup = current?.graph?.poleGroups?.find(({ assetIds = [] }) => (
+      assetIds.includes(assetId)
+    ))
+    if (selectedGroup && collapsedPoleGroupIds.has(selectedGroup.id || selectedGroup.poleAssetId)) {
+      collapsedPoleGroupIds.delete(selectedGroup.id || selectedGroup.poleAssetId)
+      currentSelectedAssetId = assetId
+      renderCurrentDiagram({ preload: false })
+      onSelectAsset?.(assetId)
+      return
+    }
     const svg = getCurrentSvg()
     svg?.querySelectorAll('.diagram-node.selected')
       .forEach((node) => node.classList.remove('selected'))
@@ -261,7 +273,6 @@ function bindDialogEvents({
       .find((node) => node.dataset.assetId === assetId)
     selectedNode?.classList.add('selected')
     currentSelectedAssetId = assetId
-    const current = getCurrentDiagram()
     if (current?.graph.status === 'ready') {
       summary.innerHTML = renderDiagramSummary(
         current.graph,
@@ -344,6 +355,7 @@ function bindDialogEvents({
             context: activeContext,
             selectedAssetId: currentSelectedAssetId,
             sourceIconDataByUrl,
+            collapsedPoleGroupIds,
           })}
         </div>`
       : renderDiagramState(graph)
@@ -405,12 +417,30 @@ function bindDialogEvents({
     selectDiagramAsset(currentSelectedAssetId)
   })
 
+  const togglePoleGroup = (groupId) => {
+    if (!groupId) return
+    if (collapsedPoleGroupIds.has(groupId)) collapsedPoleGroupIds.delete(groupId)
+    else collapsedPoleGroupIds.add(groupId)
+    renderCurrentDiagram({ preload: false })
+  }
+
   board.addEventListener('click', (event) => {
+    const group = event.target.closest('[data-pole-group-toggle]')
+    if (group) {
+      togglePoleGroup(group.dataset.poleGroupToggle)
+      return
+    }
     const node = event.target.closest('.diagram-node')
     if (node) selectDiagramAsset(node.dataset.assetId)
   })
   board.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' && event.key !== ' ') return
+    const group = event.target.closest('[data-pole-group-toggle]')
+    if (group) {
+      event.preventDefault()
+      togglePoleGroup(group.dataset.poleGroupToggle)
+      return
+    }
     const node = event.target.closest('.diagram-node')
     if (!node) return
     event.preventDefault()

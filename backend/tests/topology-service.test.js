@@ -117,6 +117,44 @@ test('candidate review is audited, materializes confirmed graph, and can be revo
   )
 })
 
+test('mounting override updates only physical placement and survives detach', async () => {
+  const bundle = mountingBundle()
+  const initial = generateRelationArtifacts(bundle, {
+    generatedAt: '2026-08-19T01:00:00.000Z',
+  })
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const auditLog = new MemoryAuditLog()
+  const service = new TopologyService({
+    repository,
+    auditLog,
+    clock: () => new Date('2026-08-19T02:00:00.000Z'),
+  })
+  const graphRevision = (await repository.get('dv-review')).topologyGraph.graphRevision
+
+  const assigned = await service.setMountingRelation('dv-review', 'admin-1', {
+    assetId: 'CAM-01',
+    poleAssetId: 'POLE-FIELD',
+    action: 'assign',
+    reason: 'Koreksi posisi hasil verifikasi lapangan.',
+  })
+  assert.equal(assigned.relation.sourceAssetId, 'CAM-01')
+  assert.equal(assigned.relation.targetAssetId, 'POLE-FIELD')
+  assert.equal(assigned.relation.provenance, 'manual_admin')
+  assert.equal(assigned.graph.graphRevision, graphRevision)
+
+  const detached = await service.setMountingRelation('dv-review', 'admin-1', {
+    assetId: 'CAM-01',
+    action: 'detach',
+    reason: 'Aset tidak lagi terpasang pada tiang tersebut.',
+  })
+  assert.equal(detached.relation, null)
+  assert.equal(detached.mountingOverrides[0].action, 'detach')
+  assert.deepEqual(
+    auditLog.entries.map(({ event }) => event),
+    ['topology.mounting_override_updated', 'topology.mounting_override_updated'],
+  )
+})
+
 test('bulk review confirms recommended candidates and revokes every confirmed relation atomically', async () => {
   const bundle = reviewBundle()
   const initial = generateRelationArtifacts(bundle)
@@ -1138,6 +1176,54 @@ function lineLabelReviewBundle() {
   bundle.classifiedPaths[0].sourceName = 'Jalur Cam-01 - Cam-END'
   bundle.classifiedPaths[0].sourceFolderPath = '/site/Cable'
   return bundle
+}
+
+function mountingBundle() {
+  const nodes = [
+    mountingNode('POLE-NEAR', 'Tiang', [110, -7]),
+    mountingNode('POLE-FIELD', 'Tiang', [110.000015, -7]),
+    mountingNode('CAM-01', 'CCTV Camera', [110.000004, -7]),
+  ]
+  return {
+    datasetVersion: {
+      id: 'dv-review',
+      sourceChecksum: `sha256:${'m'.repeat(64)}`,
+    },
+    site: 'site-1',
+    classifiedNodes: nodes.map(({ object }) => object),
+    classifiedPaths: [],
+    geometries: nodes.map(({ geometry }) => geometry),
+    explicitRelations: [],
+    semanticRuleSetVersion: 'semantic-classifier/1.0.0',
+    topologyRuleSetVersion: null,
+  }
+}
+
+function mountingNode(assetId, assetType, coordinates) {
+  const sourceFeatureId = `feature:${assetId}`
+  const geometryId = `geometry:${assetId}`
+  return {
+    object: {
+      assetId,
+      sourceFeatureId,
+      siteId: 'site-1',
+      objectRole: 'device_node',
+      networkFamily: 'cctv',
+      assetType,
+      category: assetType,
+      classificationStatus: 'classified',
+      classificationEvidence: [],
+      geometryIds: [geometryId],
+    },
+    geometry: {
+      geometryId,
+      datasetVersionId: 'dv-review',
+      sourceFeatureId,
+      geometryType: 'Point',
+      coordinates,
+      valid: true,
+    },
+  }
 }
 
 function traceRecord() {

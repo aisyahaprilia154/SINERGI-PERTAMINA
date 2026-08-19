@@ -48,6 +48,7 @@ export function resolveTopologyReadiness({
   const capabilities = {
     viewTopology: readinessContract?.capabilities?.viewTopology ?? graphAvailable,
     reviewTopology: readinessContract?.capabilities?.reviewTopology ?? false,
+    editAssetMounting: readinessContract?.capabilities?.editAssetMounting ?? false,
     trace: readinessContract?.capabilities?.trace ?? (graphAvailable && graphValid),
     diagram: readinessContract?.capabilities?.diagram ?? (graphAvailable && graphValid),
     autoConfirm: readinessContract?.capabilities?.autoConfirm ?? false,

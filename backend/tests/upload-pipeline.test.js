@@ -95,6 +95,43 @@ test('parse job persists a bounded summary instead of the full dataset aggregate
   assert.ok(Buffer.byteLength(JSON.stringify(result)) < 1024)
 })
 
+function mountingFixtureKml({ cameraLongitude = '110.400005', cameraName = 'Camera Gate' } = {}) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Folder><name>RJBT</name>
+      <Folder><name>Pengapon</name>
+        <Folder><name>Tiang</name>
+          <Placemark id="pole-placemark"><name>Tiang A</name>
+            <ExtendedData>
+              <Data name="ASSET_ID"><value>POLE-01</value></Data>
+              <Data name="type"><value>Tiang</value></Data>
+            </ExtendedData>
+            <Point><coordinates>110.4,-6.9,0</coordinates></Point>
+          </Placemark>
+          <Placemark id="pole-placemark-2"><name>Tiang B</name>
+            <ExtendedData>
+              <Data name="ASSET_ID"><value>POLE-02</value></Data>
+              <Data name="type"><value>Tiang</value></Data>
+            </ExtendedData>
+            <Point><coordinates>110.4001,-6.9,0</coordinates></Point>
+          </Placemark>
+        </Folder>
+        <Folder><name>CCTV</name>
+          <Placemark id="camera-placemark"><name>${cameraName}</name>
+            <ExtendedData>
+              <Data name="ASSET_ID"><value>CCTV-01</value></Data>
+              <Data name="type"><value>CCTV</value></Data>
+            </ExtendedData>
+            <Point><coordinates>${cameraLongitude},-6.9,0</coordinates></Point>
+          </Placemark>
+        </Folder>
+      </Folder>
+    </Folder>
+ </Document>
+</kml>`
+}
+
 test('Administrator upload is queued, persisted as a non-active version, and exposes progress', async () => {
   const fixture = await createFixture()
   try {
@@ -589,6 +626,108 @@ test('KMZ import merges source features from every valid KML document', async ()
       && issue.severity === 'information'
       && issue.canActivate === true
     )))
+  } finally {
+    await fixture.close()
+  }
+})
+
+test('manual mounting from KMZ A survives assignment and KMZ B re-import', async () => {
+  const fixture = await createFixture()
+  try {
+    const firstArchive = createStoredZip([{
+      name: 'doc.kml',
+      content: mountingFixtureKml(),
+    }])
+    const firstAccepted = await uploadFile(
+      fixture.origin,
+      firstArchive,
+      'rjbt-a.kmz',
+      'application/vnd.google-earth.kmz',
+      {
+        versionName: 'RJBT KMZ A',
+        officialSourceConfirmed: 'true',
+      },
+    )
+    assert.equal(firstAccepted.response.status, 202)
+    await fixture.jobQueue.onIdle()
+    const firstStatusResponse = await fetch(
+      `${fixture.origin}${firstAccepted.body.statusUrl}`,
+      { headers: { authorization: 'Bearer admin-token' } },
+    )
+    const firstStatus = await firstStatusResponse.json()
+    assert.equal(firstStatus.datasetVersion.status, 'valid', JSON.stringify(firstStatus.issues))
+
+    const activationResponse = await fetch(
+      `${fixture.origin}/api/admin/imports/${firstStatus.datasetVersion.id}/activate`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer admin-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          confirmArchiveCurrent: true,
+          expectedActiveVersionId: null,
+        }),
+      },
+    )
+    assert.equal(activationResponse.status, 200)
+
+    const assignmentResponse = await fetch(
+      `${fixture.origin}/api/dataset-versions/${firstStatus.datasetVersion.id}/topology/mounting-relations`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer admin-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          assetId: 'CCTV-01',
+          poleAssetId: 'POLE-02',
+          action: 'assign',
+          reason: 'Koreksi lapangan pada KMZ A.',
+        }),
+      },
+    )
+    const assignment = await assignmentResponse.json()
+    assert.equal(assignmentResponse.status, 200, JSON.stringify(assignment))
+    assert.equal(assignment.relation.sourceAssetId, 'CCTV-01')
+    assert.equal(assignment.relation.targetAssetId, 'POLE-02')
+    assert.equal(assignment.relation.provenance, 'manual_admin')
+
+    const secondArchive = createStoredZip([{
+      name: 'doc.kml',
+      content: mountingFixtureKml({
+        cameraLongitude: '110.400003',
+        cameraName: 'Camera Gate Refresh',
+      }),
+    }])
+    const secondAccepted = await uploadFile(
+      fixture.origin,
+      secondArchive,
+      'rjbt-b.kmz',
+      'application/vnd.google-earth.kmz',
+      {
+        versionName: 'RJBT KMZ B',
+        officialSourceConfirmed: 'true',
+      },
+    )
+    assert.equal(secondAccepted.response.status, 202)
+    await fixture.jobQueue.onIdle()
+
+    const secondRecord = await fixture.repository.get(secondAccepted.body.datasetVersion.id)
+    const persistedRelation = secondRecord.mountingRelations.find((relation) => (
+      relation.sourceAssetId === 'CCTV-01'
+    ))
+    assert.ok(persistedRelation)
+    assert.equal(persistedRelation.targetAssetId, 'POLE-02')
+    assert.equal(persistedRelation.provenance, 'manual_admin')
+    assert.equal(secondRecord.mountingOverrides[0].assetId, 'CCTV-01')
+    assert.equal(secondRecord.mountingOverrides[0].targetAssetId, 'POLE-02')
+    assert.equal(
+      secondRecord.assets.find((asset) => asset.assetId === 'CCTV-01')?.canonicalAssetId,
+      'CCTV-01',
+    )
   } finally {
     await fixture.close()
   }

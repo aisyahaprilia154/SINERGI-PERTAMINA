@@ -640,6 +640,43 @@ export async function createTopologyRelation({
   )
 }
 
+export async function setMountingRelation({
+  datasetVersionId,
+  assetId,
+  poleAssetId = null,
+  action = poleAssetId ? 'assign' : 'detach',
+  reason,
+  expectedRecordRevision,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
+  if (!assetId) throw new TypeError('Asset ID wajib tersedia.')
+  if (!['assign', 'detach'].includes(action)) {
+    throw new TypeError('Action pemasangan tiang tidak valid.')
+  }
+  if (action === 'assign' && !poleAssetId) {
+    throw new TypeError('Pole Asset ID wajib untuk assignment.')
+  }
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + '/topology/mounting-relations',
+    {
+      token,
+      signal,
+      method: 'POST',
+      body: {
+        assetId,
+        action,
+        ...(action === 'assign' ? { poleAssetId } : {}),
+        reason: String(reason ?? '').trim() || undefined,
+        ...(expectedRecordRevision !== undefined ? { expectedRecordRevision } : {}),
+      },
+    },
+  )
+}
+
 export async function revokeTopologyRelation({
   relationId,
   reason,

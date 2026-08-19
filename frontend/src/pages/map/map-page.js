@@ -11,6 +11,7 @@ import {
   loadDatasetProjection,
   loadTopologyProjection,
   revokeTopologyRelation,
+  setMountingRelation,
   traceTopology,
 } from '../../services/active-dataset-service.js'
 import { renderAssetDetailDrawer } from './asset-detail-drawer.js'
@@ -22,6 +23,7 @@ import {
   parseMapUrlState,
   serializeMapUrlState,
 } from './network-sidebar-state.js'
+import { buildPoleGroups } from '../../domain/pole-groups.js'
 import {
   buildExplicitRelationGraph,
   getConnectedAssets,
@@ -100,6 +102,10 @@ export async function renderMapPage(container) {
     exportAssets: allExportAssets,
     networks: allNetworks,
     topologyGraph: fullTopologyGraph,
+    mountingRelations: allMountingRelations,
+    mountingCandidates: allMountingCandidates,
+    mountingOptions: allMountingOptions,
+    poleGroups: allPoleGroups,
     topologySummary: datasetTopologySummary,
     locationGroups,
     renderingSummary,
@@ -114,7 +120,7 @@ export async function renderMapPage(container) {
   // replace the confirmed graph with an empty graph or hide KML/KMZ evidence.
   const operationalTopologyGraph = fullTopologyGraph
   const selectedArea = selectLocationGroup(window.location.search, locationGroups)
-  const {
+  let {
     assets,
     assetById,
     diagramAssets,
@@ -122,6 +128,10 @@ export async function renderMapPage(container) {
     exportAssets,
     networks,
     topologyGraph: initialTopologyGraph,
+    mountingRelations,
+    mountingCandidates,
+    mountingOptions,
+    poleGroups,
     counts,
   } = scopeMapData({
     selectedArea,
@@ -131,6 +141,10 @@ export async function renderMapPage(container) {
     exportAssets: allExportAssets,
     networks: allNetworks,
     topologyGraph: operationalTopologyGraph,
+    mountingRelations: allMountingRelations,
+    mountingCandidates: allMountingCandidates,
+    mountingOptions: allMountingOptions,
+    poleGroups: allPoleGroups,
   })
   let topologyGraph = initialTopologyGraph
   const traceAvailable = topologyGraph.edges.length > 0
@@ -193,6 +207,10 @@ export async function renderMapPage(container) {
     assetDetailError: null,
     showAdditionalMetadata: false,
     showCctvCoverage: true,
+    showMountingCandidates: false,
+    mountingActionStatus: 'idle',
+    mountingActionError: null,
+    mountingSearch: '',
     dimOthers: true,
     search: '',
     expandedNetworkIds: new Set(),
@@ -225,7 +243,8 @@ export async function renderMapPage(container) {
           assetsWithoutGeometry: renderingSummary.assetsWithoutGeometry,
           selectedArea,
           counts,
-          confirmedConnectionCount: topologyGraph.edges.length,
+          confirmedConnectionCount: traceAvailable ? topologyGraph.edges.length : 0,
+          poleGroupCount: poleGroups.length,
           topologySummary,
           selectedAssetId: initialUrlState.selectedAssetId,
           topologyReadiness,
@@ -254,6 +273,7 @@ export async function renderMapPage(container) {
     networks,
     geometries,
     topologyGraph,
+    poleGroups,
     overlays: resolvedOverlays,
     candidates: [],
     onSelectAsset: handleAssetSelect,
@@ -445,6 +465,10 @@ export async function renderMapPage(container) {
     state.assetDetailStatus = assetDetailCache.has(assetId) ? 'ready' : 'loading'
     state.assetDetailError = assetById[assetId] ? null : 'Aset tidak ditemukan pada dataset aktif.'
     state.showAdditionalMetadata = false
+    state.showMountingCandidates = false
+    state.mountingActionStatus = 'idle'
+    state.mountingActionError = null
+    state.mountingSearch = ''
     if (selection.selectedAssetId !== previousAssetId) updateUrl()
     renderDrawer()
     syncMap()
@@ -481,6 +505,35 @@ export async function renderMapPage(container) {
       return
     }
     const asset = assetDetailCache.get(mapAsset.id) ?? mapAsset
+    const mountingAssetRelations = asset.mountingRelations?.length
+      ? asset.mountingRelations
+      : mountingRelations.filter((relation) => (
+        relation.sourceAssetId === asset.id || relation.targetAssetId === asset.id
+      ))
+    const mountedAssets = (asset.mountedAssetIds ?? mountingAssetRelations
+      .filter((relation) => relation.targetAssetId === asset.id)
+      .map((relation) => relation.sourceAssetId))
+      .map((assetId) => assetById[assetId])
+      .filter(Boolean)
+    const mountedOnAsset = assetById[asset.mountedOnAssetId
+      ?? mountingAssetRelations.find((relation) => relation.sourceAssetId === asset.id)?.targetAssetId]
+    const assetMountingCandidates = [
+      ...(mountingCandidates ?? []).filter((candidate) => candidate.assetId === asset.id),
+      ...(asset.mountingCandidates ?? []).filter((candidate) => candidate.assetId === asset.id),
+    ].filter((candidate, index, all) => (
+      all.findIndex((item) => item.candidateId === candidate.candidateId) === index
+    ))
+    const assetMountingOptions = [
+      ...(mountingOptions ?? []).filter((option) => option.assetId === asset.id),
+      ...(asset.mountingOptions ?? []).filter((option) => option.assetId === asset.id),
+    ].filter((option, index, all) => {
+      const key = option.optionId
+        ?? option.candidateId
+        ?? `${option.assetId}:${option.targetAssetId}`
+      return all.findIndex((item) => (
+        (item.optionId ?? item.candidateId ?? `${item.assetId}:${item.targetAssetId}`) === key
+      )) === index
+    })
 
     const assetNetworks = networks.filter((network) => network.nodeIds.includes(asset.id))
     const connectedAssets = getConnectedAssets(relationGraph, asset.id)
@@ -502,6 +555,15 @@ export async function renderMapPage(container) {
       asset,
       assetNetworks,
       connectedAssets,
+      mountedOnAsset,
+      mountedAssets,
+      mountingCandidates: assetMountingCandidates,
+      mountingOptions: assetMountingOptions,
+      showMountingCandidates: state.showMountingCandidates,
+      mountingActionStatus: state.mountingActionStatus,
+      mountingActionError: state.mountingActionError,
+      mountingSearch: state.mountingSearch,
+      mountingControlsAvailable: topologyReadiness.capabilities?.editAssetMounting === true,
       activeContext,
       showAdditionalMetadata: state.showAdditionalMetadata,
       trace: getDrawerTraceState(),
@@ -575,6 +637,87 @@ export async function renderMapPage(container) {
       toggleNetworkFocus(networkId)
     }))
     drawer.querySelector('.open-schematic')?.addEventListener('click', openSchematic)
+    drawer.querySelector('[data-mounting-action="change"]')?.addEventListener('click', () => {
+      state.showMountingCandidates = !state.showMountingCandidates
+      renderDrawer()
+    })
+    drawer.querySelector('[data-mounting-search]')?.addEventListener('input', (event) => {
+      state.mountingSearch = event.target.value
+      renderDrawer()
+      const searchInput = drawer.querySelector('[data-mounting-search]')
+      if (searchInput) {
+        searchInput.focus()
+        searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length)
+      }
+    })
+    drawer.querySelector('[data-mounting-action="detach"]')?.addEventListener('click', () => {
+      void updateMountingAssignment(asset.id, null)
+    })
+    drawer.querySelectorAll('[data-mounting-pole]').forEach((button) => {
+      button.addEventListener('click', () => {
+        void updateMountingAssignment(asset.id, button.dataset.mountingPole)
+      })
+    })
+  }
+
+  async function updateMountingAssignment(assetId, poleAssetId) {
+    state.mountingActionStatus = 'loading'
+    state.mountingActionError = null
+    renderDrawer()
+    try {
+      const response = await setMountingRelation({
+        datasetVersionId: activeContext.datasetVersionId,
+        assetId,
+        poleAssetId,
+        action: poleAssetId ? 'assign' : 'detach',
+        reason: poleAssetId
+          ? 'Penyesuaian pemasangan aset dari Detail Aset.'
+          : 'Aset dilepaskan dari tiang melalui Detail Aset.',
+      })
+      applyMountingProjection(response)
+      state.mountingActionStatus = 'success'
+      state.showMountingCandidates = false
+      state.mountingSearch = ''
+      state.assetDetailStatus = 'ready'
+      state.assetDetailError = null
+      assetDetailCache.clear()
+      renderDrawer()
+      syncMap()
+    } catch (error) {
+      state.mountingActionStatus = 'error'
+      state.mountingActionError = error.message
+      renderDrawer()
+    }
+  }
+
+  function applyMountingProjection(response = {}) {
+    const nextRelations = Array.isArray(response.mountingRelations)
+      ? response.mountingRelations
+      : mountingRelations
+    const nextCandidates = Array.isArray(response.mountingCandidates)
+      ? response.mountingCandidates
+      : mountingCandidates
+    const nextOptions = Array.isArray(response.mountingOptions)
+      ? response.mountingOptions
+      : mountingOptions
+    mountingRelations = nextRelations.map((relation) => ({ ...relation }))
+    mountingCandidates = nextCandidates.map((candidate) => ({ ...candidate }))
+    mountingOptions = nextOptions.map((option) => ({
+      ...option,
+      targetAssetName: option.targetAssetName
+        ?? assetById[option.targetAssetId]?.name
+        ?? option.targetAssetId,
+    }))
+    assets.forEach((asset) => {
+      asset.mountedOnAssetId = mountingRelations.find((relation) => (
+        relation.sourceAssetId === asset.id
+      ))?.targetAssetId ?? null
+      asset.mountedAssetIds = mountingRelations
+        .filter((relation) => relation.targetAssetId === asset.id)
+        .map((relation) => relation.sourceAssetId)
+    })
+    poleGroups = buildPoleGroups({ assets, mountingRelations })
+    canvasApi.setPoleGroups?.(poleGroups)
   }
 
   async function saveAssetRelation(sourceAssetId, targetAssetId, replaceRelationId = null) {
@@ -982,18 +1125,21 @@ export async function renderMapPage(container) {
       assets: diagramAssets,
       networks,
       topologyGraph,
+      poleGroups,
       scope: 'all-assets',
     })
     const fullMapGraph = buildSchematicGraph({
       assets: diagramAssets,
       networks,
       topologyGraph,
+      poleGroups,
       scope: 'full-map',
     })
     const traceGraph = buildSchematicGraph({
       assets: diagramAssets,
       networks,
       topologyGraph,
+      poleGroups,
       scope: 'trace',
       tracePath: state.traceStatus === 'active' ? state.tracePath : [],
       traceRelations: state.traceStatus === 'active' ? state.traceRelations : [],
@@ -1002,6 +1148,7 @@ export async function renderMapPage(container) {
       assets,
       networks,
       topologyGraph,
+      poleGroups,
       focusedAssetId: selection.selectedAssetId,
       scope: 'selected',
     })
@@ -1733,6 +1880,10 @@ export function scopeMapData({
   exportAssets,
   networks,
   topologyGraph,
+  mountingRelations = [],
+  mountingCandidates = [],
+  mountingOptions = [],
+  poleGroups = [],
 }) {
   const areaKey = selectedArea?.key
   const scopedAssets = areaKey
@@ -1743,6 +1894,34 @@ export function scopeMapData({
     : [...geometries]
   const scopedAssetIds = new Set(scopedAssets.map(({ id }) => id))
   const scopedGeometryIds = new Set(scopedGeometries.map(({ id }) => id))
+  const scopedMountingRelations = mountingRelations.filter((relation) => (
+    scopedAssetIds.has(relation.sourceAssetId)
+      && scopedAssetIds.has(relation.targetAssetId)
+  ))
+  const scopedMountingCandidates = mountingCandidates.filter((candidate) => (
+    scopedAssetIds.has(candidate.assetId)
+      && scopedAssetIds.has(candidate.targetAssetId)
+  ))
+  const scopedMountingOptions = mountingOptions.filter((option) => (
+    scopedAssetIds.has(option.assetId)
+      && scopedAssetIds.has(option.targetAssetId)
+  ))
+  const scopedPoleGroups = poleGroups
+    .map((group) => ({
+      ...group,
+      assetIds: group.assetIds.filter((assetId) => scopedAssetIds.has(assetId)),
+      assets: group.assets.filter((asset) => scopedAssetIds.has(asset.id)),
+      relations: scopedMountingRelations.filter((relation) => (
+        relation.targetAssetId === group.poleAssetId
+      )),
+      count: group.assetIds.filter((assetId) => scopedAssetIds.has(assetId)).length,
+      childCount: group.assetIds.filter((assetId) => (
+        assetId !== group.poleAssetId && scopedAssetIds.has(assetId)
+      )).length,
+    }))
+    .filter((group) => (
+      group.assetIds.includes(group.poleAssetId) && group.assetIds.length > 1
+    ))
   const edges = (topologyGraph.edges ?? []).filter((edge) => {
     const sourceId = edge.sourceAssetId ?? edge.sourceNodeId
     const targetId = edge.targetAssetId ?? edge.targetNodeId
@@ -1809,6 +1988,10 @@ export function scopeMapData({
     )),
     geometries: scopedGeometries,
     exportAssets: exportAssets.filter(({ id }) => scopedExportAssetIds.has(id)),
+    mountingRelations: scopedMountingRelations,
+    mountingCandidates: scopedMountingCandidates,
+    mountingOptions: scopedMountingOptions,
+    poleGroups: scopedPoleGroups,
     networks: scopedNetworks,
     topologyGraph: {
       ...topologyGraph,
@@ -1833,6 +2016,7 @@ export function scopeMapData({
         ({ geometryType }) => geometryType === 'polygon',
       ).length,
       geometryCount: scopedGeometries.length,
+      poleGroupCount: scopedPoleGroups.length,
     },
   }
 }

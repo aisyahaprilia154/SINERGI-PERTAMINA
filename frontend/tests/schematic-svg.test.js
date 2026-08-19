@@ -103,6 +103,79 @@ test('SVG renderer uses the preloaded source icon from the KMZ style when availa
   assert.match(svg, /data:image\/png;base64,Y2FtZXJh/)
 })
 
+test('SVG renderer draws a neutral physical mounting group around its assets', () => {
+  const groupedGraph = {
+    ...graph,
+    nodes: [
+      ...graph.nodes,
+      {
+        id: 'pole',
+        name: 'Tiang-01',
+        shortName: 'Tiang-01',
+        type: 'Tiang',
+        category: 'infrastructure',
+        location: 'Gerbang',
+        isAnchor: false,
+        isConnector: false,
+      },
+    ],
+    poleGroups: [{
+      id: 'pole-group:pole',
+      poleAssetId: 'pole',
+      pole: { id: 'pole', name: 'Tiang-01' },
+      assetIds: ['pole', 'cam'],
+    }],
+  }
+  const layout = calculateSchematicLayout(groupedGraph)
+  const svg = renderSchematicSvg({
+    graph: groupedGraph,
+    layout,
+    context: { branchName: 'Semarang', version: 'v14' },
+  })
+
+  assert.match(svg, /diagram-pole-groups/)
+  assert.match(svg, /data-pole-group-id="pole-group:pole"/)
+  assert.match(svg, /Tiang-01/)
+  assert.match(svg, /relasi pemasangan fisik/)
+})
+
+test('SVG renderer can collapse a physical group and reroute its visible edge endpoint', () => {
+  const groupedGraph = {
+    ...graph,
+    nodes: [
+      ...graph.nodes,
+      {
+        id: 'pole',
+        name: 'Tiang-01',
+        shortName: 'Tiang-01',
+        type: 'Tiang',
+        category: 'infrastructure',
+        location: 'Gerbang',
+        isAnchor: false,
+        isConnector: false,
+      },
+    ],
+    poleGroups: [{
+      id: 'pole-group:pole',
+      poleAssetId: 'pole',
+      pole: { id: 'pole', name: 'Tiang-01' },
+      assetIds: ['pole', 'cam'],
+    }],
+  }
+  const layout = calculateSchematicLayout(groupedGraph)
+  const svg = renderSchematicSvg({
+    graph: groupedGraph,
+    layout,
+    context: { branchName: 'Semarang', version: 'v14' },
+    collapsedPoleGroupIds: new Set(['pole-group:pole']),
+  })
+
+  assert.match(svg, /data-pole-group-toggle="pole-group:pole"/)
+  assert.match(svg, /aria-expanded="false"/)
+  assert.doesNotMatch(svg, /data-asset-id="cam"/)
+  assert.match(svg, /data-edge-id="cctv:cam:jb"/)
+})
+
 test('SVG renderer draws every selected node and confirmed edge without clipping', () => {
   const selectedGraph = {
     status: 'ready',
