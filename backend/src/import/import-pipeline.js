@@ -153,6 +153,8 @@ export class ImportPipeline {
         canonicalParser.topologyInputBundle,
         {
           config: this.topology,
+          previousMountingRelations: activeRecord?.mountingRelations ?? [],
+          previousMountingOverrides: activeRecord?.mountingOverrides ?? [],
           generatedAt: this.clock().toISOString(),
         },
       )

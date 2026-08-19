@@ -26,7 +26,7 @@ export function buildExplicitRelationGraph({ networks, assetIds, topologyGraph =
         relationType: 'explicit-network-edge',
       }))
     for (const relation of relationRecords) {
-      if (!isConfirmedRelation(relation)) continue
+      if (relation.relationType === 'mounted_on' || !isConfirmedRelation(relation)) continue
       const { sourceAssetId, targetAssetId } = relation
       if (!validAssetIds.has(sourceAssetId) || !validAssetIds.has(targetAssetId)) continue
       if (sourceAssetId === targetAssetId) continue

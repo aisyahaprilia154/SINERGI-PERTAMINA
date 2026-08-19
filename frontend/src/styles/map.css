@@ -3425,6 +3425,191 @@
   background: var(--network-indicator);
 }
 
+.mounting-section {
+  background: color-mix(in srgb, var(--color-surface-subtle) 72%, var(--color-surface));
+}
+
+.mounting-assignment {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.mounting-assignment + .mounting-assignment,
+.mounting-actions,
+.mounting-candidate-panel {
+  margin-top: var(--space-3);
+}
+
+.mounting-label {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-micro);
+  font-weight: 650;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+
+.mounting-search-field {
+  min-height: 38px;
+  margin-top: var(--space-2);
+  padding: 0 var(--space-2);
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+}
+
+.mounting-search-field:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+
+.mounting-search-field input {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font: inherit;
+  font-size: var(--font-size-caption);
+}
+
+.mounting-search-field .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.mounting-current {
+  width: 100%;
+  min-height: 50px;
+  padding: var(--space-2);
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+}
+
+.mounting-current:hover,
+.mounting-current:focus-visible {
+  background: var(--color-surface-hover);
+  border-color: var(--color-primary);
+  outline: none;
+}
+
+.mounting-current > span:nth-child(2),
+.mounting-asset-list button > span:nth-child(2),
+.mounting-candidate-list button > span:nth-child(2) {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mounting-current strong,
+.mounting-current small,
+.mounting-asset-list strong,
+.mounting-asset-list small,
+.mounting-candidate-list strong,
+.mounting-candidate-list small {
+  overflow-wrap: anywhere;
+}
+
+.mounting-current small,
+.mounting-asset-list small,
+.mounting-candidate-list small {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-micro);
+}
+
+.mounting-current > .relation-icon,
+.mounting-asset-list .relation-icon,
+.mounting-candidate-list .relation-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 17px;
+}
+
+.mounting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.mounting-actions .button {
+  width: auto;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+}
+
+.mounting-actions .button.danger {
+  color: var(--color-danger, #b42318);
+}
+
+.mounting-asset-list,
+.mounting-candidate-list {
+  margin-top: var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+}
+
+.mounting-asset-list button,
+.mounting-candidate-list button {
+  min-height: 48px;
+  padding-inline: var(--space-2);
+}
+
+.mounting-candidate-list button:disabled {
+  cursor: wait;
+  opacity: .6;
+}
+
+.mounting-action-status {
+  margin: var(--space-3) 0 0;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  line-height: 1.4;
+}
+
+.mounting-action-status .material-symbols-outlined {
+  flex: 0 0 auto;
+  font-size: 17px;
+}
+
+.mounting-action-status.success {
+  color: var(--color-success);
+}
+
+.mounting-action-status.error {
+  color: var(--color-danger, #b42318);
+}
+
 .relation-list {
   margin: 0;
   padding: 0;

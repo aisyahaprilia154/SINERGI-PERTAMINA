@@ -4,6 +4,15 @@ export function renderAssetDetailDrawer({
   asset,
   assetNetworks = [],
   connectedAssets = [],
+  mountedOnAsset = null,
+  mountedAssets = [],
+  mountingCandidates = [],
+  mountingOptions = [],
+  mountingSearch = '',
+  showMountingCandidates = false,
+  mountingActionStatus = 'idle',
+  mountingActionError = null,
+  mountingControlsAvailable = false,
   activeContext,
   trace = {},
   showAdditionalMetadata = false,
@@ -86,6 +95,19 @@ export function renderAssetDetailDrawer({
           </a>
         ` : ''}
       </section>
+
+      ${renderMountingSection({
+        asset,
+        mountedOnAsset,
+        mountedAssets,
+        mountingCandidates,
+        mountingOptions,
+        mountingSearch,
+        showMountingCandidates,
+        mountingActionStatus,
+        mountingActionError,
+        mountingControlsAvailable,
+      })}
 
       <section class="drawer-section" aria-labelledby="asset-information-title">
         <h3 id="asset-information-title">Informasi aset</h3>
@@ -178,8 +200,10 @@ export function renderAssetDetailDrawer({
       </section>
 
       <p class="read-only-note">
-        <span class="material-symbols-outlined" aria-hidden="true">lock</span>
-        Detail dan relasi ini hanya dapat dibaca.
+        <span class="material-symbols-outlined" aria-hidden="true">${mountingControlsAvailable ? 'admin_panel_settings' : 'lock'}</span>
+        ${mountingControlsAvailable
+          ? 'Detail read-only; penempatan tiang dapat disesuaikan administrator.'
+          : 'Detail dan relasi ini hanya dapat dibaca.'}
       </p>
     </div>
 
@@ -209,6 +233,124 @@ export function renderAssetDetailDrawer({
         </button>
       </div>
     </footer>
+  `
+}
+
+function renderMountingSection({
+  asset,
+  mountedOnAsset,
+  mountedAssets,
+  mountingCandidates,
+  mountingOptions,
+  mountingSearch = '',
+  showMountingCandidates,
+  mountingActionStatus,
+  mountingActionError,
+  mountingControlsAvailable,
+}) {
+  const mountable = isMountableAsset(asset)
+  const pole = isPoleAsset(asset)
+  const availableMountingOptions = mountingOptions.length ? mountingOptions : mountingCandidates
+  if (!mountable && !pole && !mountedOnAsset && !mountedAssets.length
+    && !availableMountingOptions.length) {
+    return ''
+  }
+
+  const busy = mountingActionStatus === 'loading'
+  const canEdit = mountingControlsAvailable && mountable
+  const assignedLabel = mountedOnAsset
+    ? displayAssetName(mountedOnAsset)
+    : 'Belum ditentukan'
+  const normalizedSearch = String(mountingSearch ?? '').trim().toLocaleLowerCase('id')
+  const filteredMountingOptions = availableMountingOptions.filter((candidate) => {
+    if (!normalizedSearch) return true
+    const haystack = [
+      candidate.targetAssetName,
+      candidate.targetAssetId,
+    ].map((value) => String(value ?? '').toLocaleLowerCase('id')).join(' ')
+    return haystack.includes(normalizedSearch)
+  })
+  const candidateList = filteredMountingOptions.map((candidate) => `
+    <li>
+      <button type="button" data-mounting-pole="${escapeAttribute(candidate.targetAssetId)}" ${busy ? 'disabled' : ''}>
+        <span class="relation-icon material-symbols-outlined" aria-hidden="true">location_on</span>
+        <span>
+          <strong>${escapeHtml(candidate.targetAssetName || candidate.targetAssetId)}</strong>
+          <small>${escapeHtml(candidate.targetAssetId)} · ${formatDistance(candidate.distanceMeters)} · pilih untuk menetapkan</small>
+        </span>
+        <span class="material-symbols-outlined" aria-hidden="true">check</span>
+      </button>
+    </li>
+  `).join('')
+
+  return `
+    <section class="drawer-section mounting-section" aria-labelledby="asset-mounting-title">
+      <div class="drawer-section-heading">
+        <h3 id="asset-mounting-title">Pemasangan fisik</h3>
+        <span class="count-badge">${pole ? mountedAssets.length : mountedOnAsset ? 1 : 0}</span>
+      </div>
+      ${mountable ? `
+        <div class="mounting-assignment">
+          <span class="mounting-label">Dipasang pada</span>
+          ${mountedOnAsset ? `
+            <button type="button" class="mounting-current" data-connected-asset="${escapeAttribute(mountedOnAsset.id)}">
+              <span class="relation-icon material-symbols-outlined" aria-hidden="true">location_on</span>
+              <span><strong>${escapeHtml(assignedLabel)}</strong><small>${escapeHtml(mountedOnAsset.id)}</small></span>
+              <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+            </button>
+          ` : `<p class="drawer-inline-empty">Belum ada tiang yang ditetapkan.</p>`}
+        </div>
+      ` : ''}
+      ${pole ? `
+        <div class="mounting-assignment">
+          <span class="mounting-label">Aset terpasang</span>
+          ${mountedAssets.length ? `
+            <ul class="relation-list mounting-asset-list">
+              ${mountedAssets.map((mountedAsset) => `
+                <li>
+                  <button type="button" data-connected-asset="${escapeAttribute(mountedAsset.id)}">
+                    <span class="relation-icon material-symbols-outlined" aria-hidden="true">${assetIcon(mountedAsset.type)}</span>
+                    <span><strong>${escapeHtml(displayAssetName(mountedAsset))}</strong><small>${escapeHtml(mountedAsset.id)}</small></span>
+                    <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+                  </button>
+                </li>
+              `).join('')}
+            </ul>
+          ` : renderInlineEmpty('Belum ada aset yang terdeteksi terpasang pada tiang ini.')}
+        </div>
+      ` : ''}
+      ${canEdit ? `
+        <div class="mounting-actions">
+          <button type="button" class="button secondary" data-mounting-action="change" ${busy ? 'disabled' : ''}>
+            <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
+            Ganti tiang
+          </button>
+          ${mountedOnAsset ? `
+            <button type="button" class="button secondary danger" data-mounting-action="detach" ${busy ? 'disabled' : ''}>
+              <span class="material-symbols-outlined" aria-hidden="true">link_off</span>
+              Lepaskan
+            </button>
+          ` : ''}
+        </div>
+      ` : ''}
+      ${showMountingCandidates ? `
+        <div class="mounting-candidate-panel" aria-live="polite">
+          <span class="mounting-label">Tiang dalam fasilitas untuk dipilih</span>
+          <label class="mounting-search-field">
+            <span class="material-symbols-outlined" aria-hidden="true">search</span>
+            <span class="sr-only">Cari tiang</span>
+            <input type="search" data-mounting-search
+              value="${escapeAttribute(mountingSearch)}"
+              placeholder="Cari ID atau nama tiang"
+              autocomplete="off" ${busy ? 'disabled' : ''}>
+          </label>
+          ${candidateList ? `<ul class="relation-list mounting-candidate-list">${candidateList}</ul>` : renderInlineEmpty('Tidak ada tiang yang cocok pada fasilitas ini.')}
+        </div>
+      ` : ''}
+      ${busy ? `<p class="mounting-action-status" role="status"><span class="material-symbols-outlined" aria-hidden="true">progress_activity</span>Menyimpan penempatan…</p>` : ''}
+      ${mountingActionStatus === 'success' ? `<p class="mounting-action-status success" role="status"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Penempatan fisik diperbarui.</p>` : ''}
+      ${mountingActionError ? `<p class="mounting-action-status error" role="alert"><span class="material-symbols-outlined" aria-hidden="true">error</span>${escapeHtml(mountingActionError)}</p>` : ''}
+    </section>
   `
 }
 
@@ -461,6 +603,23 @@ function assetIcon(type = '') {
   if (normalizedType === 'access point') return 'wifi'
   if (normalizedType === 'printer') return 'print'
   return 'device_hub'
+}
+
+function isMountableAsset(asset) {
+  return /junction|\bjb\b|cctv|camera|kamera/i.test(
+    `${asset?.type || ''} ${asset?.category || ''}`,
+  )
+}
+
+function isPoleAsset(asset) {
+  return /\b(tiang|pole|pylon)\b/i.test(
+    `${asset?.type || ''} ${asset?.category || ''} ${asset?.name || ''}`,
+  )
+}
+
+function formatDistance(value) {
+  const distance = Number(value)
+  return Number.isFinite(distance) ? `${distance.toLocaleString('id-ID', { maximumFractionDigits: 2 })} m` : 'jarak tidak tersedia'
 }
 
 function formatDateTime(value) {

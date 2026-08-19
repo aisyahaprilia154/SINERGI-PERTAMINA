@@ -40,3 +40,22 @@ test('readiness keeps invalid confirmed graph as the highest priority error', ()
 
   assert.equal(result.traceMessage, TOPOLOGY_GRAPH_INVALID_MESSAGE)
 })
+
+test('mounting edit capability is independent from topology candidate review', () => {
+  const result = resolveTopologyReadiness({
+    topologyGraph: { nodes: [{ id: 'pole-1' }], edges: [] },
+    readinessContract: {
+      topologyReady: false,
+      validation: { errorCount: 0 },
+      capabilities: {
+        reviewTopology: false,
+        editAssetMounting: true,
+        trace: false,
+        diagram: false,
+      },
+    },
+  })
+
+  assert.equal(result.capabilities.reviewTopology, false)
+  assert.equal(result.capabilities.editAssetMounting, true)
+})

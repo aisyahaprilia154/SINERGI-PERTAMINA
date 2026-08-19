@@ -1,4 +1,9 @@
 import { resolveTopologyReadiness } from '../domain/topology-readiness.js'
+import {
+  buildPoleGroups,
+  MOUNTING_RELATION_TYPE,
+} from '../domain/pole-groups.js'
+import { filterConflictingCameraEdges } from '../domain/device-edge-policy.js'
 
 const CATEGORY_STYLE = Object.freeze({
   cctv: { color: '#9698f4', softColor: '#f1f1fe', type: 'CCTV', order: 1 },
@@ -77,6 +82,7 @@ export function adaptActiveDatasetForMap(payload) {
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
   const validNodeIds = new Set(assets.map(({ id }) => id))
   const topologyGraph = confirmedTopologyProjection(payload)
+  const resolver = createFrontendIdentityResolver(payload)
   const topologyReadiness = resolveTopologyReadiness({
     topologyReadiness: payload.topologyReadiness,
     readiness: payload.readiness,
@@ -94,6 +100,33 @@ export function adaptActiveDatasetForMap(payload) {
       sourceAssetId: edge.sourceNodeId,
       targetAssetId: edge.targetNodeId,
     }))
+  const mountingRelations = normalizeMountingRelations(
+    payload.mountingRelations
+      ?? (payload.relations ?? []).filter((relation) => (
+        relation?.relationType === MOUNTING_RELATION_TYPE
+      )),
+    resolver,
+  ).filter((relation) => (
+    validNodeIds.has(relation.sourceAssetId)
+      && validNodeIds.has(relation.targetAssetId)
+  ))
+  const mountingOptions = normalizeMountingOptions(
+    payload.mountingOptions ?? payload.mountingCandidates,
+    resolver,
+  ).filter((option) => (
+    validNodeIds.has(option.assetId)
+      && validNodeIds.has(option.targetAssetId)
+  )).map((option) => ({
+    ...option,
+    targetAssetName: option.targetAssetName
+      ?? assetById[option.targetAssetId]?.name
+      ?? option.targetAssetId,
+  }))
+  const poleGroups = buildPoleGroups({ assets, mountingRelations })
+  const poleGroupByAssetId = new Map()
+  poleGroups.forEach((group) => group.assetIds.forEach((assetId) => {
+    poleGroupByAssetId.set(assetId, group)
+  }))
   const networks = createSemanticNetworks({
     nodes: assets,
     geometries,
@@ -121,6 +154,14 @@ export function adaptActiveDatasetForMap(payload) {
     asset.relationCount = relations.filter((relation) => (
       relation.sourceAssetId === asset.id || relation.targetAssetId === asset.id
     )).length
+    const poleGroup = poleGroupByAssetId.get(asset.id)
+    asset.poleGroupId = poleGroup?.id ?? null
+    asset.mountedOnAssetId = mountingRelations.find((relation) => (
+      relation.sourceAssetId === asset.id
+    ))?.targetAssetId ?? null
+    asset.mountedAssetIds = mountingRelations
+      .filter((relation) => relation.targetAssetId === asset.id)
+      .map((relation) => relation.sourceAssetId)
   })
   exportAssets.forEach((asset) => {
     asset.networkIds = networkIdsByAssetId.get(asset.id) ?? []
@@ -164,6 +205,12 @@ export function adaptActiveDatasetForMap(payload) {
     networks,
     locationGroups,
     topologyGraph,
+    mountingRelations,
+    mountingCandidates: normalizeMountingCandidates(payload.mountingCandidates, resolver),
+    mountingOptions,
+    mountingOverrides: structuredClone(payload.mountingOverrides ?? []),
+    mountingSummary: structuredClone(payload.mountingSummary ?? null),
+    poleGroups,
     topologySummary: structuredClone(payload.topologySummary ?? {}),
     topologyReadiness,
     readiness: structuredClone(payload.readiness ?? null),
@@ -202,8 +249,8 @@ function confirmedTopologyProjection(payload) {
     })
     const nodeIds = new Set(nodes.map(({ id }) => id))
     const unresolvedEdges = []
-    const edges = source.edges.flatMap((edge) => {
-      if (!isConfirmedRelation(edge)) return []
+    const edges = filterConflictingCameraEdges(source.edges.flatMap((edge) => {
+      if (!isConfirmedRelation(edge) || edge.relationType === MOUNTING_RELATION_TYPE) return []
       const originalSource = edge.sourceAssetId ?? edge.sourceNodeId
       const originalTarget = edge.targetAssetId ?? edge.targetNodeId
       const sourceAssetId = resolver.resolve(originalSource)
@@ -228,7 +275,7 @@ function confirmedTopologyProjection(payload) {
         canonicalSourceAssetId: sourceAssetId,
         canonicalTargetAssetId: targetAssetId,
       }]
-    })
+    }), nodes)
     return {
       ...structuredClone(source),
       nodes,
@@ -247,10 +294,16 @@ function confirmedTopologyProjection(payload) {
     canonicalAssetId: canonicalAssetIdFor(asset),
     sourceNodeId: asset.id,
     sourceFeatureId: asset.sourceFeatureId,
+    objectRole: 'device_node',
+    assetType: asset.type,
+    category: asset.category,
+    sourceName: asset.name,
   }))
   const validIds = new Set(nodes.map(({ id }) => id))
-  const edges = (payload.relations ?? [])
+  const edges = filterConflictingCameraEdges((payload.relations ?? [])
     .filter((relation) => (
+      relation?.relationType !== MOUNTING_RELATION_TYPE
+      &&
       isConfirmedRelation(relation)
       && resolver.resolve(relation.sourceAssetId)
       && resolver.resolve(relation.targetAssetId)
@@ -267,7 +320,7 @@ function confirmedTopologyProjection(payload) {
       targetNodeId: resolver.resolve(relation.targetAssetId),
       verificationStatus: 'confirmed',
       relationStatus: 'confirmed',
-    }))
+    })), nodes)
   return {
     datasetVersionId: payload.datasetVersion.id,
     nodes,
@@ -322,6 +375,75 @@ function isConfirmedRelation(relation) {
   return relation.relationStatus === undefined || relation.relationStatus === 'confirmed'
 }
 
+function normalizeMountingRelations(relations = [], resolver = null) {
+  return (Array.isArray(relations) ? relations : []).flatMap((relation) => {
+    if (relation?.relationType && relation.relationType !== MOUNTING_RELATION_TYPE) return []
+    const sourceAssetId = resolver?.resolve(relation?.sourceAssetId)
+      ?? relation?.sourceAssetId
+    const targetAssetId = resolver?.resolve(relation?.targetAssetId)
+      ?? relation?.targetAssetId
+    if (!sourceAssetId || !targetAssetId || sourceAssetId === targetAssetId) return []
+    return [{
+      ...structuredClone(relation),
+      relationType: MOUNTING_RELATION_TYPE,
+      relationKind: 'installation_attachment',
+      sourceAssetId,
+      targetAssetId,
+      verificationStatus: relation.verificationStatus ?? 'confirmed',
+    }]
+  })
+}
+
+function normalizeMountingCandidates(candidates = [], resolver = null) {
+  return (Array.isArray(candidates) ? candidates : []).flatMap((candidate) => {
+    const assetId = resolver?.resolve(candidate?.assetId) ?? candidate?.assetId
+    const targetAssetId = resolver?.resolve(candidate?.targetAssetId) ?? candidate?.targetAssetId
+    if (!assetId || !targetAssetId) return []
+    return [{
+      ...structuredClone(candidate),
+      candidateType: MOUNTING_RELATION_TYPE,
+      relationType: MOUNTING_RELATION_TYPE,
+      assetId,
+      targetAssetId,
+    }]
+  })
+}
+
+function normalizeMountingOptions(options = [], resolver = null) {
+  return (Array.isArray(options) ? options : []).flatMap((option) => {
+    const assetId = resolver?.resolve(option?.assetId) ?? option?.assetId
+    const targetAssetId = resolver?.resolve(option?.targetAssetId) ?? option?.targetAssetId
+    if (!assetId || !targetAssetId || assetId === targetAssetId) return []
+    return [{
+      ...structuredClone(option),
+      optionId: option.optionId ?? option.candidateId ?? null,
+      optionType: 'mounting_option',
+      relationType: MOUNTING_RELATION_TYPE,
+      relationKind: 'installation_attachment',
+      optionStatus: option.optionStatus ?? 'available',
+      assetId,
+      targetAssetId,
+    }]
+  })
+}
+
+function createDetailReferenceResolver(payload, mapAsset) {
+  const expectedId = mapAsset?.canonicalAssetId ?? mapAsset?.id
+  const aliases = new Set([
+    expectedId,
+    mapAsset?.assetId,
+    mapAsset?.id,
+    payload?.identity?.canonicalAssetId,
+    ...(payload?.identity?.aliasValues ?? []),
+    ...Object.values(payload?.identity?.aliases ?? {}).flat(),
+  ].filter(Boolean))
+  return {
+    resolve(value) {
+      return aliases.has(value) ? expectedId : value ?? null
+    },
+  }
+}
+
 export function adaptActiveAssetDetail(payload, mapAsset) {
   const expectedId = mapAsset?.canonicalAssetId ?? mapAsset?.id
   const detailIds = [
@@ -340,6 +462,15 @@ export function adaptActiveAssetDetail(payload, mapAsset) {
   const operationalStatus = detailOperationalStatus.present
     ? detailOperationalStatus
     : mapOperationalStatus
+  const detailReferenceResolver = createDetailReferenceResolver(payload, mapAsset)
+  const mountingRelations = normalizeMountingRelations(
+    payload.mountingRelations ?? mapAsset.mountingRelations ?? [],
+    detailReferenceResolver,
+  )
+  const mountingOptions = normalizeMountingOptions(
+    payload.mountingOptions ?? mapAsset.mountingOptions ?? payload.mountingCandidates ?? [],
+    detailReferenceResolver,
+  )
   return {
     ...mapAsset,
     name: asset.name || mapAsset.name,
@@ -356,6 +487,19 @@ export function adaptActiveAssetDetail(payload, mapAsset) {
     ip: readProperty(asset, 'ipAddress') || readProperty(asset, 'ip_address') || '—',
     owner: readProperty(asset, 'owner') || 'Tidak tersedia',
     properties: structuredClone(asset.properties ?? {}),
+    mountingRelations,
+    mountedOnAssetId: mountingRelations.find((relation) => (
+      relation.sourceAssetId === expectedId
+    ))?.targetAssetId ?? mapAsset.mountedOnAssetId ?? null,
+    mountedAssetIds: mountingRelations
+      .filter((relation) => relation.targetAssetId === expectedId)
+      .map((relation) => relation.sourceAssetId),
+    mountingCandidates: normalizeMountingCandidates(
+      payload.mountingCandidates ?? [],
+      detailReferenceResolver,
+    ),
+    mountingOptions,
+    mountingSummary: structuredClone(payload.mountingSummary ?? mapAsset.mountingSummary ?? null),
   }
 }
 

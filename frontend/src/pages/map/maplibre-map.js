@@ -36,6 +36,7 @@ export function createMapLibreSurface(element, {
   networks = [],
   geometries = [],
   topologyGraph = { edges: [] },
+  poleGroups = [],
   candidates = [],
   overlays = [],
   onSelectAsset = () => {},
@@ -46,6 +47,7 @@ export function createMapLibreSurface(element, {
 } = {}) {
   let currentCandidates = candidates
   let currentTopologyGraph = topologyGraph
+  let currentPoleGroups = poleGroups
   const assetById = new Map(assets.map((asset) => [asset.id, asset]))
   const geometryById = new Map(geometries.map((geometry) => [geometry.id, geometry]))
   const networkById = new Map(networks.map((network) => [network.id, network]))
@@ -72,6 +74,7 @@ export function createMapLibreSurface(element, {
     isolateSelectedCandidate: false,
     highlightedNetworkId: null,
     focusedNetworkId: null,
+    expandedPoleGroupId: null,
   }
   let loaded = false
   let destroyed = false
@@ -260,6 +263,11 @@ export function createMapLibreSurface(element, {
     const candidateId = event.features?.[0]?.properties?.candidateId
     if (candidateId) onSelectCandidate(candidateId)
   })
+  map.on('click', () => {
+    if (state.expandedPoleGroupId === null) return
+    state.expandedPoleGroupId = null
+    scheduleAdaptiveMarkers()
+  })
   for (const layerId of ['asset-points-hit', 'cable-lines-hit', 'candidate-connectors-hit']) {
     map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer' })
     map.on('mouseleave', layerId, () => {
@@ -276,6 +284,23 @@ export function createMapLibreSurface(element, {
   map.on('zoom', scheduleAdaptiveMarkers)
   map.on('resize', scheduleAdaptiveMarkers)
   markerOverlay.addEventListener('click', (event) => {
+    const poleGroupButton = event.target.closest('[data-pole-group-toggle]')
+    if (poleGroupButton) {
+      event.stopPropagation()
+      const groupId = poleGroupButton.dataset.poleGroupToggle
+      state.expandedPoleGroupId = state.expandedPoleGroupId === groupId
+        ? null
+        : groupId
+      syncAdaptiveMarkers()
+      return
+    }
+    const poleAssetButton = event.target.closest('[data-pole-group-asset]')
+    if (poleAssetButton) {
+      event.stopPropagation()
+      state.expandedPoleGroupId = poleAssetButton.dataset.poleGroupId || null
+      onSelectAsset(poleAssetButton.dataset.poleGroupAsset)
+      return
+    }
     const assetButton = event.target.closest('[data-adaptive-asset]')
     if (assetButton) {
       event.stopPropagation()
@@ -330,8 +355,31 @@ export function createMapLibreSurface(element, {
       selectedCandidate?.targetAssetId,
       selectedCandidate?.targetPathAssetId,
     ].filter(Boolean))
+    const isAssetActive = (asset) => (
+      !asset.networkIds?.length
+        || asset.networkIds.some((networkId) => state.selectedNetworkIds.has(networkId))
+    )
+    const renderedPoleGroups = currentPoleGroups.flatMap((group) => {
+      if (!validPosition(group.coordinate)) return []
+      const groupAssets = group.assetIds
+        .map((assetId) => assetById.get(assetId))
+        .filter(Boolean)
+      if (!groupAssets.some(isAssetActive)) return []
+      const open = map.getZoom() >= 17
+        || state.expandedPoleGroupId === group.id
+        || group.assetIds.includes(state.selectedAssetId)
+      return [{
+        group,
+        open,
+        point: map.project(group.coordinate.slice(0, 2)),
+      }]
+    })
+    const hiddenPoleGroupAssetIds = new Set(
+      renderedPoleGroups.flatMap(({ group, open }) => (open ? [] : group.assetIds)),
+    )
     const items = assets
       .filter(({ coordinate }) => validPosition(coordinate))
+      .filter(({ id }) => !hiddenPoleGroupAssetIds.has(id))
       .map((asset) => {
         const networkFocused = Boolean(
           state.focusedNetworkId && asset.networkIds?.includes(state.focusedNetworkId),
@@ -371,6 +419,9 @@ export function createMapLibreSurface(element, {
       enabled: declutterEnabled,
     })
     clusterLookup = new Map()
+    const poleGroupMarkup = renderedPoleGroups
+      .map(({ group, open, point }) => renderPoleGroupOverlay(group, open, point))
+      .join('')
     const leaders = layout.leaders.map(renderAdaptiveLeader).join('')
     const markers = layout.markers.map((marker, index) => {
       if (marker.kind === 'cluster') {
@@ -381,6 +432,7 @@ export function createMapLibreSurface(element, {
       return renderAdaptiveAssetMarker(marker)
     }).join('')
     markerOverlay.innerHTML = '<canvas class="map-kml-line-overlay" aria-hidden="true"></canvas>'
+      + `<div class="map-pole-groups">${poleGroupMarkup}</div>`
       + `<div class="map-adaptive-leaders">${leaders}</div>`
       + `<div class="map-adaptive-markers">${markers}</div>`
     drawKmlLineOverlay(markerOverlay.querySelector('.map-kml-line-overlay'))
@@ -735,6 +787,14 @@ export function createMapLibreSurface(element, {
       syncSources()
       syncAdaptiveMarkers()
     },
+    setPoleGroups(nextPoleGroups = []) {
+      currentPoleGroups = Array.isArray(nextPoleGroups) ? nextPoleGroups : []
+      if (state.expandedPoleGroupId
+        && !currentPoleGroups.some(({ id }) => id === state.expandedPoleGroupId)) {
+        state.expandedPoleGroupId = null
+      }
+      syncAdaptiveMarkers()
+    },
     setHighlightedNetworkId(networkId) {
       state.highlightedNetworkId = networkById.has(networkId) ? networkId : null
       syncSources()
@@ -1074,6 +1134,48 @@ function renderAdaptiveAssetMarker(marker) {
         aria-hidden="true">${escapeHtml(marker.icon)}</span>
       <span class="map-adaptive-asset-name">${escapeHtml(label)}</span>
     </button>
+  `
+}
+
+function renderPoleGroupOverlay(group, open, point) {
+  const poleName = shortAssetLabel(group.pole?.name || group.poleAssetId)
+  const countLabel = `${group.childCount} aset`
+  const title = `${group.pole?.name || group.poleAssetId} · ${countLabel}`
+  const memberMarkup = group.assets.map((asset) => `
+    <button class="map-pole-group-asset" type="button"
+      data-pole-group-asset="${escapeHtml(asset.id)}"
+      data-pole-group-id="${escapeHtml(group.id)}"
+      title="Buka detail ${escapeHtml(asset.name || asset.id)}">
+      <span class="material-symbols-outlined" aria-hidden="true">${escapeHtml(iconForAsset(asset))}</span>
+      <span><strong>${escapeHtml(shortAssetLabel(asset.name || asset.id))}</strong>
+        <small>${escapeHtml(asset.type || asset.category || 'Aset')}</small></span>
+    </button>
+  `).join('')
+  if (!open) {
+    return `
+      <button class="map-pole-group-collapsed" type="button"
+        data-pole-group-toggle="${escapeHtml(group.id)}"
+        aria-label="Buka kelompok ${escapeHtml(title)}"
+        title="${escapeHtml(title)}"
+        style="left:${styleNumber(point.x)}px;top:${styleNumber(point.y)}px">
+        <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
+        <span><strong>${escapeHtml(poleName)}</strong><small>${escapeHtml(countLabel)}</small></span>
+      </button>
+    `
+  }
+  return `
+    <section class="map-pole-group-bubble" data-pole-group="${escapeHtml(group.id)}"
+      aria-label="Kelompok ${escapeHtml(title)}"
+      style="left:${styleNumber(point.x)}px;top:${styleNumber(point.y)}px">
+      <button class="map-pole-group-heading" type="button"
+        data-pole-group-toggle="${escapeHtml(group.id)}"
+        aria-label="Tutup kelompok ${escapeHtml(title)}">
+        <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
+        <span><strong>${escapeHtml(poleName)}</strong><small>${escapeHtml(countLabel)}</small></span>
+        <span class="material-symbols-outlined map-pole-group-close" aria-hidden="true">close</span>
+      </button>
+      <div class="map-pole-group-members">${memberMarkup}</div>
+    </section>
   `
 }
 

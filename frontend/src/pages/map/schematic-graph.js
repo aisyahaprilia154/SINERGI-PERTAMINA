@@ -12,6 +12,7 @@ export function buildSchematicGraph({
   networks,
   topologyGraph = null,
   topologyCandidates = [],
+  poleGroups = [],
   selectedNetworkIds = [],
   focusedAssetId = null,
   tracePath = [],
@@ -20,6 +21,7 @@ export function buildSchematicGraph({
 }) {
   const assetById = new Map(assets.map((asset) => [asset.id, asset]))
   const networkById = new Map(networks.map((network) => [network.id, network]))
+  const normalizedPoleGroups = normalizePoleGroups(poleGroups, assetById)
   const selectedIds = new Set(selectedNetworkIds)
   const topologyEdges = Array.isArray(topologyGraph?.edges)
     ? topologyGraph.edges.filter(isConfirmedTopologyEdge).map((edge, index) => {
@@ -70,6 +72,7 @@ export function buildSchematicGraph({
         anchorAssetId: focusedAssetId,
         nodes: [],
         edges: [],
+        poleGroups: [],
         neighborCount: selectedGraph.neighborCount,
         relationCount: selectedGraph.relationCount,
       }
@@ -86,6 +89,7 @@ export function buildSchematicGraph({
       mode: 'trace',
       nodes: [],
       edges: [],
+      poleGroups: [],
     }
   }
 
@@ -186,10 +190,18 @@ export function buildSchematicGraph({
       mode,
       nodes: [],
       edges: [],
+      poleGroups: [],
     }
   }
 
   const includedIds = new Set(nodeIds)
+  const graphPoleGroups = normalizedPoleGroups.map((group) => ({
+    ...group,
+    assetIds: group.assetIds.filter((assetId) => includedIds.has(assetId)),
+    assets: group.assets.filter((asset) => includedIds.has(asset.id)),
+  })).filter((group) => (
+    group.assetIds.includes(group.poleAssetId) && group.assetIds.length > 1
+  ))
   const edges = deduplicateEdges(sourceEdges)
     .filter((edge) => includedIds.has(edge.sourceId) && includedIds.has(edge.targetId))
     .map((edge, index) => {
@@ -272,6 +284,7 @@ export function buildSchematicGraph({
     anchorAssetId,
     nodes,
     edges,
+    poleGroups: graphPoleGroups,
     sourceBounds: getSourceDisplayBounds(assets),
     neighborCount: mode === 'selected' ? Math.max(0, nodes.length - 1) : undefined,
     relationCount: edges.length,
@@ -511,6 +524,28 @@ function deduplicateEdges(edges) {
     if (seen.has(key)) return false
     seen.add(key)
     return true
+  })
+}
+
+function normalizePoleGroups(groups, assetById) {
+  return (Array.isArray(groups) ? groups : []).flatMap((group) => {
+    const poleAssetId = group?.poleAssetId
+    if (!poleAssetId || !assetById.has(poleAssetId)) return []
+    const assetIds = uniqueIds([
+      poleAssetId,
+      ...(group.assetIds ?? group.assets?.map((asset) => asset.id) ?? []),
+    ]).filter((assetId) => assetById.has(assetId))
+    if (assetIds.length < 2) return []
+    const assets = assetIds.map((assetId) => assetById.get(assetId)).filter(Boolean)
+    return [{
+      ...group,
+      poleAssetId,
+      assetIds,
+      assets,
+      pole: assetById.get(poleAssetId),
+      childCount: Math.max(0, assetIds.length - 1),
+      count: assetIds.length,
+    }]
   })
 }
 
