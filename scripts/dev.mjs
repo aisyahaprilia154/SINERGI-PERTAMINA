@@ -36,6 +36,9 @@ const services = [
       SINERGI_BRANCH_IDS: branchIds,
       SINERGI_BRANCH_DATASETS: branchDatasets,
       SINERGI_JOB_LOCK_STALE_MS: process.env.SINERGI_JOB_LOCK_STALE_MS ?? '5000',
+      // Local operational mode: strong, unique relation matches are confirmed
+      // immediately so the map does not depend on the retired review screen.
+      SINERGI_AUTOMATIC_RELATIONS: process.env.SINERGI_AUTOMATIC_RELATIONS ?? 'true',
     },
   },
   {

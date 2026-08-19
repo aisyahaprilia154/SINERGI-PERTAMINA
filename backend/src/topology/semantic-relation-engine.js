@@ -54,6 +54,13 @@ export const DEFAULT_RELATION_ENGINE_CONFIG = Object.freeze({
   acceptanceThreshold: 0.55,
   ambiguityScoreMargin: 0.12,
   autoConfirmSpatialInference: false,
+  // Operational map mode can publish strong, unique spatial matches directly
+  // without putting them through the retired review screen. The legacy flag
+  // above keeps its accuracy-artifact gate for existing review workflows.
+  automaticRelationConfirmation: false,
+  deviceRelationRadiusMeters: 30,
+  deviceRelationUniquenessMarginMeters: 5,
+  deviceRelationUniquenessRatio: 1.25,
   autoConfirmExplicitMetadata: true,
   requiredHeldOutPrecision: 0.99,
   requiredPathAccuracy: 0.95,
@@ -109,6 +116,7 @@ export function generateRelationArtifacts(topologyInputBundle, {
     paths,
     interfaceRegistry,
     topologyPolicy,
+    settings,
   })
   detectDuplicateAndOverlappingLinework(paths, lineworkIssues, bundle, settings)
   assertGenerationBudget(candidateBudget, 'linework_validation')
@@ -132,6 +140,14 @@ export function generateRelationArtifacts(topologyInputBundle, {
       candidateBudget,
     ),
     ...generateMountingCandidates(nodes, spatialIndexes, settings, interfaceContext, candidateBudget),
+    ...(settings.automaticRelationConfirmation
+      ? generateNearestJunctionDeviceCandidates(
+        nodes,
+        spatialIndexes,
+        settings,
+        candidateBudget,
+      )
+      : []),
     ...generateEndpointEndpointCandidates(spatialIndexes, settings, candidateBudget),
     ...generateIntersectionTerminationCandidates(
       spatialIndexes,
@@ -1107,6 +1123,7 @@ function createInterfaceContext({
   paths,
   interfaceRegistry,
   topologyPolicy,
+  settings,
 }) {
   const interfaceById = new Map(
     asArray(interfaceRegistry?.interfaces).map((item) => [item.interfaceId, item]),
@@ -1129,6 +1146,8 @@ function createInterfaceContext({
     interfacesByAssetId,
     nodeById: new Map(nodes.map((node) => [node.id, node])),
     lineLabelNodesByGeometryId: new Map(),
+    extendedJunctionEndpointRadiusMeters: settings?.inlineSearchRadiusMeters
+      ?? DEFAULT_RELATION_ENGINE_CONFIG.inlineSearchRadiusMeters,
     diagnostics: [],
   }
 }
@@ -1887,6 +1906,108 @@ function generateMountingCandidates(
   return candidates
 }
 
+function generateNearestJunctionDeviceCandidates(
+  nodes,
+  spatialIndexes,
+  settings,
+  candidateBudget,
+) {
+  const candidates = []
+  nodes.filter(isCameraNode).forEach((camera) => {
+    assertGenerationBudget(candidateBudget, 'device_nearest_junction')
+    const nearbyTargets = spatialIndexes.nodes
+      .queryPoint(camera.coordinate, settings.deviceRelationRadiusMeters)
+      .filter((target) => (
+        target.id !== camera.id
+          && isOperationalJunctionTarget(target)
+          && sameFacilityScope(camera, target)
+      ))
+      .map((target) => ({
+        target,
+        distanceMeters: geographicDistanceMeters(camera.coordinate, target.coordinate),
+      }))
+      .filter(({ distanceMeters }) => distanceMeters <= settings.deviceRelationRadiusMeters)
+      .sort((left, right) => (
+        left.distanceMeters - right.distanceMeters
+          || String(left.target.id).localeCompare(String(right.target.id))
+      ))
+    const nearest = nearbyTargets[0]
+    if (!nearest) return
+    const second = nearbyTargets[1]
+    const distanceMargin = second
+      ? second.distanceMeters - nearest.distanceMeters
+      : Number.POSITIVE_INFINITY
+    const distanceRatio = second && nearest.distanceMeters > 0
+      ? second.distanceMeters / nearest.distanceMeters
+      : Number.POSITIVE_INFINITY
+    const uniqueNearest = !second
+      || distanceMargin >= settings.deviceRelationUniquenessMarginMeters
+      || distanceRatio >= settings.deviceRelationUniquenessRatio
+    if (!uniqueNearest) return
+
+    const labelCorrespondence = matchingNumericIdentity(camera, nearest.target) ? 1 : 0.75
+    const distanceScore = clamp(
+      1 - (nearest.distanceMeters / settings.deviceRelationRadiusMeters) * 0.45,
+      0.55,
+      1,
+    )
+    const candidate = baseCandidate({
+      candidateType: 'device_nearest_junction',
+      sourceEndpointId: `device-nearest-junction:${camera.id}`,
+      sourcePath: camera,
+      targetAssetId: nearest.target.id,
+      targetNode: nearest.target,
+      distanceMeters: nearest.distanceMeters,
+      sourceCoordinate: camera.coordinate,
+      targetCoordinate: nearest.target.coordinate,
+      measureMeters: null,
+      semanticCompatibility: 1,
+      endpointRole: 1,
+      sourceContext: 1,
+      styleConsistency: styleConsistencyScore(camera, nearest.target),
+      angleScore: 1,
+      graphConsistency: 1,
+      evidence: [{
+        source: 'spatial',
+        ruleId: 'device.unique-nearest-junction',
+        observedValue: nearest.distanceMeters,
+        normalizedValue: `${nearest.distanceMeters.toFixed(3)}m`,
+        weight: SCORE_WEIGHTS.distance,
+        explanation: 'Kamera memiliki satu junction box terdekat yang jelas pada area fasilitas yang sama.',
+      }, {
+        source: 'spatial',
+        ruleId: 'device.nearest-junction-uniqueness',
+        observedValue: Number.isFinite(distanceMargin) ? distanceMargin : null,
+        normalizedValue: second
+          ? `${distanceMargin.toFixed(3)}m / ${distanceRatio.toFixed(3)}x`
+          : 'single-target',
+        weight: SCORE_WEIGHTS.explicitEvidence,
+        explanation: 'Jarak terhadap kandidat kedua cukup berbeda sehingga hubungan tidak ambigu.',
+      }],
+      serviceDomain: 'data',
+      mediaType: 'unknown',
+      cableRole: 'access',
+      relationType: 'connected-to',
+      relationKind: 'device_edge',
+      direction: 'undirected',
+      provenance: 'automatic_device_relation',
+    })
+    candidate.sourceGeometryIds = []
+    candidate.components = {
+      ...candidate.components,
+      interfaceCompatibility: 1,
+      explicitEvidence: 0.9,
+      distance: distanceScore,
+      labelCorrespondence,
+      siteContext: 1,
+      endpointRoleConsistency: 1,
+      capacityAvailability: 1,
+    }
+    pushCandidate(candidates, candidate, candidateBudget, 'device_nearest_junction')
+  })
+  return candidates
+}
+
 function generateInternalConnectionCandidates(interfaceContext, candidateBudget) {
   const candidates = []
   internalConnectionDefinitions(interfaceContext).forEach((definition) => {
@@ -2501,6 +2622,8 @@ function generateLineLabelAttachmentCandidates(
         compatibleInterfaces,
         proxyInterfaceAssignments,
       )
+      const isPhysicalExtendedEndpoint = isExtendedJunctionBoxNode(targetNode)
+        && !pathLabelMatchesNode(path, targetNode)
       selectedInterfaces.forEach(({ item, score, ruleId, explanation, capacityAvailable }) => {
         const candidate = baseCandidate({
           candidateType: 'cable_termination',
@@ -2525,12 +2648,18 @@ function generateLineLabelAttachmentCandidates(
           capacityAvailable,
           provenance: 'line_label_inference',
           evidence: [{
-            source: 'line_label',
-            ruleId: 'line.name.endpoint-attachment',
+            source: isPhysicalExtendedEndpoint ? 'spatial' : 'line_label',
+            ruleId: isPhysicalExtendedEndpoint
+              ? 'extended-junction.endpoint-replaces-nearby-label'
+              : 'line.name.endpoint-attachment',
             observedValue: path.sourceName,
             normalizedValue: `${endpoint?.role ?? 'inline'}:${targetNode.id}:${item.interfaceId}`,
-            weight: SCORE_WEIGHTS.labelCorrespondence,
-            explanation: 'Nama device pada garis menentukan target interface kabel.',
+            weight: isPhysicalExtendedEndpoint
+              ? SCORE_WEIGHTS.distance
+              : SCORE_WEIGHTS.labelCorrespondence,
+            explanation: isPhysicalExtendedEndpoint
+              ? 'JB Extended yang paling dekat dengan endpoint menggantikan label kamera yang berada pada endpoint cluster yang sama.'
+              : 'Nama device pada garis menentukan target interface kabel.',
           }, {
             source: 'semantic',
             ruleId,
@@ -2560,7 +2689,6 @@ function buildLineLabelProxyInterfaceAssignments(pathRecords, interfaceContext) 
   pathRecords.forEach(({ path, matchedNodes }) => {
     if (matchedNodes.length < 2) return
     assignLineLabelNodes(path, matchedNodes).forEach(({ node: targetNode, endpoint }) => {
-      if (!isRackNode(targetNode)) return
       const endpointRole = labelEndpointRole(
         targetNode,
         matchedNodes,
@@ -2572,13 +2700,23 @@ function buildLineLabelProxyInterfaceAssignments(pathRecords, interfaceContext) 
         interfaceContext,
         endpointRole,
       )
-      const proxyInterfaces = compatibleInterfaces.filter(({ item }) => (
+      // A line label is strong endpoint evidence, but a normal JB can expose
+      // several equivalent LAN ports. Allocate one deterministic port per
+      // labelled path so the endpoint does not remain ambiguous merely because
+      // the source file does not specify a physical port number. Rack/server
+      // proxy ports use the same allocator below.
+      const hasProxyInterfaces = compatibleInterfaces.some(({ item }) => (
         item.isProxy === true || item.virtual === true
       ))
-      if (!proxyInterfaces.length) return
+      const allocatableInterfaces = hasProxyInterfaces && isRackNode(targetNode)
+        ? compatibleInterfaces.filter(({ item }) => (
+          item.isProxy === true || item.virtual === true
+        ))
+        : compatibleInterfaces
+      if (!allocatableInterfaces.length) return
       const sourceEndpointId = endpoint?.id ?? `inline:${path.geometryId}:${targetNode.id}`
       const recordKey = lineLabelProxyAllocationKey(path, targetNode, sourceEndpointId)
-      const interfaceClass = unique(proxyInterfaces.map(({ item }) => (
+      const interfaceClass = unique(allocatableInterfaces.map(({ item }) => (
         `${item.interfaceType}:${item.serviceDomain}:${item.mediaType}`
       ))).sort().join(',')
       const groupKey = [
@@ -2593,7 +2731,7 @@ function buildLineLabelProxyInterfaceAssignments(pathRecords, interfaceContext) 
         recordKey,
         pathId: path.id,
         geometryId: path.geometryId,
-        proxyInterfaces,
+        proxyInterfaces: allocatableInterfaces,
       })
       groups.set(groupKey, records)
     })
@@ -2638,7 +2776,9 @@ function lineLabelInterfacesForTarget(
   const hasProxyInterfaces = compatibleInterfaces.some(({ item }) => (
     item.isProxy === true || item.virtual === true
   ))
-  if (!isRackNode(targetNode) || !hasProxyInterfaces) return compatibleInterfaces
+  const needsDeterministicAllocation = compatibleInterfaces.length > 1
+    || (isRackNode(targetNode) && hasProxyInterfaces)
+  if (!needsDeterministicAllocation) return compatibleInterfaces
   const selected = proxyInterfaceAssignments.get(
     lineLabelProxyAllocationKey(path, targetNode, sourceEndpointId),
   )
@@ -2670,12 +2810,20 @@ function lineLabelNodesForPath(path, interfaceContext) {
   const cache = interfaceContext?.lineLabelNodesByGeometryId
   const cacheKey = `${path.id}|${path.geometryId}`
   if (cache?.has(cacheKey)) return cache.get(cacheKey)
-  const matchedNodes = lineLabelNodeSequence(path, interfaceContext.nodes)
+  const matchedNodes = lineLabelNodeSequence(
+    path,
+    interfaceContext.nodes,
+    interfaceContext.extendedJunctionEndpointRadiusMeters,
+  )
   cache?.set(cacheKey, matchedNodes)
   return matchedNodes
 }
 
-function lineLabelNodeSequence(path, nodes) {
+function lineLabelNodeSequence(
+  path,
+  nodes,
+  extendedJunctionEndpointRadiusMeters = DEFAULT_RELATION_ENGINE_CONFIG.inlineSearchRadiusMeters,
+) {
   const pathTokens = normalizeLabelTokens(path.sourceName)
   if (!pathTokens.length) return []
   const localNodes = nodes.filter((node) => (
@@ -2703,7 +2851,13 @@ function lineLabelNodeSequence(path, nodes) {
   })
   const labelNodes = accepted.map(({ node }) => node)
   if (labelNodes.length < 2) return labelNodes
-  return insertInlineJunctionBoxes(path, labelNodes, localNodes)
+  const inlineNodes = insertInlineJunctionBoxes(path, labelNodes, localNodes)
+  return replaceEndpointLabelWithExtendedJunctions(
+    path,
+    inlineNodes,
+    localNodes,
+    extendedJunctionEndpointRadiusMeters,
+  )
 }
 
 function insertInlineJunctionBoxes(path, labelNodes, localNodes) {
@@ -2739,6 +2893,63 @@ function insertInlineJunctionBoxes(path, labelNodes, localNodes) {
     inlineNodes.forEach(({ candidate }) => output.push(candidate))
   })
   return output
+}
+
+function replaceEndpointLabelWithExtendedJunctions(
+  path,
+  labelNodes,
+  localNodes,
+  radiusMeters,
+) {
+  if (!isLanPath(path) || labelNodes.length < 2) return labelNodes
+
+  const orderedLabelNodes = assignLineLabelEndpoints(path, labelNodes)
+  const endpoints = lineEndpoints(path)
+  const labelIds = new Set(labelNodes.map(({ id }) => id))
+  const replacements = new Map()
+
+  orderedLabelNodes.forEach((labelNode, index) => {
+    // A labelled JB is already an authoritative endpoint. The override is
+    // intended for the common KMZ shape where the line is named with a camera
+    // but an Extended JB is physically placed at the same endpoint cluster.
+    if (isJunctionBoxNode(labelNode)) return
+    const endpoint = endpoints[index]
+    const labelDistance = geographicDistanceMeters(
+      endpoint.coordinate,
+      labelNode.coordinate,
+    )
+    const nearby = localNodes
+      .filter((candidate) => (
+        !labelIds.has(candidate.id)
+          && isExtendedJunctionBoxNode(candidate)
+      ))
+      .map((candidate) => ({
+        candidate,
+        distanceMeters: geographicDistanceMeters(endpoint.coordinate, candidate.coordinate),
+      }))
+      .filter(({ distanceMeters }) => distanceMeters <= radiusMeters)
+      .sort((left, right) => (
+        left.distanceMeters - right.distanceMeters
+          || left.candidate.id.localeCompare(right.candidate.id)
+      ))
+
+    const nearest = nearby[0]
+    if (!nearest) return
+    // Do not guess when two Extended JB points occupy the same endpoint
+    // cluster. A small but meaningful gap also prevents replacing a labelled
+    // camera merely because of GPS noise.
+    const second = nearby[1]
+    if (second && second.distanceMeters - nearest.distanceMeters < 0.5) return
+    if (nearest.distanceMeters >= labelDistance - 0.25) return
+    replacements.set(labelNode.id, nearest.candidate)
+  })
+
+  return labelNodes.map((node) => replacements.get(node.id) ?? node)
+}
+
+function isLanPath(path) {
+  const mediaType = normalizeMediaType(path?.mediaType ?? 'unknown')
+  return path?.networkFamily === 'lan' || mediaType === 'copper_lan'
 }
 
 function topologyLabelAliases(sourceName) {
@@ -3537,7 +3748,7 @@ function applyCapacityConstraints(
     ))
     .sort((left, right) => right.score - left.score || compareCandidate(left, right))
   recommended.forEach((candidate) => {
-    if (candidate.candidateType === 'mounting_attachment') return
+    if (['mounting_attachment', 'device_nearest_junction'].includes(candidate.candidateType)) return
     const interfaceId = candidate.targetInterfaceId
     const item = interfaceId ? interfaceById.get(interfaceId) : null
     if (!item) {
@@ -3586,15 +3797,23 @@ function applyCapacityConstraints(
       interfaceOccupancy: count,
     }
   })
-  if (settings.autoConfirmSpatialInference && accuracyGate.approved) {
+  const automaticConfirmationEnabled = settings.automaticRelationConfirmation === true
+    || (settings.autoConfirmSpatialInference && accuracyGate.approved)
+  if (automaticConfirmationEnabled) {
     recommended.filter(({ proposalStatus }) => proposalStatus === 'recommended')
       .forEach((candidate) => {
         candidate.candidateStatus = 'confirmed'
         candidate.review = {
-          actorId: 'publication-policy',
+          actorId: settings.automaticRelationConfirmation === true
+            ? 'automatic-relation-engine'
+            : 'publication-policy',
           reviewedAt: candidate.generatedAt,
-          reason: 'Accuracy artifact approved dan auto-confirm policy terpenuhi.',
-          accuracyEvaluationId: accuracyGate.evaluationId,
+          reason: settings.automaticRelationConfirmation === true
+            ? 'Relasi kuat dan unik dikonfirmasi otomatis oleh relation engine.'
+            : 'Accuracy artifact approved dan auto-confirm policy terpenuhi.',
+          ...(settings.automaticRelationConfirmation === true
+            ? { confirmationMode: 'automatic_strong_match' }
+            : { accuracyEvaluationId: accuracyGate.evaluationId }),
         }
       })
   }
@@ -3840,6 +4059,7 @@ function confirmedRelationPreference(left, right) {
   const provenancePriority = {
     manual_admin: 4,
     explicit_kml_metadata: 3,
+    automatic_device_relation: 2,
     line_label_inference: 2,
     spatial_inference: 1,
   }
@@ -4408,7 +4628,8 @@ export function validateConfirmedGraph({
     if (!['installation_attachment', 'path_termination', 'internal_connection']
       .includes(relation.relationKind)
       && !familiesCompatibleForRelation(source, target)
-      && !['manual_admin', 'line_label_inference'].includes(relation.provenance)) {
+      && !['manual_admin', 'line_label_inference', 'automatic_device_relation']
+        .includes(relation.provenance)) {
       issues.push(graphIssue(bundle, relation, 'incompatible_family_edge', 'error'))
     }
     if (relation.sourceAssetId === relation.targetAssetId
@@ -5377,6 +5598,19 @@ function normalizeConfig(config) {
       DEFAULT_RELATION_ENGINE_CONFIG.ambiguityScoreMargin,
     ),
     autoConfirmSpatialInference: value.autoConfirmSpatialInference === true,
+    automaticRelationConfirmation: value.automaticRelationConfirmation === true,
+    deviceRelationRadiusMeters: positiveNumber(
+      value.deviceRelationRadiusMeters,
+      DEFAULT_RELATION_ENGINE_CONFIG.deviceRelationRadiusMeters,
+    ),
+    deviceRelationUniquenessMarginMeters: nonNegativeNumber(
+      value.deviceRelationUniquenessMarginMeters,
+      DEFAULT_RELATION_ENGINE_CONFIG.deviceRelationUniquenessMarginMeters,
+    ),
+    deviceRelationUniquenessRatio: positiveNumber(
+      value.deviceRelationUniquenessRatio,
+      DEFAULT_RELATION_ENGINE_CONFIG.deviceRelationUniquenessRatio,
+    ),
     autoConfirmExplicitMetadata: value.autoConfirmExplicitMetadata !== false,
     requiredHeldOutPrecision: unitNumber(
       value.requiredHeldOutPrecision,
@@ -5540,6 +5774,41 @@ function isJunctionBoxNode(node) {
   if (isOtbNode(node) || isRackNode(node)) return false
   return node?.assetType === 'junction_box'
     || /junction|\bjb\b/.test(type)
+}
+
+function isOperationalJunctionTarget(node) {
+  if (isJunctionBoxNode(node)) return true
+  const name = normalizeToken(node?.sourceName)
+  return isRackNode(node) && /(^|\s)jb(?:\s|-|$)/.test(name)
+}
+
+function sameFacilityScope(left, right) {
+  if (String(left?.siteId ?? '') !== String(right?.siteId ?? '')) return false
+  const leftScope = facilityScope(left?.sourceFolderPath)
+  const rightScope = facilityScope(right?.sourceFolderPath)
+  if (!leftScope || !rightScope) return true
+  return leftScope === rightScope
+}
+
+function facilityScope(value) {
+  const segments = String(value ?? '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((segment) => normalizeToken(segment))
+    .filter(Boolean)
+  const rootIndex = segments.findIndex((segment) => segment === 'rjbt')
+  if (rootIndex >= 0 && segments[rootIndex + 1]) return segments[rootIndex + 1]
+  return segments[0] ?? null
+}
+
+function matchingNumericIdentity(left, right) {
+  const identity = (node) => {
+    const match = String(node?.sourceName ?? node?.id ?? '').match(/\d+/)
+    return match ? String(Number(match[0])) : null
+  }
+  const leftIdentity = identity(left)
+  const rightIdentity = identity(right)
+  return Boolean(leftIdentity && rightIdentity && leftIdentity === rightIdentity)
 }
 
 function isExtendedJunctionBoxNode(node) {

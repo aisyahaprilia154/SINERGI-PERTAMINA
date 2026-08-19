@@ -4,13 +4,13 @@ import {
   locationGroupFor,
 } from '../../adapters/active-dataset-map-adapter.js'
 import {
+  createTopologyRelation,
   loadActiveAssetDetail,
   loadActiveDataset,
-  loadAllTopologyCandidates,
   loadActiveOverlays,
   loadDatasetProjection,
   loadTopologyProjection,
-  reviewTopologyCandidate,
+  revokeTopologyRelation,
   traceTopology,
 } from '../../services/active-dataset-service.js'
 import { renderAssetDetailDrawer } from './asset-detail-drawer.js'
@@ -25,15 +25,12 @@ import {
 import {
   buildExplicitRelationGraph,
   getConnectedAssets,
+  relationMutationId,
 } from './network-tracing.js'
 import { openSchematicDialog } from './diagram-dialog.js'
 import { openMapDataTransferDialog } from './map-data-transfer-dialog.js'
 import { buildSchematicGraph } from './schematic-graph.js'
 import { calculateSchematicLayout } from './schematic-layout.js'
-import {
-  emptyOperationalTopologyGraph,
-  TOPOLOGY_NOT_READY_MESSAGE,
-} from '../../domain/topology-readiness.js'
 
 export async function renderMapPage(container) {
   document.title = 'Peta Jaringan — SINERGI'
@@ -108,20 +105,14 @@ export async function renderMapPage(container) {
     renderingSummary,
   } = mapData
   const topologyReadiness = mapData.topologyReadiness ?? {
-    ready: false,
-    traceAvailable: false,
-    diagramAvailable: false,
-    message: TOPOLOGY_NOT_READY_MESSAGE,
+    ready: true,
+    traceAvailable: true,
+    diagramAvailable: true,
+    message: '',
   }
-  const globalTraceAvailable = topologyReadiness.traceAvailable
-    ?? topologyReadiness.ready
-    ?? false
-  const globalDiagramAvailable = topologyReadiness.diagramAvailable
-    ?? topologyReadiness.ready
-    ?? false
-  const operationalTopologyGraph = globalTraceAvailable
-    ? fullTopologyGraph
-    : emptyOperationalTopologyGraph(activeContext.datasetVersionId)
+  // The map is source-first. A not-ready legacy review contract must not
+  // replace the confirmed graph with an empty graph or hide KML/KMZ evidence.
+  const operationalTopologyGraph = fullTopologyGraph
   const selectedArea = selectLocationGroup(window.location.search, locationGroups)
   const {
     assets,
@@ -130,7 +121,7 @@ export async function renderMapPage(container) {
     geometries,
     exportAssets,
     networks,
-    topologyGraph,
+    topologyGraph: initialTopologyGraph,
     counts,
   } = scopeMapData({
     selectedArea,
@@ -141,15 +132,15 @@ export async function renderMapPage(container) {
     networks: allNetworks,
     topologyGraph: operationalTopologyGraph,
   })
-  const traceAvailable = globalTraceAvailable && topologyGraph.edges.length > 0
-  const diagramAvailable = globalDiagramAvailable && assets.length > 0
+  let topologyGraph = initialTopologyGraph
+  const traceAvailable = topologyGraph.edges.length > 0
+  const diagramAvailable = assets.length > 0
   const topologySummary = summarizeMapTopology({
     assets,
     topologyGraph,
     datasetTopologySummary,
   })
   const hasRenderableData = geometries.length > 0
-  let diagramCandidateProjectionPromise = null
   const resolvedOverlays = (overlayResult[0].status === 'fulfilled'
     ? overlayResult[0].value.overlays ?? overlayResult[0].value.items ?? []
     : [])
@@ -180,7 +171,7 @@ export async function renderMapPage(container) {
     initialSelectedNetworkIds: initialUrlState.selectedNetworkIds,
     initialSelectedAssetId: initialUrlState.selectedAssetId,
   })
-  const relationGraph = buildExplicitRelationGraph({
+  let relationGraph = buildExplicitRelationGraph({
     networks,
     assetIds: validIds.assetIds,
     topologyGraph,
@@ -208,6 +199,11 @@ export async function renderMapPage(container) {
     focusedNetworkId: null,
     dataStatus: 'loading',
     dataError: null,
+    relationEditorOpen: false,
+    relationTargetId: '',
+    relationReplaceId: null,
+    relationStatus: 'idle',
+    relationError: null,
   }
   let traceRequestId = 0
 
@@ -229,7 +225,7 @@ export async function renderMapPage(container) {
           assetsWithoutGeometry: renderingSummary.assetsWithoutGeometry,
           selectedArea,
           counts,
-          confirmedConnectionCount: traceAvailable ? topologyGraph.edges.length : 0,
+          confirmedConnectionCount: topologyGraph.edges.length,
           topologySummary,
           selectedAssetId: initialUrlState.selectedAssetId,
           topologyReadiness,
@@ -415,7 +411,7 @@ export async function renderMapPage(container) {
     traceButton.disabled = !traceAvailable
     traceButton.setAttribute('aria-disabled', String(!traceAvailable))
     traceButton.title = !traceAvailable
-      ? topologyReadiness.traceMessage || topologyReadiness.message || TOPOLOGY_NOT_READY_MESSAGE
+      ? 'Belum ada relasi terkonfirmasi untuk ditelusuri.'
       : selectedAsset && connectedCount > 0
         ? `Telusuri koneksi dari ${selectedAsset.name || selectedAsset.id}`
         : 'Klik lalu pilih aset awal pada peta.'
@@ -425,7 +421,7 @@ export async function renderMapPage(container) {
     diagramButton.setAttribute('aria-disabled', String(!diagramAvailable))
     diagramButton.title = diagramAvailable
       ? 'Buka Diagram Topologi 2D dari graph terkonfirmasi.'
-      : topologyReadiness.message || topologyReadiness.traceMessage || TOPOLOGY_NOT_READY_MESSAGE
+      : 'Belum ada aset yang dapat ditampilkan pada diagram.'
   }
 
   function toggleNetwork(networkId) {
@@ -491,14 +487,15 @@ export async function renderMapPage(container) {
       .map((relation) => ({
         asset: assetById[relation.targetAssetId],
         network: networks.find((network) => network.id === relation.networkId),
+        relation,
       }))
       .filter((item) => item.asset)
-    const reviewQuery = new URLSearchParams({
-      datasetId: activeContext.datasetId,
-      branchId: activeContext.branchId,
-      selectedAssetId: asset.id,
+    const relationOptions = buildRelationOptions({
+      sourceAsset: asset,
+      assets,
+      connectedAssets,
+      locationKey: selectedArea?.key,
     })
-    if (selectedArea?.key) reviewQuery.set('area', selectedArea.key)
     drawer.innerHTML = renderAssetDetailDrawer({
       status: state.assetDetailStatus,
       errorMessage: state.assetDetailError,
@@ -508,16 +505,15 @@ export async function renderMapPage(container) {
       activeContext,
       showAdditionalMetadata: state.showAdditionalMetadata,
       trace: getDrawerTraceState(),
-      topologyReady: topologyReadiness.ready,
       traceAvailable,
       diagramAvailable,
       topologySummary,
-      reviewUrl: topologyReadiness.capabilities?.reviewTopology
-        ? `/admin/topology-review?${reviewQuery}`
-        : null,
-      topologyMessage: topologyReadiness.traceMessage
-        || topologyReadiness.message
-        || TOPOLOGY_NOT_READY_MESSAGE,
+      relationOptions,
+      relationEditorOpen: state.relationEditorOpen,
+      relationTargetId: state.relationTargetId,
+      relationReplaceId: state.relationReplaceId,
+      relationStatus: state.relationStatus,
+      relationError: state.relationError,
     })
     drawer.classList.add('open')
     drawer.setAttribute('aria-hidden', 'false')
@@ -537,6 +533,37 @@ export async function renderMapPage(container) {
     drawer.querySelector('.retry-asset-detail')?.addEventListener('click', () => {
       loadAssetDetail(selection.selectedAssetId, { force: true })
     })
+    drawer.querySelector('[data-open-relation-picker]')?.addEventListener('click', () => {
+      state.relationEditorOpen = true
+      state.relationReplaceId = null
+      state.relationTargetId = relationOptions[0]?.asset?.id ?? ''
+      state.relationError = null
+      renderDrawer()
+      drawer.querySelector('[data-relation-target]')?.focus()
+    })
+    drawer.querySelectorAll('[data-replace-relation]').forEach((button) => {
+      button.addEventListener('click', () => {
+        state.relationEditorOpen = true
+        state.relationReplaceId = button.dataset.replaceRelation || null
+        state.relationTargetId = relationOptions[0]?.asset?.id ?? ''
+        state.relationError = null
+        renderDrawer()
+        drawer.querySelector('[data-relation-target]')?.focus()
+      })
+    })
+    drawer.querySelector('[data-relation-target]')?.addEventListener('change', (event) => {
+      state.relationTargetId = event.currentTarget.value
+    })
+    drawer.querySelector('[data-save-relation]')?.addEventListener('click', () => {
+      saveAssetRelation(asset.id, state.relationTargetId, state.relationReplaceId)
+    })
+    drawer.querySelector('[data-cancel-relation]')?.addEventListener('click', () => {
+      state.relationEditorOpen = false
+      state.relationReplaceId = null
+      state.relationTargetId = ''
+      state.relationError = null
+      renderDrawer()
+    })
     drawer.querySelectorAll('[data-trace-target]').forEach((button) => {
       button.addEventListener('click', () => runTraceTo(button.dataset.traceTarget))
     })
@@ -548,6 +575,114 @@ export async function renderMapPage(container) {
       toggleNetworkFocus(networkId)
     }))
     drawer.querySelector('.open-schematic')?.addEventListener('click', openSchematic)
+  }
+
+  async function saveAssetRelation(sourceAssetId, targetAssetId, replaceRelationId = null) {
+    if (!sourceAssetId || !targetAssetId || sourceAssetId === targetAssetId) return
+    state.relationStatus = 'saving'
+    state.relationError = null
+    renderDrawer()
+    let rollbackGraph = topologyGraph
+    try {
+      let expectedGraphRevision = topologyGraph.graphRevision ?? undefined
+      if (replaceRelationId) {
+        const revoked = await revokeTopologyRelation({
+          relationId: replaceRelationId,
+          reason: 'Hubungan diganti dari Detail aset.',
+          expectedGraphRevision,
+        })
+        if (revoked?.graph && Array.isArray(revoked.graph.edges)) {
+          topologyGraph = revoked.graph
+          expectedGraphRevision = topologyGraph.graphRevision ?? undefined
+          relationGraph = buildExplicitRelationGraph({
+            networks,
+            assetIds: validIds.assetIds,
+            topologyGraph,
+          })
+          canvasApi.setTopologyGraph(topologyGraph)
+        }
+      }
+      rollbackGraph = topologyGraph
+      const pendingRelationId = `pending-manual:${sourceAssetId}:${targetAssetId}`
+      const pendingEdge = {
+        id: pendingRelationId,
+        edgeId: pendingRelationId,
+        relationId: pendingRelationId,
+        sourceAssetId,
+        sourceNodeId: sourceAssetId,
+        targetAssetId,
+        targetNodeId: targetAssetId,
+        relationKind: 'device_edge',
+        relationType: 'connected-to',
+        direction: 'undirected',
+        verificationStatus: 'confirmed',
+        relationStatus: 'confirmed',
+        relationSource: 'manual_admin',
+        provenance: 'manual_admin',
+        sourceGeometryIds: [],
+        networkFamily: assetById[sourceAssetId]?.networkFamily ?? null,
+        optimistic: true,
+      }
+      topologyGraph = {
+        ...topologyGraph,
+        edges: [
+          ...(topologyGraph.edges ?? []).filter((edge) => (
+            edge.id !== pendingRelationId
+              && edge.edgeId !== pendingRelationId
+              && edge.relationId !== pendingRelationId
+          )),
+          pendingEdge,
+        ],
+      }
+      relationGraph = buildExplicitRelationGraph({
+        networks,
+        assetIds: validIds.assetIds,
+        topologyGraph,
+      })
+      canvasApi.setTopologyGraph(topologyGraph)
+      renderDrawer()
+      syncMap()
+      const response = await createTopologyRelation({
+        datasetVersionId: activeContext.datasetVersionId,
+        sourceAssetId,
+        targetAssetId,
+        relationKind: 'device_edge',
+        direction: 'undirected',
+        reason: replaceRelationId
+          ? 'Hubungan diganti dari Detail aset.'
+          : 'Hubungan ditambahkan dari Detail aset.',
+        expectedGraphRevision,
+      })
+      const nextGraph = response?.graph
+      if (!nextGraph || !Array.isArray(nextGraph.edges)) {
+        throw new Error('Graph relasi terbaru tidak tersedia dari server.')
+      }
+      topologyGraph = nextGraph
+      relationGraph = buildExplicitRelationGraph({
+        networks,
+        assetIds: validIds.assetIds,
+        topologyGraph,
+      })
+      canvasApi.setTopologyGraph(topologyGraph)
+      state.relationStatus = 'saved'
+      state.relationEditorOpen = false
+      state.relationReplaceId = null
+      state.relationTargetId = ''
+      renderDrawer()
+      syncMap()
+    } catch (error) {
+      topologyGraph = rollbackGraph
+      relationGraph = buildExplicitRelationGraph({
+        networks,
+        assetIds: validIds.assetIds,
+        topologyGraph,
+      })
+      canvasApi.setTopologyGraph(topologyGraph)
+      syncMap()
+      state.relationStatus = 'error'
+      state.relationError = error.message || 'Hubungan aset tidak dapat disimpan.'
+      renderDrawer()
+    }
   }
 
   async function loadAssetDetail(assetId, { force = false } = {}) {
@@ -663,9 +798,7 @@ export async function renderMapPage(container) {
     resetTraceState()
     if (!traceAvailable) {
       state.traceStatus = 'error'
-      state.traceError = topologyReadiness.traceMessage
-        || topologyReadiness.message
-        || TOPOLOGY_NOT_READY_MESSAGE
+      state.traceError = 'Belum ada relasi terkonfirmasi untuk ditelusuri.'
       updateUrl(historyMode)
       updateTraceBanner()
       renderDrawer()
@@ -826,12 +959,10 @@ export async function renderMapPage(container) {
     renderDrawer()
   }
 
-  async function openSchematic(event) {
+  function openSchematic(event) {
     if (!diagramAvailable) {
       state.traceStatus = 'error'
-      state.traceError = topologyReadiness.message
-        || topologyReadiness.traceMessage
-        || TOPOLOGY_NOT_READY_MESSAGE
+      state.traceError = 'Belum ada aset yang dapat ditampilkan pada diagram.'
       updateTraceBanner()
       renderDrawer()
       return
@@ -842,48 +973,22 @@ export async function renderMapPage(container) {
       trigger.disabled = true
       trigger.setAttribute('aria-busy', 'true')
     }
-    let topologyCandidates = []
-    let candidateProjection = null
-    let candidateLoadError = null
-    try {
-      diagramCandidateProjectionPromise ??= Promise.all(
-        ['candidate', 'ambiguous'].map((status) => loadAllTopologyCandidates({
-          datasetVersionId: activeContext.datasetVersionId,
-          status,
-        })),
-      ).then(([candidatePage, ambiguousPage]) => ({
-        ...candidatePage,
-        items: [...(candidatePage.items ?? []), ...(ambiguousPage.items ?? [])],
-      }))
-      candidateProjection = await diagramCandidateProjectionPromise
-      topologyCandidates = candidateProjection.items ?? []
-    } catch (error) {
-      diagramCandidateProjectionPromise = null
-      candidateLoadError = error.message
-    } finally {
-      if (trigger) {
-        trigger.disabled = false
-        if (previousBusy === null) trigger.removeAttribute('aria-busy')
-        else trigger.setAttribute('aria-busy', previousBusy)
-      }
+    if (trigger) {
+      trigger.disabled = false
+      if (previousBusy === null) trigger.removeAttribute('aria-busy')
+      else trigger.setAttribute('aria-busy', previousBusy)
     }
     const allAssetsGraph = buildSchematicGraph({
       assets: diagramAssets,
       networks,
       topologyGraph,
-      topologyCandidates,
       scope: 'all-assets',
-      topologyReady: topologyReadiness.ready,
     })
-    if (candidateLoadError && allAssetsGraph.diagnostics) {
-      allAssetsGraph.diagnostics.candidateLoadError = candidateLoadError
-    }
     const fullMapGraph = buildSchematicGraph({
       assets: diagramAssets,
       networks,
       topologyGraph,
       scope: 'full-map',
-      topologyReady: topologyReadiness.ready,
     })
     const traceGraph = buildSchematicGraph({
       assets: diagramAssets,
@@ -892,7 +997,6 @@ export async function renderMapPage(container) {
       scope: 'trace',
       tracePath: state.traceStatus === 'active' ? state.tracePath : [],
       traceRelations: state.traceStatus === 'active' ? state.traceRelations : [],
-      topologyReady: topologyReadiness.ready,
     })
     const selectedAssetGraph = buildSchematicGraph({
       assets,
@@ -900,7 +1004,6 @@ export async function renderMapPage(container) {
       topologyGraph,
       focusedAssetId: selection.selectedAssetId,
       scope: 'selected',
-      topologyReady: topologyReadiness.ready,
     })
     openSchematicDialog({
       diagrams: {
@@ -929,35 +1032,6 @@ export async function renderMapPage(container) {
           ? 'selected'
           : 'all-assets',
       onSelectAsset: selectAssetFromDiagram,
-      onReviewCandidate: async ({ candidateId, action }) => {
-        await reviewTopologyCandidate({
-          candidateId,
-          action,
-          body: {
-            datasetVersionId: activeContext.datasetVersionId,
-            ...(candidateProjection?.graphRevision !== undefined
-              ? { expectedGraphRevision: candidateProjection.graphRevision } : {}),
-            ...(candidateProjection?.candidateRevision !== undefined
-              ? { expectedCandidateRevision: candidateProjection.candidateRevision } : {}),
-            reason: action === 'reject' ? 'Ditolak dari Diagram Skematik 2D.' : '',
-          },
-        })
-        window.location.reload()
-      },
-      onNoValidRelation: async ({ candidates }) => {
-        const activeCandidates = candidates.filter((candidate) => candidate.candidateId)
-        for (const candidate of activeCandidates) {
-          await reviewTopologyCandidate({
-            candidateId: candidate.candidateId,
-            action: 'reject',
-            body: {
-              datasetVersionId: activeContext.datasetVersionId,
-              reason: 'Tidak ada relasi valid berdasarkan review Diagram Skematik 2D.',
-            },
-          })
-        }
-        window.location.reload()
-      },
     })
   }
 
@@ -974,7 +1048,7 @@ export async function renderMapPage(container) {
   function toUiTraceRelations(edges = []) {
     return edges.map((edge) => ({
       ...edge,
-      id: edge.edgeId || edge.id,
+      id: relationMutationId(edge) || edge.edgeId || edge.id,
       sourceGeometryId: edge.sourceGeometryIds?.[0] || edge.sourceGeometryId,
       sourceGeometryIds: edge.sourceGeometryIds ?? [],
       relationStatus: edge.verificationStatus || 'confirmed',
@@ -991,10 +1065,6 @@ export async function renderMapPage(container) {
       initialMode,
       onActivated: () => window.location.reload(),
       onOpenDiagram: openSchematic,
-      topologyReady: diagramAvailable,
-      topologyMessage: topologyReadiness.message
-        || topologyReadiness.traceMessage
-        || TOPOLOGY_NOT_READY_MESSAGE,
     })
   }
 
@@ -1552,6 +1622,91 @@ export function displayAssetName(asset) {
   return String(asset?.name || '').trim() || 'Aset tanpa nama'
 }
 
+/**
+ * Returns a small, explainable set of device targets for a manual relation.
+ * The list is intentionally local to the selected area and prefers a nearby
+ * junction box for cameras, without changing any KML geometry or graph data.
+ */
+export function buildRelationOptions({
+  sourceAsset,
+  assets = [],
+  connectedAssets = [],
+  locationKey = null,
+  limit = 8,
+} = {}) {
+  if (!sourceAsset?.id) return []
+  const connectedIds = new Set(connectedAssets.map(({ asset }) => asset?.id).filter(Boolean))
+  const sourceLocation = sourceAsset.locationGroupKey || locationKey
+  return assets
+    .filter((candidate) => candidate?.id && candidate.id !== sourceAsset.id)
+    .filter((candidate) => !connectedIds.has(candidate.id))
+    .filter((candidate) => isRelationDevice(candidate))
+    .filter((candidate) => (
+      !sourceLocation
+      || !candidate.locationGroupKey
+      || candidate.locationGroupKey === sourceLocation
+    ))
+    .filter((candidate) => validCoordinate(candidate.coordinate))
+    .map((candidate) => {
+      const distanceMeters = distanceBetweenCoordinates(
+        sourceAsset.coordinate,
+        candidate.coordinate,
+      )
+      const preferredJunction = isCameraAsset(sourceAsset) && isJunctionBoxAsset(candidate)
+      return {
+        asset: candidate,
+        distanceMeters,
+        preferredJunction,
+        reason: preferredJunction
+          ? 'Junction box terdekat'
+          : `${Math.round(distanceMeters).toLocaleString('id-ID')} m dari aset ini`,
+      }
+    })
+    .sort((left, right) => (
+      Number(right.preferredJunction) - Number(left.preferredJunction)
+      || left.distanceMeters - right.distanceMeters
+      || displayAssetName(left.asset).localeCompare(displayAssetName(right.asset), 'id')
+    ))
+    .slice(0, Math.max(1, limit))
+}
+
+function isRelationDevice(asset) {
+  const source = `${asset?.type || ''} ${asset?.category || ''} ${asset?.objectRole || ''}`.toLocaleLowerCase('id')
+  return !/cable|line|string|path|polygon|area|jalur/.test(source)
+}
+
+function isCameraAsset(asset) {
+  return /cctv|camera|kamera/.test(
+    `${asset?.type || ''} ${asset?.category || ''}`.toLocaleLowerCase('id'),
+  )
+}
+
+function isJunctionBoxAsset(asset) {
+  return /junction\s*box|\bjb\b|junction/.test(
+    `${asset?.type || ''} ${asset?.category || ''} ${asset?.name || ''}`.toLocaleLowerCase('id'),
+  )
+}
+
+function validCoordinate(coordinate) {
+  return Array.isArray(coordinate)
+    && coordinate.length >= 2
+    && Number.isFinite(Number(coordinate[0]))
+    && Number.isFinite(Number(coordinate[1]))
+}
+
+function distanceBetweenCoordinates(left, right) {
+  if (!validCoordinate(left) || !validCoordinate(right)) return Number.POSITIVE_INFINITY
+  const earthRadiusMeters = 6371008.8
+  const toRadians = (value) => Number(value) * Math.PI / 180
+  const latitudeDelta = toRadians(Number(right[1]) - Number(left[1]))
+  const longitudeDelta = toRadians(Number(right[0]) - Number(left[0]))
+  const leftLatitude = toRadians(left[1])
+  const rightLatitude = toRadians(right[1])
+  const haversine = Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(leftLatitude) * Math.cos(rightLatitude) * Math.sin(longitudeDelta / 2) ** 2
+  return 2 * earthRadiusMeters * Math.asin(Math.sqrt(Math.min(1, haversine)))
+}
+
 export function summarizeMapTopology({
   assets = [],
   topologyGraph = {},
@@ -1719,11 +1874,6 @@ export function renderTopNavigation(activeView = 'map', context = null) {
         </a>
         <a href="/topology${contextQuery}" class="${activeView === 'topology' ? 'active' : ''}">
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>Topologi Cabang
-        </a>
-        <a href="/admin/topology-review${contextQuery}"
-          class="${activeView === 'review' ? 'active' : ''}">
-          <span class="material-symbols-outlined" aria-hidden="true">fact_check</span>
-          Konfirmasi Koneksi
         </a>
       </nav>
       <div class="nav-actions">

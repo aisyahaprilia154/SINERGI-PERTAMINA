@@ -13,8 +13,6 @@ export function openSchematicDialog({
   selectedAssetId = null,
   initialMode = 'all-assets',
   onSelectAsset,
-  onReviewCandidate,
-  onNoValidRelation,
 }) {
   const dialog = document.createElement('dialog')
   dialog.className = 'schematic-dialog'
@@ -128,8 +126,6 @@ export function openSchematicDialog({
     selectedAssetId,
     initialMode,
     onSelectAsset,
-    onReviewCandidate,
-    onNoValidRelation,
   })
 }
 
@@ -140,8 +136,6 @@ function bindDialogEvents({
   selectedAssetId,
   initialMode,
   onSelectAsset,
-  onReviewCandidate,
-  onNoValidRelation,
 }) {
   const board = dialog.querySelector('.schematic-board')
   const content = dialog.querySelector('.schematic-content')
@@ -166,7 +160,6 @@ function bindDialogEvents({
   let zoom = 1
   let fallbackFullscreen = false
   let panState = null
-  let reviewBusy = false
   let isAutoFit = true
   let renderSequence = 0
   const sourceIconDataByUrl = new Map()
@@ -424,38 +417,6 @@ function bindDialogEvents({
     selectDiagramAsset(node.dataset.assetId)
   })
 
-  summary.addEventListener('click', async (event) => {
-    const selectButton = event.target.closest('[data-review-asset-id]')
-    if (selectButton) {
-      selectDiagramAsset(selectButton.dataset.reviewAssetId)
-      centerNode(selectButton.dataset.reviewAssetId)
-      return
-    }
-    const actionButton = event.target.closest('[data-candidate-action]')
-    const unresolvedButton = event.target.closest('[data-no-valid-relation]')
-    if (reviewBusy || (!actionButton && !unresolvedButton)) return
-    reviewBusy = true
-    summary.querySelectorAll('button').forEach((button) => { button.disabled = true })
-    try {
-      if (actionButton) {
-        await onReviewCandidate?.({
-          candidateId: actionButton.dataset.candidateId,
-          action: actionButton.dataset.candidateAction,
-          assetId: currentSelectedAssetId,
-        })
-      } else {
-        const node = getCurrentDiagram()?.graph.nodes
-          .find((item) => item.id === unresolvedButton.dataset.noValidRelation)
-        await onNoValidRelation?.({ assetId: node?.id, candidates: node?.candidates ?? [] })
-      }
-    } catch (error) {
-      const status = summary.querySelector('.schematic-review-status')
-      if (status) status.textContent = error.message
-    } finally {
-      reviewBusy = false
-    }
-  })
-
   board.addEventListener('wheel', (event) => {
     if (!isCurrentReady()) return
     event.preventDefault()
@@ -676,31 +637,25 @@ function renderDiagramSummary(graph, layout, selectedAssetId = null) {
         <li><span>${escapeHtml(label)}</span><strong>${count}</strong></li>
       `).join('')}</ul>
       <div class="schematic-summary-total"><span>Total aset</span><strong>${layout.nodes.length}</strong></div>
-      <div class="schematic-summary-total"><span>Total edge evidence</span><strong>${layout.edges.length}</strong></div>
+      <div class="schematic-summary-total"><span>Total relasi otomatis</span><strong>${layout.edges.length}</strong></div>
     </section>
     ${diagnostics ? `
       <section class="schematic-summary-card topology-diagnostics">
         <h3>Diagnostik topologi</h3>
         <ul>
-          <li><span>Evidence confirmed</span><strong>${diagnostics.confirmedNodeCount}</strong></li>
-          <li><span>Rekomendasi kuat</span><strong>${diagnostics.recommendedNodeCount}</strong></li>
-          <li><span>Perlu ditinjau</span><strong>${diagnostics.reviewNodeCount}</strong></li>
-          <li><span>Tanpa evidence</span><strong>${diagnostics.unresolvedNodeCount}</strong></li>
-          <li><span>Edge confirmed</span><strong>${diagnostics.confirmedEdgeCount}</strong></li>
-          <li><span>Edge rekomendasi</span><strong>${diagnostics.recommendedEdgeCount}</strong></li>
+          <li><span>Relasi otomatis</span><strong>${diagnostics.confirmedEdgeCount}</strong></li>
+          <li><span>Aset terhubung</span><strong>${diagnostics.confirmedNodeCount}</strong></li>
+          <li><span>Aset tanpa relasi</span><strong>${isolatedCount}</strong></li>
           <li><span>Cakupan node sumber</span><strong>${diagnostics.validation.coveragePercent}%</strong></li>
           <li><span>Node hilang</span><strong>${diagnostics.validation.missingAssetIds.length}</strong></li>
           <li><span>Endpoint invalid</span><strong>${diagnostics.validation.invalidEndpoints.length}</strong></li>
-          <li><span>Edge confirmed tidak sinkron</span><strong>${diagnostics.validation.missingConfirmedEdgeKeys.length + diagnostics.validation.unexpectedConfirmedEdgeKeys.length}</strong></li>
+          <li><span>Relasi otomatis tidak sinkron</span><strong>${diagnostics.validation.missingConfirmedEdgeKeys.length + diagnostics.validation.unexpectedConfirmedEdgeKeys.length}</strong></li>
         </ul>
-        ${diagnostics.candidateLoadError ? `
-          <p class="schematic-diagnostic-warning">Kandidat tidak dapat dimuat: ${escapeHtml(diagnostics.candidateLoadError)}</p>
-        ` : ''}
       </section>
     ` : ''}
     ${selectedNode ? `
       <section class="schematic-summary-card selected-evidence-card">
-        <h3>Evidence aset terpilih</h3>
+        <h3>Relasi aset terpilih</h3>
         <p><strong>${escapeHtml(selectedNode.name || selectedNode.id)}</strong><br>
           ${escapeHtml(selectedNode.type || 'Aset')} · ${escapeHtml(resolutionText(selectedNode.resolutionStatus))}</p>
         <ul>${selectedEdges.length ? selectedEdges.map((edge) => `
@@ -708,56 +663,25 @@ function renderDiagramSummary(graph, layout, selectedAssetId = null) {
             <span>${escapeHtml(edge.relationType || 'Relasi')}<small>${escapeHtml(edge.relationSource || 'explicit')}</small></span>
             <strong>${Number.isFinite(edge.confidence) ? `${Math.round(edge.confidence * 100)}%` : edge.relationStatus}</strong>
           </li>
-        `).join('') : '<li><span>Belum ada edge yang dapat dipertanggungjawabkan.</span></li>'}</ul>
+        `).join('') : '<li><span>Belum ada relasi otomatis.</span></li>'}</ul>
       </section>
     ` : ''}
-    ${diagnostics && (diagnostics.reviewNodes.length || diagnostics.unresolvedNodes.length) ? `
+    ${diagnostics && isolatedCount ? `
       <section class="schematic-summary-card unresolved-detail-card">
-        <div class="schematic-summary-card-heading"><h3>Perlu tindak lanjut</h3><strong>${diagnostics.reviewNodes.length + diagnostics.unresolvedNodes.length}</strong></div>
-        <ul>
-          ${diagnostics.reviewNodes.map((node) => `
-            <li><span>${escapeHtml(node.name)}<small>Konfirmasi Koneksi · ${node.candidateCount} kandidat</small></span>
-              <button class="button compact" type="button" data-review-asset-id="${escapeHtml(node.assetId)}">Review</button></li>
-          `).join('')}
-          ${diagnostics.unresolvedNodes.map((node) => `
-            <li><span>${escapeHtml(node.name)}<small>${escapeHtml(node.type || 'Aset')}</small></span><strong>Unresolved</strong></li>
-          `).join('')}
-        </ul>
+        <div class="schematic-summary-card-heading"><h3>Aset tanpa relasi</h3><strong>${isolatedCount}</strong></div>
+        <p>Aset tanpa pasangan relasi dapat disambungkan atau diganti langsung dari Detail aset pada peta.</p>
       </section>
     ` : graph.mode === 'all-assets' ? `
       <section class="schematic-summary-card ${isolatedCount ? '' : 'is-clear'}">
-        <h3>Evidence lengkap</h3><p>Semua aset memiliki evidence topologi yang dapat dipertanggungjawabkan.</p>
-      </section>
-    ` : ''}
-    ${selectedNode?.candidates?.length ? `
-      <section class="schematic-summary-card schematic-review-card">
-        <h3>Kandidat untuk ${escapeHtml(selectedNode.name || selectedNode.id)}</h3>
-        <p class="schematic-review-status" role="status" aria-live="polite"></p>
-        <ul>${selectedNode.candidates.map((candidate) => `
-          <li class="schematic-candidate-card">
-            <span><strong>${escapeHtml(candidate.targetAssetId || candidate.targetPathAssetId || 'Target belum tersedia')}</strong>
-              <small>${escapeHtml(candidate.candidateType || candidate.relationKind || 'Evidence spasial')}
-              ${Number.isFinite(candidate.distanceMeters) ? ` · ${candidate.distanceMeters.toFixed(2)} m` : ''}
-              ${Number.isFinite(candidate.score) ? ` · ${Math.round(candidate.score * 100)}%` : ''}</small></span>
-            <div class="schematic-candidate-actions">
-              <button type="button" data-candidate-id="${escapeHtml(candidate.candidateId)}" data-candidate-action="confirm">Konfirmasi</button>
-              <button type="button" data-candidate-id="${escapeHtml(candidate.candidateId)}" data-candidate-action="reject">Tolak</button>
-              <button type="button" data-candidate-id="${escapeHtml(candidate.candidateId)}" data-candidate-action="skip">Lewati</button>
-            </div>
-          </li>
-        `).join('')}</ul>
-        <button class="button secondary schematic-no-relation" type="button"
-          data-no-valid-relation="${escapeHtml(selectedNode.id)}">Tidak ada relasi yang valid</button>
+        <h3>Relasi lengkap</h3><p>Semua aset pada diagram memiliki relasi otomatis.</p>
       </section>
     ` : ''}
   `
 }
 
 function resolutionText(status) {
-  if (status === 'confirmed') return 'Evidence terkonfirmasi'
-  if (status === 'recommended') return 'Rekomendasi kuat'
-  if (status === 'review') return 'Perlu Konfirmasi Koneksi'
-  return 'Belum ada evidence'
+  if (status === 'confirmed') return 'Relasi otomatis terkonfirmasi'
+  return 'Belum tersambung'
 }
 
 function formatDiagramMeta(graph, layout, context) {
@@ -766,8 +690,9 @@ function formatDiagramMeta(graph, layout, context) {
       + `${context.branchName} · Dataset ${context.version} · Read-only`
   }
   if (graph.mode === 'all-assets' && graph.diagnostics) {
-    return `${layout.nodes.length} aset · ${graph.diagnostics.confirmedEdgeCount} edge evidence · `
-      + `${graph.diagnostics.reviewNodeCount} perlu ditinjau · ${graph.diagnostics.unresolvedNodeCount} tanpa evidence · `
+    const isolatedCount = graph.isolatedNodeIds?.length || graph.diagnostics.unresolvedNodeCount || 0
+    return `${layout.nodes.length} aset · ${graph.diagnostics.confirmedEdgeCount} relasi otomatis · `
+      + `${isolatedCount} tanpa relasi · `
       + `${graph.diagnostics.validation.coveragePercent}% tercakup · ${context.branchName} · `
       + `Dataset ${context.version} · Read-only`
   }

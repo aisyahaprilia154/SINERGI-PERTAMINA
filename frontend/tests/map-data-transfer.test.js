@@ -156,7 +156,7 @@ test('map context and toolbar present compact professional map actions', () => {
   assert.ok(controls.indexOf('import-toggle') < controls.indexOf('export-toggle'))
 })
 
-test('map disables unavailable tracing and displays an Indonesian readiness status', () => {
+test('map keeps source-first actions independent from the legacy review readiness flag', () => {
   const topologyReadiness = {
     ready: false,
     message: 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.',
@@ -164,14 +164,12 @@ test('map disables unavailable tracing and displays an Indonesian readiness stat
   const context = renderMapContextPill(activeContext, topologyReadiness)
   const controls = renderMapFloatingControls(activeContext, topologyReadiness)
 
-  assert.match(context, /Topologi perlu diperiksa/)
-  assert.match(controls, /class="tool-button trace-toggle map-action-primary"[^>]*title="Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\."/)
-  assert.match(controls, /class="tool-button trace-toggle map-action-primary"[^>]*disabled aria-disabled="true"/)
-  assert.match(controls, /class="tool-button diagram-toggle map-action-secondary"[^>]*disabled aria-disabled="true"/)
-  assert.match(controls, /Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\./)
+  assert.doesNotMatch(context, /Topologi perlu diperiksa|Data koneksi masih dalam review/)
+  assert.doesNotMatch(controls, /disabled aria-disabled="true"/)
+  assert.doesNotMatch(controls, /Data koneksi masih dalam review/)
 })
 
-test('map renders topology warning as a distinct readable callout', () => {
+test('map does not render a topology review warning over the source map', () => {
   const html = renderNetworkMapCanvas(activeContext, {
     topologyReadiness: {
       ready: false,
@@ -180,13 +178,10 @@ test('map renders topology warning as a distinct readable callout', () => {
     },
   })
 
-  assert.match(html, /class="map-topology-readiness"/)
-  assert.match(html, /material-symbols-outlined" aria-hidden="true">warning/)
-  assert.match(html, /<strong>Topologi perlu diperiksa<\/strong>/)
-  assert.match(html, /Belum ada koneksi yang dikonfirmasi\./)
+  assert.doesNotMatch(html, /map-topology-readiness|Topologi perlu diperiksa|Belum ada koneksi yang dikonfirmasi\./)
 })
 
-test('export dialog also disables the diagram entry point while topology is unready', () => {
+test('export dialog keeps the diagram entry point available when source assets exist', () => {
   const html = renderMapDataTransferDialog({
     activeContext,
     assets,
@@ -205,6 +200,6 @@ test('export dialog also disables the diagram entry point while topology is unre
     },
   })
 
-  assert.match(html, /class="button secondary open-map-diagram"[^>]*disabled aria-disabled="true"/)
-  assert.match(html, /Topologi site ini belum siap untuk tracing\. Data koneksi masih dalam review\./)
+  assert.doesNotMatch(html, /class="button secondary open-map-diagram"[^>]*disabled aria-disabled="true"/)
+  assert.doesNotMatch(html, /Topologi site ini belum siap|Data koneksi masih dalam review/)
 })

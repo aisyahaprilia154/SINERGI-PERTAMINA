@@ -224,6 +224,89 @@ test('spatial auto-confirm requires explicit policy and an approved accuracy art
   assert.equal(approved.readiness.topologyReadiness, 'ready')
 })
 
+test('operational automatic relation mode confirms strong spatial matches without review artifacts', () => {
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [node('CAM-01', 'cctv', 'CCTV Camera', [110, -7])],
+    paths: [pathObject('CBL-01', 'cctv', 'CCTV Cable', [
+      [110, -7],
+      [110.001, -7],
+    ])],
+    topologyPolicy: { requireJbTermination: false },
+  }), {
+    config: { automaticRelationConfirmation: true },
+  })
+
+  assert.equal(result.confirmedRelations.length, 1)
+  assert.ok(result.confirmedRelations.every(({ verificationStatus }) => (
+    verificationStatus === 'confirmed'
+  )))
+  assert.ok(result.candidates.some(({ candidateStatus, review }) => (
+    candidateStatus === 'confirmed'
+      && review?.confirmationMode === 'automatic_strong_match'
+  )))
+  assert.equal(result.graph.physicalTerminationGraph.edges.length, 1)
+})
+
+test('automatic relation mode confirms a camera to one clearly nearest junction box', () => {
+  const camera = node('CAM-01', 'cctv', 'CCTV Camera', [110, -7])
+  const nearestJunction = node('JB-01', 'infrastructure', 'Junction Box', [110.00002, -7])
+  const distantJunction = node('JB-02', 'infrastructure', 'Junction Box', [110.001, -7])
+  ;[camera, nearestJunction, distantJunction].forEach(({ object }) => {
+    object.sourceFolderPath = '/RJBT/AREA-A/Assets'
+  })
+
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [camera, nearestJunction, distantJunction],
+  }), {
+    config: { automaticRelationConfirmation: true },
+  })
+  const candidate = result.candidates.find(({ candidateType }) => (
+    candidateType === 'device_nearest_junction'
+  ))
+
+  assert.equal(candidate?.sourceAssetId, 'CAM-01')
+  assert.equal(candidate?.targetAssetId, 'JB-01')
+  assert.equal(candidate?.candidateStatus, 'confirmed')
+  assert.deepEqual(candidate?.sourceGeometryIds, [])
+  assert.ok(result.graph.edges.some(({ sourceNodeId, targetNodeId }) => (
+    new Set([sourceNodeId, targetNodeId]).has('CAM-01')
+      && new Set([sourceNodeId, targetNodeId]).has('JB-01')
+  )))
+})
+
+test('automatic relation mode does not force an ambiguous nearest junction relation', () => {
+  const camera = node('CAM-01', 'cctv', 'CCTV Camera', [110, -7])
+  const leftJunction = node('JB-A', 'infrastructure', 'Junction Box', [109.99998, -7])
+  const rightJunction = node('JB-B', 'infrastructure', 'Junction Box', [110.00002, -7])
+  ;[camera, leftJunction, rightJunction].forEach(({ object }) => {
+    object.sourceFolderPath = '/RJBT/AREA-A/Assets'
+  })
+
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [camera, leftJunction, rightJunction],
+  }), {
+    config: { automaticRelationConfirmation: true },
+  })
+
+  assert.equal(result.candidates.some(({ candidateType }) => (
+    candidateType === 'device_nearest_junction'
+  )), false)
+  assert.equal(result.graph.edges.length, 0)
+})
+
+test('nearest junction device relation stays disabled outside automatic mode', () => {
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [
+      node('CAM-01', 'cctv', 'CCTV Camera', [110, -7]),
+      node('JB-01', 'infrastructure', 'Junction Box', [110.00002, -7]),
+    ],
+  }))
+
+  assert.equal(result.candidates.some(({ candidateType }) => (
+    candidateType === 'device_nearest_junction'
+  )), false)
+})
+
 test('redundant confirmed attachments to the same path endpoint are materialized once', () => {
   const result = generateRelationArtifacts(topologyBundle({
     nodes: [node('CAM-01', 'cctv', 'CCTV Camera', [110, -7])],
@@ -648,6 +731,65 @@ test('line-labelled CCTV cable preserves an inline Extended JB termination', () 
   assert.equal(result.validation.issues.some(({ issueCode }) => (
     issueCode === 'required_jb_termination_missing'
   )), false)
+})
+
+test('LAN endpoint prefers a physically closer Extended JB and confirms both cable terminals', () => {
+  const main = node('JB-001-exp', 'cctv', 'Junction Box', [110.001, -7])
+  const extended = node('JB-01.1-WP', 'cctv', 'Junction Box', [110, -7])
+  const camera = node('C-019', 'cctv', 'CCTV Camera', [110.00002, -7])
+  main.object.sourceName = 'JB-001-exp'
+  extended.object.sourceName = 'JB-01.1-WP'
+  camera.object.sourceName = 'C-019'
+  ;[main, extended, camera].forEach(({ object }) => {
+    object.sourceFolderPath = '/site/PENGAPON/JUNCTION BOX'
+  })
+  const cable = pathObject('JB-001_C-019', 'lan', 'UTP Cable', [
+    [110, -7],
+    [110.001, -7],
+  ])
+  cable.object.sourceName = 'JB-001_C-019'
+  cable.object.sourceFolderPath = '/site/PENGAPON/KABEL/UTP/Rekomendasi'
+
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [main, extended, camera],
+    paths: [cable],
+  }), {
+    config: { automaticRelationConfirmation: true },
+  })
+
+  const endpointCandidates = result.candidates.filter((candidate) => (
+    candidate.sourcePathAssetId === 'JB-001_C-019'
+      && candidate.candidateType === 'cable_termination'
+      && candidate.provenance === 'line_label_inference'
+  ))
+  assert.ok(endpointCandidates.some((candidate) => (
+    candidate.targetAssetId === 'JB-01.1-WP'
+      && candidate.sourceEndpointId.endsWith(':start')
+      && candidate.candidateStatus === 'confirmed'
+      && candidate.proposalStatus === 'recommended'
+      && candidate.evidence.some(({ ruleId }) => (
+        ruleId === 'extended-junction.endpoint-replaces-nearby-label'
+      ))
+  )))
+  assert.ok(endpointCandidates.some((candidate) => (
+    candidate.targetAssetId === 'JB-001-exp'
+      && candidate.sourceEndpointId.endsWith(':end')
+      && candidate.candidateStatus === 'confirmed'
+  )))
+
+  const confirmedTerminations = result.confirmedRelations.filter((relation) => (
+    relation.pathAssetId === 'JB-001_C-019'
+  ))
+  assert.deepEqual(
+    new Set(confirmedTerminations.map(({ targetAssetId }) => targetAssetId)),
+    new Set(['JB-01.1-WP', 'JB-001-exp']),
+  )
+  assert.ok(result.graph.edges.some((edge) => (
+    new Set([edge.sourceAssetId, edge.targetAssetId]).size === 2
+      && new Set([edge.sourceAssetId, edge.targetAssetId]).has('JB-01.1-WP')
+      && new Set([edge.sourceAssetId, edge.targetAssetId]).has('JB-001-exp')
+      && edge.sourceGeometryIds.includes('geometry:JB-001_C-019')
+  )))
 })
 
 test('line label matching cannot cross facilities with duplicate JB and camera names', () => {

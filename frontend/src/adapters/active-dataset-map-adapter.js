@@ -198,22 +198,10 @@ export function adaptActiveDatasetForMap(payload) {
 }
 
 function confirmedTopologyProjection(payload) {
-  if (payload.capabilities && payload.capabilities.trace !== true) {
-    return {
-      datasetVersionId: payload.datasetVersion?.id ?? null,
-      nodes: [],
-      edges: [],
-      components: [],
-      degreeByNode: {},
-      isolatedNodeIds: [],
-      identityResolution: {
-        unresolvedNodeCount: 0,
-        unresolvedEdgeCount: 0,
-        unresolvedNodes: [],
-        unresolvedEdges: [],
-      },
-    }
-  }
+  // A map publication can expose confirmed relation evidence even when the
+  // legacy topology-review readiness contract is not ready. Readiness only
+  // controls the retired review workflow; it must not erase graph evidence
+  // from the operational map.
   const source = payload.topologyGraph
   const resolver = createFrontendIdentityResolver(payload)
   if (source && Array.isArray(source.nodes) && Array.isArray(source.edges)) {

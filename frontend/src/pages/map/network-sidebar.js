@@ -1,28 +1,15 @@
 export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, {
   locationGroups = [],
   selectedArea = null,
-  topologyReadiness = null,
   topologySummary = {},
 } = {}) {
   const countSummary = formatDatasetCounts(counts)
-  const topologyReady = topologyReadiness?.ready ?? activeContext?.topologyReady ?? true
-  const traceAvailable = topologyReadiness?.traceAvailable ?? topologyReady
-  const topologyStatus = topologyReadiness?.status || (topologyReady ? 'ready' : 'not_ready')
-  const topologyMessage = topologyReadiness?.message
-    || 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.'
   const confirmedCount = Number(topologySummary.confirmedConnectionCount) || 0
-  const pendingCount = Number(topologySummary.pendingConnectionCount) || 0
   const isolatedCount = Number(topologySummary.isolatedAssetCount) || 0
   const totalNetworkCount = Number(counts.networkCount) || 0
   const normalizedSelectedCount = Number(selectedCount) || 0
   const showAllActive = totalNetworkCount > 0 && normalizedSelectedCount === totalNetworkCount
   const hideAllActive = totalNetworkCount > 0 && normalizedSelectedCount === 0
-  const canReviewTopology = topologyReadiness?.capabilities?.reviewTopology === true
-  const reviewQuery = new URLSearchParams({
-    datasetId: activeContext.datasetId,
-    branchId: activeContext.branchId,
-  })
-  if (selectedArea?.key) reviewQuery.set('area', selectedArea.key)
   return `
     <aside class="network-sidebar" id="network-sidebar"
       aria-label="Pemilih jaringan. ${escapeAttribute(countSummary)}">
@@ -110,30 +97,21 @@ export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, 
             <span class="status-dot" title="Dataset aktif"></span>
           </section>
 
-          <details class="sidebar-topology-readiness ${topologyStatus}">
+          <details class="sidebar-topology-readiness ready">
             <summary>
               <span>
-                <strong>Status topologi</strong>
-                <small>${formatCount(confirmedCount)} terkonfirmasi · ${formatCount(isolatedCount)} tanpa relasi</small>
+                <strong>Relasi aset</strong>
+                <small>${formatCount(confirmedCount)} otomatis terkonfirmasi · ${formatCount(isolatedCount)} tanpa relasi</small>
               </span>
               <span class="material-symbols-outlined topology-summary-chevron"
                 aria-hidden="true">expand_more</span>
             </summary>
             <div class="sidebar-topology-detail">
               <span class="sidebar-topology-metrics">
-                <span><b>${formatCount(confirmedCount)}</b> terkonfirmasi</span>
-                <span title="Jumlah kandidat pada dataset aktif"><b>${formatCount(pendingCount)}</b> perlu diperiksa</span>
+                <span><b>${formatCount(confirmedCount)}</b> otomatis terkonfirmasi</span>
                 <span><b>${formatCount(isolatedCount)}</b> tanpa relasi</span>
               </span>
-              <small>${escapeHtml(traceAvailable
-                ? 'Tracing menggunakan graph koneksi terkonfirmasi.'
-                : topologyMessage)}</small>
-              ${canReviewTopology ? `
-                <a class="topology-review-link" href="/admin/topology-review?${reviewQuery}">
-                  Buka Konfirmasi Koneksi
-                  <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
-                </a>
-              ` : ''}
+              <small>Relasi kuat dibaca otomatis. Hubungan aset dapat disambungkan atau diganti dari Detail aset.</small>
             </div>
           </details>
         </section>
@@ -209,7 +187,7 @@ function renderNetworkItem({
               <span>${Number(network.confirmedConnectionCount) || 0} koneksi</span>
               ${network.isolatedAssetCount ? `
                 <span class="network-relation-warning"
-                  title="${Number(network.isolatedAssetCount)} aset belum memiliki relasi terkonfirmasi">
+                  title="${Number(network.isolatedAssetCount)} aset belum tersambung">
                   <span class="material-symbols-outlined" aria-hidden="true">warning</span>
                   ${Number(network.isolatedAssetCount)}
                 </span>

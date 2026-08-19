@@ -7,16 +7,14 @@ export function renderNetworkMapCanvas(activeContext, {
   selectedAssetId = null,
   topologyReadiness = null,
 } = {}) {
-  const traceAvailable = topologyReadiness?.traceAvailable
-    ?? topologyReadiness?.ready
-    ?? activeContext?.topologyReady
-    ?? true
-  const topologyMessage = topologyReadiness?.traceMessage
-    || topologyReadiness?.message
-    || 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.'
-  const displayedConfirmedConnectionCount = traceAvailable
-    ? Number(confirmedConnectionCount) || 0
-    : 0
+  const displayedConfirmedConnectionCount = Number(confirmedConnectionCount) || 0
+  const operationalReadiness = {
+    operational: true,
+    ready: true,
+    traceAvailable: displayedConfirmedConnectionCount > 0,
+    diagramAvailable: Number(counts.assetNodeCount) > 0,
+    status: 'ready',
+  }
   return `
     <section class="map-stage" aria-label="Peta geografis aset">
       <div id="network-map" tabindex="0" aria-label="Peta geografis jaringan aset"
@@ -41,15 +39,6 @@ export function renderNetworkMapCanvas(activeContext, {
         <span class="map-sr-only">Peta dasar <b class="basemap-availability">memuat</b>,
           mode <b class="basemap-mode-label">Jalan &amp; bangunan</b>.</span>
       </div>
-      ${!traceAvailable ? `
-        <div class="map-topology-readiness" id="topology-not-ready-message" role="status">
-          <span class="material-symbols-outlined" aria-hidden="true">warning</span>
-          <span>
-            <strong>Topologi perlu diperiksa</strong>
-            <span>${escapeHtml(topologyMessage)}</span>
-          </span>
-        </div>
-      ` : ''}
       <div class="map-asset-tooltip" id="map-asset-tooltip" role="tooltip" aria-live="polite" hidden></div>
       ${empty ? `
         <section class="map-empty-layer" aria-live="polite">
@@ -61,12 +50,12 @@ export function renderNetworkMapCanvas(activeContext, {
         </section>
       ` : ''}
       <div class="map-info-overlays" aria-label="Informasi konteks peta">
-        ${renderMapContextPill(activeContext, topologyReadiness, selectedArea, {
+        ${renderMapContextPill(activeContext, operationalReadiness, selectedArea, {
           counts,
           confirmedConnectionCount: displayedConfirmedConnectionCount,
         })}
       </div>
-      ${renderMapFloatingControls(activeContext, topologyReadiness, { selectedAssetId })}
+      ${renderMapFloatingControls(activeContext, operationalReadiness, { selectedAssetId })}
 
       <div class="trace-banner" hidden>
         <span class="trace-step">1</span>
@@ -79,7 +68,7 @@ export function renderNetworkMapCanvas(activeContext, {
         </button>
       </div>
 
-      ${renderMapLegend(topologyReadiness)}
+      ${renderMapLegend()}
 
       <div class="basemap-popover" id="basemap-picker" hidden>
         <div class="basemap-popover-heading">
@@ -117,14 +106,7 @@ export function renderMapContextPill(
   { counts = {}, confirmedConnectionCount = 0 } = {},
 ) {
   const branchName = formatBranchName(activeContext.branchName)
-  const topologyReady = topologyReadiness?.ready ?? activeContext?.topologyReady ?? true
-  const topologyStatus = topologyReadiness?.status
-    || (topologyReady ? 'ready' : 'not_ready')
-  const topologyText = topologyStatus === 'partial_ready'
-    ? 'Topologi sebagian tersedia'
-    : topologyReady
-      ? 'Topologi tersedia'
-      : 'Topologi perlu diperiksa'
+  const topologyStatus = 'ready'
   const assetCount = Number(counts.assetNodeCount) || 0
   const lineCount = Number(counts.lineCount) || 0
   const confirmedCount = Number(confirmedConnectionCount) || 0
@@ -155,10 +137,8 @@ export function renderMapContextPill(
           Read-only
         </span>
         <span class="context-topology ${topologyStatus}"
-          title="${escapeHtml(topologyReadiness?.message || (topologyReady
-            ? 'Topologi siap untuk tracing.'
-            : 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.'))}">
-          ${topologyText}
+          title="Relasi kuat pada dataset dibaca dan dikonfirmasi otomatis.">
+          ${confirmedCount > 0 ? 'Relasi otomatis' : 'Belum ada relasi'}
         </span>
       </span>
       <span class="context-metrics" aria-label="Ringkasan aset dan jalur">
@@ -173,17 +153,16 @@ export function renderMapFloatingControls(
   topologyReadiness = null,
   { selectedAssetId = null } = {},
 ) {
-  const traceAvailable = topologyReadiness?.traceAvailable
-    ?? topologyReadiness?.ready
+  const operationalReadiness = topologyReadiness?.operational === true
+    ? topologyReadiness
+    : null
+  const traceAvailable = operationalReadiness?.traceAvailable
     ?? activeContext?.topologyReady
     ?? true
-  const diagramAvailable = topologyReadiness?.diagramAvailable
-    ?? topologyReadiness?.ready
+  const diagramAvailable = operationalReadiness?.diagramAvailable
     ?? activeContext?.topologyReady
     ?? true
-  const topologyMessage = topologyReadiness?.traceMessage
-    || topologyReadiness?.message
-    || 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.'
+  const topologyMessage = 'Belum ada relasi terkonfirmasi untuk ditelusuri.'
   const traceActionMessage = !traceAvailable ? topologyMessage : ''
   const traceActionAttributes = traceActionMessage
     ? `disabled aria-disabled="true" title="${escapeHtml(traceActionMessage)}"`
@@ -193,7 +172,7 @@ export function renderMapFloatingControls(
   const diagramActionAttributes = diagramAvailable
     ? ''
     : `disabled aria-disabled="true" title="${escapeHtml(
-      topologyReadiness?.message || topologyMessage,
+      topologyMessage,
     )}"`
   return `
     <button class="open-sidebar sidebar-reopen" type="button" title="Buka panel"
@@ -273,8 +252,7 @@ export function renderMapFloatingControls(
   `
 }
 
-function renderMapLegend(topologyReadiness = null) {
-  const showPending = topologyReadiness?.capabilities?.reviewTopology === true
+function renderMapLegend() {
   return `
     <div class="legend-popover" id="map-legend" hidden>
       <strong>Legenda peta</strong>
@@ -298,7 +276,6 @@ function renderMapLegend(topologyReadiness = null) {
         <span><i class="legend-route geographic"></i>Jalur geografis</span>
         <span><i class="legend-route confirmed"></i>Relasi terkonfirmasi</span>
         <span><i class="legend-route trace"></i>Tracing aktif</span>
-        ${showPending ? '<span><i class="legend-route pending"></i>Perlu diperiksa (Admin)</span>' : ''}
       </section>
       <span class="legend-coordinate-note"><i class="legend-leader"></i>Offset visual tetap menunjuk koordinat KML</span>
     </div>

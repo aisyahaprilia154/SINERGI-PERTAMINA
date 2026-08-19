@@ -4659,6 +4659,135 @@
   font-size: var(--font-size-micro);
 }
 
+.drawer-relation-add {
+  width: 100%;
+  margin-top: var(--space-3);
+  padding: var(--space-3) 0 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-primary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-top-color: var(--color-divider);
+  font-size: var(--font-size-caption);
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+.drawer-relation-add .material-symbols-outlined:last-child {
+  margin-left: auto;
+  font-size: 17px;
+}
+
+.drawer-relation-add:hover {
+  color: var(--color-primary-strong, var(--color-primary));
+}
+
+.drawer-relation-hint {
+  color: var(--color-text-muted) !important;
+}
+
+.drawer-relation-editor {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  display: grid;
+  gap: var(--space-2);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.drawer-relation-editor > strong,
+.drawer-relation-editor > label {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-caption);
+}
+
+.drawer-relation-editor > label {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-micro);
+}
+
+.drawer-relation-editor select {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 var(--space-2);
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong, var(--color-border));
+  border-radius: var(--radius-sm);
+}
+
+.drawer-relation-editor > small {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-micro);
+  line-height: 1.45;
+}
+
+.drawer-relation-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.drawer-relation-editor-actions .button {
+  min-height: 34px;
+  padding: 0 var(--space-3);
+  font-size: var(--font-size-micro);
+}
+
+.drawer-relation-error {
+  margin: 0;
+  color: var(--color-danger, #c64545);
+  font-size: var(--font-size-micro);
+  line-height: 1.45;
+}
+
+.drawer-relation-success {
+  margin: var(--space-2) 0 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-success, #1f8a63);
+  font-size: var(--font-size-micro);
+  line-height: 1.45;
+}
+
+.drawer-relation-success .material-symbols-outlined {
+  font-size: 16px;
+}
+
+.relation-item-row {
+  display: flex;
+  align-items: stretch;
+}
+
+.relation-item-row > button:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.relation-replace-button {
+  width: auto !important;
+  min-width: 42px !important;
+  min-height: 32px !important;
+  margin: var(--space-2) 0;
+  padding: 0 var(--space-2) !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-primary) !important;
+  border-left: 1px solid var(--color-divider) !important;
+  font-size: var(--font-size-micro) !important;
+  font-weight: 650;
+}
+
+.relation-replace-button:hover {
+  background: var(--color-surface-hover);
+}
+
 .drawer-review-link {
   margin-top: var(--space-3);
   padding-top: var(--space-3);

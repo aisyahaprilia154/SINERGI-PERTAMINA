@@ -164,6 +164,48 @@ test('candidate API keeps large historical evidence out of every page response',
   }
 })
 
+test('candidate API keeps dataset-level registry data out of every page response', async () => {
+  const record = candidateRecord()
+  record.topologyInterfaceRegistry = Array.from({ length: 4000 }, (_, index) => ({
+    interfaceId: `interface-${index}`,
+    ownerAssetId: `asset-${index}`,
+    componentId: `component-${index}`,
+    interfaceType: 'fiber_port',
+    serviceDomain: 'data',
+    mediaType: 'fiber',
+  }))
+  record.topologyEligibilityIssues = Array.from({ length: 1000 }, (_, index) => ({
+    issueId: `issue-${index}`,
+    datasetVersionId: record.datasetVersion.id,
+    severity: 'warning',
+    issueCode: 'missing_stable_asset_id',
+    scope: 'eligibility',
+    message: `Object source-feature:${index} belum memiliki stable Asset ID.`,
+    entityReference: `source-feature:${index}`,
+    readinessImpact: 'warning',
+  }))
+  const repository = new MemoryRepository([record])
+  const app = createCandidateApp(repository)
+  await listen(app)
+  const origin = `http://127.0.0.1:${app.address().port}`
+
+  try {
+    const response = await fetch(
+      `${origin}/api/dataset-versions/dv-candidates/topology/candidates?limit=1`,
+      { headers: { authorization: 'Bearer admin-token' } },
+    )
+    const body = await response.json()
+    assert.equal(response.status, 200)
+    assert.equal(body.items.length, 1)
+    assert.deepEqual(body.interfaceRegistry, [])
+    assert.equal(body.interfaceRegistryCount, 4000)
+    assert.equal(body.eligibilityIssues.length, 1000)
+    assert.ok(Number(response.headers.get('content-length')) <= MAX_CANDIDATE_RESPONSE_BYTES)
+  } finally {
+    await close(app)
+  }
+})
+
 function candidateRecord() {
   return {
     datasetVersion: {

@@ -23,8 +23,6 @@ export function openMapDataTransferDialog({
   initialMode = 'import',
   onActivated,
   onOpenDiagram,
-  topologyReady = true,
-  topologyMessage = 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.',
 }) {
   const dialog = document.createElement('dialog')
   dialog.className = 'map-transfer-dialog'
@@ -67,8 +65,6 @@ export function openMapDataTransferDialog({
       assets,
       networks,
       selectedNetworkIds,
-      topologyReady,
-      topologyMessage,
       state,
     })
     bindEvents()
@@ -394,8 +390,6 @@ export function renderMapDataTransferDialog({
   assets,
   networks,
   selectedNetworkIds,
-  topologyReady = true,
-  topologyMessage = 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.',
   state,
 }) {
   const importSelected = state.mode === 'import'
@@ -434,8 +428,6 @@ export function renderMapDataTransferDialog({
             assets,
             networks,
             selectedNetworkIds,
-            topologyReady,
-            topologyMessage,
             error: state.error,
           })}
       </div>
@@ -623,8 +615,6 @@ function renderExportPanel({
   assets,
   networks,
   selectedNetworkIds,
-  topologyReady,
-  topologyMessage,
   error,
 }) {
   const hasActiveDataset = Boolean(activeContext.datasetVersionId)
@@ -665,8 +655,7 @@ function renderExportPanel({
           description: 'Export peta penuh atau jalur tracing ke SVG/PNG',
           buttonClass: 'open-map-diagram',
           buttonLabel: 'Buka diagram',
-          disabled: !hasActiveDataset || !assets.length || !topologyReady,
-          disabledReason: topologyReady ? null : topologyMessage,
+          disabled: !hasActiveDataset || !assets.length,
         })}
       </div>
       ${error ? `<p class="map-transfer-error" role="alert">
