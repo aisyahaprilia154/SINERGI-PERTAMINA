@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  attachClustersToPoleGroups,
   buildAdaptiveAssetLayout,
   groupNearbyItems,
 } from '../src/pages/map/adaptive-asset-layout.js'
@@ -32,6 +33,7 @@ const denseAssets = [
     coordinate: [109.7627063, -7.7152711],
     point: { x: 203, y: 194 },
     active: true,
+    isPole: true,
     color: '#c58722',
   },
 ]
@@ -45,6 +47,10 @@ test('far zoom combines dense KML points into a clickable aggregate', () => {
   assert.equal(layout.markers.length, 1)
   assert.equal(layout.markers[0].kind, 'cluster')
   assert.equal(layout.markers[0].count, 3)
+  assert.deepEqual(layout.markers[0].representativePole, {
+    id: 'T-04',
+    label: 'T-04',
+  })
   assert.deepEqual(new Set(layout.markers[0].memberIds), new Set(['CAM-01', 'JB-01', 'T-04']))
   assert.equal(layout.summary.clusteredAssetCount, 3)
   assert.equal(layout.leaders.length, 0)
@@ -57,8 +63,11 @@ test('close zoom spreads dense assets while keeping leaders on canonical coordin
   })
   const assetMarkers = layout.markers.filter(({ kind }) => kind === 'asset')
   const displayPositions = assetMarkers.map(({ point }) => `${point.x.toFixed(2)}:${point.y.toFixed(2)}`)
+  const poleMarker = assetMarkers.find(({ id }) => id === 'T-04')
 
   assert.equal(assetMarkers.length, 3)
+  assert.equal(poleMarker?.isPole, true)
+  assert.equal(poleMarker?.kind, 'asset')
   assert.equal(new Set(displayPositions).size, 3)
   assert.equal(layout.leaders.length, 3)
   assert.deepEqual(
@@ -141,4 +150,40 @@ test('spatial grouping does not chain adjacent points into one oversized cluster
   ], 30)
 
   assert.deepEqual(groups.map((group) => group.length).sort((a, b) => a - b), [1, 2])
+})
+
+test('number-only cluster is absorbed by its nearby named pole marker', () => {
+  const marker = {
+    key: 'cluster:CAM-01|JB-01',
+    kind: 'cluster',
+    point: { x: 240, y: 210 },
+    count: 2,
+    representativePole: null,
+  }
+  const poleGroup = {
+    group: { id: 'pole-group:T-04' },
+    point: { x: 203, y: 194 },
+  }
+
+  const result = attachClustersToPoleGroups([marker], [poleGroup])
+
+  assert.equal(result.clusterGroupIds.get(marker.key), poleGroup.group.id)
+  assert.equal(result.nearbyAssetCounts.get(poleGroup.group.id), 2)
+})
+
+test('cluster that already contains a pole keeps that pole as its representation', () => {
+  const marker = {
+    key: 'cluster:T-04|CAM-01',
+    kind: 'cluster',
+    point: { x: 203, y: 194 },
+    count: 2,
+    representativePole: { id: 'T-04', label: 'T-04' },
+  }
+  const result = attachClustersToPoleGroups([marker], [{
+    group: { id: 'pole-group:T-99' },
+    point: { x: 205, y: 195 },
+  }])
+
+  assert.equal(result.clusterGroupIds.has(marker.key), false)
+  assert.equal(result.nearbyAssetCounts.size, 0)
 })

@@ -248,6 +248,21 @@ export function createConfig(env = process.env, overrides = {}) {
         // source-first map. Keep the environment override so deployments can
         // temporarily opt out without bringing back the review UI.
         ?? booleanFrom(env.SINERGI_AUTOMATIC_RELATIONS, true),
+      mountingSearchRadiusMeters: overrides.topology?.mountingSearchRadiusMeters
+        ?? numberFrom(
+          env.SINERGI_MOUNTING_SEARCH_RADIUS_METERS,
+          DEFAULT_RELATION_ENGINE_CONFIG.mountingSearchRadiusMeters,
+        ),
+      mountingIdentityRadiusMeters: overrides.topology?.mountingIdentityRadiusMeters
+        ?? numberFrom(
+          env.SINERGI_MOUNTING_IDENTITY_RADIUS_METERS,
+          DEFAULT_RELATION_ENGINE_CONFIG.mountingIdentityRadiusMeters,
+        ),
+      mountingAmbiguityRatio: overrides.topology?.mountingAmbiguityRatio
+        ?? numberFrom(
+          env.SINERGI_MOUNTING_AMBIGUITY_RATIO,
+          DEFAULT_RELATION_ENGINE_CONFIG.mountingAmbiguityRatio,
+        ),
       autoConfirmExplicitMetadata: overrides.topology?.autoConfirmExplicitMetadata
         ?? booleanFrom(env.SINERGI_TOPOLOGY_AUTO_CONFIRM_EXPLICIT, true),
       // Accuracy approval is loaded from an explicit versioned artifact by the

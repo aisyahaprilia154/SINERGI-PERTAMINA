@@ -32,8 +32,9 @@ export function renderAssetDetailDrawer({
 
   const category = getAssetCategory(asset, assetNetworks)
   const hasIpAddress = asset.ip && !['—', 'â€”', '-'].includes(asset.ip)
+  const poleAsset = isPoleAsset(asset)
   const hasDirectRelations = connectedAssets.length > 0
-  const canTraceAsset = traceAvailable && hasDirectRelations
+  const canTraceAsset = !poleAsset && traceAvailable && hasDirectRelations
   const operationalStatus = resolveOperationalStatus(asset)
   const assetName = displayAssetName(asset)
 
@@ -70,9 +71,9 @@ export function renderAssetDetailDrawer({
         <p>${escapeHtml(asset.type || 'Jenis aset belum tersedia')}</p>
       </section>
 
-      ${renderTraceSection(trace)}
+      ${poleAsset ? '' : renderTraceSection(trace)}
 
-      <section class="drawer-section drawer-topology-summary" aria-labelledby="asset-topology-title">
+      ${poleAsset ? '' : `<section class="drawer-section drawer-topology-summary" aria-labelledby="asset-topology-title">
         <div class="drawer-section-heading">
           <h3 id="asset-topology-title">Relasi aset</h3>
           <span class="count-badge">${connectedAssets.length}</span>
@@ -103,7 +104,7 @@ export function renderAssetDetailDrawer({
           relationStatus,
           relationError,
         }) : ''}
-      </section>
+      </section>`}
 
       ${renderMountingSection({
         asset,
@@ -166,7 +167,7 @@ export function renderAssetDetailDrawer({
         `).join('') : renderInlineEmpty('Aset ini belum tercakup dalam jaringan pada dataset aktif.')}
       </section>
 
-      <section class="drawer-section connected-assets" aria-labelledby="connected-assets-title">
+      ${poleAsset ? '' : `<section class="drawer-section connected-assets" aria-labelledby="connected-assets-title">
         <div class="drawer-section-heading">
           <h3 id="connected-assets-title">Aset terhubung</h3>
           <span class="count-badge">${connectedAssets.length}</span>
@@ -197,7 +198,7 @@ export function renderAssetDetailDrawer({
             `).join('')}
           </ul>
         ` : renderInlineEmpty('Relasi aset belum tersedia.')}
-      </section>
+      </section>`}
 
       <section class="drawer-section additional-metadata ${showAdditionalMetadata ? 'expanded' : ''}"
         aria-labelledby="additional-metadata-title">

@@ -16,6 +16,10 @@ export function groundOverlayCoordinates(overlay) {
   return [coordinates[3], coordinates[2], coordinates[1], coordinates[0]]
 }
 
+export function shouldRenderGroundOverlayFootprint(overlay) {
+  return !String(overlay?.resourceUrl ?? '').trim()
+}
+
 function rotateGeographicCorners(corners, degrees) {
   if (!Number.isFinite(degrees) || Math.abs(degrees) < 0.0001) return corners
   const centerLongitude = corners.reduce((sum, [longitude]) => sum + longitude, 0) / corners.length

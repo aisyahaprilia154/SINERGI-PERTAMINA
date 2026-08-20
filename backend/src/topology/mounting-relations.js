@@ -7,9 +7,18 @@ export const MOUNTING_RELATION_TYPE = 'mounted_on'
 export const MOUNTING_RELATION_KIND = 'installation_attachment'
 
 export const DEFAULT_MOUNTING_CONFIG = Object.freeze({
-  mountingSearchRadiusMeters: 2,
+  // KMZ points for a pole, camera, and junction box are commonly drawn a few
+  // metres apart even though they describe one physical installation.
+  mountingSearchRadiusMeters: 5,
+  // A matching asset number is stronger evidence than coordinates alone, but
+  // remains bounded so similarly named assets in another location are ignored.
+  mountingIdentityRadiusMeters: 10,
   mountingOptionRadiusMeters: 25,
   mountingAmbiguityDeltaMeters: 0.35,
+  // A small absolute delta is not enough when both coordinates are several
+  // metres away from their real-world position. The ratio catches those
+  // cases without making the automatic radius itself wider.
+  mountingAmbiguityRatio: 1.5,
 })
 
 /**
@@ -62,6 +71,10 @@ export function generateMountingArtifacts(topologyInputBundle, {
     const nearby = nearbyOptions.filter(({ distanceMeters }) => (
       distanceMeters <= settings.mountingSearchRadiusMeters
     ))
+    const matchingIdentityOptions = nearbyOptions.filter(({ pole, distanceMeters }) => (
+      distanceMeters <= settings.mountingIdentityRadiusMeters
+        && hasMatchingMountingIdentity(asset, pole)
+    ))
 
     const override = overrides.byAsset.get(asset.id)
     if (override) {
@@ -96,10 +109,43 @@ export function generateMountingArtifacts(topologyInputBundle, {
       return
     }
 
+    const identityMatch = matchingIdentityOptions.length === 1
+      ? matchingIdentityOptions[0]
+      : null
+    // The number match may bridge a small KMZ coordinate offset. It must not
+    // overrule a different pole that is already inside the normal search
+    // radius, unless the matching pole is inside that radius as well.
+    if (identityMatch && (
+      identityMatch.distanceMeters <= settings.mountingSearchRadiusMeters
+        || nearby.length === 0
+    )) {
+      relations.push(createMountingRelation({
+        bundle,
+        asset,
+        pole: identityMatch.pole,
+        distanceMeters: identityMatch.distanceMeters,
+        provenance: 'spatial_inference',
+        inferenceRule: 'matching_asset_number',
+        verifiedBy: 'mounting-identity-spatial-policy',
+        verifiedAt: generatedAt,
+        generatedAt,
+      }))
+      return
+    }
+
     if (!nearby.length) return
-    const ambiguous = nearby.length > 1
-      && nearby[1].distanceMeters - nearby[0].distanceMeters
-        <= settings.mountingAmbiguityDeltaMeters
+    const nearestDistanceMeters = nearby[0].distanceMeters
+    const secondDistanceMeters = nearby[1]?.distanceMeters ?? null
+    const distanceMarginMeters = secondDistanceMeters === null
+      ? Number.POSITIVE_INFINITY
+      : secondDistanceMeters - nearestDistanceMeters
+    const distanceRatio = secondDistanceMeters === null || nearestDistanceMeters <= 0
+      ? Number.POSITIVE_INFINITY
+      : secondDistanceMeters / nearestDistanceMeters
+    const ambiguous = nearby.length > 1 && (
+      distanceMarginMeters <= settings.mountingAmbiguityDeltaMeters
+        || distanceRatio <= settings.mountingAmbiguityRatio
+    )
     if (ambiguous) {
       nearby.forEach(({ pole, distanceMeters }) => {
         candidates.push(createMountingCandidate({
@@ -142,8 +188,10 @@ export function generateMountingArtifacts(topologyInputBundle, {
       poleCount: poles.length,
       mountableAssetCount: mountableNodes.length,
       searchRadiusMeters: settings.mountingSearchRadiusMeters,
+      identityRadiusMeters: settings.mountingIdentityRadiusMeters,
       optionRadiusMeters: settings.mountingOptionRadiusMeters,
       ambiguityDeltaMeters: settings.mountingAmbiguityDeltaMeters,
+      ambiguityRatio: settings.mountingAmbiguityRatio,
     },
   }
 }
@@ -271,6 +319,7 @@ function createMountingRelation({
   pole,
   distanceMeters,
   provenance,
+  inferenceRule = 'unique_nearest_pole',
   verifiedBy,
   verifiedAt,
   auditEventId = null,
@@ -299,15 +348,23 @@ function createMountingRelation({
     auditEventId,
     ...(reason ? { reason } : {}),
     evidence: [{
-      source: provenance === 'manual_admin' ? 'manual_review' : 'spatial',
+      source: provenance === 'manual_admin'
+        ? 'manual_review'
+        : inferenceRule === 'matching_asset_number'
+          ? 'source_label_and_spatial'
+          : 'spatial',
       ruleId: provenance === 'manual_admin'
         ? 'mounting.manual_override'
-        : 'mounting.unique-nearest-pole',
+        : inferenceRule === 'matching_asset_number'
+          ? 'mounting.matching-asset-number'
+          : 'mounting.unique-nearest-pole',
       observedValue: round(distanceMeters),
       normalizedValue: `${round(distanceMeters)}m`,
       explanation: provenance === 'manual_admin'
         ? 'Penempatan aset pada tiang ditetapkan administrator.'
-        : 'Aset memiliki satu tiang terdekat yang unik dalam area fasilitas dan radius pemasangan.',
+        : inferenceRule === 'matching_asset_number'
+          ? 'Nomor aset dan tiang sama, berada dalam area fasilitas yang sama, dan tidak ada tiang lain dalam radius pemasangan normal.'
+          : 'Aset memiliki satu tiang terdekat yang unik dalam area fasilitas dan radius pemasangan.',
     }],
     generatedAt,
   }
@@ -450,6 +507,22 @@ function nodeSemanticText(node) {
   ].filter(Boolean).join(' '))
 }
 
+function hasMatchingMountingIdentity(asset, pole) {
+  const assetNumber = mountingAssetNumber(asset, 'asset')
+  const poleNumber = mountingAssetNumber(pole, 'pole')
+  return Boolean(assetNumber && poleNumber && assetNumber === poleNumber)
+}
+
+function mountingAssetNumber(node, role) {
+  const name = normalizeText(node?.sourceName ?? node?.name)
+  if (!name) return null
+  const pattern = role === 'pole'
+    ? /^(?:t|tiang|pole)\s*0*(\d+)\b/
+    : /^(?:c|cctv|camera|kamera|jb|junction box)\s*0*(\d+)\b/
+  const match = name.match(pattern)
+  return match ? String(Number(match[1])) : null
+}
+
 function objectIdentity(object) {
   return String(
     object?.canonicalAssetId
@@ -499,9 +572,17 @@ function normalizeConfig(config) {
       config.mountingSearchRadiusMeters,
       DEFAULT_MOUNTING_CONFIG.mountingSearchRadiusMeters,
     ),
+    mountingIdentityRadiusMeters: positiveNumber(
+      config.mountingIdentityRadiusMeters,
+      DEFAULT_MOUNTING_CONFIG.mountingIdentityRadiusMeters,
+    ),
     mountingAmbiguityDeltaMeters: nonNegativeNumber(
       config.mountingAmbiguityDeltaMeters,
       DEFAULT_MOUNTING_CONFIG.mountingAmbiguityDeltaMeters,
+    ),
+    mountingAmbiguityRatio: positiveNumber(
+      config.mountingAmbiguityRatio,
+      DEFAULT_MOUNTING_CONFIG.mountingAmbiguityRatio,
     ),
     mountingOptionRadiusMeters: positiveNumber(
       config.mountingOptionRadiusMeters,
