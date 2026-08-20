@@ -63,6 +63,9 @@ export const DEFAULT_RELATION_ENGINE_CONFIG = Object.freeze({
   deviceRelationRadiusMeters: 30,
   deviceRelationUniquenessMarginMeters: 5,
   deviceRelationUniquenessRatio: 1.25,
+  mountingSearchRadiusMeters: 5,
+  mountingIdentityRadiusMeters: 10,
+  mountingAmbiguityRatio: 1.5,
   autoConfirmExplicitMetadata: true,
   requiredHeldOutPrecision: 0.99,
   requiredPathAccuracy: 0.95,
@@ -5642,6 +5645,10 @@ function normalizeConfig(config) {
     deviceRelationUniquenessRatio: positiveNumber(
       value.deviceRelationUniquenessRatio,
       DEFAULT_RELATION_ENGINE_CONFIG.deviceRelationUniquenessRatio,
+    ),
+    mountingAmbiguityRatio: positiveNumber(
+      value.mountingAmbiguityRatio,
+      DEFAULT_RELATION_ENGINE_CONFIG.mountingAmbiguityRatio,
     ),
     autoConfirmExplicitMetadata: value.autoConfirmExplicitMetadata !== false,
     requiredHeldOutPrecision: unitNumber(

@@ -267,6 +267,9 @@ test('automatic relation mode confirms a camera to one clearly nearest junction 
   assert.equal(candidate?.sourceAssetId, 'CAM-01')
   assert.equal(candidate?.targetAssetId, 'JB-01')
   assert.equal(candidate?.candidateStatus, 'confirmed')
+  assert.equal(candidate?.relationType, 'connected-to')
+  assert.equal(candidate?.mediaType, 'unknown')
+  assert.equal(candidate?.provenance, 'automatic_device_relation')
   assert.deepEqual(candidate?.sourceGeometryIds, [])
   assert.ok(result.graph.edges.some(({ sourceNodeId, targetNodeId }) => (
     new Set([sourceNodeId, targetNodeId]).has('CAM-01')

@@ -77,6 +77,56 @@ test('mounting inference leaves an ambiguous asset unresolved when two poles are
   assert.equal(result.summary.ambiguousAssetCount, 1)
 })
 
+test('mounting inference consistently includes nearby CCTV and junction boxes on a pole', () => {
+  const result = generateMountingArtifacts(topologyBundle([
+    { id: 'pole-18', type: 'Tiang', sourceName: 'T-018', coordinate: [110, -7] },
+    { id: 'camera-18', type: 'CCTV', sourceName: 'C-018', coordinate: [110.00003, -7] },
+    { id: 'jb-18', type: 'Junction Box', sourceName: 'JB-18.1-WP', coordinate: [110.000005, -7] },
+  ]))
+
+  assert.deepEqual(result.relations.map(({ sourceAssetId, targetAssetId }) => (
+    [sourceAssetId, targetAssetId]
+  )).sort(), [
+    ['camera-18', 'pole-18'],
+    ['jb-18', 'pole-18'],
+  ].sort())
+  assert.equal(result.summary.searchRadiusMeters, 5)
+})
+
+test('matching asset number bridges a bounded KMZ offset without capturing an unrelated pole', () => {
+  const result = generateMountingArtifacts(topologyBundle([
+    { id: 'pole-13', type: 'Tiang', sourceName: 'T-013', coordinate: [110, -7] },
+    { id: 'jb-13', type: 'Junction Box', sourceName: 'JB-013', coordinate: [110.00008, -7] },
+    { id: 'camera-unrelated', type: 'CCTV', sourceName: 'C-099', coordinate: [110.00008, -7] },
+  ]))
+
+  assert.equal(result.relations.length, 1)
+  assert.equal(result.relations[0].sourceAssetId, 'jb-13')
+  assert.equal(result.relations[0].targetAssetId, 'pole-13')
+  assert.equal(result.relations[0].evidence[0].ruleId, 'mounting.matching-asset-number')
+  assert.equal(result.summary.identityRadiusMeters, 10)
+})
+
+test('mounting inference uses distance ratio when coordinate uncertainty exceeds the absolute delta', () => {
+  const result = generateMountingArtifacts(topologyBundle([
+    { id: 'pole-near', type: 'Tiang', coordinate: [110.0000072, -7] },
+    { id: 'pole-second', type: 'Tiang', coordinate: [110.0000108, -7] },
+    { id: 'cctv-1', type: 'CCTV', coordinate: [110, -7] },
+  ]), {
+    config: {
+      mountingAmbiguityDeltaMeters: 0.35,
+      mountingAmbiguityRatio: 1.5,
+    },
+  })
+
+  assert.equal(result.relations.length, 0)
+  assert.deepEqual(result.candidates.map(({ targetAssetId }) => targetAssetId), [
+    'pole-near',
+    'pole-second',
+  ])
+  assert.equal(result.summary.ambiguityRatio, 1.5)
+})
+
 test('manual mounting override wins across regeneration and detach suppresses automatic inference', () => {
   const bundle = topologyBundle([
     { id: 'pole-near', type: 'Tiang', coordinate: [110, -7] },

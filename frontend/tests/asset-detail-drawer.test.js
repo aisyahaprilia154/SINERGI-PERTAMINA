@@ -218,3 +218,27 @@ test('drawer exposes physical mounting assignment and administrator override con
   assert.match(html, /data-mounting-search/)
   assert.match(html, /Tiang CCTV-02/)
 })
+
+test('pole detail shows installed JB and cameras without the connected-assets section', () => {
+  const html = renderAssetDetailDrawer({
+    asset: { id: 'pole-18', name: 'T-018', type: 'Tiang' },
+    mountedAssets: [
+      { id: 'jb-18', name: 'JB-18.1-WP', type: 'Junction Box' },
+      { id: 'camera-18', name: 'C-018', type: 'CCTV' },
+    ],
+    connectedAssets: [{
+      asset: { id: 'network-device', name: 'Perangkat jaringan', type: 'Switch' },
+      network,
+    }],
+    activeContext,
+    trace: { status: 'idle' },
+  })
+
+  assert.match(html, /Pemasangan fisik/)
+  assert.match(html, /Aset terpasang/)
+  assert.match(html, /JB-18\.1-WP/)
+  assert.match(html, /C-018/)
+  assert.doesNotMatch(html, /id="connected-assets-title">Aset terhubung/)
+  assert.doesNotMatch(html, /id="asset-topology-title">Relasi aset/)
+  assert.doesNotMatch(html, /Sambungkan aset/)
+})

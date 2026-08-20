@@ -124,6 +124,7 @@ export function buildAdaptiveAssetLayout(items = [], {
 }
 
 function createClusterMarker(items, point = centroid(items.map((item) => item.point))) {
+  const representativePole = items.find(({ isPole }) => isPole)
   return {
     key: `cluster:${items.map(({ id }) => id).sort().join('|')}`,
     kind: 'cluster',
@@ -132,6 +133,12 @@ function createClusterMarker(items, point = centroid(items.map((item) => item.po
     memberIds: items.map(({ id }) => id),
     coordinates: items.map(({ coordinate }) => coordinate).filter(validCoordinate),
     label: clusterLabel(items),
+    representativePole: representativePole
+      ? {
+          id: representativePole.id,
+          label: representativePole.label || representativePole.id,
+        }
+      : null,
     networkFocused: items.some(({ networkFocused }) => networkFocused),
     candidateEndpoint: items.some(({ candidateEndpoint }) => candidateEndpoint),
     candidateContext: items.every(({ candidateContext }) => candidateContext),
@@ -164,6 +171,36 @@ export function groupNearbyItems(items, threshold) {
     else groups.push([item])
   })
   return groups
+}
+
+export function attachClustersToPoleGroups(markers = [], poleGroups = [], maxDistance = 110) {
+  const clusterGroupIds = new Map()
+  // These assets are only close on the current screen. They are not
+  // mounting relations and must stay separate from the persisted count.
+  const nearbyAssetCounts = new Map()
+
+  markers
+    .filter(({ kind, representativePole }) => kind === 'cluster' && !representativePole)
+    .forEach((marker) => {
+      const nearest = poleGroups
+        .map((group) => ({
+          group,
+          distance: distance(marker.point, group.point),
+        }))
+        .filter(({ distance: markerDistance }) => markerDistance <= maxDistance)
+        .sort((left, right) => (
+          left.distance - right.distance
+            || String(left.group.group.id).localeCompare(String(right.group.group.id), 'id')
+        ))[0]
+      if (!nearest) return
+      clusterGroupIds.set(marker.key, nearest.group.group.id)
+      nearbyAssetCounts.set(
+        nearest.group.group.id,
+        (nearbyAssetCounts.get(nearest.group.group.id) ?? 0) + marker.count,
+      )
+    })
+
+  return { clusterGroupIds, nearbyAssetCounts }
 }
 
 function spreadPoints(center, count) {
