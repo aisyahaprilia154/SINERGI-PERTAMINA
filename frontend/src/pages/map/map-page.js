@@ -29,10 +29,7 @@ import {
   getConnectedAssets,
   relationMutationId,
 } from './network-tracing.js'
-import { openSchematicDialog } from './diagram-dialog.js'
 import { openMapDataTransferDialog } from './map-data-transfer-dialog.js'
-import { buildSchematicGraph } from './schematic-graph.js'
-import { calculateSchematicLayout } from './schematic-layout.js'
 
 export async function renderMapPage(container) {
   document.title = 'Peta Jaringan — SINERGI'
@@ -440,7 +437,7 @@ export async function renderMapPage(container) {
     diagramButton.disabled = !diagramAvailable
     diagramButton.setAttribute('aria-disabled', String(!diagramAvailable))
     diagramButton.title = diagramAvailable
-      ? 'Buka Diagram Topologi 2D dari graph terkonfirmasi.'
+      ? 'Buka Diagram Topologi dari graph terkonfirmasi.'
       : 'Belum ada aset yang dapat ditampilkan pada diagram.'
   }
 
@@ -1110,76 +1107,15 @@ export async function renderMapPage(container) {
       renderDrawer()
       return
     }
-    const trigger = event?.currentTarget
-    const previousBusy = trigger?.getAttribute('aria-busy')
-    if (trigger) {
-      trigger.disabled = true
-      trigger.setAttribute('aria-busy', 'true')
-    }
-    if (trigger) {
-      trigger.disabled = false
-      if (previousBusy === null) trigger.removeAttribute('aria-busy')
-      else trigger.setAttribute('aria-busy', previousBusy)
-    }
-    const allAssetsGraph = buildSchematicGraph({
-      assets: diagramAssets,
-      networks,
-      topologyGraph,
-      poleGroups,
-      scope: 'all-assets',
+    const query = new URLSearchParams({
+      datasetId: activeContext.datasetId,
+      branchId: activeContext.branchId,
     })
-    const fullMapGraph = buildSchematicGraph({
-      assets: diagramAssets,
-      networks,
-      topologyGraph,
-      poleGroups,
-      scope: 'full-map',
-    })
-    const traceGraph = buildSchematicGraph({
-      assets: diagramAssets,
-      networks,
-      topologyGraph,
-      poleGroups,
-      scope: 'trace',
-      tracePath: state.traceStatus === 'active' ? state.tracePath : [],
-      traceRelations: state.traceStatus === 'active' ? state.traceRelations : [],
-    })
-    const selectedAssetGraph = buildSchematicGraph({
-      assets,
-      networks,
-      topologyGraph,
-      poleGroups,
-      focusedAssetId: selection.selectedAssetId,
-      scope: 'selected',
-    })
-    openSchematicDialog({
-      diagrams: {
-        'all-assets': {
-          graph: allAssetsGraph,
-          layout: calculateSchematicLayout(allAssetsGraph, { preserveMapOrientation: true }),
-        },
-        'full-map': {
-          graph: fullMapGraph,
-          layout: calculateSchematicLayout(fullMapGraph, { preserveMapOrientation: true }),
-        },
-        trace: {
-          graph: traceGraph,
-          layout: calculateSchematicLayout(traceGraph, { preserveMapOrientation: true }),
-        },
-        selected: {
-          graph: selectedAssetGraph,
-          layout: calculateSchematicLayout(selectedAssetGraph),
-        },
-      },
-      activeContext,
-      selectedAssetId: selection.selectedAssetId,
-      initialMode: state.traceStatus === 'active'
-        ? 'trace'
-        : selection.selectedAssetId
-          ? 'selected'
-          : 'all-assets',
-      onSelectAsset: selectAssetFromDiagram,
-    })
+    if (selectedArea?.key) query.set('area', selectedArea.key)
+    if (selection.selectedAssetId) query.set('selectedAssetId', selection.selectedAssetId)
+    if (state.traceFromId) query.set('traceFrom', state.traceFromId)
+    if (state.traceToId) query.set('traceTo', state.traceToId)
+    window.location.href = `/topology?${query}`
   }
 
   function traceErrorMessage(error) {
@@ -2057,7 +1993,7 @@ export function renderTopNavigation(activeView = 'map', context = null) {
           <span class="material-symbols-outlined" aria-hidden="true">map</span>Peta Aset
         </a>
         <a href="/topology${contextQuery}" class="${activeView === 'topology' ? 'active' : ''}">
-          <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>Topologi Cabang
+          <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>Diagram Topologi
         </a>
       </nav>
       <div class="nav-actions">

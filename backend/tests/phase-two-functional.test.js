@@ -7,6 +7,7 @@ import { createApp } from '../src/app.js'
 import {
   buildActiveAssetCatalog,
   buildActiveCapabilities,
+  buildActiveOverlayDescriptors,
   buildActiveSites,
   queryActiveAssets,
 } from '../src/domain/active-dataset-query.js'
@@ -56,6 +57,34 @@ test('Fase 2 active catalog applies stable search ranking, AND filters, facets, 
     query: { q: 'a', limit: 10 },
   })
   assert.equal(oneCharacterPartial.totalMatched, 0)
+})
+
+test('active map overlay descriptors preserve KML LatLonBox rotation', () => {
+  const overlays = buildActiveOverlayDescriptors({
+    datasetVersionId: 'dv-rotation',
+    record: {
+      datasetVersion: { branchId: 'site-a' },
+      sourceOverlays: [{
+        sourceOverlayId: 'overlay-rotation',
+        sourceFeatureId: 'feature-rotation',
+        name: 'CCTV view',
+        sourceFolderPath: '/CCTV/View',
+        resourceId: 'resource-rotation',
+        resourceResolutionStatus: 'resolved',
+        valid: true,
+        latLonBox: {
+          west: 110,
+          south: -7,
+          east: 111,
+          north: -6,
+          rotation: 37,
+        },
+      }],
+    },
+  })
+
+  assert.equal(overlays[0].rotation, 37)
+  assert.equal(overlays[0].latLonBox.rotation, 37)
 })
 
 test('Fase 2 cursor is bound to active pointer revision and query snapshot', () => {

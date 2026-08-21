@@ -2,12 +2,13 @@ export function groundOverlayCoordinates(overlay) {
   if (overlay?.latLonBox) {
     const { west, south, east, north } = overlay.latLonBox
     if (![west, south, east, north].every(Number.isFinite)) return null
+    const rotation = Number(overlay.rotation ?? overlay.latLonBox.rotation ?? 0)
     return rotateGeographicCorners([
       [west, north],
       [east, north],
       [east, south],
       [west, south],
-    ], Number(overlay.rotation ?? 0))
+    ], rotation)
   }
   const coordinates = overlay?.latLonQuad?.coordinates
   if (!Array.isArray(coordinates) || coordinates.length !== 4

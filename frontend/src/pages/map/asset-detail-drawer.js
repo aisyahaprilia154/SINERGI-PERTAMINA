@@ -247,7 +247,7 @@ export function renderAssetDetailDrawer({
         <button class="button secondary open-schematic" type="button"
           ${diagramAvailable ? '' : 'disabled aria-disabled="true" title="Belum ada aset yang dapat ditampilkan pada diagram."'}>
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
-          Buat diagram 2D
+          Buka Diagram Topologi
         </button>
       </div>
     </footer>

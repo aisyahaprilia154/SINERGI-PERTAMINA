@@ -779,6 +779,18 @@ function classifyFeature({ feature, placemark, metadata, geometries, datasetVers
     mediaType: metadata.semanticValues.media_type,
     cableRole: metadata.semanticValues.cable_role,
   })
+  const canonicalAssetType = canonicalVocabularyValue(
+    'assetType',
+    metadata.semanticValues.asset_type ?? inferredAssetType(match, geometries),
+  ) ?? 'unknown'
+  const canonicalCategory = canonicalVocabularyValue('category', rawCategory) ?? 'unknown'
+  const diagramClass = canonicalDiagramClassFor({
+    explicitClass: metadata.semanticValues.diagram_class,
+    objectRole,
+    canonicalAssetType,
+    assetType: rawAssetType,
+    jbProfileId,
+  })
   if (!match) {
     evidence.push({
       source: 'classifier',
@@ -811,12 +823,10 @@ function classifyFeature({ feature, placemark, metadata, geometries, datasetVers
     // Preserve the observed/display value while storing the canonical value
     // used by readiness and publication policy.
     assetType: rawAssetType,
-    canonicalAssetType: canonicalVocabularyValue(
-      'assetType',
-      metadata.semanticValues.asset_type ?? inferredAssetType(match, geometries),
-    ) ?? 'unknown',
+    canonicalAssetType,
     category: rawCategory,
-    canonicalCategory: canonicalVocabularyValue('category', rawCategory) ?? 'unknown',
+    canonicalCategory,
+    ...compact({ diagramClass }),
     classificationStatus: match ? 'classified' : 'review_required',
     classificationScore: match?.score ?? 0,
     classificationEvidence: [...evidence, ...dimensions.semanticDimensionEvidence],
@@ -1023,6 +1033,48 @@ function inferredAssetType(match, geometries) {
   if (match.networkFamily === 'cctv') return 'cctv_camera'
   if (match.networkFamily === 'lan') return 'peripheral'
   return geometries.some(({ geometryType }) => geometryType === 'Point') ? 'unknown' : 'infrastructure_path'
+}
+
+function canonicalDiagramClassFor({
+  explicitClass,
+  objectRole,
+  canonicalAssetType,
+  assetType,
+  jbProfileId,
+} = {}) {
+  const explicit = normalizeToken(explicitClass).replaceAll(' ', '-')
+  const explicitMap = {
+    'rack-root': 'rack-root',
+    rack: 'rack-root',
+    root: 'rack-root',
+    core: 'rack-root',
+    'junction-peer': 'junction-peer',
+    junction: 'junction-peer',
+    'junction-regular': 'junction-peer',
+    'junction-extended': 'junction-extended',
+    'extended-junction': 'junction-extended',
+    endpoint: 'endpoint',
+    'physical-mount': 'physical-mount',
+    mounting: 'physical-mount',
+  }
+  if (explicitMap[explicit]) return explicitMap[explicit]
+
+  const profile = normalizeToken(jbProfileId).replaceAll(' ', '-')
+  if (profile.includes('server-rack') || profile.includes('rack-server')) return 'rack-root'
+  if (profile.includes('extended')) return 'junction-extended'
+  if (profile.includes('main-jb') || profile.includes('main-junction')) return 'junction-peer'
+
+  const type = normalizeToken([canonicalAssetType, assetType].filter(Boolean).join(' '))
+  if (/(^|\s)(pole|tiang|mast|pylon)(\s|$)/.test(type)) return 'physical-mount'
+  if (/(^|\s)(junction box|junction|jb)(\s|$)/.test(type)) return 'junction-peer'
+  if (/(server rack|rack server|router|switch|core switch|nvr|otb|olt)/.test(type)) {
+    return 'rack-root'
+  }
+  if (/(cctv|camera|access point|endpoint|printer|peripheral)/.test(type)) return 'endpoint'
+  if (objectRole === 'device_node' && normalizeToken(canonicalAssetType) !== 'unknown') {
+    return 'endpoint'
+  }
+  return null
 }
 
 function inferredCategory(match) {
@@ -1274,6 +1326,7 @@ export function buildTopologyInputBundle({
     semanticDimensionEvidence: structuredClone(object.semanticDimensionEvidence ?? []),
     ...compact({
       jbProfileId: object.jbProfileId,
+      diagramClass: object.diagramClass,
       componentInventory: object.componentInventory,
       interfaceDefinitions: object.interfaceDefinitions,
       mountingRole: object.mountingRole,
@@ -1418,6 +1471,7 @@ export function rebuildStoredTopologyInputBundle(record = {}) {
       semanticDimensionEvidence: classification.semanticDimensionEvidence,
       classificationRuleSetVersion: classification.classificationRuleSetVersion,
       jbProfileId: classification.jbProfileId,
+      diagramClass: classification.diagramClass,
     }
   })
   const topologyInputBundle = buildTopologyInputBundle({

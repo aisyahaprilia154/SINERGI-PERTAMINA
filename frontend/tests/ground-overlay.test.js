@@ -42,6 +42,17 @@ test('LatLonBox rotation preserves its geographic center', () => {
   assert.ok(Math.abs(center[1] + 6.5) < 1e-10)
 })
 
+test('LatLonBox rotation is read from the nested KML box when projection omits the alias', () => {
+  const withNestedRotation = groundOverlayCoordinates({
+    latLonBox: { west: 110, south: -7, east: 111, north: -6, rotation: 15 },
+  })
+  const withTopLevelRotation = groundOverlayCoordinates({
+    rotation: 15,
+    latLonBox: { west: 110, south: -7, east: 111, north: -6 },
+  })
+  assert.deepEqual(withNestedRotation, withTopLevelRotation)
+})
+
 test('resolved overlay image does not receive a duplicate rectangular footprint', () => {
   assert.equal(shouldRenderGroundOverlayFootprint({ resourceUrl: '/overlay.png' }), false)
   assert.equal(shouldRenderGroundOverlayFootprint({ resourceUrl: '' }), true)

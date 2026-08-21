@@ -115,7 +115,7 @@ test('map data transfer dialog exposes direct import and complete export choices
   assert.match(html, /Dataset aktif ke KML/)
   assert.match(html, /Jaringan terpilih ke KML/)
   assert.match(html, /File sumber asli/)
-  assert.match(html, /Diagram skematik 2D/)
+  assert.match(html, /Diagram Topologi/)
 })
 
 test('map context and toolbar present compact professional map actions', () => {
@@ -137,7 +137,7 @@ test('map context and toolbar present compact professional map actions', () => {
   assert.match(controls, />Import</)
   assert.match(controls, />Export</)
   assert.match(controls, />Tracing</)
-  assert.match(controls, />Diagram 2D</)
+  assert.match(controls, />Diagram Topologi</)
   assert.match(controls, /class="tool-button export-toggle map-action-ghost"/)
   assert.match(controls, /aria-label="Export" title="Export data peta"/)
   assert.match(controls, />Export</)

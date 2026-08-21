@@ -11,12 +11,13 @@ export async function loadActiveDataset({
   datasetId,
   branchId,
   siteId = null,
+  view = 'map',
   token = getDefaultMapToken(),
   signal,
   apiBase = '',
 } = {}) {
   if (!datasetId) throw new TypeError('datasetId wajib tersedia.')
-  const query = new URLSearchParams({ view: 'map' })
+  const query = new URLSearchParams({ view })
   if (branchId) query.set('branchId', branchId)
   if (siteId) query.set('siteId', siteId)
   const response = await fetch(

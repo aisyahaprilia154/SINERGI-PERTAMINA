@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   adaptActiveAssetDetail,
   adaptActiveDatasetForMap,
+  adaptActiveDatasetForTopology,
   locationGroupFor,
 } from '../src/adapters/active-dataset-map-adapter.js'
 
@@ -612,6 +613,55 @@ test('location group is derived from the first KML folder after RJBT', () => {
     locationGroupKey: 'lainnya',
     locationGroupName: 'Lainnya',
   })
+})
+
+test('topology adapter keeps the payload lightweight and preserves canonical classes', () => {
+  const payload = {
+    topologyView: true,
+    activePointer: { revision: 'topology-revision' },
+    datasetVersion: {
+      id: 'version-topology',
+      datasetId: 'dataset-semarang',
+      branchId: 'semarang',
+      versionName: 'Topology aktif',
+    },
+    assets: [{
+      id: 'canonical-jb',
+      canonicalAssetId: 'canonical-jb',
+      name: 'JB-01',
+      type: 'Junction Box',
+      assetType: 'junction_box',
+      diagramClass: 'junction-peer',
+      locationGroupKey: 'area-a',
+      locationGroupName: 'Area A',
+    }, {
+      id: 'canonical-pole',
+      canonicalAssetId: 'canonical-pole',
+      name: 'T-01',
+      type: 'Pole',
+      assetType: 'pole',
+      diagramClass: 'physical-mount',
+      locationGroupKey: 'area-a',
+      locationGroupName: 'Area A',
+    }],
+    topologyGraph: {
+      nodes: [{ id: 'canonical-jb', diagramClass: 'junction-peer' }],
+      edges: [],
+    },
+    locationGroups: [{ key: 'area-a', name: 'Area A' }],
+    mountingRelations: [{
+      id: 'mount-jb',
+      relationType: 'mounted_on',
+      sourceAssetId: 'canonical-jb',
+      targetAssetId: 'canonical-pole',
+    }],
+  }
+  const result = adaptActiveDatasetForTopology(payload)
+  assert.equal(result.geometries.length, 0)
+  assert.deepEqual(result.locationGroups.map(({ key }) => key), ['area-a'])
+  assert.equal(result.assets.find(({ id }) => id === 'canonical-jb').diagramClass, 'junction-peer')
+  assert.equal(result.assets.find(({ id }) => id === 'canonical-pole').diagramClass, 'physical-mount')
+  assert.equal(result.mountingRelations.length, 1)
 })
 
 test('Point and LineString in one facility share a location group without coordinate changes', () => {

@@ -90,6 +90,16 @@ export function buildActiveAssetCatalog({
       asset.branchId,
       record.datasetVersion?.branchId,
     )
+    const canonicalAssetType = String(firstValue(
+      classified.canonicalAssetType,
+      classified.assetType,
+      asset.type,
+      sourceProperties.assetType,
+      'Unknown',
+    ))
+    const locationGroup = locationGroupFor(sourceFeature.sourceFolderPath
+      ?? asset.sourceFolderPath
+      ?? layer?.sourceFolderPath)
     return {
       nodeId: asset.id ?? canonicalAssetId,
       assetId: firstValue(asset.assetId, stableAssetId, canonicalAssetId),
@@ -106,6 +116,7 @@ export function buildActiveAssetCatalog({
       sourceFeatureId,
       name: String(name),
       objectRole,
+      topologyRole: classified.topologyRole ?? null,
       category: String(firstValue(
         classified.canonicalCategory,
         classified.category,
@@ -113,13 +124,16 @@ export function buildActiveAssetCatalog({
         sourceProperties.category,
         'Uncategorized',
       )),
-      assetType: String(firstValue(
-        classified.canonicalAssetType,
-        classified.assetType,
-        asset.type,
-        sourceProperties.assetType,
-        'Unknown',
-      )),
+      assetType: canonicalAssetType,
+      canonicalAssetType,
+      diagramClass: canonicalDiagramClassFor({
+        diagramClass: classified.diagramClass,
+        objectRole,
+        canonicalAssetType,
+        assetType: classified.assetType ?? asset.type,
+        jbProfileId: classified.jbProfileId,
+      }),
+      jbProfileId: classified.jbProfileId ?? null,
       networkFamily: String(firstValue(
         classified.networkFamily,
         asset.networkFamily,
@@ -172,6 +186,8 @@ export function buildActiveAssetCatalog({
         layer?.sourceFolderPath,
         null,
       ),
+      locationGroupKey: locationGroup.key,
+      locationGroupName: locationGroup.name,
       sourceKmlId: sourceFeature.sourceKmlId ?? null,
       sourceElementType: sourceFeature.sourceElementType ?? null,
       sourceFingerprint: sourceFeature.sourceFingerprint ?? null,
@@ -371,6 +387,7 @@ export function buildActiveOverlayDescriptors({
         valid: true,
         visibility: overlay.visibility !== false,
         drawOrder: overlay.drawOrder ?? null,
+        rotation: overlay.rotation ?? overlay.latLonBox?.rotation ?? 0,
         resourceUrl: `/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
           + `/overlay-resources/${encodeURIComponent(overlay.resourceId)}`,
         geometryType: overlay.geometryType ?? null,
@@ -442,6 +459,8 @@ export function projectSearchItem(item, rank = 0, canViewSensitive = false) {
     identityStatus: item.identityStatus,
     name: safeText(item.name),
     objectRole: item.objectRole,
+    diagramClass: item.diagramClass,
+    jbProfileId: item.jbProfileId,
     category: safeText(item.category),
     assetType: safeText(item.assetType),
     networkFamily: safeText(item.networkFamily),
@@ -455,6 +474,8 @@ export function projectSearchItem(item, rank = 0, canViewSensitive = false) {
     bounds: cloneValue(item.bounds),
     sourceFeatureId: item.sourceFeatureId,
     sourceFolderPath: safeText(item.sourceFolderPath),
+    locationGroupKey: item.locationGroupKey,
+    locationGroupName: safeText(item.locationGroupName),
     rank,
   }
 }
@@ -778,6 +799,65 @@ function normalizeLimit(value, max = MAX_QUERY_LIMIT) {
   const limit = Number(value)
   if (!Number.isInteger(limit) || limit < 1) return Math.min(DEFAULT_QUERY_LIMIT, max)
   return Math.min(limit, max)
+}
+
+function canonicalDiagramClassFor({
+  diagramClass,
+  objectRole,
+  canonicalAssetType,
+  assetType,
+  jbProfileId,
+} = {}) {
+  const explicit = normalizeSearchText(diagramClass).replaceAll('_', '-')
+  const explicitMap = {
+    'rack-root': 'rack-root',
+    rack: 'rack-root',
+    root: 'rack-root',
+    core: 'rack-root',
+    'junction-peer': 'junction-peer',
+    junction: 'junction-peer',
+    'junction-regular': 'junction-peer',
+    'junction-extended': 'junction-extended',
+    'extended-junction': 'junction-extended',
+    endpoint: 'endpoint',
+    'physical-mount': 'physical-mount',
+    mounting: 'physical-mount',
+  }
+  if (explicitMap[explicit]) return explicitMap[explicit]
+
+  const profile = normalizeSearchText(jbProfileId).replaceAll('_', '-')
+  if (profile.includes('server-rack') || profile.includes('rack-server')) return 'rack-root'
+  if (profile.includes('extended')) return 'junction-extended'
+  if (profile.includes('main-jb') || profile.includes('main-junction')) return 'junction-peer'
+
+  const type = normalizeSearchText([canonicalAssetType, assetType].filter(Boolean).join(' '))
+  if (/(^|\s)(pole|tiang|mast|pylon)(\s|$)/.test(type)) return 'physical-mount'
+  if (/(^|\s)(junction box|junction|jb)(\s|$)/.test(type)) return 'junction-peer'
+  if (/(server rack|rack server|router|switch|core switch|nvr|otb|olt)/.test(type)) {
+    return 'rack-root'
+  }
+  if (/(cctv|camera|access point|endpoint|printer|peripheral)/.test(type)) return 'endpoint'
+  if (objectRole === 'device_node' && normalizeSearchText(canonicalAssetType) !== 'unknown') {
+    return 'endpoint'
+  }
+  return null
+}
+
+function locationGroupFor(sourceFolderPath) {
+  const segments = String(sourceFolderPath ?? '')
+    .replaceAll('\\', '/')
+    .split('/')
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+  const rjbtIndex = segments.findIndex((segment) => segment.toUpperCase() === 'RJBT')
+  const name = rjbtIndex >= 0 ? segments[rjbtIndex + 1] : null
+  if (!name) return { key: 'lainnya', name: 'Lainnya' }
+  const key = name.toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return { key: key || 'lainnya', name }
 }
 
 function firstValue(...values) {
