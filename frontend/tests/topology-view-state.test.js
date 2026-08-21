@@ -22,6 +22,7 @@ test('topology URL state keeps only valid opaque asset and candidate identifiers
   assert.deepEqual([...state.selectedCategories], ['cctv', 'fiber-optic'])
   assert.equal(state.traceFrom, 'CAM-01')
   assert.equal(state.traceTo, 'SW-01')
+  assert.equal(state.view, 'diagram')
 })
 
 test('topology URL serialization preserves cross-view selection and trace', () => {
@@ -35,6 +36,8 @@ test('topology URL serialization preserves cross-view selection and trace', () =
     focusOnly: true,
     traceFrom: 'CAM-01',
     traceTo: 'SW-01',
+    view: 'spatial',
+    area: 'ft-pengapon-semarang',
   })
   const params = new URLSearchParams(query)
 
@@ -44,4 +47,6 @@ test('topology URL serialization preserves cross-view selection and trace', () =
   assert.equal(params.get('categories'), 'cctv')
   assert.equal(params.get('focus'), 'neighbors')
   assert.equal(params.get('traceTo'), 'SW-01')
+  assert.equal(params.get('view'), 'spatial')
+  assert.equal(params.get('area'), 'ft-pengapon-semarang')
 })

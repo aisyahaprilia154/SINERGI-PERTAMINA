@@ -3,6 +3,7 @@ import {
   parseTopologyViewState,
   serializeTopologyViewState,
 } from '../../domain/topology-view-state.js'
+import { buildPathTopologyModel } from '../../domain/path-topology-model.js'
 import {
   loadActiveDataset,
   loadDatasetProjection,
@@ -10,7 +11,9 @@ import {
   loadTopologyProjection,
   reviewTopologyCandidate,
 } from '../../services/active-dataset-service.js'
-import { bindUserAccountMenu, renderTopNavigation } from '../map/map-page.js'
+import { bindUserAccountMenu, renderTopNavigation, scopeMapData } from '../map/map-page.js'
+import { createPathTopologyLayout } from './path-topology-layout.js'
+import { renderPathTopologySvg } from './path-topology-renderer.js'
 import { renderSpatialTopologySvg } from './topology-renderer.js'
 import { createSpatialTopologyLayout } from './topology-spatial-layout.js'
 
@@ -33,6 +36,15 @@ export async function renderTopologyPage(container) {
   try {
     const activePayload = await loadActiveDataset(requested)
     const mapData = adaptActiveDatasetForMap(activePayload)
+    const requestedArea = new URLSearchParams(window.location.search).get('area')
+    const selectedArea = mapData.locationGroups.find(({ key }) => key === requestedArea) ?? null
+    if (!selectedArea) {
+      renderAreaPicker(container, mapData, requestedArea)
+      return
+    }
+    const requestedView = new URLSearchParams(window.location.search).get('view') === 'spatial'
+      ? 'spatial'
+      : 'diagram'
     const datasetVersionId = mapData.activeContext.datasetVersionId
     const [
       graphPayload,
@@ -43,15 +55,22 @@ export async function renderTopologyPage(container) {
     ] = await Promise.all([
       loadTopologyProjection({ datasetVersionId, projection: 'graph' }),
       loadTopologyProjection({ datasetVersionId, projection: 'summary' }),
-      loadAllTopologyCandidates({ datasetVersionId })
+      (requestedView === 'spatial'
+        ? loadAllTopologyCandidates({ datasetVersionId })
+        : loadTopologyProjection({ datasetVersionId, projection: 'candidates', limit: 500 }))
         .catch(() => ({ items: [], unresolved: [], restricted: true })),
-      loadDatasetProjection({ datasetVersionId, projection: 'source-features' })
-        .catch(() => ({ items: [] })),
-      loadDatasetProjection({ datasetVersionId, projection: 'geometries' })
-        .catch(() => ({ items: [] })),
+      requestedView === 'spatial'
+        ? loadDatasetProjection({ datasetVersionId, projection: 'source-features' })
+          .catch(() => ({ items: [] }))
+        : Promise.resolve({ items: [] }),
+      requestedView === 'spatial'
+        ? loadDatasetProjection({ datasetVersionId, projection: 'geometries' })
+          .catch(() => ({ items: [] }))
+        : Promise.resolve({ items: [] }),
     ])
     initializeTopologyWorkspace(container, {
       mapData,
+      selectedArea,
       graph: graphPayload.graph,
       summary: summaryPayload,
       candidates: candidatePayload.items ?? [],
@@ -72,6 +91,7 @@ export async function renderTopologyPage(container) {
 function initializeTopologyWorkspace(container, initial) {
   const {
     mapData,
+    selectedArea,
     sourceFeatures,
     sourceGeometries,
     reviewRestricted = false,
@@ -80,7 +100,42 @@ function initializeTopologyWorkspace(container, initial) {
   let summary = initial.summary
   let candidates = initial.candidates
   let unresolved = initial.unresolved
-  const { activeContext, assets, geometries } = mapData
+  const areaData = scopeMapData({
+    selectedArea,
+    assets: mapData.assets,
+    diagramAssets: mapData.diagramAssets,
+    geometries: mapData.geometries,
+    exportAssets: mapData.exportAssets,
+    networks: mapData.networks,
+    topologyGraph: mapData.topologyGraph,
+    mountingRelations: mapData.mountingRelations,
+    mountingCandidates: mapData.mountingCandidates,
+    mountingOptions: mapData.mountingOptions,
+    poleGroups: mapData.poleGroups,
+  })
+  const { activeContext } = mapData
+  activeContext.area = selectedArea.key
+  const { assets, geometries } = areaData
+  const areaAssetIds = new Set(areaData.exportAssets.map(({ id }) => id))
+  const areaGeometryIds = new Set(geometries.flatMap((geometry) => [
+    geometry.id,
+    geometry.sourceGeometryId,
+  ]).filter(Boolean))
+  const diagramProjectionAssets = areaData.exportAssets.filter((asset) => (
+    !asset.geometry?.length
+      || asset.geometry.some(({ geometryType }) => ['point', 'line_string'].includes(geometryType))
+  ))
+  const diagramGraph = scopeGraphToArea(mapData.topologyGraph, areaAssetIds)
+  candidates = candidates.filter((candidate) => candidateMatchesArea(
+    candidate,
+    areaAssetIds,
+    areaGeometryIds,
+  ))
+  unresolved = unresolved.filter((endpoint) => endpointMatchesArea(
+    endpoint,
+    areaAssetIds,
+    areaGeometryIds,
+  ))
   const selectableIds = unique([
     ...assets.map(({ id }) => id),
     ...(graph.nodes ?? []).map(({ id }) => id),
@@ -92,6 +147,7 @@ function initializeTopologyWorkspace(container, initial) {
   const query = new URLSearchParams(window.location.search)
   const state = {
     ...parsed,
+    area: selectedArea.key,
     selectedCandidateId: parsed.reviewCandidateId,
     selectedUnresolvedId: query.get('unresolvedEndpoint'),
     selectedCategories: parsed.selectedCategories.size
@@ -102,17 +158,26 @@ function initializeTopologyWorkspace(container, initial) {
     zoom: 1,
     actionStatus: 'idle',
     actionMessage: '',
+    collapsedPoleGroupIds: new Set(),
   }
   let layout = buildLayout()
   let searchTimer = null
 
   container.innerHTML = `
-    <div class="map-app topology-app">
+    <div class="map-app topology-app topology-${state.view}">
       ${renderTopNavigation('topology', activeContext)}
+      <nav class="view-switcher" aria-label="Tampilan topologi">
+        <button type="button" data-topology-view="diagram" class="${state.view === 'diagram' ? 'active' : ''}">
+          <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>Diagram Jalur
+        </button>
+        <button type="button" data-topology-view="spatial" class="${state.view === 'spatial' ? 'active' : ''}">
+          <span class="material-symbols-outlined" aria-hidden="true">location_on</span>Topologi Spasial
+        </button>
+      </nav>
       <main class="topology-workspace">
         <aside class="topology-controls" aria-label="Kontrol peta topologi">
           <div class="topology-controls-scroll">
-            ${renderContext(activeContext, summary)}
+            ${renderContext(activeContext, summary, selectedArea, mapData.locationGroups)}
             <div class="topology-search">
               <label for="topology-search-input">Cari aset atau jalur</label>
               <div>
@@ -121,14 +186,14 @@ function initializeTopologyWorkspace(container, initial) {
                   placeholder="Nama, Asset ID, endpoint" autocomplete="off">
               </div>
             </div>
-            <section class="control-section category-control">
+            <section class="control-section category-control spatial-only-control">
               <div class="control-section-heading">
                 <h2>Jaringan</h2>
                 <button class="text-button reset-category-filter" type="button">Tampilkan semua</button>
               </div>
               <div class="category-chips"></div>
             </section>
-            <section class="control-section topology-layer-control">
+            <section class="control-section topology-layer-control spatial-only-control">
               <h2>Lapisan status</h2>
               <label class="presentation-toggle">
                 <input class="toggle-candidates" type="checkbox"${
@@ -170,9 +235,9 @@ function initializeTopologyWorkspace(container, initial) {
         <section class="topology-stage" aria-label="Peta topologi cabang">
           <header class="topology-toolbar">
             <div class="topology-toolbar-title">
-              <span class="eyebrow">SPATIAL TOPOLOGY</span>
-              <strong>Posisi dan geometri asli</strong>
-              <small>Proyeksi yang sama dengan peta aset · data sumber tidak digeser</small>
+              <span class="eyebrow topology-mode-eyebrow"></span>
+              <strong class="topology-mode-title"></strong>
+              <small class="topology-mode-description"></small>
             </div>
             <div class="topology-toolbar-actions">
               <div class="zoom-control" aria-label="Kontrol zoom">
@@ -199,12 +264,7 @@ function initializeTopologyWorkspace(container, initial) {
             aria-label="Kanvas topologi. Geser untuk pan dan gunakan roda mouse untuk zoom.">
             <div class="topology-canvas" aria-live="polite"></div>
           </div>
-          <div class="topology-canvas-legend" aria-label="Legenda status">
-            <span><i class="legend-line source"></i>Geometri sumber</span>
-            <span><i class="legend-line confirmed"></i>Jalur terkonfirmasi</span>
-            <span><i class="legend-line candidate"></i>Perlu konfirmasi</span>
-            <span><i class="legend-endpoint"></i>Unresolved</span>
-          </div>
+          <div class="topology-canvas-legend" aria-label="Legenda status"></div>
           <aside class="topology-minimap" aria-label="Ringkasan posisi topologi"></aside>
           <aside class="topology-inspector" aria-live="polite"></aside>
           <div class="topology-toast" role="status" aria-live="polite"></div>
@@ -221,12 +281,30 @@ function initializeTopologyWorkspace(container, initial) {
   requestAnimationFrame(fitGraph)
 
   function buildLayout() {
+    if (state.view === 'diagram') {
+      const model = buildPathTopologyModel({
+        area: selectedArea,
+        assets: diagramProjectionAssets,
+        graph: diagramGraph,
+        mountingRelations: areaData.mountingRelations,
+        candidates,
+        unresolved,
+        collapsedPoleGroupIds: state.collapsedPoleGroupIds,
+        selectedAssetId: state.selectedAssetId,
+        search: state.search,
+        traceFrom: state.traceFrom,
+        traceTo: state.traceTo,
+      })
+      return createPathTopologyLayout(model, {
+        collapsedPoleGroupIds: state.collapsedPoleGroupIds,
+      })
+    }
     return createSpatialTopologyLayout({
       assets,
       geometries,
       sourceFeatures,
       sourceGeometries,
-      graph,
+      graph: scopeGraphToArea(graph, areaAssetIds),
       candidates,
       unresolved,
       state,
@@ -235,6 +313,11 @@ function initializeTopologyWorkspace(container, initial) {
 
   function renderWorkspace({ preserveInspector = false } = {}) {
     layout = buildLayout()
+    container.querySelector('.topology-app').className = `map-app topology-app topology-${state.view}`
+    container.querySelectorAll('[data-topology-view]').forEach((button) => {
+      button.classList.toggle('active', button.dataset.topologyView === state.view)
+      button.setAttribute('aria-pressed', String(button.dataset.topologyView === state.view))
+    })
     renderControls()
     renderCanvas()
     if (!preserveInspector) renderInspector()
@@ -244,7 +327,7 @@ function initializeTopologyWorkspace(container, initial) {
 
   function renderControls() {
     const chips = container.querySelector('.category-chips')
-    chips.innerHTML = layout.categories.map((category) => {
+    chips.innerHTML = (layout.categories ?? []).map((category) => {
       const active = !state.selectedCategories.size || state.selectedCategories.has(category)
       return `<button type="button" class="category-chip${active ? ' active' : ''}"
         data-category="${category}" aria-pressed="${active}">
@@ -258,11 +341,35 @@ function initializeTopologyWorkspace(container, initial) {
     container.querySelector('.unresolved-layer-count').textContent = unresolved.length
     const reviewCount = container.querySelector('.review-link-count')
     if (reviewCount) reviewCount.textContent = openCandidates.length
-    container.querySelector('.topology-stats').innerHTML = `
+    container.querySelector('.topology-stats').innerHTML = state.view === 'diagram' ? `
+      <div><strong>${layout.stats.poleCount}</strong><span>tiang fisik</span></div>
+      <div><strong>${layout.stats.jbCount}</strong><span>junction box</span></div>
+      <div class="confirmed-stat"><strong>${layout.stats.cctvCount}</strong><span>CCTV</span></div>
+      <div><strong>${layout.cablePathCount}</strong><span>jalur sebagai edge</span></div>
+    ` : `
       <div><strong>${layout.pathCount}</strong><span>jalur sumber</span></div>
       <div><strong>${layout.graphNodeCount}</strong><span>node</span></div>
       <div class="confirmed-stat"><strong>${layout.graphEdgeCount}</strong><span>confirmed edge</span></div>
       <div class="review-stat"><strong>${openCandidates.length}</strong><span>perlu review</span></div>
+    `
+    const title = container.querySelector('.topology-mode-title')
+    const eyebrow = container.querySelector('.topology-mode-eyebrow')
+    const description = container.querySelector('.topology-mode-description')
+    eyebrow.textContent = state.view === 'diagram' ? 'DIAGRAM TOPOLOGI' : 'SPATIAL TOPOLOGY'
+    title.textContent = state.view === 'diagram' ? `Core → jalur → blok tiang · ${selectedArea.name}` : 'Posisi dan geometri asli'
+    description.textContent = state.view === 'diagram'
+      ? 'Urutan graph terkonfirmasi · maksimal enam blok per jalur'
+      : 'Proyeksi yang sama dengan peta aset · data sumber tidak digeser'
+    container.querySelector('.topology-canvas-legend').innerHTML = state.view === 'diagram' ? `
+      <span><i class="legend-line diagram-lan"></i>LAN</span>
+      <span><i class="legend-line diagram-fiber"></i>Fiber optic</span>
+      <span><i class="legend-line candidate"></i>Rekomendasi</span>
+      <span><i class="legend-endpoint"></i>Unresolved</span>
+    ` : `
+      <span><i class="legend-line source"></i>Geometri sumber</span>
+      <span><i class="legend-line confirmed"></i>Jalur terkonfirmasi</span>
+      <span><i class="legend-line candidate"></i>Perlu konfirmasi</span>
+      <span><i class="legend-endpoint"></i>Unresolved</span>
     `
   }
 
@@ -270,7 +377,7 @@ function initializeTopologyWorkspace(container, initial) {
     const canvas = container.querySelector('.topology-canvas')
     canvas.innerHTML = `<div class="topology-canvas-frame" style="
       width:${layout.width}px;height:${layout.height}px">
-      ${renderSpatialTopologySvg(layout, {
+      ${state.view === 'diagram' ? renderPathTopologySvg(layout) : renderSpatialTopologySvg(layout, {
         labelMode: state.labelMode,
         zoom: state.zoom,
         showCandidates: state.showCandidates,
@@ -280,7 +387,10 @@ function initializeTopologyWorkspace(container, initial) {
     applyCanvasScale()
     bindCanvasTargets()
     renderMinimap()
-    container.querySelector('.topology-a11y-list').innerHTML = layout.nodes.map((node) => (
+    const accessibleAssets = state.view === 'diagram'
+      ? areaData.exportAssets.filter(({ id }) => layout.visualizedPhysicalAssetIds.includes(id))
+      : layout.nodes
+    container.querySelector('.topology-a11y-list').innerHTML = accessibleAssets.map((node) => (
       `<button data-a11y-node="${escapeHtml(node.id)}">${escapeHtml(node.name)}</button>`
     )).join('')
   }
@@ -297,7 +407,13 @@ function initializeTopologyWorkspace(container, initial) {
   }
 
   function renderMinimap() {
-    container.querySelector('.topology-minimap').innerHTML = renderSpatialTopologySvg(layout, {
+    const minimap = container.querySelector('.topology-minimap')
+    minimap.hidden = state.view === 'diagram'
+    if (state.view === 'diagram') {
+      minimap.innerHTML = ''
+      return
+    }
+    minimap.innerHTML = renderSpatialTopologySvg(layout, {
       labelMode: 'off',
       showCandidates: false,
       showUnresolved: false,
@@ -328,6 +444,24 @@ function initializeTopologyWorkspace(container, initial) {
         state.selectedAssetId = null
         state.selectedCandidateId = null
         renderWorkspace()
+      })
+    })
+    container.querySelectorAll('[data-pole-group-toggle]').forEach((group) => {
+      const toggle = () => {
+        const groupId = group.dataset.poleGroupToggle
+        if (state.collapsedPoleGroupIds.has(groupId)) state.collapsedPoleGroupIds.delete(groupId)
+        else state.collapsedPoleGroupIds.add(groupId)
+        renderWorkspace({ preserveInspector: true })
+      }
+      group.addEventListener('click', (event) => {
+        if (event.target.closest('[data-node-id]')) return
+        toggle()
+      })
+      group.addEventListener('keydown', (event) => {
+        if (event.target.closest('[data-node-id]')) return
+        if (!['Enter', ' '].includes(event.key)) return
+        event.preventDefault()
+        toggle()
       })
     })
   }
@@ -367,13 +501,17 @@ function initializeTopologyWorkspace(container, initial) {
       bindInspectorBase()
       return
     }
-    const node = layout.nodes.find(({ id }) => id === state.selectedAssetId)
+    const node = state.view === 'diagram'
+      ? areaData.exportAssets.find(({ id }) => id === state.selectedAssetId)
+      : layout.nodes.find(({ id }) => id === state.selectedAssetId)
     if (node) {
       inspector.classList.add('open')
-      inspector.innerHTML = renderNodeInspector(node)
+      inspector.innerHTML = state.view === 'diagram'
+        ? renderDiagramAssetInspector(node, areaData, activeContext, selectedArea)
+        : renderNodeInspector(node)
       bindInspectorBase()
       inspector.querySelector('.open-topology-node-on-map')?.addEventListener('click', () => {
-        window.location.href = mapHref(activeContext, node.mapAssetId)
+        window.location.href = mapHref(activeContext, node.mapAssetId ?? node.id, selectedArea.key, state)
       })
       return
     }
@@ -525,6 +663,20 @@ function initializeTopologyWorkspace(container, initial) {
   }
 
   function bindStaticControls() {
+    container.querySelectorAll('[data-topology-view]').forEach((button) => {
+      button.addEventListener('click', () => {
+        if (state.view === button.dataset.topologyView) return
+        const params = new URLSearchParams(window.location.search)
+        if (button.dataset.topologyView === 'spatial') params.set('view', 'spatial')
+        else params.delete('view')
+        window.location.href = `${window.location.pathname}?${params}`
+      })
+    })
+    container.querySelector('.topology-area-select')?.addEventListener('change', (event) => {
+      const params = new URLSearchParams(window.location.search)
+      params.set('area', event.target.value)
+      window.location.href = `${window.location.pathname}?${params}`
+    })
     container.querySelector('#topology-search-input').addEventListener('input', (event) => {
       state.search = event.target.value
       window.clearTimeout(searchTimer)
@@ -578,7 +730,7 @@ function initializeTopologyWorkspace(container, initial) {
     const viewport = container.querySelector('.topology-viewport')
     let drag = null
     viewport.addEventListener('pointerdown', (event) => {
-      if (event.target.closest('[data-node-id], [data-candidate-id], [data-unresolved-id]')) {
+      if (event.target.closest('[data-node-id], [data-candidate-id], [data-unresolved-id], [data-pole-group-toggle]')) {
         return
       }
       drag = {
@@ -649,7 +801,9 @@ function initializeTopologyWorkspace(container, initial) {
   function exportSvg() {
     const svg = container.querySelector('.topology-canvas .topology-svg')
     if (!svg) return
-    downloadBlob(new Blob([svg.outerHTML], { type: 'image/svg+xml' }), 'peta-topologi-spasial.svg')
+    downloadBlob(new Blob([svg.outerHTML], { type: 'image/svg+xml' }), `${
+      state.view === 'diagram' ? 'diagram-topologi-jalur' : 'peta-topologi-spasial'
+    }-${selectedArea.key}.svg`)
   }
 
   function exportPng() {
@@ -663,11 +817,13 @@ function initializeTopologyWorkspace(container, initial) {
       canvas.width = Math.ceil(layout.width)
       canvas.height = Math.ceil(layout.height)
       const context = canvas.getContext('2d')
-      context.fillStyle = '#101923'
+      context.fillStyle = state.view === 'diagram' ? '#ffffff' : '#101923'
       context.fillRect(0, 0, canvas.width, canvas.height)
       context.drawImage(image, 0, 0)
       canvas.toBlob((blob) => {
-        if (blob) downloadBlob(blob, 'peta-topologi-spasial.png')
+        if (blob) downloadBlob(blob, `${
+          state.view === 'diagram' ? 'diagram-topologi-jalur' : 'peta-topologi-spasial'
+        }-${selectedArea.key}.png`)
         URL.revokeObjectURL(url)
       }, 'image/png')
     }
@@ -680,6 +836,8 @@ function initializeTopologyWorkspace(container, initial) {
       reviewCandidateId: state.selectedCandidateId,
     })
     const params = new URLSearchParams(base)
+    setOrDelete(params, 'view', state.view === 'diagram' ? null : state.view)
+    setOrDelete(params, 'area', selectedArea.key)
     setOrDelete(params, 'unresolvedEndpoint', state.selectedUnresolvedId)
     setOrDelete(params, 'candidates', state.showCandidates ? null : 'off')
     setOrDelete(params, 'unresolved', state.showUnresolved ? null : 'off')
@@ -687,13 +845,21 @@ function initializeTopologyWorkspace(container, initial) {
   }
 }
 
-function renderContext(activeContext, summaryPayload) {
+function renderContext(activeContext, summaryPayload, selectedArea, locationGroups) {
   const readiness = summaryPayload.readiness?.topologyReadiness ?? 'not_ready'
   return `
     <section class="topology-context">
       <span class="eyebrow">CABANG AKTIF</span>
       <h1>${escapeHtml(activeContext.branchName)}</h1>
       <p>${escapeHtml(activeContext.version)} · ${escapeHtml(activeContext.datasetVersionId)}</p>
+      <label class="topology-area-picker">
+        <span>Fasilitas</span>
+        <select class="topology-area-select" aria-label="Pilih fasilitas topologi">
+          ${locationGroups.map((group) => `<option value="${escapeHtml(group.key)}"${
+            group.key === selectedArea.key ? ' selected' : ''
+          }>${escapeHtml(group.name)}</option>`).join('')}
+        </select>
+      </label>
       <span class="readiness-badge ${readiness}">
         <span class="material-symbols-outlined" aria-hidden="true">${
           readiness === 'ready' ? 'verified' : 'pending_actions'
@@ -844,6 +1010,108 @@ function renderNodeInspector(node) {
   `
 }
 
+function renderAreaPicker(container, mapData, requestedArea) {
+  const query = new URLSearchParams(window.location.search)
+  query.delete('area')
+  container.innerHTML = `<div class="map-app topology-app">
+    ${renderTopNavigation('topology', mapData.activeContext)}
+    <main class="topology-area-gate">
+      <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
+      <span class="eyebrow">DIAGRAM TOPOLOGI</span>
+      <h1>Pilih fasilitas untuk membuka diagram</h1>
+      <p>Diagram jalur dirender per area agar core, urutan jalur, dan kelompok tiang tidak tercampur antar fasilitas.</p>
+      ${requestedArea ? '<p class="area-gate-warning" role="status">Area pada URL tidak tersedia di dataset aktif.</p>' : ''}
+      <div class="topology-area-grid">
+        ${mapData.locationGroups.map((group) => {
+          const params = new URLSearchParams(query)
+          params.set('area', group.key)
+          return `<a class="topology-area-card" href="${window.location.pathname}?${params}">
+            <span class="material-symbols-outlined" aria-hidden="true">corporate_fare</span>
+            <span><strong>${escapeHtml(group.name)}</strong><small>${group.assetIds?.length ?? 0} aset · ${group.geometryIds?.length ?? 0} geometri</small></span>
+            <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
+          </a>`
+        }).join('') || '<p>Tidak ada fasilitas yang tersedia pada dataset aktif.</p>'}
+      </div>
+    </main>
+  </div>`
+  bindUserAccountMenu()
+}
+
+function candidateMatchesArea(candidate, assetIds, geometryIds) {
+  return [
+    candidate.sourceAssetId,
+    candidate.sourcePathAssetId,
+    candidate.targetAssetId,
+    candidate.targetPathAssetId,
+  ].some((id) => assetIds.has(id)) || [
+    candidate.sourceGeometryId,
+    candidate.targetGeometryId,
+    ...(candidate.sourceGeometryIds ?? []),
+  ].some((id) => geometryIds.has(id))
+}
+
+function endpointMatchesArea(endpoint, assetIds, geometryIds) {
+  return [endpoint.sourceAssetId, endpoint.sourcePathAssetId].some((id) => assetIds.has(id))
+    || [endpoint.sourceGeometryId, ...(endpoint.sourceGeometryIds ?? [])]
+      .some((id) => geometryIds.has(id))
+}
+
+function scopeGraphToArea(graph, assetIds) {
+  const nodes = (graph.nodes ?? []).filter((node) => assetIds.has(
+    node.canonicalAssetId ?? node.assetId ?? node.id,
+  ))
+  const nodeIds = new Set(nodes.flatMap((node) => [
+    node.id,
+    node.assetId,
+    node.canonicalAssetId,
+  ].filter(Boolean)))
+  const edges = (graph.edges ?? []).filter((edge) => (
+    nodeIds.has(edge.sourceAssetId ?? edge.sourceNodeId)
+      && nodeIds.has(edge.targetAssetId ?? edge.targetNodeId)
+  ))
+  return { ...graph, nodes, edges }
+}
+
+function renderDiagramAssetInspector(asset, areaData, activeContext, selectedArea) {
+  const connected = (areaData.topologyGraph.edges ?? []).filter((edge) => (
+    [edge.sourceAssetId, edge.targetAssetId].includes(asset.id)
+  ))
+  const mountedOn = areaData.mountingRelations.find(({ sourceAssetId }) => (
+    sourceAssetId === asset.id
+  ))
+  const mounted = areaData.mountingRelations.filter(({ targetAssetId }) => (
+    targetAssetId === asset.id
+  ))
+  return `
+    <button class="icon-button close-topology-inspector" type="button" aria-label="Tutup detail">
+      <span class="material-symbols-outlined" aria-hidden="true">close</span>
+    </button>
+    <header class="inspector-header node">
+      <span class="node-family"><i class="category-dot ${normalizeFamily(asset.category)}"></i>${
+        categoryLabel(normalizeFamily(asset.category))
+      }</span>
+      <h2>${escapeHtml(asset.name)}</h2>
+      <p>${escapeHtml(asset.type)}</p>
+    </header>
+    <section class="unresolved-detail">
+      <dl>
+        <div><dt>Confirmed edge</dt><dd>${connected.length}</dd></div>
+        <div><dt>Kelompok tiang</dt><dd>${escapeHtml(mountedOn?.targetAssetId ?? (mounted.length ? asset.id : '—'))}</dd></div>
+        <div><dt>Perangkat terpasang</dt><dd>${mounted.length}</dd></div>
+        <div><dt>Identitas aset</dt><dd>${escapeHtml(asset.id)}</dd></div>
+      </dl>
+    </section>
+    <div class="inspector-integrity-note">
+      <span class="material-symbols-outlined" aria-hidden="true">verified</span>
+      <p>Blok fisik hanya berasal dari relasi mounting confirmed/manual. Jalur berasal dari confirmed graph.</p>
+    </div>
+    <footer class="inspector-actions">
+      <a class="button primary" href="${mapHref(activeContext, asset.id, selectedArea.key)}">
+        <span class="material-symbols-outlined" aria-hidden="true">location_on</span>Lihat di peta
+      </a>
+    </footer>`
+}
+
 function endpointCard(label, name, id) {
   return `<div class="inspector-endpoint">
     <span>${escapeHtml(label)}</span><strong>${escapeHtml(name)}</strong>
@@ -882,12 +1150,15 @@ function readContext() {
   }
 }
 
-function mapHref(context, selectedAssetId) {
+function mapHref(context, selectedAssetId, area = null, traceState = {}) {
   const params = new URLSearchParams({
     datasetId: context.datasetId,
     branchId: context.branchId,
   })
   if (selectedAssetId) params.set('selectedAssetId', selectedAssetId)
+  if (area) params.set('area', area)
+  if (traceState.traceFrom) params.set('traceFrom', traceState.traceFrom)
+  if (traceState.traceTo) params.set('traceTo', traceState.traceTo)
   return `/map?${params}`
 }
 

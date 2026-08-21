@@ -6,6 +6,7 @@ export const TOPOLOGY_GROUPING_MODES = Object.freeze([
 ])
 
 export const TOPOLOGY_LABEL_MODES = Object.freeze(['auto', 'all', 'off'])
+export const TOPOLOGY_VIEW_MODES = Object.freeze(['diagram', 'spatial'])
 
 export function parseTopologyViewState(search, {
   assetIds = [],
@@ -16,7 +17,10 @@ export function parseTopologyViewState(search, {
   const validCandidates = new Set(candidateIds)
   const grouping = params.get('grouping')
   const labelMode = params.get('labels')
+  const view = params.get('view')
   return {
+    view: TOPOLOGY_VIEW_MODES.includes(view) ? view : 'diagram',
+    area: params.get('area') || null,
     selectedAssetId: validAssets.has(params.get('selectedAssetId'))
       ? params.get('selectedAssetId')
       : null,
@@ -35,6 +39,8 @@ export function parseTopologyViewState(search, {
 
 export function serializeTopologyViewState(search, state) {
   const params = new URLSearchParams(search)
+  setOrDelete(params, 'view', state.view && state.view !== 'diagram' ? state.view : null)
+  setOrDelete(params, 'area', state.area)
   setOrDelete(params, 'selectedAssetId', state.selectedAssetId)
   setOrDelete(params, 'reviewCandidateId', state.reviewCandidateId)
   setOrDelete(params, 'grouping', state.groupingMode)

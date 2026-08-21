@@ -6,10 +6,8 @@ import {
 import {
   loadActiveAssetDetail,
   loadActiveDataset,
-  loadAllTopologyCandidates,
   loadDatasetProjection,
   loadTopologyProjection,
-  reviewTopologyCandidate,
   setMountingRelation,
   traceTopology,
 } from '../../services/active-dataset-service.js'
@@ -23,14 +21,12 @@ import {
   serializeMapUrlState,
 } from './network-sidebar-state.js'
 import { buildPoleGroups } from '../../domain/pole-groups.js'
+import { buildTopologyDiagramHref } from '../../domain/topology-navigation.js'
 import {
   buildExplicitRelationGraph,
   getConnectedAssets,
 } from './network-tracing.js'
-import { openSchematicDialog } from './diagram-dialog.js'
 import { openMapDataTransferDialog } from './map-data-transfer-dialog.js'
-import { buildSchematicGraph } from './schematic-graph.js'
-import { calculateSchematicLayout } from './schematic-layout.js'
 import {
   emptyOperationalTopologyGraph,
   TOPOLOGY_NOT_READY_MESSAGE,
@@ -112,9 +108,6 @@ export async function renderMapPage(container) {
   const globalTraceAvailable = topologyReadiness.traceAvailable
     ?? topologyReadiness.ready
     ?? false
-  const globalDiagramAvailable = topologyReadiness.diagramAvailable
-    ?? topologyReadiness.ready
-    ?? false
   const operationalTopologyGraph = globalTraceAvailable
     ? fullTopologyGraph
     : emptyOperationalTopologyGraph(activeContext.datasetVersionId)
@@ -146,14 +139,13 @@ export async function renderMapPage(container) {
     poleGroups: allPoleGroups,
   })
   const traceAvailable = globalTraceAvailable && topologyGraph.edges.length > 0
-  const diagramAvailable = globalDiagramAvailable && assets.length > 0
+  const diagramAvailable = assets.length > 0
   const topologySummary = summarizeMapTopology({
     assets,
     topologyGraph,
     datasetTopologySummary,
   })
   const hasRenderableData = geometries.length > 0
-  let diagramCandidateProjectionPromise = null
   const resolvedOverlays = (overlayResult[0].status === 'fulfilled'
     ? overlayResult[0].value.items ?? []
     : [])
@@ -934,7 +926,7 @@ export async function renderMapPage(container) {
     renderDrawer()
   }
 
-  async function openSchematic(event) {
+  function openSchematic() {
     if (!diagramAvailable) {
       state.traceStatus = 'error'
       state.traceError = topologyReadiness.message
@@ -944,133 +936,7 @@ export async function renderMapPage(container) {
       renderDrawer()
       return
     }
-    const trigger = event?.currentTarget
-    const previousBusy = trigger?.getAttribute('aria-busy')
-    if (trigger) {
-      trigger.disabled = true
-      trigger.setAttribute('aria-busy', 'true')
-    }
-    let topologyCandidates = []
-    let candidateProjection = null
-    let candidateLoadError = null
-    try {
-      diagramCandidateProjectionPromise ??= Promise.all(
-        ['candidate', 'ambiguous'].map((status) => loadAllTopologyCandidates({
-          datasetVersionId: activeContext.datasetVersionId,
-          status,
-        })),
-      ).then(([candidatePage, ambiguousPage]) => ({
-        ...candidatePage,
-        items: [...(candidatePage.items ?? []), ...(ambiguousPage.items ?? [])],
-      }))
-      candidateProjection = await diagramCandidateProjectionPromise
-      topologyCandidates = candidateProjection.items ?? []
-    } catch (error) {
-      diagramCandidateProjectionPromise = null
-      candidateLoadError = error.message
-    } finally {
-      if (trigger) {
-        trigger.disabled = false
-        if (previousBusy === null) trigger.removeAttribute('aria-busy')
-        else trigger.setAttribute('aria-busy', previousBusy)
-      }
-    }
-    const allAssetsGraph = buildSchematicGraph({
-      assets: diagramAssets,
-      networks,
-      topologyGraph,
-      poleGroups,
-      topologyCandidates,
-      scope: 'all-assets',
-      topologyReady: topologyReadiness.ready,
-    })
-    if (candidateLoadError && allAssetsGraph.diagnostics) {
-      allAssetsGraph.diagnostics.candidateLoadError = candidateLoadError
-    }
-    const fullMapGraph = buildSchematicGraph({
-      assets: diagramAssets,
-      networks,
-      topologyGraph,
-      poleGroups,
-      scope: 'full-map',
-      topologyReady: topologyReadiness.ready,
-    })
-    const traceGraph = buildSchematicGraph({
-      assets: diagramAssets,
-      networks,
-      topologyGraph,
-      poleGroups,
-      scope: 'trace',
-      tracePath: state.traceStatus === 'active' ? state.tracePath : [],
-      traceRelations: state.traceStatus === 'active' ? state.traceRelations : [],
-      topologyReady: topologyReadiness.ready,
-    })
-    const selectedAssetGraph = buildSchematicGraph({
-      assets,
-      networks,
-      topologyGraph,
-      poleGroups,
-      focusedAssetId: selection.selectedAssetId,
-      scope: 'selected',
-      topologyReady: topologyReadiness.ready,
-    })
-    openSchematicDialog({
-      diagrams: {
-        'all-assets': {
-          graph: allAssetsGraph,
-          layout: calculateSchematicLayout(allAssetsGraph, { preserveMapOrientation: true }),
-        },
-        'full-map': {
-          graph: fullMapGraph,
-          layout: calculateSchematicLayout(fullMapGraph, { preserveMapOrientation: true }),
-        },
-        trace: {
-          graph: traceGraph,
-          layout: calculateSchematicLayout(traceGraph, { preserveMapOrientation: true }),
-        },
-        selected: {
-          graph: selectedAssetGraph,
-          layout: calculateSchematicLayout(selectedAssetGraph),
-        },
-      },
-      activeContext,
-      selectedAssetId: selection.selectedAssetId,
-      initialMode: state.traceStatus === 'active'
-        ? 'trace'
-        : selection.selectedAssetId
-          ? 'selected'
-          : 'all-assets',
-      onSelectAsset: selectAssetFromDiagram,
-      onReviewCandidate: async ({ candidateId, action }) => {
-        await reviewTopologyCandidate({
-          candidateId,
-          action,
-          body: {
-            datasetVersionId: activeContext.datasetVersionId,
-            ...(candidateProjection?.graphRevision !== undefined
-              ? { expectedGraphRevision: candidateProjection.graphRevision } : {}),
-            ...(candidateProjection?.candidateRevision !== undefined
-              ? { expectedCandidateRevision: candidateProjection.candidateRevision } : {}),
-            reason: action === 'reject' ? 'Ditolak dari Diagram Skematik 2D.' : '',
-          },
-        })
-        window.location.reload()
-      },
-      onNoValidRelation: async ({ candidates }) => {
-        const activeCandidates = candidates.filter((candidate) => candidate.candidateId)
-        for (const candidate of activeCandidates) {
-          await reviewTopologyCandidate({
-            candidateId: candidate.candidateId,
-            action: 'reject',
-            body: {
-              datasetVersionId: activeContext.datasetVersionId,
-              reason: 'Tidak ada relasi valid berdasarkan review Diagram Skematik 2D.',
-            },
-          })
-        }
-        window.location.reload()
-      },
-    })
+    window.location.href = topologyDiagramHref()
   }
 
   function traceErrorMessage(error) {
@@ -1102,7 +968,7 @@ export async function renderMapPage(container) {
       selectedNetworkIds: selection.selectedNetworkIds,
       initialMode,
       onActivated: () => window.location.reload(),
-      onOpenDiagram: openSchematic,
+      diagramUrl: topologyDiagramHref(),
       topologyReady: diagramAvailable,
       topologyMessage: topologyReadiness.message
         || topologyReadiness.traceMessage
@@ -1110,8 +976,14 @@ export async function renderMapPage(container) {
     })
   }
 
-  function selectAssetFromDiagram(assetId) {
-    handleAssetSelect(assetId)
+  function topologyDiagramHref() {
+    return buildTopologyDiagramHref({
+      context: activeContext,
+      area: selectedArea?.key,
+      selectedAssetId: selection.selectedAssetId,
+      traceFrom: state.traceFromId,
+      traceTo: state.traceToId,
+    })
   }
 
   function setMobileMapTab(tab) {

@@ -22,7 +22,7 @@ export function openMapDataTransferDialog({
   selectedNetworkIds = new Set(),
   initialMode = 'import',
   onActivated,
-  onOpenDiagram,
+  diagramUrl = '/topology',
   topologyReady = true,
   topologyMessage = 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.',
 }) {
@@ -146,7 +146,7 @@ export function openMapDataTransferDialog({
     dialog.querySelector('.download-active-source')?.addEventListener('click', downloadSource)
     dialog.querySelector('.open-map-diagram')?.addEventListener('click', () => {
       close()
-      onOpenDiagram?.()
+      window.location.href = diagramUrl
     })
   }
 
