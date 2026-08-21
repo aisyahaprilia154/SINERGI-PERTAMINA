@@ -244,6 +244,135 @@ export function adaptActiveDatasetForMap(payload) {
   }
 }
 
+/**
+ * Adapts the lightweight topology payload. It intentionally does not create
+ * geometry, map display coordinates, or source-layer features; the topology
+ * page only needs canonical device metadata, area identity, and graph scope.
+ */
+export function adaptActiveDatasetForTopology(payload) {
+  if (!payload?.datasetVersion || !Array.isArray(payload.assets)) {
+    throw new TypeError('Response topology aktif tidak valid.')
+  }
+  const resolver = createFrontendIdentityResolver(payload)
+  const topologyGraph = confirmedTopologyProjection(payload)
+  const graphNodeById = new Map((topologyGraph.nodes ?? []).map((node) => [
+    canonicalAssetIdFor(node),
+    node,
+  ]))
+  const assets = payload.assets.map((asset) => {
+    const id = canonicalAssetIdFor(asset)
+    const graphNode = graphNodeById.get(id) ?? {}
+    const location = asset.locationGroupKey || asset.locationGroupName
+      ? {
+        locationGroupKey: asset.locationGroupKey ?? 'lainnya',
+        locationGroupName: asset.locationGroupName ?? asset.locationGroupKey ?? 'Lainnya',
+      }
+      : locationGroupFor(asset.sourceFolderPath)
+    return {
+      ...structuredClone(asset),
+      id,
+      assetId: id,
+      canonicalAssetId: id,
+      datasetVersionId: asset.datasetVersionId ?? payload.datasetVersion.id,
+      branchId: asset.branchId ?? payload.datasetVersion.branchId,
+      name: asset.name ?? id,
+      type: asset.type ?? asset.assetType ?? graphNode.assetType ?? 'Aset',
+      assetType: asset.assetType ?? asset.type ?? graphNode.assetType ?? 'Aset',
+      category: asset.category ?? graphNode.category ?? 'unmapped',
+      networkFamily: asset.networkFamily ?? graphNode.networkFamily ?? asset.category ?? 'unmapped',
+      topologyRole: asset.topologyRole ?? graphNode.topologyRole ?? null,
+      objectRole: asset.objectRole ?? graphNode.objectRole ?? 'device_node',
+      diagramClass: asset.diagramClass ?? graphNode.diagramClass ?? null,
+      jbProfileId: asset.jbProfileId ?? graphNode.jbProfileId ?? null,
+      locationGroupKey: location.locationGroupKey,
+      locationGroupName: location.locationGroupName,
+      areaKey: location.locationGroupKey,
+      areaName: location.locationGroupName,
+      location: asset.location ?? asset.locationText ?? location.locationGroupName,
+    }
+  }).filter(({ id }) => Boolean(id))
+  const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
+  const mountingRelations = normalizeMountingRelations(
+    payload.mountingRelations ?? [],
+    resolver,
+  ).filter((relation) => assetById[relation.sourceAssetId] && assetById[relation.targetAssetId])
+  const poleGroups = buildPoleGroups({ assets, mountingRelations })
+  const groups = new Map()
+  assets.forEach((asset) => {
+    const key = asset.locationGroupKey ?? 'lainnya'
+    const group = groups.get(key) ?? {
+      key,
+      name: asset.locationGroupName ?? key,
+      assetIds: [],
+      geometryIds: [],
+      bounds: null,
+    }
+    group.assetIds.push(asset.id)
+    groups.set(key, group)
+  })
+  const context = payload.context ?? {}
+  const datasetVersion = payload.datasetVersion
+  const topologyReadiness = structuredClone(payload.topologyReadiness ?? null)
+  const activeContext = {
+    branchId: context.branchId ?? datasetVersion.branchId,
+    branchName: context.branchName ?? formatName(context.branchId ?? datasetVersion.branchId),
+    datasetId: context.datasetId ?? datasetVersion.datasetId,
+    datasetVersionId: context.datasetVersionId ?? datasetVersion.id,
+    siteId: context.siteId ?? null,
+    publicationProfile: context.publicationProfile
+      ?? payload.publicationProfile
+      ?? datasetVersion.publicationProfile
+      ?? 'map_only',
+    datasetName: datasetVersion.versionName,
+    version: datasetVersion.versionName,
+    publishedAt: datasetVersion.publishedAt ?? datasetVersion.activatedAt ?? null,
+    activePointerRevision: context.activePointerRevision ?? payload.activePointer?.revision ?? null,
+    topologyReady: context.topologyReady === true
+      || topologyReadiness?.ready === true
+      || topologyReadiness?.topologyReadiness === 'ready'
+      || payload.topologyReady === true,
+    topologyReadiness,
+    readinessContract: structuredClone(payload.readinessContract ?? null),
+    capabilities: structuredClone(payload.capabilities ?? null),
+  }
+  return {
+    activeContext,
+    assets,
+    diagramAssets: [],
+    assetById,
+    geometries: [],
+    exportAssets: assets,
+    networks: [],
+    locationGroups: [...groups.values()].sort((left, right) => (
+      left.name.localeCompare(right.name, 'id') || left.key.localeCompare(right.key, 'id')
+    )),
+    topologyGraph,
+    mountingRelations,
+    mountingCandidates: structuredClone(payload.mountingCandidates ?? []),
+    mountingOptions: structuredClone(payload.mountingOptions ?? []),
+    mountingOverrides: structuredClone(payload.mountingOverrides ?? []),
+    mountingSummary: structuredClone(payload.mountingSummary ?? null),
+    poleGroups,
+    topologySummary: structuredClone(payload.topologySummary ?? {}),
+    topologyReadiness,
+    readiness: structuredClone(payload.readiness ?? null),
+    readinessContract: structuredClone(payload.readinessContract ?? null),
+    capabilities: structuredClone(payload.capabilities ?? null),
+    sites: structuredClone(payload.sites ?? []),
+    overlays: [],
+    summary: structuredClone(payload.summary ?? null),
+    assetIdentityMap: structuredClone(payload.assetIdentityMap ?? null),
+    layers: [],
+    counts: {
+      assetCount: assets.length,
+      assetNodeCount: assets.length,
+      geometryCount: 0,
+    },
+    renderingSummary: structuredClone(payload.renderingSummary ?? {}),
+    hasRenderableData: false,
+  }
+}
+
 function confirmedTopologyProjection(payload) {
   // A map publication can expose confirmed relation evidence even when the
   // legacy topology-review readiness contract is not ready. Readiness only

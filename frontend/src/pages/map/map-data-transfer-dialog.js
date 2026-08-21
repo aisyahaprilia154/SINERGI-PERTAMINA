@@ -651,10 +651,10 @@ function renderExportPanel({
         })}
         ${renderExportOption({
           icon: 'account_tree',
-          title: 'Diagram skematik 2D',
-          description: 'Export peta penuh atau jalur tracing ke SVG/PNG',
+          title: 'Diagram Topologi',
+          description: 'Buka workspace logis dari graph terkonfirmasi',
           buttonClass: 'open-map-diagram',
-          buttonLabel: 'Buka diagram',
+          buttonLabel: 'Buka Diagram Topologi',
           disabled: !hasActiveDataset || !assets.length,
         })}
       </div>

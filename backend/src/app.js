@@ -237,7 +237,9 @@ export function createApp({
           200,
           url.searchParams.get('view') === 'map'
             ? await lifecycleService.getActiveMapDataset(context)
-            : await lifecycleService.getActiveDataset(context),
+            : url.searchParams.get('view') === 'topology'
+              ? await lifecycleService.getActiveTopologyDataset(context)
+              : await lifecycleService.getActiveDataset(context),
         )
       }
       const parserProjectionMatch = request.method === 'GET'

@@ -79,6 +79,10 @@ test('atomic activation archives the previous version and publishes one shared p
       datasetId: 'dataset-semarang',
       branchId: 'semarang',
     })
+    const topologyView = await fixture.service.getActiveTopologyDataset({
+      datasetId: 'dataset-semarang',
+      branchId: 'semarang',
+    })
     const assetDetail = await fixture.service.getActiveAssetDetail({
       datasetId: 'dataset-semarang',
       branchId: 'semarang',
@@ -101,6 +105,17 @@ test('atomic activation archives the previous version and publishes one shared p
     assert.equal(mapView.assets[0].assetId, 'ASSET-version-new')
     assert.equal(mapView.assets[0].sourceFeatureId, 'source-feature-version-new')
     assert.equal(Object.hasOwn(mapView.assets[0], 'properties'), false)
+    assert.equal(topologyView.topologyView, true)
+    assert.equal(Object.hasOwn(topologyView, 'geometries'), false)
+    assert.equal(topologyView.assets[0].diagramClass, 'rack-root')
+    assert.equal(Object.hasOwn(topologyView.topologyGraph, 'serviceGraph'), false)
+    assert.equal(Object.hasOwn(topologyView.topologyGraph, 'physicalTerminationGraph'), false)
+    assert.equal(Object.hasOwn(topologyView.topologyGraph, 'interfaceRegistry'), false)
+    assert.equal(Object.hasOwn(topologyView.assetIdentityMap, 'identityRegistry'), false)
+    assert.ok(topologyView.topologyGraph.nodes.every((node) => (
+      node.id === node.canonicalAssetId
+    )))
+    assert.equal(topologyView.assets[0].locationGroupKey, 'lainnya')
     assert.deepEqual(mapView.geometries[0].coordinates, [110, -7])
     assert.equal(mapView.geometries[0].sourceGeometryId, 'source-geometry-version-new')
     assert.equal(mapView.geometries[0].sourceFeatureId, 'source-feature-version-new')

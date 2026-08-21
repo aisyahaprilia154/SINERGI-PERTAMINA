@@ -382,6 +382,11 @@ export class DatasetVersionLifecycleService {
     })
   }
 
+  async getActiveTopologyDataset({ datasetId, branchId } = {}) {
+    const resolved = await this.#resolveActive(datasetId, branchId)
+    return toActiveTopologyDataset(resolved)
+  }
+
   async getActiveAssetDetail({
     datasetId,
     branchId,
@@ -1018,6 +1023,243 @@ export function compareDatasetVersions(candidate, active) {
       unchangedAssets: assetChanges.filter(({ status }) => status === 'unchanged').length,
       removedAssets: removedAssets.length,
     },
+  }
+}
+
+function toActiveTopologyDataset(resolved) {
+  const record = resolved.record
+  const assetIdentityMap = buildAssetIdentityMapFromRecord(record)
+  const resolver = createAssetIdentityResolver(assetIdentityMap)
+  const topology = normalizeTopologyGraph(record, assetIdentityMap)
+  const topologyGraph = projectTopologyGraph(topology.graph)
+  const topologyRelations = filterConflictingCameraEdges(
+    record.confirmedRelations,
+    topologyGraph.nodes,
+  ).edges
+  const publicationProfile = activePublicationProfile(record, resolved.pointer)
+  const readinessContract = buildReadinessContract(record, topology.graph)
+  const catalog = buildActiveAssetCatalog({
+    record,
+    identityMap: assetIdentityMap,
+    topologyGraph: topology.graph,
+    publicationProfile,
+  }).filter(({ objectRole }) => objectRole !== 'visual_only')
+  const graphNodeById = new Map((topologyGraph.nodes ?? []).map((node) => [
+    node.id ?? node.assetId ?? node.canonicalAssetId,
+    node,
+  ]))
+  const assets = catalog.map((item) => {
+    const id = item.canonicalAssetId
+    const graphNode = graphNodeById.get(id) ?? {}
+    return {
+      id,
+      assetId: id,
+      canonicalAssetId: id,
+      stableAssetId: item.stableAssetId,
+      onboardingIdentity: item.onboardingIdentity,
+      legacyAssetId: item.legacyAssetId,
+      identityStatus: item.identityStatus,
+      identityAliases: item.identityAliases,
+      sourceFeatureId: item.sourceFeatureId,
+      name: item.name,
+      type: item.assetType,
+      assetType: item.assetType,
+      canonicalAssetType: item.canonicalAssetType ?? item.assetType,
+      category: item.category,
+      networkFamily: item.networkFamily,
+      objectRole: item.objectRole,
+      topologyRole: graphNode.topologyRole ?? item.topologyRole ?? null,
+      diagramClass: item.diagramClass ?? graphNode.diagramClass ?? null,
+      jbProfileId: item.jbProfileId ?? graphNode.jbProfileId ?? null,
+      branchId: item.branchId ?? record.datasetVersion.branchId,
+      datasetVersionId: record.datasetVersion.id,
+      siteId: item.siteId,
+      location: item.locationText,
+      locationText: item.locationText,
+      locationGroupKey: item.locationGroupKey ?? 'lainnya',
+      locationGroupName: item.locationGroupName ?? 'Lainnya',
+      sourceFolderPath: item.sourceFolderPath,
+      status: item.objectStatus,
+      sourceStatus: item.sourceStatus,
+    }
+  })
+  const assetIds = new Set(assets.map(({ id }) => id))
+  const assetsByArea = new Map()
+  assets.forEach((asset) => {
+    const key = asset.locationGroupKey ?? 'lainnya'
+    const group = assetsByArea.get(key) ?? {
+      key,
+      name: asset.locationGroupName ?? key,
+      assetIds: [],
+      geometryIds: [],
+      bounds: null,
+    }
+    group.assetIds.push(asset.id)
+    assetsByArea.set(key, group)
+  })
+  const mountingRelations = filterResolvedMountingRelations(record, resolver)
+    .filter((relation) => {
+      const sourceId = relation.sourceAssetId
+      const targetId = relation.targetAssetId
+      return assetIds.has(sourceId) && assetIds.has(targetId)
+    })
+  const sites = buildActiveSites({ catalog, record, siteBoundaries: {} })
+  const capabilities = buildActiveCapabilities({
+    publicationProfile,
+    readiness: readinessContract,
+  })
+  return {
+    topologyView: true,
+    activePointer: resolved.pointer,
+    datasetVersion: publicDatasetVersion(record.datasetVersion, resolved.pointer),
+    assets,
+    topologyGraph,
+    topologySummary: normalizeTopologySummary(
+      record.topologySummary,
+      topology.graph,
+      topologyRelations,
+    ),
+    topologyReadiness: record.topologyReadiness ?? null,
+    topologyIdentity: topology.identity,
+    mountingRelations,
+    mountingCandidates: structuredClone(record.mountingCandidates ?? []),
+    mountingOptions: filterResolvedMountingOptions(record, resolver),
+    mountingOverrides: structuredClone(record.mountingOverrides ?? []),
+    mountingSummary: structuredClone(record.mountingSummary ?? null),
+    assetIdentityMap: projectTopologyIdentityMap(assetIdentityMap, assets),
+    readiness: record.readiness ?? null,
+    readinessContract,
+    topologyReady: readinessContract.topologyReady === 'ready',
+    publicationProfile,
+    context: activeContext(record, resolved.pointer, null, publicationProfile),
+    capabilities,
+    locationGroups: [...assetsByArea.values()].sort((left, right) => (
+      left.name.localeCompare(right.name, 'id') || left.key.localeCompare(right.key, 'id')
+    )),
+    sites,
+    summary: buildActiveSummary({
+      catalog,
+      sites,
+      record,
+      topologyGraph: topology.graph,
+      overlays: [],
+    }),
+    renderingSummary: {
+      totalAssets: assets.length,
+      topologyNodes: topology.graph.nodes.length,
+      topologyEdges: topology.graph.edges.length,
+      geometryCount: 0,
+    },
+  }
+}
+
+// The topology screen consumes canonical device metadata and confirmed edge
+// evidence. Internal service/termination/interface registries are useful for
+// backend tracing and review, but shipping them with every topology page
+// response makes the initial render needlessly expensive.
+function projectTopologyGraph(graph = {}) {
+  const nodes = (graph.nodes ?? []).map((node) => ({
+    id: node.id ?? node.canonicalAssetId ?? node.assetId,
+    canonicalAssetId: node.canonicalAssetId ?? node.id ?? node.assetId,
+    assetId: node.assetId ?? node.canonicalAssetId ?? node.id,
+    sourceNodeId: node.sourceNodeId ?? node.id ?? null,
+    sourceFeatureId: node.sourceFeatureId ?? null,
+    siteId: node.siteId ?? null,
+    networkFamily: node.networkFamily ?? null,
+    serviceDomain: node.serviceDomain ?? null,
+    serviceDomains: node.serviceDomains ?? [],
+    mediaType: node.mediaType ?? null,
+    cableRole: node.cableRole ?? null,
+    objectRole: node.objectRole ?? null,
+    topologyRole: node.topologyRole ?? null,
+    topologyRequired: node.topologyRequired ?? null,
+    assetType: node.assetType ?? null,
+    category: node.category ?? null,
+    sourceStatus: node.sourceStatus ?? null,
+  }))
+  const edges = (graph.edges ?? []).map((edge) => ({
+    id: edge.id ?? edge.relationId ?? null,
+    relationId: edge.relationId ?? edge.id ?? null,
+    datasetVersionId: edge.datasetVersionId ?? graph.datasetVersionId ?? null,
+    sourceAssetId: edge.sourceAssetId ?? edge.sourceNodeId ?? null,
+    targetAssetId: edge.targetAssetId ?? edge.targetNodeId ?? null,
+    sourceNodeId: edge.sourceNodeId ?? edge.sourceAssetId ?? null,
+    targetNodeId: edge.targetNodeId ?? edge.targetAssetId ?? null,
+    canonicalSourceAssetId: edge.canonicalSourceAssetId ?? null,
+    canonicalTargetAssetId: edge.canonicalTargetAssetId ?? null,
+    relationType: edge.relationType ?? null,
+    direction: edge.direction ?? 'undirected',
+    serviceDomain: edge.serviceDomain ?? null,
+    mediaType: edge.mediaType ?? null,
+    cableRole: edge.cableRole ?? null,
+    networkFamily: edge.networkFamily ?? null,
+    pathAssetId: edge.pathAssetId ?? null,
+    pathAssetIds: edge.pathAssetIds ?? [],
+    targetInterfaceIds: edge.targetInterfaceIds ?? [],
+    sourceGeometryId: edge.sourceGeometryId ?? null,
+    sourceGeometryIds: edge.sourceGeometryIds ?? [],
+    lengthMeters: edge.lengthMeters ?? null,
+    totalLengthMeters: edge.totalLengthMeters ?? null,
+    distanceMeters: edge.distanceMeters ?? null,
+    confidence: edge.confidence ?? null,
+    score: edge.score ?? null,
+    provenance: edge.provenance ?? null,
+    verificationStatus: edge.verificationStatus ?? null,
+    relationStatus: edge.relationStatus ?? null,
+    relationSource: edge.relationSource ?? null,
+    relationKind: edge.relationKind ?? null,
+    candidateIds: edge.candidateIds ?? [],
+    sourceRelationIds: edge.sourceRelationIds ?? [],
+  }))
+  return {
+    datasetVersionId: graph.datasetVersionId ?? null,
+    topologyRuleSetVersion: graph.topologyRuleSetVersion ?? null,
+    graphRevision: graph.graphRevision ?? null,
+    nodes,
+    edges,
+    components: (graph.components ?? []).map((component) => ({
+      componentId: component.componentId ?? component.id ?? null,
+      id: component.id ?? component.componentId ?? null,
+      nodeIds: component.nodeIds ?? [],
+      edgeIds: component.edgeIds ?? [],
+      rootId: component.rootId ?? null,
+      rootVerified: component.rootVerified ?? false,
+      rootReason: component.rootReason ?? null,
+      areaKey: component.areaKey ?? null,
+      suggestedLinkIds: component.suggestedLinkIds ?? [],
+      suggestedNeighborComponentIds: component.suggestedNeighborComponentIds ?? [],
+    })),
+    degreeByNode: graph.degreeByNode ?? {},
+    isolatedNodeIds: graph.isolatedNodeIds ?? [],
+  }
+}
+
+function projectTopologyIdentityMap(identityMap = {}, assets = []) {
+  const aliasToCanonicalAssetId = {}
+  const items = assets.map((asset) => {
+    const canonicalAssetId = asset.canonicalAssetId ?? asset.id
+    const aliasValues = [
+      canonicalAssetId,
+      asset.assetId,
+      asset.stableAssetId,
+      asset.onboardingIdentity,
+      asset.legacyAssetId,
+      asset.sourceFeatureId,
+    ].filter(Boolean).map(String)
+    aliasValues.forEach((alias) => {
+      if (!Object.hasOwn(aliasToCanonicalAssetId, alias)) {
+        aliasToCanonicalAssetId[alias] = canonicalAssetId
+      } else if (aliasToCanonicalAssetId[alias] !== canonicalAssetId) {
+        aliasToCanonicalAssetId[alias] = null
+      }
+    })
+    return { canonicalAssetId, aliasValues }
+  })
+  return {
+    datasetVersionId: identityMap.datasetVersionId ?? null,
+    version: identityMap.version ?? null,
+    items,
+    aliasToCanonicalAssetId,
   }
 }
 

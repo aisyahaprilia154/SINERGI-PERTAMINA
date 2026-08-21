@@ -188,11 +188,11 @@ export function renderMapFloatingControls(
           <span>Tracing</span>
         </button>
         <button class="tool-button diagram-toggle map-action-secondary" type="button"
-          aria-label="Diagram 2D" ${diagramAvailable
-            ? 'title="Lihat jaringan dalam diagram 2D"'
+          aria-label="Diagram Topologi" ${diagramAvailable
+            ? 'title="Lihat jaringan dalam Diagram Topologi"'
             : diagramActionAttributes}>
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
-          <span>Diagram 2D</span>
+          <span>Diagram Topologi</span>
         </button>
         <button class="tool-button import-toggle map-action-ghost" type="button"
           aria-label="Import" title="Import data peta">
