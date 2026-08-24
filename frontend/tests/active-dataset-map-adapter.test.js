@@ -95,7 +95,7 @@ test('mounting relations build pole groups without becoming traversable network 
 
   const result = adaptActiveDatasetForMap(payload)
 
-  assert.equal(result.mountingRelations.length, 1)
+  assert.equal(result.mountingRelations.length, 2)
   assert.deepEqual(result.mountingRelations[0], {
     relationId: 'mounting-pole-cam',
     sourceAssetId: 'CAM-01',
@@ -104,12 +104,15 @@ test('mounting relations build pole groups without becoming traversable network 
     relationKind: 'installation_attachment',
     verificationStatus: 'confirmed',
   })
+  assert.equal(result.mountingRelations[1].sourceAssetId, 'JB-01')
+  assert.equal(result.mountingRelations[1].targetAssetId, 'POLE-01')
+  assert.equal(result.mountingRelations[1].provenance, 'spatial_inference')
   assert.equal(result.poleGroups.length, 1)
   assert.equal(result.mountingOptions.length, 1)
   assert.equal(result.mountingOptions[0].targetAssetName, 'POLE-01')
-  assert.deepEqual(result.poleGroups[0].assetIds, ['POLE-01', 'CAM-01'])
+  assert.deepEqual(result.poleGroups[0].assetIds, ['POLE-01', 'CAM-01', 'JB-01'])
   assert.equal(result.assetById['CAM-01'].mountedOnAssetId, 'POLE-01')
-  assert.deepEqual(result.assetById['POLE-01'].mountedAssetIds, ['CAM-01'])
+  assert.deepEqual(result.assetById['POLE-01'].mountedAssetIds, ['CAM-01', 'JB-01'])
   assert.equal(result.networks.flatMap(({ edges }) => edges).some(([source, target]) => (
     [source, target].includes('POLE-01') && [source, target].includes('CAM-01')
   )), false)

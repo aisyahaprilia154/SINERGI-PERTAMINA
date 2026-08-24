@@ -238,6 +238,7 @@ test('pole detail shows installed JB and cameras without the connected-assets se
   assert.match(html, /Aset terpasang/)
   assert.match(html, /JB-18\.1-WP/)
   assert.match(html, /C-018/)
+  assert.ok(html.indexOf('JB-18.1-WP') < html.indexOf('C-018'))
   assert.doesNotMatch(html, /id="connected-assets-title">Aset terhubung/)
   assert.doesNotMatch(html, /id="asset-topology-title">Relasi aset/)
   assert.doesNotMatch(html, /Sambungkan aset/)

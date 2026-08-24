@@ -23,7 +23,14 @@ import {
   parseMapUrlState,
   serializeMapUrlState,
 } from './network-sidebar-state.js'
-import { buildPoleGroups } from '../../domain/pole-groups.js'
+import {
+  buildPoleGroups,
+  createAssetReferenceIndex,
+  inferSpatialMountingRelations,
+  mergeMountingRelations,
+  mountingRelationsFromAssetProjection,
+  mountedChildrenForPole,
+} from '../../domain/pole-groups.js'
 import {
   buildExplicitRelationGraph,
   getConnectedAssets,
@@ -102,6 +109,7 @@ export async function renderMapPage(container) {
     mountingRelations: allMountingRelations,
     mountingCandidates: allMountingCandidates,
     mountingOptions: allMountingOptions,
+    mountingOverrides: allMountingOverrides,
     poleGroups: allPoleGroups,
     topologySummary: datasetTopologySummary,
     locationGroups,
@@ -143,6 +151,10 @@ export async function renderMapPage(container) {
     mountingOptions: allMountingOptions,
     poleGroups: allPoleGroups,
   })
+  const assetReferenceIndex = createAssetReferenceIndex(allAssets)
+  let mountingOverrides = Array.isArray(allMountingOverrides)
+    ? allMountingOverrides.map((override) => ({ ...override }))
+    : []
   let topologyGraph = initialTopologyGraph
   const traceAvailable = topologyGraph.edges.length > 0
   const diagramAvailable = assets.length > 0
@@ -502,18 +514,23 @@ export async function renderMapPage(container) {
       return
     }
     const asset = assetDetailCache.get(mapAsset.id) ?? mapAsset
-    const mountingAssetRelations = asset.mountingRelations?.length
-      ? asset.mountingRelations
-      : mountingRelations.filter((relation) => (
-        relation.sourceAssetId === asset.id || relation.targetAssetId === asset.id
-      ))
-    const mountedAssets = (asset.mountedAssetIds ?? mountingAssetRelations
-      .filter((relation) => relation.targetAssetId === asset.id)
-      .map((relation) => relation.sourceAssetId))
-      .map((assetId) => assetById[assetId])
+    const assetId = mapAsset.id
+    const mountingAssetRelations = mergeMountingRelations([
+      mountingRelations,
+      asset.mountingRelations ?? [],
+      mountingRelationsFromAssetProjection(asset, assetReferenceIndex),
+    ], assetReferenceIndex).filter((relation) => (
+      (relation.sourceAssetId === assetId || relation.targetAssetId === assetId)
+        && assetById[relation.sourceAssetId]
+        && assetById[relation.targetAssetId]
+    ))
+    const mountedAssets = mountedChildrenForPole(mountingAssetRelations, assetId)
+      .map((mountedAssetId) => assetById[mountedAssetId])
       .filter(Boolean)
-    const mountedOnAsset = assetById[asset.mountedOnAssetId
-      ?? mountingAssetRelations.find((relation) => relation.sourceAssetId === asset.id)?.targetAssetId]
+    const mountedOnAssetId = mountingAssetRelations.find((relation) => (
+      relation.sourceAssetId === assetId
+    ))?.targetAssetId
+    const mountedOnAsset = assetById[mountedOnAssetId]
     const assetMountingCandidates = [
       ...(mountingCandidates ?? []).filter((candidate) => candidate.assetId === asset.id),
       ...(asset.mountingCandidates ?? []).filter((candidate) => candidate.assetId === asset.id),
@@ -691,13 +708,27 @@ export async function renderMapPage(container) {
     const nextRelations = Array.isArray(response.mountingRelations)
       ? response.mountingRelations
       : mountingRelations
+    const nextOverrides = Array.isArray(response.mountingOverrides)
+      ? response.mountingOverrides
+      : mountingOverrides
     const nextCandidates = Array.isArray(response.mountingCandidates)
       ? response.mountingCandidates
       : mountingCandidates
     const nextOptions = Array.isArray(response.mountingOptions)
       ? response.mountingOptions
       : mountingOptions
-    mountingRelations = nextRelations.map((relation) => ({ ...relation }))
+    const confirmedRelations = mergeMountingRelations([nextRelations], assetReferenceIndex)
+    const inferredRelations = inferSpatialMountingRelations({
+      assets,
+      mountingRelations: confirmedRelations,
+      mountingOverrides: nextOverrides,
+      assetReferenceIndex,
+    })
+    mountingRelations = mergeMountingRelations([
+      confirmedRelations,
+      inferredRelations,
+    ], assetReferenceIndex)
+    mountingOverrides = nextOverrides.map((override) => ({ ...override }))
     mountingCandidates = nextCandidates.map((candidate) => ({ ...candidate }))
     mountingOptions = nextOptions.map((option) => ({
       ...option,

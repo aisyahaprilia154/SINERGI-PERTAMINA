@@ -261,6 +261,30 @@ test('search covers hostname and edge provenance', () => {
   assert.equal(getTopologyDiagramSearchResults(model, 'line-a')[0].id, 'edge-core-dist')
 })
 
+test('search includes path assets and physical mounting hosts', () => {
+  const model = buildTopologyDiagramModel({
+    assets,
+    graph,
+    locationGroups,
+    roots: ['core-a'],
+    mountingRelations: [{
+      id: 'mount-camera',
+      relationType: 'mounted_on',
+      sourceAssetId: 'camera-a',
+      targetAssetId: 'pole-a',
+    }],
+    ...context,
+  })
+
+  assert.equal(getTopologyDiagramSearchResults(model, 'cable-a')[0].id, 'edge-core-dist')
+  const mountingResult = getTopologyDiagramSearchResults(model, 'T-018')[0]
+  assert.equal(mountingResult.kind, 'mounting')
+  assert.equal(mountingResult.id, 'pole-group:pole-a')
+  assert.equal(mountingResult.label, 'T-018')
+  assert.equal(mountingResult.detail, 'Tiang CCTV · 1 aset terpasang')
+  assert.ok(mountingResult.score > 0)
+})
+
 test('physical mounting stays a separate group and never becomes a network edge', () => {
   const model = buildTopologyDiagramModel({
     assets,
@@ -283,6 +307,7 @@ test('physical mounting stays a separate group and never becomes a network edge'
   }])
   assert.equal(model.nodes.some(({ id }) => id === 'pole-a'), false)
   assert.equal(model.summary.physicalMountCount, 1)
+  assert.equal(model.completeness.complete, true)
 })
 
 test('diagram classes separate JB peer, JB extended, rack root, endpoint, and physical mount', () => {

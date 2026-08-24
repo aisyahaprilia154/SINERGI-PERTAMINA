@@ -509,7 +509,27 @@ export function buildTopologyDiagramModel({
     draft: Boolean(isDraft),
   }
 
-  const invalid = topologyGraphDiagnostics({ nodes, edges, graph })
+  const completeness = topologyCompletenessAudit({
+    inputAssets,
+    sourceAssetById,
+    assetById,
+    nodes,
+    graph,
+    allDeviceIds,
+    allEdges,
+    edges,
+    crossAreaEdges,
+    area,
+    mountingRelations,
+    mountingGroups,
+  })
+  const invalid = topologyGraphDiagnostics({ nodes, edges, graph, knownNodeIds: allDeviceIds })
+  const diagnostics = {
+    ...invalid,
+    invalid: invalid.invalid || !completeness.complete,
+    message: invalid.message || completeness.message,
+    completeness,
+  }
   return {
     status: nodes.length ? 'ready' : 'empty',
     message: nodes.length
@@ -549,7 +569,8 @@ export function buildTopologyDiagramModel({
     selectedFamilies: new Set(selectedFamilies),
     search,
     summary,
-    diagnostics: invalid,
+    completeness,
+    diagnostics,
     edgeGroups,
     traceAssetIds: traceAssets,
     traceEdgeIds: traceEdges,
@@ -575,6 +596,7 @@ export function getTopologyDiagramSearchResults(model, query, limit = 12) {
       const score = searchScore({
         id: edge.id,
         name: `${edge.sourceGeometryId ?? ''} ${edge.relationId ?? ''} ${edge.networkFamily ?? ''}`,
+        assetId: (edge.pathAssetIds ?? []).join(' '),
         type: `${source?.name ?? ''} ${target?.name ?? ''}`,
         location: edge.provenance,
       }, normalized)
@@ -587,7 +609,26 @@ export function getTopologyDiagramSearchResults(model, query, limit = 12) {
       }
     })
     .filter(({ score }) => score > 0)
-  return [...nodeResults, ...edgeResults]
+  const mountingResults = (model?.mountingGroups ?? [])
+    .map((group) => {
+      const hostId = group.hostId ?? group.id
+      const hostName = group.hostName || hostId
+      const score = searchScore({
+        id: hostId,
+        name: hostName,
+        type: group.hostType ?? 'Tiang',
+        assetId: group.id,
+      }, normalized)
+      return {
+        kind: 'mounting',
+        id: group.id,
+        label: hostName,
+        detail: `${group.hostType || 'Tiang'} · ${group.childCount ?? group.childIds?.length ?? 0} aset terpasang`,
+        score,
+      }
+    })
+    .filter(({ score }) => score > 0)
+  return [...nodeResults, ...edgeResults, ...mountingResults]
     .sort((left, right) => right.score - left.score
       || left.label.localeCompare(right.label, 'id')
       || left.id.localeCompare(right.id, 'id'))
@@ -1243,8 +1284,135 @@ function familyOrder(value) {
   return index < 0 ? Number.MAX_SAFE_INTEGER : index
 }
 
-function topologyGraphDiagnostics({ nodes, edges, graph }) {
-  const nodeIds = new Set(nodes.map(({ id }) => id))
+function topologyCompletenessAudit({
+  inputAssets = [],
+  sourceAssetById = new Map(),
+  assetById = new Map(),
+  nodes = [],
+  graph = {},
+  allDeviceIds = new Set(),
+  allEdges = [],
+  edges = [],
+  crossAreaEdges = [],
+  area = null,
+  mountingRelations = [],
+  mountingGroups = [],
+}) {
+  const sourceAssetIds = [...assetById.keys()].sort(compareIds)
+  const renderedAssetIds = nodes.map(({ id }) => id).sort(compareIds)
+  const renderedAssetIdSet = new Set(renderedAssetIds)
+  const missingAssetIds = sourceAssetIds.filter((id) => !renderedAssetIdSet.has(id))
+  const duplicateAssetIds = duplicateIds(
+    inputAssets
+      .map(assetIdFor)
+      .filter((id) => id && sourceAssetById.has(id)),
+  )
+
+  const visibleEdgeIds = [...new Set([
+    ...edges.map(({ id }) => id),
+    ...crossAreaEdges.map(({ id }) => id),
+  ])].sort(compareIds)
+  const normalizedEdgeIds = new Set(allEdges.map(({ id }) => id))
+  const rawConfirmedEdges = (Array.isArray(graph?.edges) ? graph.edges : [])
+    .filter((edge) => isConfirmedTopologyEdge(edge))
+  const missingEdgeIds = rawConfirmedEdges
+    .filter((edge) => {
+      const sourceId = edge.sourceAssetId ?? edge.sourceNodeId ?? edge.sourceId
+      const targetId = edge.targetAssetId ?? edge.targetNodeId ?? edge.targetId
+      const id = String(edge.id ?? edge.edgeId ?? edge.relationId ?? '')
+      return sourceId && targetId && sourceId !== targetId
+        && allDeviceIds.has(sourceId) && allDeviceIds.has(targetId)
+        && !normalizedEdgeIds.has(id)
+    })
+    .map((edge) => String(edge.id ?? edge.edgeId ?? edge.relationId))
+    .sort(compareIds)
+  const duplicateEdgeIds = duplicateIds(
+    (Array.isArray(graph?.edges) ? graph.edges : [])
+      .map((edge) => edge?.id ?? edge?.edgeId ?? edge?.relationId)
+      .filter(Boolean),
+  )
+  const knownDeviceIds = new Set(allDeviceIds)
+  const invalidEndpointEdgeIds = allEdges
+    .filter((edge) => !knownDeviceIds.has(edge.sourceId) || !knownDeviceIds.has(edge.targetId))
+    .map(({ id }) => id)
+    .sort(compareIds)
+
+  const expectedMountingAssetIds = [...new Set(
+    mountingGroups.flatMap((group) => group.childIds ?? []),
+  )].sort(compareIds)
+  const missingMountingAssetIds = expectedMountingAssetIds
+    .filter((id) => !renderedAssetIdSet.has(id))
+  const scopedAssetIdSet = new Set(assetById.keys())
+  const sourceMountingRelationIds = mountingRelations
+    .filter((relation) => {
+      if (!area) return true
+      const sourceId = relation?.sourceAssetId ?? relation?.sourceNodeId ?? relation?.assetId
+      const targetId = relation?.targetAssetId ?? relation?.targetNodeId
+        ?? relation?.poleAssetId ?? relation?.hostAssetId
+      return scopedAssetIdSet.has(sourceId) || scopedAssetIdSet.has(targetId)
+    })
+    .map((relation) => relation?.relationId ?? relation?.id)
+    .filter(Boolean)
+  const renderedMountingRelationIds = mountingGroups.flatMap((group) => group.relationIds ?? [])
+  const missingMountingRelationIds = [...new Set(sourceMountingRelationIds)]
+    .filter((id) => !renderedMountingRelationIds.includes(id))
+    .sort(compareIds)
+
+  const complete = !missingAssetIds.length
+    && !missingEdgeIds.length
+    && !missingMountingAssetIds.length
+    && !missingMountingRelationIds.length
+    && !duplicateAssetIds.length
+    && !duplicateEdgeIds.length
+    && !invalidEndpointEdgeIds.length
+  const issueCount = [
+    missingAssetIds,
+    missingEdgeIds,
+    missingMountingAssetIds,
+    missingMountingRelationIds,
+    duplicateAssetIds,
+    duplicateEdgeIds,
+    invalidEndpointEdgeIds,
+  ].reduce((total, items) => total + items.length, 0)
+  return {
+    complete,
+    issueCount,
+    sourceAssetCount: sourceAssetIds.length,
+    renderedAssetCount: renderedAssetIds.length,
+    sourceEdgeCount: rawConfirmedEdges.length,
+    renderedEdgeCount: allEdges.length,
+    visibleEdgeCount: visibleEdgeIds.length,
+    sourceMountingAssetCount: expectedMountingAssetIds.length,
+    renderedMountingAssetCount: expectedMountingAssetIds.length - missingMountingAssetIds.length,
+    sourceMountingRelationCount: [...new Set(sourceMountingRelationIds)].length,
+    renderedMountingRelationCount: [...new Set(renderedMountingRelationIds)].length,
+    scopeArea: area,
+    missingAssetIds,
+    missingEdgeIds,
+    missingMountingAssetIds,
+    missingMountingRelationIds,
+    duplicateAssetIds,
+    duplicateEdgeIds,
+    invalidEndpointEdgeIds,
+    message: complete
+      ? null
+      : `Kelengkapan diagram perlu diperiksa: ${issueCount} ketidaksesuaian terdeteksi.`,
+  }
+}
+
+function duplicateIds(ids = []) {
+  const counts = new Map()
+  ids.forEach((id) => counts.set(id, (counts.get(id) ?? 0) + 1))
+  return [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([id]) => id)
+    .sort(compareIds)
+}
+
+function topologyGraphDiagnostics({ nodes, edges, graph, knownNodeIds = null }) {
+  const nodeIds = knownNodeIds instanceof Set
+    ? knownNodeIds
+    : new Set(nodes.map(({ id }) => id))
   const invalidEdges = (Array.isArray(graph?.edges) ? graph.edges : []).filter((edge) => (
     isConfirmedTopologyEdge(edge)
       && (!nodeIds.has(edge.sourceAssetId ?? edge.sourceNodeId ?? edge.sourceId)

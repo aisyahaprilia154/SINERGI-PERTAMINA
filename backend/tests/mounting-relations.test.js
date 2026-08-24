@@ -90,14 +90,14 @@ test('mounting inference consistently includes nearby CCTV and junction boxes on
     ['camera-18', 'pole-18'],
     ['jb-18', 'pole-18'],
   ].sort())
-  assert.equal(result.summary.searchRadiusMeters, 5)
+  assert.equal(result.summary.searchRadiusMeters, 15)
 })
 
 test('matching asset number bridges a bounded KMZ offset without capturing an unrelated pole', () => {
   const result = generateMountingArtifacts(topologyBundle([
     { id: 'pole-13', type: 'Tiang', sourceName: 'T-013', coordinate: [110, -7] },
     { id: 'jb-13', type: 'Junction Box', sourceName: 'JB-013', coordinate: [110.00008, -7] },
-    { id: 'camera-unrelated', type: 'CCTV', sourceName: 'C-099', coordinate: [110.00008, -7] },
+    { id: 'camera-unrelated', type: 'CCTV', sourceName: 'C-099', coordinate: [110.0002, -7] },
   ]))
 
   assert.equal(result.relations.length, 1)

@@ -9,7 +9,10 @@ export const MOUNTING_RELATION_KIND = 'installation_attachment'
 export const DEFAULT_MOUNTING_CONFIG = Object.freeze({
   // KMZ points for a pole, camera, and junction box are commonly drawn a few
   // metres apart even though they describe one physical installation.
-  mountingSearchRadiusMeters: 5,
+  // The source KMZ commonly offsets pole, JB, and camera points by up to
+  // roughly 10 metres. Keep the radius wide enough to recover the physical
+  // group while the ambiguity policy prevents cross-pole assignments.
+  mountingSearchRadiusMeters: 15,
   // A matching asset number is stronger evidence than coordinates alone, but
   // remains bounded so similarly named assets in another location are ignored.
   mountingIdentityRadiusMeters: 10,
