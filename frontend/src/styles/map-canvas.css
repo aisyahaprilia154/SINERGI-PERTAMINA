@@ -21,6 +21,7 @@
   /* Reserve the full labeled action group so the context card cannot sit
      underneath the toolbar on wide map layouts. */
   --map-toolbar-width: 520px;
+  --map-context-toolbar-width: 520px;
   --map-primary-control-width: 42px;
   --map-secondary-control-size: 40px;
   --map-secondary-control-width: calc(
@@ -167,6 +168,29 @@
   pointer-events: auto;
 }
 
+/* Keep the context card in the map area that remains visible beside the
+   detail drawer. The card keeps the same left/top anchor as the idle state,
+   but its parent stops before the drawer instead of being painted beneath it. */
+@media (min-width: 961px) {
+  .map-body .map-workspace.drawer-open .map-info-overlays {
+    width: min(
+      680px,
+      calc(
+        100% - var(--map-overlay-side-inset) -
+        max(
+          calc(
+            var(--map-context-toolbar-width) + var(--map-overlay-inset) +
+            var(--map-overlay-gap)
+          ),
+          calc(
+            var(--map-drawer-width) + var(--space-4) + var(--map-control-gap)
+          )
+        )
+      )
+    );
+  }
+}
+
 @media (min-width: 961px) {
   .map-workspace.drawer-open .map-stage {
     --map-toolbar-width: 196px;
@@ -176,6 +200,7 @@
 @media (min-width: 961px) and (max-width: 1450px) {
   .map-body .map-stage {
     --map-toolbar-width: 430px;
+    --map-context-toolbar-width: 430px;
   }
 
   .map-body .map-action-group {
@@ -193,6 +218,7 @@
 @media (min-width: 961px) and (max-width: 1180px) {
   .map-body .map-stage {
     --map-toolbar-width: 196px;
+    --map-context-toolbar-width: 196px;
   }
 }
 
