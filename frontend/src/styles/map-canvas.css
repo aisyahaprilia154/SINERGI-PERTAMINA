@@ -18,7 +18,9 @@
   --map-overlay-top-inset: var(--space-6);
   --map-overlay-bottom-inset: var(--space-5);
   --map-overlay-gap: var(--space-2);
-  --map-toolbar-width: 440px;
+  /* Reserve the full labeled action group so the context card cannot sit
+     underneath the toolbar on wide map layouts. */
+  --map-toolbar-width: 520px;
   --map-primary-control-width: 42px;
   --map-secondary-control-size: 40px;
   --map-secondary-control-width: calc(
@@ -173,11 +175,18 @@
 
 @media (min-width: 961px) and (max-width: 1450px) {
   .map-body .map-stage {
-    --map-toolbar-width: 332px;
+    --map-toolbar-width: 430px;
   }
 
-  .map-body .map-action-group > .import-toggle span:not(.material-symbols-outlined) {
-    display: none;
+  .map-body .map-action-group {
+    gap: 2px;
+    padding: 3px;
+  }
+
+  .map-body .map-action-group > .tool-button {
+    gap: 6px;
+    padding-inline: 8px;
+    font-size: 12px;
   }
 }
 
