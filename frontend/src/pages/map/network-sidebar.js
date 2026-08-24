@@ -134,7 +134,7 @@ export function renderNetworkList({
   expandedNetworkIds,
   search,
   focusedNetworkId = null,
-  showCctvCoverage = true,
+  showCctvCoverage = false,
 }) {
   if (status === 'loading') return renderLoadingSkeleton()
   if (status === 'error') return renderErrorState(errorMessage)

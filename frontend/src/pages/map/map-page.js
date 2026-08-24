@@ -200,7 +200,7 @@ export async function renderMapPage(container) {
     assetDetailStatus: 'ready',
     assetDetailError: null,
     showAdditionalMetadata: false,
-    showCctvCoverage: true,
+    showCctvCoverage: false,
     showMountingCandidates: false,
     mountingActionStatus: 'idle',
     mountingActionError: null,
