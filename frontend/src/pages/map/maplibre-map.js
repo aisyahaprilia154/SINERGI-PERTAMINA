@@ -83,7 +83,7 @@ export function createMapLibreSurface(element, {
     isolateSelectedCandidate: false,
     highlightedNetworkId: null,
     focusedNetworkId: null,
-    showCctvCoverage: true,
+    showCctvCoverage: false,
   }
   let loaded = false
   let destroyed = false

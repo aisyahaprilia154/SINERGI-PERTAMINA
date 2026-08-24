@@ -196,6 +196,7 @@ test('network cards expose compact metadata and clear action tooltips', () => {
     selectedNetworkIds: new Set(['cctv']),
     expandedNetworkIds: new Set(),
     search: '',
+    showCctvCoverage: true,
   })
 
   assert.match(html, /34 koneksi/)
