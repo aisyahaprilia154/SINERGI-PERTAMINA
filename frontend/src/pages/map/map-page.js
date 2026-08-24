@@ -206,7 +206,6 @@ export async function renderMapPage(container) {
     mountingActionError: null,
     mountingSearch: '',
     dimOthers: true,
-    search: '',
     expandedNetworkIds: new Set(),
     focusedNetworkId: null,
     dataStatus: 'loading',
@@ -339,7 +338,6 @@ export async function renderMapPage(container) {
       assets,
       selectedNetworkIds: selection.selectedNetworkIds,
       expandedNetworkIds: state.expandedNetworkIds,
-      search: state.search,
       focusedNetworkId: state.focusedNetworkId,
       showCctvCoverage: state.showCctvCoverage,
     })
@@ -1014,7 +1012,6 @@ export async function renderMapPage(container) {
   function selectAssetResult(assetId) {
     if (!assetById[assetId]) return
     assetSearch.value = displayAssetName(assetById[assetId])
-    state.search = assetSearch.value
     closeAssetResults()
     renderNetworkList()
     handleAssetSelect(assetId)
@@ -1081,7 +1078,6 @@ export async function renderMapPage(container) {
     canvasApi.setHighlightedNetworkId(null)
   })
   assetSearch.addEventListener('input', (event) => {
-    state.search = event.target.value
     renderNetworkList()
     renderAssetResults(event.target.value)
   })
