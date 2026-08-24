@@ -2,7 +2,6 @@ import { adaptActiveDatasetForTopology } from '../../adapters/active-dataset-map
 import {
   buildTopologyDiagramModel,
   getTopologyDiagramSearchResults,
-  isConfirmedTopologyEdge,
 } from '../../domain/topology-diagram-model.js'
 import {
   parseTopologyViewState,
@@ -14,7 +13,6 @@ import {
   loadTopologyProjection,
   loadTopologyRoots,
   reviewTopologyCandidate,
-  traceTopology,
 } from '../../services/active-dataset-service.js'
 import { downloadSchematicPng, downloadSchematicSvg } from '../map/schematic-export.js'
 import { bindUserAccountMenu, renderTopNavigation } from '../map/map-page.js'
@@ -151,11 +149,6 @@ async function initializeTopologyWorkspace(container, initial) {
     selectedMountingGroupId: null,
     showAdminLayers: adminAvailable,
     showMountingPhysical: parsed.showMountingPhysical !== false,
-    traceStatus: parsed.traceFrom && parsed.traceTo ? 'pending' : 'idle',
-    traceMessage: '',
-    tracePath: [],
-    traceEdgeIds: [],
-    traceResult: null,
     zoom: 1,
     layoutStatus: 'loading',
     layoutError: null,
@@ -189,14 +182,6 @@ async function initializeTopologyWorkspace(container, initial) {
     await ensureAdminData()
   }
 
-  if (state.traceStatus === 'pending' && topologyReady) {
-    await runTrace({ historyMode: 'replace' })
-  } else if (state.traceStatus === 'pending') {
-    state.traceStatus = 'idle'
-    state.traceMessage = 'Tracing menunggu dataset topology-ready dipublikasikan.'
-    renderWorkspace()
-  }
-
   function buildModel() {
     return buildTopologyDiagramModel({
       assets,
@@ -216,8 +201,6 @@ async function initializeTopologyWorkspace(container, initial) {
       showAdminLayers: state.showAdminLayers,
       showMountingPhysical: state.showMountingPhysical,
       selectedMountingGroupId: state.selectedMountingGroupId,
-      traceAssetIds: state.tracePath,
-      traceEdgeIds: state.traceEdgeIds,
       readiness: mapData.topologyReadiness,
       publicationProfile: activeContext.publicationProfile,
       isDraft: draftDiagram,
@@ -247,11 +230,6 @@ async function initializeTopologyWorkspace(container, initial) {
     ))) {
       state.selectedMountingGroupId = null
     }
-    if (state.tracePath.some((id) => !model.nodeById.has(id))) {
-      state.tracePath = []
-      state.traceEdgeIds = []
-      state.traceStatus = state.traceStatus === 'active' ? 'stale' : state.traceStatus
-    }
     state.layoutStatus = 'loading'
     state.layoutError = null
     layout = null
@@ -265,7 +243,7 @@ async function initializeTopologyWorkspace(container, initial) {
         && !state.selectedEdgeId
         && !state.selectedCandidateId
         && !state.selectedUnresolvedId
-        && !state.tracePath.length,
+        ,
       layoutStyle: 'compound-poles',
       componentColumns: 1,
     })
@@ -293,7 +271,7 @@ async function initializeTopologyWorkspace(container, initial) {
           && !state.selectedEdgeId
           && !state.selectedCandidateId
           && !state.selectedUnresolvedId
-          && !state.tracePath.length,
+          ,
         // Wrap large endpoint fan-outs into semantic rows in the workspace.
         // The layout module keeps its historical central-backbone default for
         // callers such as the export and compatibility tests.
@@ -314,7 +292,6 @@ async function initializeTopologyWorkspace(container, initial) {
       && !state.selectedEdgeId
       && !state.selectedCandidateId
       && !state.selectedUnresolvedId
-      && !state.tracePath.length
     if (overview || typeof Worker === 'undefined' || nextModel.nodes.length < 160) {
       return calculateTopologyDiagramLayout(nextModel, {
         overview,
@@ -546,7 +523,7 @@ async function initializeTopologyWorkspace(container, initial) {
       const nextArea = target.dataset.areaOverview
       if (!areaKeys.includes(nextArea)) return
       state.area = nextArea
-      clearSelectionAndTrace()
+      clearSelection()
       resetViewport()
       void rebuild({ fit: true })
     }))
@@ -628,32 +605,6 @@ async function initializeTopologyWorkspace(container, initial) {
     inspector.querySelector('[data-open-map]')?.addEventListener('click', (event) => {
       window.location.href = mapHref({ ...activeContext, area: state.area }, event.currentTarget.dataset.openMap)
     })
-    inspector.querySelector('[data-trace-start]')?.addEventListener('click', () => {
-      if (!node) return
-      state.traceFrom = node.id
-      state.traceTo = null
-      state.traceStatus = 'idle'
-      state.traceMessage = ''
-      state.tracePath = []
-      state.traceEdgeIds = []
-      state.traceResult = null
-      renderWorkspace()
-    })
-    inspector.querySelector('[data-trace-target]')?.addEventListener('click', () => {
-      if (!node || !state.traceFrom || node.id === state.traceFrom) return
-      state.traceTo = node.id
-      state.traceStatus = 'pending'
-      state.traceMessage = ''
-      state.tracePath = []
-      state.traceEdgeIds = []
-      state.traceResult = null
-      renderWorkspace()
-      void runTrace({ historyMode: 'push' })
-    })
-    inspector.querySelector('[data-trace-clear]')?.addEventListener('click', () => {
-      clearTrace()
-      renderWorkspace()
-    })
     inspector.querySelectorAll('[data-inspector-edge]').forEach((button) => {
       button.addEventListener('click', () => {
         state.selectedEdgeId = button.dataset.inspectorEdge
@@ -682,17 +633,6 @@ async function initializeTopologyWorkspace(container, initial) {
 
   function renderNodeInspector(node) {
     const directEdges = node.directEdgeIds.map((edgeId) => model.edgeById.get(edgeId)).filter(Boolean)
-    const traceSection = topologyReady && state.traceStatus === 'active'
-      ? renderTraceSummary()
-      : ''
-    const traceTargetAction = topologyReady && state.traceFrom && state.traceFrom !== node.id
-      ? `<button class="button primary" type="button" data-trace-target>
-          <span class="material-symbols-outlined" aria-hidden="true">route</span>Jadikan tujuan tracing
-        </button>`
-      : ''
-    const traceClearAction = topologyReady && state.traceFrom
-      ? `<button class="button ghost" type="button" data-trace-clear>Batalkan tracing</button>`
-      : ''
     return `
       <button class="icon-button topology-inspector-close" type="button" data-close-inspector aria-label="Tutup detail">
         <span class="material-symbols-outlined" aria-hidden="true">close</span>
@@ -721,18 +661,10 @@ async function initializeTopologyWorkspace(container, initial) {
           </button></li>`
         }).join('')}</ul>` : '<p class="topology-inspector-muted">Aset belum memiliki relasi terkonfirmasi.</p>'}
       </section>
-      ${traceSection}
-      ${!topologyReady ? `<div class="topology-admin-warning"><span class="material-symbols-outlined">lock</span>
-        <p>Tracing operasional tersedia setelah dataset topology-ready dipublikasikan.</p></div>` : ''}
       <footer class="topology-inspector-actions">
         <button class="button primary" type="button" data-open-map="${escapeAttribute(node.id)}">
           <span class="material-symbols-outlined" aria-hidden="true">location_on</span>Buka di Peta Aset
         </button>
-        ${traceTargetAction}
-        ${topologyReady ? `<button class="button secondary" type="button" data-trace-start>
-          <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>${state.traceFrom === node.id ? 'Ubah titik awal' : 'Jadikan titik awal'}
-        </button>` : ''}
-        ${traceClearAction}
       </footer>
     `
   }
@@ -827,7 +759,7 @@ async function initializeTopologyWorkspace(container, initial) {
         )).join('')}</ul>` : '<p class="topology-inspector-muted">Evidence belum tersedia.</p>'}
       </section>
       <div class="topology-admin-warning"><span class="material-symbols-outlined">warning</span>
-        <p>Kandidat tidak ikut graph terkonfirmasi atau tracing sebelum keputusan administrator.</p></div>
+        <p>Kandidat tidak ikut graph terkonfirmasi sebelum keputusan administrator.</p></div>
       <footer class="topology-inspector-actions">
         <button class="button primary" type="button" data-candidate-action="confirm">Konfirmasi relasi</button>
         <button class="button danger-outline" type="button" data-candidate-action="reject">Tolak kandidat</button>
@@ -852,27 +784,8 @@ async function initializeTopologyWorkspace(container, initial) {
         <div><dt>Alasan</dt><dd>${escapeHtml(item.reason)}</dd></div>
       </dl>
       <div class="topology-admin-warning"><span class="material-symbols-outlined">rule</span>
-        <p>Perbaiki endpoint sumber atau target aset lalu regenerasi topology. Marker ini tidak dapat ditelusuri.</p></div>
+        <p>Perbaiki endpoint sumber atau target aset lalu regenerasi topology. Marker ini belum menjadi node aktif.</p></div>
     `
-  }
-
-  function renderTraceSummary() {
-    const result = state.traceResult ?? {}
-    return `<section class="topology-trace-summary"><h3>Tracing terkonfirmasi</h3>
-      <p>${state.tracePath.length} hop/node · ${result.totalLengthMeters == null ? 'panjang tidak tersedia' : `${formatNumber(result.totalLengthMeters)} m`}</p>
-      <ol>${state.tracePath.map((id) => `<li>${escapeHtml(model.nodeById.get(id)?.name || id)}</li>`).join('')}</ol>
-      <small>Graph revision ${escapeHtml(result.graphRevision ?? model.graphRevision ?? '—')} · candidate/unresolved tidak ikut.</small>
-    </section>`
-  }
-
-  function clearTrace() {
-    state.traceFrom = null
-    state.traceTo = null
-    state.traceStatus = 'idle'
-    state.traceMessage = ''
-    state.tracePath = []
-    state.traceEdgeIds = []
-    state.traceResult = null
   }
 
   function renderStatus() {
@@ -893,28 +806,12 @@ async function initializeTopologyWorkspace(container, initial) {
     if (!model.summary.confirmedEdgeCount && model.nodes.length) {
       messages.push('Graph belum memiliki confirmed edge. Semua aset tetap ditampilkan pada Aset tanpa relasi.')
     }
-    if (state.traceStatus === 'loading' || state.traceStatus === 'pending') messages.push('Menghitung tracing dari confirmed graph…')
-    if (state.traceFrom && !state.traceTo && state.traceStatus === 'idle') {
-      messages.push('Titik awal tracing dipilih. Pilih aset tujuan dari graph atau inspector.')
-    }
-    if (state.traceStatus === 'active') messages.push(`Tracing aktif · ${state.tracePath.length} node di-highlight.`)
-    if (state.traceStatus === 'stale') messages.push('Trace stale karena graph revision berubah. Jalankan tracing ulang.')
-    if (state.traceStatus === 'error') messages.push(state.traceMessage)
-    if (state.traceMessage && !['error', 'stale'].includes(state.traceStatus)) messages.push(state.traceMessage)
     if (state.actionStatus === 'loading') messages.push(state.actionMessage)
     if (state.actionStatus === 'error') messages.push(state.actionMessage)
     status.className = `topology-diagram-status${messages.length ? ' visible' : ''}${
-      state.traceStatus === 'error' || state.traceStatus === 'stale' || state.actionStatus === 'error'
-        ? ' error'
-        : draftDiagram ? ' warning' : ''
+      state.actionStatus === 'error' ? ' error' : draftDiagram ? ' warning' : ''
     }`
     status.innerHTML = messages.map((message) => `<span>${escapeHtml(message)}</span>`).join('')
-      + (state.traceFrom && !state.traceTo && state.traceStatus === 'idle'
-        ? '<button type="button" class="topology-status-action" data-trace-cancel>Batalkan tracing</button>'
-        : '')
-      + (state.traceStatus === 'stale'
-        ? '<button type="button" class="topology-status-action" data-refresh-topology>Muat ulang graph</button>'
-        : '')
   }
 
   function bindStaticControls() {
@@ -945,7 +842,7 @@ async function initializeTopologyWorkspace(container, initial) {
       const nextArea = event.target.value || null
       if (nextArea && !areaKeys.includes(nextArea)) return
       state.area = nextArea
-      clearSelectionAndTrace()
+      clearSelection()
       resetViewport()
       void rebuild({ fit: true })
     })
@@ -996,10 +893,6 @@ async function initializeTopologyWorkspace(container, initial) {
     container.querySelector('[data-export-svg]')?.addEventListener('click', () => void exportSvg())
     container.querySelector('[data-export-png]')?.addEventListener('click', () => void exportPng())
     container.addEventListener('click', (event) => {
-      if (event.target.closest('[data-trace-cancel]')) {
-        clearTrace()
-        renderWorkspace()
-      }
       if (event.target.closest('[data-refresh-topology]')) void renderTopologyPage(container)
     })
     container.querySelector('.topology-diagram-a11y-list')?.addEventListener('click', (event) => {
@@ -1141,115 +1034,12 @@ async function initializeTopologyWorkspace(container, initial) {
     viewport.scrollTop = 0
   }
 
-  async function runTrace({ historyMode = 'push' } = {}) {
-    if (!state.traceFrom || !state.traceTo) return
-    if (!topologyReady) {
-      state.traceStatus = 'error'
-      state.traceMessage = 'Tracing hanya tersedia pada dataset topology-ready.'
-      state.tracePath = []
-      state.traceEdgeIds = []
-      await rebuild()
-      return
-    }
-    if (!model.nodeById.has(state.traceFrom) || !model.nodeById.has(state.traceTo)) {
-      state.traceStatus = 'error'
-      state.traceMessage = 'Trace diabaikan karena endpoint berada di luar scope cabang/area aktif.'
-      state.tracePath = []
-      state.traceEdgeIds = []
-      renderWorkspace()
-      return
-    }
-    if (!model.graphRevision) {
-      state.traceStatus = 'error'
-      state.traceMessage = 'Graph revision tidak tersedia; tracing aman tidak dapat dijalankan.'
-      renderWorkspace()
-      return
-    }
-    state.traceStatus = 'loading'
-    state.traceMessage = ''
-    renderWorkspace()
-    try {
-      const result = await traceTopology({
-        datasetVersionId: activeContext.datasetVersionId,
-        sourceAssetId: state.traceFrom,
-        targetAssetId: state.traceTo,
-        graphRevision: model.graphRevision,
-        direction: 'both',
-        scopeAssetIds: model.nodes.map(({ id }) => id),
-      })
-      if (result.graphRevision && result.graphRevision !== model.graphRevision) {
-        state.traceStatus = 'stale'
-        state.traceMessage = 'Graph revision berubah saat tracing. Muat ulang data lalu jalankan ulang.'
-        state.tracePath = []
-        state.traceEdgeIds = []
-      } else if (result.status === 'found' && Array.isArray(result.nodeIds)
-        && result.nodeIds.length > 1) {
-        state.traceStatus = 'active'
-        state.traceResult = result
-        state.tracePath = result.nodeIds.filter((id) => model.nodeById.has(id))
-        state.traceEdgeIds = resolveTraceEdges(result.edges ?? [], state.tracePath)
-        state.traceMessage = ''
-        await rebuild()
-        focusTrace()
-        updateUrl(historyMode)
-        return
-      } else {
-        state.traceStatus = 'error'
-        state.traceMessage = result.message || 'Jalur terkonfirmasi tidak ditemukan.'
-        state.tracePath = []
-        state.traceEdgeIds = []
-      }
-    } catch (error) {
-      state.traceStatus = error?.code === 'topology_graph_stale' ? 'stale' : 'error'
-      state.traceMessage = error?.code === 'topology_graph_stale'
-        ? 'Graph revision berubah. Muat ulang data sebelum menjalankan tracing ulang.'
-        : error.message
-      state.tracePath = []
-      state.traceEdgeIds = []
-    }
-    await rebuild()
-    updateUrl(historyMode)
-  }
-
-  function resolveTraceEdges(traceEdges, traceNodeIds = []) {
-    const resolved = traceEdges.flatMap((traceEdge) => {
-      if (!isConfirmedTopologyEdge(traceEdge)) return []
-      const directId = traceEdge.id ?? traceEdge.edgeId ?? traceEdge.relationId
-      if (directId && model.edgeById.has(directId)) return [directId]
-      const source = traceEdge.sourceAssetId ?? traceEdge.sourceNodeId ?? traceEdge.sourceId
-      const target = traceEdge.targetAssetId ?? traceEdge.targetNodeId ?? traceEdge.targetId
-      return model.edges.filter((edge) => (
-        [edge.sourceId, edge.targetId].sort().join('|') === [source, target].sort().join('|')
-      )).map(({ id }) => id)
-    })
-    if (resolved.length || traceNodeIds.length < 2) return [...new Set(resolved)]
-    return [...new Set(traceNodeIds.slice(1).flatMap((targetId, index) => {
-      const sourceId = traceNodeIds[index]
-      return model.edges.filter((edge) => (
-        [edge.sourceId, edge.targetId].sort().join('|') === [sourceId, targetId].sort().join('|')
-      )).map(({ id }) => id)
-    }))]
-  }
-
-  function focusTrace() {
-    const traceNodes = state.tracePath.map((id) => layout.nodes.find((node) => node.id === id)).filter(Boolean)
-    if (!traceNodes.length) return
-    const viewport = container.querySelector('.topology-diagram-viewport')
-    const minX = Math.min(...traceNodes.map((node) => node.diagram.x))
-    const maxX = Math.max(...traceNodes.map((node) => node.diagram.x + node.diagram.width))
-    const minY = Math.min(...traceNodes.map((node) => node.diagram.y))
-    const maxY = Math.max(...traceNodes.map((node) => node.diagram.y + node.diagram.height))
-    viewport.scrollLeft = Math.max(0, ((minX + maxX) / 2) * state.zoom - viewport.clientWidth / 2)
-    viewport.scrollTop = Math.max(0, ((minY + maxY) / 2) * state.zoom - viewport.clientHeight / 2)
-  }
-
-  function clearSelectionAndTrace() {
+  function clearSelection() {
     state.selectedAssetId = null
     state.selectedEdgeId = null
     state.selectedCandidateId = null
     state.selectedUnresolvedId = null
     state.selectedMountingGroupId = null
-    clearTrace()
   }
 
   function updateUrl(mode = 'replace') {
@@ -1277,7 +1067,6 @@ async function initializeTopologyWorkspace(container, initial) {
       mapLink.href = mapHref(
         { ...activeContext, area: state.area },
         state.selectedAssetId,
-        { traceFrom: state.traceFrom, traceTo: state.traceTo },
       )
     }
     const topologyLink = container.querySelector('.top-navigation nav a[href^="/topology"]')
@@ -1343,10 +1132,6 @@ async function initializeTopologyWorkspace(container, initial) {
       unresolved = nextCandidates.unresolved ?? []
       roots = (await loadTopologyRoots({ datasetVersionId: activeContext.datasetVersionId }).catch(() => ({ roots: [] }))).roots ?? roots
       state.selectedCandidateId = null
-      state.traceStatus = state.traceStatus === 'active' ? 'stale' : state.traceStatus
-      state.traceMessage = state.traceStatus === 'stale'
-        ? 'Graph revision berubah setelah keputusan admin. Jalankan tracing ulang.'
-        : ''
       await rebuild()
     } catch (error) {
       const errorElement = dialog.querySelector('.topology-decision-error')
@@ -1549,15 +1334,13 @@ function readContext() {
   }
 }
 
-function mapHref(context, selectedAssetId, extra = {}) {
+function mapHref(context, selectedAssetId) {
   const params = new URLSearchParams({
     datasetId: context.datasetId,
     branchId: context.branchId,
   })
   if (context.area) params.set('area', context.area)
   if (selectedAssetId) params.set('selectedAssetId', selectedAssetId)
-  if (extra.traceFrom) params.set('traceFrom', extra.traceFrom)
-  if (extra.traceTo) params.set('traceTo', extra.traceTo)
   return `/map?${params}`
 }
 

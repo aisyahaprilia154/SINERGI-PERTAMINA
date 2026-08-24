@@ -119,7 +119,7 @@ test('documentation render keeps every endpoint label visible regardless of scre
   assert.match(documentation, /topology-mounting-header/)
 })
 
-test('SVG preserves selection and trace presentation without dropping graph nodes', () => {
+test('SVG preserves selection without dropping graph nodes', () => {
   const { model, layout } = renderFixture()
   const selectedSvg = renderTopologyDiagramSvg({
     model,
@@ -128,26 +128,13 @@ test('SVG preserves selection and trace presentation without dropping graph node
   })
   assert.match(selectedSvg, /topology-node dimmed/)
   assert.match(selectedSvg, /topology-edge[^>]*dimmed|class="topology-edge[^\"]*dimmed/)
-  const tracedModel = buildTopologyDiagramModel({
-    assets: model.nodes,
-    graph: {
-      graphRevision: model.graphRevision,
-      nodes: model.nodes,
-      edges: model.edges,
-    },
-    roots: ['core'],
-    locationGroups: [{ key: 'area-a', name: 'Area A' }],
-    traceAssetIds: ['core', 'camera'],
-    traceEdgeIds: ['core-camera'],
-  })
   const svg = renderTopologyDiagramSvg({
-    model: tracedModel,
+    model,
     layout,
     selectedAssetId: 'camera',
     selectedEdgeId: 'core-camera',
   })
   assert.match(svg, /topology-node selected/)
-  assert.match(svg, /topology-edge.*trace/)
   assert.match(svg, /topology-edge.*selected/)
   assert.match(svg, /data-node-id="core"/)
   assert.match(svg, /data-node-id="camera"/)

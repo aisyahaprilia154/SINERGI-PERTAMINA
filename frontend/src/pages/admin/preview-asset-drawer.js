@@ -75,11 +75,6 @@ export function renderPreviewAssetDrawer({ model, state }) {
                 `
               }).join('')}
             </ul>
-            <button type="button" class="preview-secondary-action" data-trace-connected
-              aria-pressed="${state.traceAssetIds.size > 0}">
-              <span class="material-symbols-outlined" aria-hidden="true">route</span>
-              ${state.traceAssetIds.size ? 'Hentikan penelusuran' : 'Telusuri koneksi'}
-            </button>
           ` : '<p class="preview-empty-copy">Tidak ada relasi eksplisit untuk aset ini.</p>'}
         </section>
         <section>

@@ -1,11 +1,11 @@
 export const TOPOLOGY_NOT_READY_MESSAGE =
-  'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.'
+  'Diagram topologi site ini belum siap dipublikasikan. Data koneksi masih dalam review.'
 
 export const TOPOLOGY_PARTIAL_READY_MESSAGE =
-  'Topologi sebagian siap. Tracing hanya tersedia pada komponen terverifikasi.'
+  'Diagram topologi sebagian siap dan hanya menampilkan komponen terverifikasi.'
 
 export const TOPOLOGY_GRAPH_INVALID_MESSAGE =
-  'Tracing dihentikan karena confirmed graph tidak valid.'
+  'Diagram tidak dapat ditampilkan karena graph terkonfirmasi tidak valid.'
 
 export const TOPOLOGY_NO_DEVICE_EDGE_MESSAGE =
   'Belum ada jalur perangkat terkonfirmasi yang menghubungkan dua aset. Lengkapi endpoint kabel terlebih dahulu.'
@@ -49,22 +49,20 @@ export function resolveTopologyReadiness({
     viewTopology: readinessContract?.capabilities?.viewTopology ?? graphAvailable,
     reviewTopology: readinessContract?.capabilities?.reviewTopology ?? false,
     editAssetMounting: readinessContract?.capabilities?.editAssetMounting ?? false,
-    trace: readinessContract?.capabilities?.trace ?? (graphAvailable && graphValid),
     diagram: readinessContract?.capabilities?.diagram ?? (graphAvailable && graphValid),
     autoConfirm: readinessContract?.capabilities?.autoConfirm ?? false,
   }
-  const traceAvailable = capabilities.trace === true && graphValid
   const diagramAvailable = capabilities.diagram === true && graphValid
   const derivedStatus = !graphValid
     ? 'invalid'
     : publicationReady
       ? 'ready'
-      : traceAvailable
+      : diagramAvailable
         ? 'partial_ready'
         : declaredTopologyStatus || 'review_required'
-  const traceMessage = !graphValid
+  const message = !graphValid
     ? TOPOLOGY_GRAPH_INVALID_MESSAGE
-    : traceAvailable
+    : diagramAvailable
       ? null
       : noConfirmedDeviceEdge
         ? TOPOLOGY_NO_DEVICE_EDGE_MESSAGE
@@ -79,13 +77,11 @@ export function resolveTopologyReadiness({
     graphValid,
     validationErrorCount,
     ready: publicationReady,
-    traceAvailable,
     diagramAvailable,
     capabilities,
-    message: traceAvailable && !publicationReady
+    message: diagramAvailable && !publicationReady
       ? TOPOLOGY_PARTIAL_READY_MESSAGE
-      : traceMessage,
-    traceMessage,
+      : message,
   }
 }
 

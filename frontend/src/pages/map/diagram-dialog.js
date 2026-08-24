@@ -45,11 +45,6 @@ export function openSchematicDialog({
             <span><strong>Topologi jaringan</strong><small>Relasi terkonfirmasi pada area aktif</small></span>
           </button>
           <button class="schematic-mode-option" type="button" role="tab"
-            data-schematic-mode="trace" aria-selected="false">
-            <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>
-            <span><strong>Tracing aktif</strong><small>Hanya hasil tracing yang sedang dipilih</small></span>
-          </button>
-          <button class="schematic-mode-option" type="button" role="tab"
             data-schematic-mode="selected" aria-selected="false"
             ${selectedAssetId ? '' : 'disabled title="Pilih satu aset pada peta untuk melihat relasinya."'}>
             <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>
@@ -153,9 +148,7 @@ function bindDialogEvents({
   )
   let currentMode = initialMode === 'selected' && selectedAssetId && diagrams.selected
     ? 'selected'
-    : initialMode === 'trace' && diagrams.trace
-      ? 'trace'
-      : 'all-assets'
+    : 'all-assets'
   let currentSelectedAssetId = selectedAssetId
   let zoom = 1
   let fallbackFullscreen = false
@@ -618,7 +611,7 @@ function renderDiagramState(graph) {
         ${isTooDense ? 'density_large' : 'account_tree_off'}
       </span>
       <strong>${isTooDense ? 'Cakupan diagram terlalu luas' : 'Data diagram belum tersedia'}</strong>
-      <p>${escapeHtml(graph.message || 'Pilih aset atau jalankan tracing terlebih dahulu.')}</p>
+      <p>${escapeHtml(graph.message || 'Pilih aset untuk melihat relasi langsungnya.')}</p>
       ${isTooDense ? `<small>${graph.nodeCount} aset dipilih · batas ${graph.maxNodes} aset</small>` : ''}
     </div>
   `
@@ -732,7 +725,6 @@ function formatDiagramMeta(graph, layout, context) {
 
 function describeMode(mode) {
   if (mode === 'selected') return 'relasi aset terpilih'
-  if (mode === 'trace') return 'jalur terpilih'
   if (mode === 'full-map') return 'peta jaringan lengkap'
   if (mode === 'focus') return 'aset fokus dan relasi langsung'
   return 'jaringan terpilih'

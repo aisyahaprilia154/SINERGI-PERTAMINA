@@ -13,7 +13,6 @@ import {
   buildImportPreviewModel,
   calculateAssetBounds,
   createImportPreviewState,
-  findConnectedAssetIds,
   getVisiblePreviewData,
 } from './preview-import-state.js'
 import { renderPreviewSidebar } from './preview-sidebar.js'
@@ -70,7 +69,6 @@ export function renderPreviewImportPage(container, datasetVersionId) {
         state.viewMode = button.dataset.viewMode
         state.selectedAssetId = null
         state.selectedIssueId = null
-        state.traceAssetIds.clear()
         state.focusBounds = null
         state.zoom = 1
         rerender()
@@ -107,22 +105,6 @@ export function renderPreviewImportPage(container, datasetVersionId) {
     container.querySelectorAll('[data-related-asset]').forEach((button) => {
       button.addEventListener('click', () => selectAsset(button.dataset.relatedAsset))
     })
-    container.querySelector('[data-trace-connected]')?.addEventListener('click', () => {
-      const wasTracing = state.traceAssetIds.size > 0
-      state.traceAssetIds = wasTracing
-        ? new Set()
-        : findConnectedAssetIds(model, state.selectedAssetId)
-      const hasConnection = state.traceAssetIds.size > 1
-      if (!hasConnection) state.traceAssetIds.clear()
-      state.actionStatus = wasTracing || hasConnection ? 'success' : 'error'
-      state.actionMessage = wasTracing
-        ? 'Penelusuran koneksi dihentikan.'
-        : hasConnection
-          ? `${state.traceAssetIds.size} aset ditelusuri dari relasi eksplisit.`
-          : 'Aset ini tidak mempunyai koneksi eksplisit yang dapat ditelusuri.'
-      rerender()
-    })
-
     container.querySelectorAll('[data-fit-all], [data-preview-fit], [data-reset-view]')
       .forEach((button) => button.addEventListener('click', () => {
         state.focusBounds = null
@@ -213,7 +195,6 @@ export function renderPreviewImportPage(container, datasetVersionId) {
   function closeDrawer() {
     page.state.selectedAssetId = null
     page.state.selectedIssueId = null
-    page.state.traceAssetIds.clear()
     page.state.focusBounds = null
     render()
   }

@@ -7,7 +7,6 @@ const DEFAULT_OPTIONS = {
   columnGap: 96,
   rowGap: 30,
   minWidth: 760,
-  maxTraceColumns: 6,
   mapWidth: 1100,
   mapContentHeight: 650,
 }
@@ -30,7 +29,6 @@ export function calculateSchematicLayout(graph, options = {}) {
   if (options.preserveMapOrientation && canUseSourcePositions(graph)) {
     return calculateMapRelativeLayout(graph, settings)
   }
-  if (graph.mode === 'trace') return calculateTraceLayout(graph, settings)
 
   const depths = calculateDepths(graph)
   const groupedNodes = groupNodesByDepth(graph.nodes, depths)
@@ -818,60 +816,7 @@ function getNodeSourceBounds(nodes) {
   }
 }
 
-function calculateTraceLayout(graph, settings) {
-  const columnCount = Math.min(graph.nodes.length, settings.maxTraceColumns)
-  const rowCount = Math.ceil(graph.nodes.length / columnCount)
-  const width = Math.max(
-    settings.minWidth,
-    settings.marginX * 2
-      + columnCount * settings.nodeWidth
-      + Math.max(0, columnCount - 1) * settings.columnGap,
-  )
-  const contentHeight = rowCount * settings.nodeHeight
-    + Math.max(0, rowCount - 1) * settings.rowGap
-  const height = settings.headerHeight + contentHeight + settings.footerHeight
-  const nodeById = new Map()
-
-  graph.nodes.forEach((node, index) => {
-    const row = Math.floor(index / columnCount)
-    const positionInRow = index % columnCount
-    const column = row % 2 === 0
-      ? positionInRow
-      : columnCount - 1 - positionInRow
-    const x = settings.marginX + column * (settings.nodeWidth + settings.columnGap)
-    const y = settings.headerHeight + row * (settings.nodeHeight + settings.rowGap)
-    nodeById.set(node.id, {
-      ...node,
-      depth: index,
-      parentId: index ? graph.nodes[index - 1].id : null,
-      diagram: {
-        x,
-        y,
-        width: settings.nodeWidth,
-        height: settings.nodeHeight,
-        nodeX: x + settings.nodeWidth / 2,
-        nodeY: y + 14,
-        labelX: x + settings.nodeWidth / 2,
-        labelY: y + 35,
-      },
-    })
-  })
-
-  return {
-    status: 'ready',
-    width,
-    height,
-    options: settings,
-    nodes: graph.nodes.map((node) => nodeById.get(node.id)),
-    edges: layoutEdges(graph.edges, nodeById),
-  }
-}
-
 function calculateDepths(graph) {
-  if (graph.mode === 'trace') {
-    return new Map(graph.nodes.map((node, index) => [node.id, index]))
-  }
-
   const adjacency = new Map(graph.nodes.map((node) => [node.id, []]))
   graph.edges.forEach((edge) => {
     adjacency.get(edge.sourceId)?.push(edge.targetId)

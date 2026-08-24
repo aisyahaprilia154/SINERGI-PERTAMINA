@@ -103,7 +103,7 @@ test('connection review keeps the decision beside a candidate-focused asset map'
   assert.match(mapSource, /selected-map-endpoint source/)
   assert.match(mapSource, /selected-map-endpoint target/)
   assert.match(mapSource, /function geometryIdsForCandidate/)
-  assert.match(mapSource, /!isolateCandidate \|\| trace/)
+  assert.match(mapSource, /!isolateCandidate \|\| candidateGeometry/)
   assert.match(mapSource, /!isolateCandidate \|\| candidate\.candidateId === state\.selectedCandidateId/)
 })
 

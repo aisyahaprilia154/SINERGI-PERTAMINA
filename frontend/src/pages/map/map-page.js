@@ -9,10 +9,8 @@ import {
   loadActiveDataset,
   loadActiveOverlays,
   loadDatasetProjection,
-  loadTopologyProjection,
   revokeTopologyRelation,
   setMountingRelation,
-  traceTopology,
 } from '../../services/active-dataset-service.js'
 import { renderAssetDetailDrawer } from './asset-detail-drawer.js'
 import { createMapLibreSurface } from './maplibre-map.js'
@@ -34,7 +32,6 @@ import {
 import {
   buildExplicitRelationGraph,
   getConnectedAssets,
-  relationMutationId,
 } from './network-tracing.js'
 import { openMapDataTransferDialog } from './map-data-transfer-dialog.js'
 
@@ -117,7 +114,6 @@ export async function renderMapPage(container) {
   } = mapData
   const topologyReadiness = mapData.topologyReadiness ?? {
     ready: true,
-    traceAvailable: true,
     diagramAvailable: true,
     message: '',
   }
@@ -156,7 +152,6 @@ export async function renderMapPage(container) {
     ? allMountingOverrides.map((override) => ({ ...override }))
     : []
   let topologyGraph = initialTopologyGraph
-  const traceAvailable = topologyGraph.edges.length > 0
   const diagramAvailable = assets.length > 0
   const topologySummary = summarizeMapTopology({
     assets,
@@ -202,16 +197,6 @@ export async function renderMapPage(container) {
   const assetDetailCache = new Map()
   let assetDetailRequest = 0
   const state = {
-    traceStatus: 'idle',
-    traceFromId: null,
-    traceToId: null,
-    tracePath: [],
-    traceRelations: [],
-    traceCandidates: [],
-    traceError: null,
-    traceExplanation: null,
-    traceResult: null,
-    traceGraphRevision: topologyGraph.graphRevision ?? null,
     assetDetailStatus: 'ready',
     assetDetailError: null,
     showAdditionalMetadata: false,
@@ -232,8 +217,6 @@ export async function renderMapPage(container) {
     relationStatus: 'idle',
     relationError: null,
   }
-  let traceRequestId = 0
-
   container.innerHTML = `
     <div class="map-app">
       ${renderTopNavigation('map', {
@@ -252,10 +235,9 @@ export async function renderMapPage(container) {
           assetsWithoutGeometry: renderingSummary.assetsWithoutGeometry,
           selectedArea,
           counts,
-          confirmedConnectionCount: traceAvailable ? topologyGraph.edges.length : 0,
+          confirmedConnectionCount: topologyGraph.edges.length,
           poleGroupCount: poleGroups.length,
           topologySummary,
-          selectedAssetId: initialUrlState.selectedAssetId,
           topologyReadiness,
         })}
       </main>
@@ -323,8 +305,6 @@ export async function renderMapPage(container) {
       siteId: activeContext.siteId,
       selectedNetworkIds: selection.selectedNetworkIds,
       selectedAssetId: stableUrlAssetId(assetById[selection.selectedAssetId]),
-      traceFrom: state.traceFromId,
-      traceTo: state.traceToId,
       networkFamily: initialUrlState.networkFamily,
       category: initialUrlState.category,
       assetType: initialUrlState.assetType,
@@ -340,8 +320,6 @@ export async function renderMapPage(container) {
         branchId: activeContext.branchId,
       })
       if (selection.selectedAssetId) topologyQuery.set('selectedAssetId', selection.selectedAssetId)
-      if (state.traceFromId) topologyQuery.set('traceFrom', state.traceFromId)
-      if (state.traceToId) topologyQuery.set('traceTo', state.traceToId)
       topologyLink.href = `/topology?${topologyQuery}`
     }
   }
@@ -412,15 +390,11 @@ export async function renderMapPage(container) {
     canvasApi.setState({
       selectedNetworkIds: selection.selectedNetworkIds,
       selectedAssetId: selection.selectedAssetId,
-      traceNodeIds: state.tracePath,
-      traceGeometryIds: state.traceRelations.flatMap((relation) => (
-        relation.sourceGeometryIds ?? []
-      )),
       connectedNodeIds,
       dimOthers: state.dimOthers,
       showCctvCoverage: state.showCctvCoverage,
     })
-    syncToolbarState(connectedNodeIds.length)
+    syncToolbarState()
   }
 
   function syncCctvCoverage() {
@@ -434,17 +408,7 @@ export async function renderMapPage(container) {
     networkList.querySelector('[data-cctv-coverage-toggle]')?.focus()
   }
 
-  function syncToolbarState(connectedCount = 0) {
-    const traceButton = container.querySelector('.trace-toggle')
-    const selectedAsset = assetById[selection.selectedAssetId]
-    traceButton.disabled = !traceAvailable
-    traceButton.setAttribute('aria-disabled', String(!traceAvailable))
-    traceButton.title = !traceAvailable
-      ? 'Belum ada relasi terkonfirmasi untuk ditelusuri.'
-      : selectedAsset && connectedCount > 0
-        ? `Telusuri koneksi dari ${selectedAsset.name || selectedAsset.id}`
-        : 'Klik lalu pilih aset awal pada peta.'
-
+  function syncToolbarState() {
     const diagramButton = container.querySelector('.diagram-toggle')
     diagramButton.disabled = !diagramAvailable
     diagramButton.setAttribute('aria-disabled', String(!diagramAvailable))
@@ -483,15 +447,6 @@ export async function renderMapPage(container) {
     syncMap()
     if (assetById[assetId] && !assetDetailCache.has(assetId)) {
       loadAssetDetail(assetId)
-    }
-
-    if (state.traceStatus === 'selecting-start') {
-      beginTracing(assetId)
-      return
-    }
-    if (state.traceStatus === 'choosing' && state.traceFromId !== assetId) {
-      runTraceTo(assetId)
-      return
     }
 
   }
@@ -580,8 +535,6 @@ export async function renderMapPage(container) {
       mountingControlsAvailable: topologyReadiness.capabilities?.editAssetMounting === true,
       activeContext,
       showAdditionalMetadata: state.showAdditionalMetadata,
-      trace: getDrawerTraceState(),
-      traceAvailable,
       diagramAvailable,
       topologySummary,
       relationOptions,
@@ -597,8 +550,6 @@ export async function renderMapPage(container) {
     invalidateMapAfterPanelChange(drawer)
 
     drawer.querySelector('.close-drawer')?.addEventListener('click', closeAssetDrawer)
-    drawer.querySelector('.trace-from')?.addEventListener('click', () => beginTracing(asset.id))
-    drawer.querySelector('.stop-tracing')?.addEventListener('click', stopTracing)
     drawer.querySelector('.open-asset-detail')?.addEventListener('click', () => {
       state.showAdditionalMetadata = !state.showAdditionalMetadata
       renderDrawer()
@@ -639,9 +590,6 @@ export async function renderMapPage(container) {
       state.relationTargetId = ''
       state.relationError = null
       renderDrawer()
-    })
-    drawer.querySelectorAll('[data-trace-target]').forEach((button) => {
-      button.addEventListener('click', () => runTraceTo(button.dataset.traceTarget))
     })
     drawer.querySelectorAll('[data-connected-asset]').forEach((button) => {
       button.addEventListener('click', () => handleAssetSelect(button.dataset.connectedAsset))
@@ -892,165 +840,6 @@ export async function renderMapPage(container) {
     renderDrawer()
   }
 
-  function getDrawerTraceState() {
-    return {
-      status: state.traceStatus,
-      error: state.traceError,
-      explanation: state.traceExplanation,
-      sourceAssetId: state.traceResult?.sourceAssetId ?? state.traceFromId,
-      targetAssetId: state.traceResult?.targetAssetId ?? state.traceToId,
-      graphRevision: state.traceResult?.graphRevision ?? state.traceGraphRevision,
-      hopCount: state.traceResult?.hopCount ?? null,
-      totalLengthMeters: state.traceResult?.totalLengthMeters ?? null,
-      networkFamily: state.traceResult?.networkFamily ?? null,
-      verifiedAt: state.traceResult?.verifiedAt ?? null,
-      candidates: state.traceCandidates.map((candidate) => ({
-        asset: assetById[candidate.assetId],
-        distance: candidate.distance,
-      })).filter((candidate) => candidate.asset),
-      pathAssets: state.tracePath.map((assetId) => assetById[assetId]).filter(Boolean),
-      relations: state.traceRelations.map((relation) => ({
-        ...relation,
-        networkName: networks.find((network) => network.id === relation.networkId)?.shortName
-          || networks.find((network) => network.id === relation.networkId)?.name,
-      })),
-    }
-  }
-
-  function updateTraceBanner() {
-    const banner = container.querySelector('.trace-banner')
-    if (state.traceStatus === 'idle') {
-      banner.hidden = true
-      return
-    }
-    closeAssetResults()
-    banner.hidden = false
-    const step = banner.querySelector('.trace-step')
-    const title = banner.querySelector('strong')
-    const description = banner.querySelector('.trace-step + div span')
-    if (state.traceStatus === 'selecting-start') {
-      step.textContent = '1'
-      title.textContent = 'Pilih titik awal'
-      description.textContent = 'Klik aset pada peta untuk memulai tracing.'
-    } else if (state.traceStatus === 'choosing') {
-      step.textContent = '2'
-      title.textContent = 'Pilih titik tujuan'
-      description.textContent = `Titik awal: ${assetById[state.traceFromId]?.name || state.traceFromId}.`
-    } else if (state.traceStatus === 'loading') {
-      step.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">progress_activity</span>'
-      title.textContent = 'Menyusun jalur'
-      description.textContent = 'Membaca graph topologi terkonfirmasi pada dataset aktif.'
-    } else if (state.traceStatus === 'active') {
-      step.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">check</span>'
-      title.textContent = 'Jalur koneksi ditampilkan'
-      description.textContent = `${state.tracePath.length} aset pada jalur topologi terkonfirmasi.`
-    } else if (state.traceStatus === 'error') {
-      step.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">priority_high</span>'
-      title.textContent = 'Tracing tidak dapat diselesaikan'
-      description.textContent = state.traceError || 'Relasi tujuan tidak tersedia.'
-    }
-  }
-
-  function resetTraceState() {
-    state.traceStatus = 'idle'
-    state.traceFromId = null
-    state.traceToId = null
-    state.tracePath = []
-    state.traceRelations = []
-    state.traceCandidates = []
-    state.traceError = null
-    state.traceExplanation = null
-    state.traceResult = null
-    state.traceGraphRevision = topologyGraph.graphRevision ?? null
-  }
-
-  async function beginTracing(startId = null, { historyMode = 'push' } = {}) {
-    const requestId = ++traceRequestId
-    resetTraceState()
-    if (!traceAvailable) {
-      state.traceStatus = 'error'
-      state.traceError = 'Belum ada relasi terkonfirmasi untuk ditelusuri.'
-      updateUrl(historyMode)
-      updateTraceBanner()
-      renderDrawer()
-      syncMap()
-      return
-    }
-    if (!startId) {
-      state.traceStatus = 'selecting-start'
-      updateUrl(historyMode)
-      updateTraceBanner()
-      renderDrawer()
-      syncMap()
-      return
-    }
-
-    if (!assetById[startId]) {
-      state.traceStatus = 'error'
-      state.traceError = 'Aset ini belum terdaftar sebagai node topology.'
-      updateUrl(historyMode)
-      updateTraceBanner()
-      renderDrawer()
-      syncMap()
-      return
-    }
-    state.traceFromId = startId
-    state.tracePath = [startId]
-    state.traceStatus = 'loading'
-    state.traceError = null
-    state.traceGraphRevision = topologyGraph.graphRevision ?? null
-    updateUrl(historyMode)
-    updateTraceBanner()
-    renderDrawer()
-    syncMap()
-
-    try {
-      // The active dataset can be regenerated while this page remains open.
-      // Refresh the authoritative graph revision before tracing so a stale
-      // local projection cannot falsely report that an asset has no links.
-      const latestGraph = await loadTopologyProjection({
-        datasetVersionId: activeContext.datasetVersionId,
-        projection: 'graph',
-      })
-      state.traceGraphRevision = latestGraph.graph?.graphRevision
-        ?? latestGraph.graphRevision
-        ?? state.traceGraphRevision
-      const result = await traceTopology({
-        datasetVersionId: activeContext.datasetVersionId,
-        sourceAssetId: startId,
-        graphRevision: state.traceGraphRevision,
-        direction: 'both',
-        scopeAssetIds: validIds.assetIds,
-      })
-      if (requestId !== traceRequestId) return
-      state.traceResult = result
-      state.traceGraphRevision = result.graphRevision || state.traceGraphRevision
-      if (result.status === 'destinations' && result.destinations?.length) {
-        state.traceCandidates = result.destinations
-          .filter(({ assetId }) => assetById[assetId])
-          .sort((left, right) => left.distance - right.distance
-            || assetById[left.assetId].name.localeCompare(assetById[right.assetId].name, 'id'))
-        state.traceStatus = state.traceCandidates.length ? 'choosing' : 'error'
-        state.traceError = state.traceCandidates.length
-          ? null
-          : 'Target berada di luar area peta yang sedang dipilih.'
-      } else {
-        state.traceStatus = 'error'
-        state.traceCandidates = []
-        state.traceError = result.message || 'Belum ada koneksi terkonfirmasi dari aset ini.'
-      }
-    } catch (error) {
-      if (requestId !== traceRequestId) return
-      state.traceStatus = 'error'
-      state.traceError = traceErrorMessage(error)
-      state.traceCandidates = []
-    }
-    updateUrl(historyMode)
-    updateTraceBanner()
-    renderDrawer()
-    syncMap()
-  }
-
   function toggleNetworkFocus(networkId) {
     if (!networks.some(({ id }) => id === networkId)) return
     state.focusedNetworkId = state.focusedNetworkId === networkId ? null : networkId
@@ -1059,83 +848,8 @@ export async function renderMapPage(container) {
     if (state.focusedNetworkId) canvasApi.focusNetworkBounds(state.focusedNetworkId)
   }
 
-  async function runTraceTo(targetId, { historyMode = 'push' } = {}) {
-    if (!traceAvailable) {
-      beginTracing(null, { historyMode })
-      return
-    }
-    if (!state.traceFromId) {
-      beginTracing(selection.selectedAssetId)
-      return
-    }
-
-    const requestId = ++traceRequestId
-    state.traceToId = targetId
-    state.traceStatus = 'loading'
-    state.traceError = null
-    state.traceResult = null
-    updateTraceBanner()
-    renderDrawer()
-    syncMap()
-
-    try {
-      const result = await traceTopology({
-        datasetVersionId: activeContext.datasetVersionId,
-        sourceAssetId: state.traceFromId,
-        targetAssetId: targetId,
-        graphRevision: topologyGraph.graphRevision,
-        direction: 'both',
-        scopeAssetIds: validIds.assetIds,
-      })
-      if (requestId !== traceRequestId) return
-      state.traceResult = result
-      state.traceGraphRevision = result.graphRevision || state.traceGraphRevision
-      if (result.status === 'found' && result.nodeIds?.length > 1) {
-        state.traceStatus = 'active'
-        state.tracePath = result.nodeIds.filter((assetId) => assetById[assetId])
-        state.traceRelations = toUiTraceRelations(result.edges)
-        state.traceExplanation = result.explanation
-        state.traceError = null
-        updateUrl(historyMode)
-        canvasApi.focusAssetBounds(state.tracePath)
-      } else {
-        state.traceStatus = 'error'
-        state.tracePath = state.traceFromId ? [state.traceFromId] : []
-        state.traceRelations = []
-        state.traceExplanation = null
-        state.traceError = result.message || 'Tujuan tracing tidak dapat digunakan.'
-        updateUrl(historyMode)
-      }
-    } catch (error) {
-      if (requestId !== traceRequestId) return
-      state.traceStatus = 'error'
-      state.tracePath = state.traceFromId ? [state.traceFromId] : []
-      state.traceRelations = []
-      state.traceExplanation = null
-      state.traceResult = null
-      state.traceError = traceErrorMessage(error)
-      updateUrl(historyMode)
-    }
-    updateTraceBanner()
-    renderDrawer()
-    syncMap()
-  }
-
-  function stopTracing() {
-    traceRequestId += 1
-    resetTraceState()
-    updateUrl()
-    updateTraceBanner()
-    syncMap()
-    renderDrawer()
-  }
-
-  function openSchematic(event) {
+  function openSchematic() {
     if (!diagramAvailable) {
-      state.traceStatus = 'error'
-      state.traceError = 'Belum ada aset yang dapat ditampilkan pada diagram.'
-      updateTraceBanner()
-      renderDrawer()
       return
     }
     const query = new URLSearchParams({
@@ -1144,30 +858,7 @@ export async function renderMapPage(container) {
     })
     if (selectedArea?.key) query.set('area', selectedArea.key)
     if (selection.selectedAssetId) query.set('selectedAssetId', selection.selectedAssetId)
-    if (state.traceFromId) query.set('traceFrom', state.traceFromId)
-    if (state.traceToId) query.set('traceTo', state.traceToId)
     window.location.href = `/topology?${query}`
-  }
-
-  function traceErrorMessage(error) {
-    if (error?.code === 'topology_graph_stale') {
-      return 'Dataset atau graph berubah. Muat ulang peta untuk menggunakan versi terbaru.'
-    }
-    if (error?.code === 'topology_graph_invalid') {
-      return 'Tracing dihentikan karena confirmed graph tidak valid.'
-    }
-    return error?.message || 'Layanan tracing tidak dapat digunakan.'
-  }
-
-  function toUiTraceRelations(edges = []) {
-    return edges.map((edge) => ({
-      ...edge,
-      id: relationMutationId(edge) || edge.edgeId || edge.id,
-      sourceGeometryId: edge.sourceGeometryIds?.[0] || edge.sourceGeometryId,
-      sourceGeometryIds: edge.sourceGeometryIds ?? [],
-      relationStatus: edge.verificationStatus || 'confirmed',
-      networkId: edge.networkId || null,
-    }))
   }
 
   function openDataTransfer(initialMode = 'import') {
@@ -1329,33 +1020,12 @@ export async function renderMapPage(container) {
     handleAssetSelect(assetId)
   }
 
-  function beginToolbarTracing() {
-    const selectedAssetId = selection.selectedAssetId
-    const selectedHasRelations = selectedAssetId
-      && getConnectedAssets(relationGraph, selectedAssetId).length > 0
-    beginTracing(selectedHasRelations ? selectedAssetId : null)
-  }
-
-  async function restoreStateFromUrl() {
+  function restoreStateFromUrl() {
     const urlState = parseMapUrlState(window.location.search, validIds)
     selection.replace(urlState)
-    await restoreTraceState(urlState)
     renderNetworkList()
     renderDrawer()
     syncMap()
-  }
-
-  async function restoreTraceState(urlState) {
-    if (!urlState.traceFrom) {
-      traceRequestId += 1
-      resetTraceState()
-      updateTraceBanner()
-      return
-    }
-    await beginTracing(urlState.traceFrom, { historyMode: 'replace' })
-    if (urlState.traceTo && state.traceStatus === 'choosing') {
-      await runTraceTo(urlState.traceTo, { historyMode: 'replace' })
-    }
   }
 
   networkList.addEventListener('click', (event) => {
@@ -1463,8 +1133,6 @@ export async function renderMapPage(container) {
     const params = new URLSearchParams(window.location.search)
     params.set('area', nextArea)
     params.delete('selectedAssetId')
-    params.delete('traceFrom')
-    params.delete('traceTo')
     canvasApi.destroy()
     window.location.assign(`${window.location.pathname}?${params}${window.location.hash}`)
   })
@@ -1507,9 +1175,7 @@ export async function renderMapPage(container) {
   container.querySelector('.import-toggle')?.addEventListener('click', () => {
     openDataTransfer('import')
   })
-  container.querySelector('.trace-toggle').addEventListener('click', beginToolbarTracing)
   container.querySelector('.diagram-toggle').addEventListener('click', openSchematic)
-  container.querySelector('.cancel-trace').addEventListener('click', stopTracing)
   container.querySelector('.zoom-in').addEventListener('click', canvasApi.zoomIn)
   container.querySelector('.zoom-out').addEventListener('click', canvasApi.zoomOut)
   container.querySelector('.zoom-reset').addEventListener('click', canvasApi.reset)
@@ -1542,7 +1208,6 @@ export async function renderMapPage(container) {
     if (!assetResults.hidden) closeAssetResults()
     else if (!basemapPicker.hidden) closeBasemapPicker()
     else if (!legend.hidden) toggleLegend()
-    else if (state.traceStatus !== 'idle') stopTracing()
     else if (selection.selectedAssetId) closeAssetDrawer()
     else if (workspace.classList.contains('sidebar-open')) closeMobileSidebar()
   })

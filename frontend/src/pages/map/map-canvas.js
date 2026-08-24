@@ -51,7 +51,6 @@ export function createMapCanvas(canvas, {
   let hoveredEdgeNetworkId = null
   let hoveredAssetId = null
   let keyboardFocusAssetId = null
-  let traceNodeIds = []
   let connectedNodeIds = []
   let dimOthers = true
   let zoom = 1
@@ -135,40 +134,26 @@ export function createMapCanvas(canvas, {
 
     const emphasizedNetworkId = hoveredEdgeNetworkId || highlightedNetworkId
     const hasEmphasizedNetwork = Boolean(emphasizedNetworkId)
-    const tracingActive = traceNodeIds.length > 0
-    const traceEdges = new Set(
-      traceNodeIds.slice(1).map((id, index) => [traceNodeIds[index], id].sort().join('|')),
-    )
 
     const networkStates = networks.map((network) => {
       const active = selectedNetworkIds.has(network.id)
       const emphasized = network.id === emphasizedNetworkId
-      const hasTraceEdge = network.edges.some(([fromId, toId]) =>
-        traceEdges.has([fromId, toId].sort().join('|')),
-      )
-      return { network, active, emphasized, hasTraceEdge }
+      return { network, active, emphasized }
     })
     networkStates
-      .filter(({ active, emphasized, hasTraceEdge }) => (
-        active || emphasized || hasTraceEdge || !dimOthers
-      ))
+      .filter(({ active, emphasized }) => active || emphasized || !dimOthers)
       .forEach((networkState) => drawNetworkPolygons(networkState, {
         width,
         height,
-        tracingActive,
         hasEmphasizedNetwork,
       }))
     networkStates
-      .filter(({ active, emphasized, hasTraceEdge }) => (
-        active || emphasized || hasTraceEdge || !dimOthers
-      ))
+      .filter(({ active, emphasized }) => active || emphasized || !dimOthers)
       .forEach((networkState) => drawNetworkLines(networkState, {
         width,
         height,
-        tracingActive,
         hasEmphasizedNetwork,
       }))
-    if (tracingActive) drawTraceRelations(networkStates, traceEdges, width, height)
 
     const visibleAssetIds = new Set(
       networks
@@ -177,7 +162,6 @@ export function createMapCanvas(canvas, {
         )
         .flatMap((network) => network.nodeIds),
     )
-    traceNodeIds.forEach((assetId) => visibleAssetIds.add(assetId))
     connectedNodeIds.forEach((assetId) => visibleAssetIds.add(assetId))
 
     assets.forEach((asset) => {
@@ -190,16 +174,13 @@ export function createMapCanvas(canvas, {
 
       const point = mapPoint(asset, width, height)
       const isSelected = asset.id === selectedAssetId
-      const isTraceNode = traceNodeIds.includes(asset.id)
-      const isConnected = connectedNodeIds.includes(asset.id) || isTraceNode
+      const isConnected = connectedNodeIds.includes(asset.id)
       const isKeyboardFocused = asset.id === keyboardFocusAssetId
       const muted = activeNetworks.length === 0 && emphasizedNetworks.length === 0 && !isConnected
       const baseRadius = connectorTypes.has(asset.type) ? 12 : 10
       const radius = isSelected || isKeyboardFocused ? baseRadius + 2 : baseRadius
       const nodeAlpha = muted
         ? .22
-        : tracingActive && !isTraceNode && !isSelected
-          ? .18
         : hasEmphasizedNetwork && emphasizedNetworks.length === 0 && !isConnected
           ? .3
           : 1
@@ -229,7 +210,7 @@ export function createMapCanvas(canvas, {
         asset,
         hitRadius: Math.max(17, radius + 5),
         active: activeNetworks.length > 0,
-        connected: isTraceNode,
+        connected: isConnected,
         important: connectorTypes.has(asset.type) || asset.type === 'Server',
       })
     })
@@ -243,18 +224,14 @@ export function createMapCanvas(canvas, {
     network,
     active,
     emphasized,
-    hasTraceEdge,
   }, {
     width,
     height,
-    tracingActive,
     hasEmphasizedNetwork,
   }) {
     const alpha = emphasized
       ? .16
-      : tracingActive && !hasTraceEdge
-        ? .025
-        : hasEmphasizedNetwork && !emphasized
+      : hasEmphasizedNetwork && !emphasized
           ? .035
           : active
             ? .09
@@ -295,19 +272,15 @@ export function createMapCanvas(canvas, {
     network,
     active,
     emphasized,
-    hasTraceEdge,
   }, {
     width,
     height,
-    tracingActive,
     hasEmphasizedNetwork,
   }) {
     const lineStyle = getNetworkLineStyle(network)
     const alpha = emphasized
       ? 1
-      : tracingActive && !hasTraceEdge
-        ? .12
-        : hasEmphasizedNetwork
+      : hasEmphasizedNetwork
           ? (active ? .25 : .08)
           : active
             ? 1
@@ -343,34 +316,6 @@ export function createMapCanvas(canvas, {
         })
       }
     }
-  }
-
-  function drawTraceRelations(networkStates, traceEdges, width, height) {
-    const drawn = new Set()
-    networkStates.forEach(({ network }) => {
-      network.edges.forEach(([fromId, toId]) => {
-        const key = [fromId, toId].sort().join('|')
-        if (!traceEdges.has(key) || drawn.has(key)) return
-        const from = assets.find((asset) => asset.id === fromId)
-        const to = assets.find((asset) => asset.id === toId)
-        if (!from?.renderable || !to?.renderable) return
-        drawn.add(key)
-        const start = mapPoint(from, width, height)
-        const end = mapPoint(to, width, height)
-        context.save()
-        context.lineCap = 'round'
-        context.setLineDash([5, 5])
-        strokeCanvasPath([start, end], colors.surface, 7)
-        strokeCanvasPath([start, end], colors.primary, 3)
-        context.restore()
-        renderedEdges.push({
-          start,
-          end,
-          networkId: network.id,
-          hitWidth: 13,
-        })
-      })
-    })
   }
 
   function displayGeometryParts(geometries, targetType) {
@@ -422,7 +367,6 @@ export function createMapCanvas(canvas, {
           || node.asset.id === hoveredAssetId
           || node.asset.id === keyboardFocusAssetId
         if (focused) return true
-        if (traceNodeIds.length && !node.connected) return false
         if (node.important && node.active && zoom >= 1) return true
         return node.active && zoom >= 1.4
       })
@@ -754,7 +698,6 @@ export function createMapCanvas(canvas, {
     setState(next) {
       if (next.selectedNetworkIds) selectedNetworkIds = new Set(next.selectedNetworkIds)
       if ('selectedAssetId' in next) selectedAssetId = next.selectedAssetId
-      if (next.traceNodeIds) traceNodeIds = next.traceNodeIds
       if (next.connectedNodeIds) connectedNodeIds = next.connectedNodeIds
       if ('dimOthers' in next) dimOthers = next.dimOthers
       draw()

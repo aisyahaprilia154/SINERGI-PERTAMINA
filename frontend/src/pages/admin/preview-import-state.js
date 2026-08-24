@@ -56,7 +56,6 @@ export function createImportPreviewState(model) {
     visibleIssueSeverities: new Set(model.issueSeverities),
     selectedAssetId: null,
     selectedIssueId: null,
-    traceAssetIds: new Set(),
     zoom: 1,
     focusBounds: null,
     sidebarOpen: false,
@@ -111,28 +110,6 @@ export function getVisiblePreviewData(model, state) {
     relations: source.relations,
     bounds: calculateGeometryBounds(geometries),
   }
-}
-
-export function findConnectedAssetIds(model, startAssetId) {
-  const graph = new Map()
-  model.candidate.assets.forEach(({ assetId }) => graph.set(assetId, new Set()))
-  model.candidate.relations.forEach(({ sourceAssetId, targetAssetId }) => {
-    if (!graph.has(sourceAssetId) || !graph.has(targetAssetId)) return
-    graph.get(sourceAssetId).add(targetAssetId)
-    graph.get(targetAssetId).add(sourceAssetId)
-  })
-  if (!graph.has(startAssetId)) return new Set()
-  const visited = new Set([startAssetId])
-  const queue = [startAssetId]
-  while (queue.length) {
-    const current = queue.shift()
-    graph.get(current).forEach((next) => {
-      if (visited.has(next)) return
-      visited.add(next)
-      queue.push(next)
-    })
-  }
-  return visited
 }
 
 export function calculateAssetBounds(model, assetId) {

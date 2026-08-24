@@ -23,7 +23,6 @@ export function createFlatNetworkMap(element, {
   let state = {
     selectedNetworkIds: new Set(networks.map(({ id }) => id)),
     selectedAssetId: null,
-    traceNodeIds: [],
     connectedNodeIds: [],
     dimOthers: true,
     highlightedNetworkId: null,
@@ -174,7 +173,6 @@ export function renderFlatNetworkSvg({
   networkByGeometryId = createNetworkGeometryIndex(networks),
   featureById = new Map(diagramAssets.map((asset) => [asset.id, asset])),
 }) {
-  const traceIds = new Set(state.traceNodeIds)
   const connectedIds = new Set(state.connectedNodeIds)
   const lineGeometries = geometries.filter(({ geometryType }) => geometryType === 'line_string')
   const pointAssets = assets.filter(({ x, y }) => Number.isFinite(x) && Number.isFinite(y))
@@ -239,9 +237,8 @@ export function renderFlatNetworkSvg({
             const active = !asset.networkIds?.length
               || asset.networkIds.some((id) => state.selectedNetworkIds.has(id))
             const selected = asset.id === state.selectedAssetId
-            const traced = traceIds.has(asset.id)
             const connected = connectedIds.has(asset.id)
-            const opacity = selected || traced || connected ? 1 : active ? 1 : state.dimOthers ? .14 : 0
+            const opacity = selected || connected ? 1 : active ? 1 : state.dimOthers ? .14 : 0
             const color = assetColor(asset, networks)
             const x = asset.x * VIEW_WIDTH
             const y = asset.y * VIEW_HEIGHT
@@ -249,7 +246,7 @@ export function renderFlatNetworkSvg({
               <g class="flat-asset ${selected ? 'selected' : ''}"
                 data-flat-asset="${escapeAttribute(asset.id)}" opacity="${opacity}">
                 <title>${escapeXml(asset.name)} · ${escapeXml(asset.type)} · ${escapeXml(asset.id)}</title>
-                ${selected || traced ? `<circle cx="${x}" cy="${y}" r="13" fill="none" stroke="#fff" stroke-width="2" filter="url(#flat-node-glow)"/>` : ''}
+                ${selected ? `<circle cx="${x}" cy="${y}" r="13" fill="none" stroke="#fff" stroke-width="2" filter="url(#flat-node-glow)"/>` : ''}
                 <circle cx="${x}" cy="${y}" r="${selected ? 8 : 6}" fill="${color}"
                   stroke="#f8fafc" stroke-width="2"/>
                 <text x="${x + 9}" y="${y - 8}" class="flat-asset-label">${escapeXml(shortLabel(asset.name))}</text>

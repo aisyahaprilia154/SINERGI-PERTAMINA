@@ -13,7 +13,6 @@ function radiusByState(defaultRadius) {
   return [
     'case',
     ['get', 'selected'], 11,
-    ['get', 'trace'], 9,
     defaultRadius,
   ]
 }

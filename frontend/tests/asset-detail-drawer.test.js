@@ -42,7 +42,7 @@ test('drawer exposes read-only asset, network, relation, and action details', ()
   assert.match(html, /10\.42\.3\.31/)
   assert.match(html, /SMG Network Master/)
   assert.match(html, /JB-CCTV-01/)
-  assert.match(html, /Telusuri koneksi/)
+  assert.doesNotMatch(html, /Telusuri koneksi|Tracing|penelusuran/i)
   assert.match(html, /Relasi aset/)
   assert.match(html, /Buka detail aset/)
   assert.match(html, /Buka Diagram Topologi/)
@@ -75,43 +75,6 @@ test('drawer omits operational status when the asset model has no status field',
   assert.doesNotMatch(html, /class="asset-status/)
   assert.doesNotMatch(html, /Status operasional/)
   assert.doesNotMatch(html, /Status tidak tersedia/)
-})
-
-test('drawer renders an explainable ordered trace', () => {
-  const html = renderAssetDetailDrawer({
-    asset,
-    assetNetworks: [network],
-    connectedAssets: [],
-    activeContext,
-    trace: {
-      status: 'active',
-      explanation: 'Jalur terpendek berdasarkan relasi eksplisit.',
-      sourceAssetId: 'cam-01',
-      targetAssetId: 'jb-01',
-      hopCount: 1,
-      totalLengthMeters: 42,
-      networkFamily: 'CCTV',
-      graphRevision: 'topology-graph:abc',
-      verifiedAt: '2026-08-03T10:00:00.000Z',
-      pathAssets: [
-        asset,
-        { ...asset, id: 'jb-01', name: 'JB-CCTV-01', type: 'Junction box' },
-      ],
-      relations: [{
-        networkName: 'CCTV Ring',
-        pathAssetIds: ['cable-01'],
-        sourceGeometryIds: ['geometry-01'],
-      }],
-    },
-  })
-
-  assert.match(html, /Jalur koneksi/)
-  assert.match(html, /Jalur terpendek berdasarkan relasi eksplisit/)
-  assert.match(html, /topology-graph:abc/)
-  assert.match(html, /cable-01/)
-  assert.match(html, /geometry-01/)
-  assert.match(html, /Hentikan tracing/)
-  assert.doesNotMatch(html, /disabled aria-disabled="true"/)
 })
 
 test('drawer supports loading and error states', () => {

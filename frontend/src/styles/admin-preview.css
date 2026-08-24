@@ -604,15 +604,6 @@
   filter: drop-shadow(0 0 0 var(--admin-primary));
 }
 
-.preview-map-object.is-traced .node-symbol {
-  stroke: var(--admin-primary);
-  stroke-width: 4;
-}
-
-.preview-map-object.is-dimmed {
-  opacity: .18;
-}
-
 .node-issue-flag {
   fill: var(--admin-danger);
   stroke: var(--admin-surface);

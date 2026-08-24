@@ -18,12 +18,12 @@ test('readiness explains when generated topology has no device edge', () => {
       topologyStatus: 'review_required',
       validation: { errorCount: 0 },
       blockers: [{ code: 'no_confirmed_device_edge' }],
-      capabilities: { trace: false, diagram: false },
+      capabilities: { diagram: false },
     },
   })
 
-  assert.equal(result.traceAvailable, false)
-  assert.equal(result.traceMessage, TOPOLOGY_NO_DEVICE_EDGE_MESSAGE)
+  assert.equal(result.diagramAvailable, false)
+  assert.equal(result.message, TOPOLOGY_NO_DEVICE_EDGE_MESSAGE)
 })
 
 test('readiness keeps invalid confirmed graph as the highest priority error', () => {
@@ -34,11 +34,11 @@ test('readiness keeps invalid confirmed graph as the highest priority error', ()
       topologyStatus: 'invalid',
       validation: { errorCount: 1 },
       blockers: [{ code: 'confirmed_graph_invalid' }],
-      capabilities: { trace: false, diagram: false },
+      capabilities: { diagram: false },
     },
   })
 
-  assert.equal(result.traceMessage, TOPOLOGY_GRAPH_INVALID_MESSAGE)
+  assert.equal(result.message, TOPOLOGY_GRAPH_INVALID_MESSAGE)
 })
 
 test('mounting edit capability is independent from topology candidate review', () => {
@@ -50,7 +50,6 @@ test('mounting edit capability is independent from topology candidate review', (
       capabilities: {
         reviewTopology: false,
         editAssetMounting: true,
-        trace: false,
         diagram: false,
       },
     },
