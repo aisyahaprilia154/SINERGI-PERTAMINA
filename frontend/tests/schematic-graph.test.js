@@ -27,28 +27,6 @@ const networks = [
   },
 ]
 
-test('trace has priority and preserves its explicit connection order', () => {
-  const graph = buildSchematicGraph({
-    assets,
-    networks,
-    selectedNetworkIds: ['peripheral'],
-    focusedAssetId: 'printer',
-    tracePath: ['cam', 'jb', 'core'],
-    traceRelations: [
-      { networkId: 'cctv', relationType: 'explicit-network-edge' },
-      { networkId: 'cctv', relationType: 'explicit-network-edge' },
-    ],
-  })
-
-  assert.equal(graph.mode, 'trace')
-  assert.equal(graph.anchorAssetId, 'cam')
-  assert.deepEqual(graph.nodes.map((node) => node.id), ['cam', 'jb', 'core'])
-  assert.deepEqual(graph.edges.map((edge) => [edge.sourceId, edge.targetId]), [
-    ['cam', 'jb'],
-    ['jb', 'core'],
-  ])
-})
-
 test('focused asset graph contains only its direct explicit relations', () => {
   const graph = buildSchematicGraph({
     assets,
@@ -61,7 +39,6 @@ test('focused asset graph contains only its direct explicit relations', () => {
   assert.equal(graph.edges.length, 2)
   assert.equal(graph.nodes.some((node) => node.id === 'printer'), false)
 })
-
 test('selected network graph excludes assets from unselected networks', () => {
   const graph = buildSchematicGraph({
     assets,
@@ -74,8 +51,7 @@ test('selected network graph excludes assets from unselected networks', () => {
   assert.equal(graph.edges.length, 1)
   assert.equal(graph.nodes.find((node) => node.id === 'core').ip, '10.42.0.1')
 })
-
-test('diagram uses the same confirmed topology edges as tracing and map', () => {
+test('diagram uses the same confirmed topology edges as the map', () => {
   const graph = buildSchematicGraph({
     assets,
     networks,
@@ -256,7 +232,6 @@ test('full-map scope includes every active network and preserves map display pos
     assets: positionedAssets,
     networks,
     scope: 'full-map',
-    tracePath: ['cam', 'jb'],
   })
 
   assert.equal(graph.mode, 'full-map')
@@ -374,14 +349,3 @@ test('all-assets evidence graph keeps path nodes, strong recommendations, review
   assert.equal(graph.diagnostics.validation.isConfirmedTopologyConsistent, true)
 })
 
-test('trace scope returns a clear empty state before tracing exists', () => {
-  const graph = buildSchematicGraph({
-    assets,
-    networks,
-    scope: 'trace',
-  })
-
-  assert.equal(graph.status, 'empty')
-  assert.equal(graph.mode, 'trace')
-  assert.match(graph.message, /Jalankan tracing/)
-})

@@ -26,17 +26,12 @@ export function renderPreviewMapCanvas({ visible, state }) {
   const bounds = zoomBounds(baseBounds, state.zoom)
   const projection = createProjection(bounds)
   const assetsByNode = new Map(visible.assets.map((asset) => [asset.id, asset]))
-  const traced = state.traceAssetIds
   const labels = createLabelCollector()
   const rendered = visible.geometries.map((geometry) => {
     const asset = assetsByNode.get(geometry.assetNodeId)
     if (!asset) return ''
     return renderGeometry(geometry, asset, projection, state, labels)
   }).join('')
-  const logicalRelations = state.traceAssetIds.size
-    ? renderTraceRelations(visible, projection, traced)
-    : ''
-
   return `
     <svg class="import-preview-map-svg" viewBox="0 0 ${WIDTH} ${HEIGHT}"
       role="img" aria-label="Peta preview dataset import">
@@ -54,7 +49,6 @@ export function renderPreviewMapCanvas({ visible, state }) {
       <rect width="${WIDTH}" height="${HEIGHT}" class="preview-map-background"/>
       <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#preview-map-grid)" class="preview-map-grid"/>
       <g class="preview-geometries">${rendered}</g>
-      <g class="preview-logical-relations">${logicalRelations}</g>
       <g class="preview-map-labels">${labels.render()}</g>
     </svg>
     <div class="preview-map-context-pill">
@@ -94,15 +88,11 @@ function renderGeometry(geometry, asset, project, state, labels) {
     }, asset, project, state, labels)).join('')
   }
   const isSelected = asset.assetId === state.selectedAssetId
-  const isTraced = state.traceAssetIds.has(asset.assetId)
-  const isDimmed = state.traceAssetIds.size > 0 && !isTraced
   const classes = [
     'preview-map-object',
     `category-${categoryClass(asset.category)}`,
     `change-${asset.changeStatus}`,
     isSelected ? 'is-selected' : '',
-    isTraced ? 'is-traced' : '',
-    isDimmed ? 'is-dimmed' : '',
     asset.issues.length ? 'has-issue' : '',
   ].filter(Boolean).join(' ')
   const common = `
@@ -160,29 +150,6 @@ function renderGeometry(geometry, asset, project, state, labels) {
     `
   }
   return ''
-}
-
-function renderTraceRelations(visible, project, traced) {
-  const pointByAssetId = new Map()
-  visible.assets.forEach((asset) => {
-    if (!traced.has(asset.assetId)) return
-    const geometry = visible.source.geometriesByAssetNode.get(asset.id)
-      ?.find(({ geometryType }) => geometryType === 'point')
-    const point = geometry ? project(geometry.coordinates) : null
-    if (point) pointByAssetId.set(asset.assetId, point)
-  })
-  return visible.relations.map((relation) => {
-    if (!traced.has(relation.sourceAssetId) || !traced.has(relation.targetAssetId)) return ''
-    const source = pointByAssetId.get(relation.sourceAssetId)
-    const target = pointByAssetId.get(relation.targetAssetId)
-    if (!source || !target) return ''
-    return `
-      <line x1="${round(source.x)}" y1="${round(source.y)}"
-        x2="${round(target.x)}" y2="${round(target.y)}">
-        <title>${escapeHtml(relation.sourceAssetId)} → ${escapeHtml(relation.targetAssetId)} · ${escapeHtml(relation.relationType)}</title>
-      </line>
-    `
-  }).join('')
 }
 
 function createProjection(bounds) {

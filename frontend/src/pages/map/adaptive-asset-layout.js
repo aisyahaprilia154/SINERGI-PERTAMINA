@@ -20,7 +20,7 @@ export function buildAdaptiveAssetLayout(items = [], {
   groups.forEach((group) => {
     const ranked = [...group].sort(compareItems)
     const focused = ranked
-      .filter(({ selected, trace, networkFocused }) => selected || trace || networkFocused)
+      .filter(({ selected, networkFocused }) => selected || networkFocused)
       .slice(0, 4)
     if (enabled && ranked.length > 8) {
       const focusedIds = new Set(focused.map(({ id }) => id))
@@ -65,9 +65,7 @@ export function buildAdaptiveAssetLayout(items = [], {
     }
 
     const mustExpand = zoom >= 17
-      || ranked.some(({ selected, trace, networkFocused }) => (
-        selected || trace || networkFocused
-      ))
+      || ranked.some(({ selected, networkFocused }) => selected || networkFocused)
 
     if (enabled && ranked.length > 1 && !mustExpand) {
       markers.push(createClusterMarker(ranked))
@@ -89,7 +87,7 @@ export function buildAdaptiveAssetLayout(items = [], {
         point,
         anchorPoint: item.point,
         displaced,
-        showLabel: Boolean(item.selected || item.trace || (item.isCoreNode && zoom >= 19.5)),
+        showLabel: Boolean(item.selected || (item.isCoreNode && zoom >= 19.5)),
       }
       markers.push(marker)
       if (displaced) {
@@ -236,7 +234,7 @@ function avoidLabelCollisions(markers) {
   ranked.forEach((marker) => {
     const box = labelBox(marker)
     const collides = placed.some((placedBox) => boxesOverlap(box, placedBox))
-    const mandatory = marker.selected || marker.trace
+    const mandatory = marker.selected
     if (collides && !mandatory) {
       marker.showLabel = false
       return
@@ -270,11 +268,10 @@ function compareItems(left, right) {
 
 function itemPriority(item) {
   if (item.selected) return 0
-  if (item.trace) return 1
-  if (item.networkFocused) return 2
-  if (item.isCoreNode) return 3
-  if (item.active !== false) return 4
-  return 5
+  if (item.networkFocused) return 1
+  if (item.isCoreNode) return 2
+  if (item.active !== false) return 3
+  return 4
 }
 
 function clusterLabel(items) {

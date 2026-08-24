@@ -136,7 +136,7 @@ test('map context and toolbar present compact professional map actions', () => {
   assert.match(controls, /upload_file/)
   assert.match(controls, />Import</)
   assert.match(controls, />Export</)
-  assert.match(controls, />Tracing</)
+  assert.doesNotMatch(controls, />Tracing</)
   assert.match(controls, />Diagram Topologi</)
   assert.match(controls, /class="tool-button export-toggle map-action-ghost"/)
   assert.match(controls, /aria-label="Export" title="Export data peta"/)
@@ -146,12 +146,10 @@ test('map context and toolbar present compact professional map actions', () => {
   assert.match(controls, /aria-label="Buka panel jaringan"[^>]*aria-expanded="false"/)
   assert.doesNotMatch(controls, /Lainnya|map-more-menu|map-more-popover/)
   assert.doesNotMatch(controls, /Kelola Dataset|Rapikan tampilan|manage-dataset-toggle|declutter-toggle/)
-  assert.match(controls, /Klik lalu pilih aset awal pada peta\./)
-  assert.doesNotMatch(controls, /class="tool-button trace-toggle"[^>]*\bdisabled\b/)
+  assert.doesNotMatch(controls, /Telusuri koneksi|Klik lalu pilih aset awal pada peta\./i)
   assert.doesNotMatch(controls, /Import \/ Export/)
   assert.match(controls, /basemap-toggle/)
   assert.doesNotMatch(controls, /map-asset-results/)
-  assert.ok(controls.indexOf('trace-toggle') < controls.indexOf('diagram-toggle'))
   assert.ok(controls.indexOf('diagram-toggle') < controls.indexOf('import-toggle'))
   assert.ok(controls.indexOf('import-toggle') < controls.indexOf('export-toggle'))
 })
@@ -159,7 +157,7 @@ test('map context and toolbar present compact professional map actions', () => {
 test('map keeps source-first actions independent from the legacy review readiness flag', () => {
   const topologyReadiness = {
     ready: false,
-    message: 'Topologi site ini belum siap untuk tracing. Data koneksi masih dalam review.',
+    message: 'Diagram topologi belum siap dipublikasikan.',
   }
   const context = renderMapContextPill(activeContext, topologyReadiness)
   const controls = renderMapFloatingControls(activeContext, topologyReadiness)

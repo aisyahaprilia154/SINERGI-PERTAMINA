@@ -63,30 +63,6 @@ test('layout coordinates remain separate from graph nodes', () => {
   assert.ok(layout.nodes.every((node) => Number.isFinite(node.diagram.labelX)))
 })
 
-test('long traces wrap into deterministic rows while preserving sequence depth', () => {
-  const traceNodes = Array.from({ length: 20 }, (_, index) => ({
-    id: `trace-${index}`,
-    category: 'cctv',
-    isAnchor: index === 0,
-  }))
-  const traceGraph = {
-    status: 'ready',
-    mode: 'trace',
-    anchorAssetId: 'trace-0',
-    nodes: traceNodes,
-    edges: traceNodes.slice(1).map((node, index) => ({
-      id: `trace-edge-${index}`,
-      sourceId: traceNodes[index].id,
-      targetId: node.id,
-    })),
-  }
-  const layout = calculateSchematicLayout(traceGraph)
-
-  assert.ok(layout.width < 2000)
-  assert.ok(new Set(layout.nodes.map((node) => node.diagram.y)).size > 1)
-  assert.deepEqual(layout.nodes.map((node) => node.depth), traceNodes.map((_, index) => index))
-})
-
 test('parallel network relations receive separate visual lanes', () => {
   const parallelGraph = {
     status: 'ready',

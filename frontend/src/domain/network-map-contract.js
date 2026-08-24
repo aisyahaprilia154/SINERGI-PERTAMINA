@@ -68,8 +68,6 @@ export const NETWORK_MAP_CONTRACT_VERSION = '1.0.0'
  * @property {string=} sourceFilename
  * @property {string[]} selectedNetworkIds
  * @property {string=} selectedAssetId
- * @property {string=} traceFrom
- * @property {string=} traceTo
  */
 
 /**
@@ -149,8 +147,6 @@ export function isMapContext(value) {
     && isOptionalString(value.sourceFilename)
     && isStringArray(value.selectedNetworkIds)
     && isOptionalString(value.selectedAssetId)
-    && isOptionalString(value.traceFrom)
-    && isOptionalString(value.traceTo)
 }
 
 /**
@@ -231,7 +227,7 @@ export function validateNetworkMapData(value) {
   value.context.selectedNetworkIds.forEach((id) => {
     if (!networkIds.has(id)) warnings.push(`selectedNetworkIds memuat network yang tidak dikenal: ${id}.`)
   })
-  for (const key of ['selectedAssetId', 'traceFrom', 'traceTo']) {
+  for (const key of ['selectedAssetId']) {
     const id = value.context[key]
     if (id && !assetIds.has(id)) warnings.push(`${key} merujuk asset yang tidak dikenal: ${id}.`)
   }

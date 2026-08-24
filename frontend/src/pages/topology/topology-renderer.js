@@ -21,7 +21,6 @@ export function renderTopologySvg(layout, {
       role="img" aria-label="Graph topologi cabang terkonfirmasi">
       <style>
         .topology-edge{fill:none;stroke:#4d78a8;stroke-width:2.5}
-        .topology-edge.traced{stroke:#0d67d1;stroke-width:5}
         .topology-edge.dimmed,.topology-node.dimmed{opacity:.14}
         .node-card{fill:#fff;stroke:#cbd6df;stroke-width:1.5}
         .topology-node.core .node-card{stroke:#314d6c;stroke-width:2.5}
@@ -260,7 +259,7 @@ function renderEdge(edge) {
   const path = points.map((point, index) => (
     `${index ? 'L' : 'M'} ${round(point.x)} ${round(point.y)}`
   )).join(' ')
-  return `<path class="topology-edge${edge.traced ? ' traced' : ''}${edge.dimmed ? ' dimmed' : ''}"
+  return `<path class="topology-edge${edge.dimmed ? ' dimmed' : ''}"
     d="${path}" data-edge-id="${escapeHtml(edge.id)}">
     <title>${escapeHtml(edge.relationType ?? 'Relasi confirmed')}</title>
   </path>`
@@ -272,7 +271,6 @@ function renderNode(node, showLabels) {
     'topology-node',
     node.selected ? 'selected' : '',
     node.neighbor ? 'neighbor' : '',
-    node.traced ? 'traced' : '',
     node.dimmed ? 'dimmed' : '',
     node.isCore ? 'core' : '',
   ].filter(Boolean).join(' ')

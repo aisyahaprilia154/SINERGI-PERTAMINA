@@ -1467,7 +1467,7 @@ async function initializeReview(container, mapData) {
           topologyGraph: projections.graph.graph,
         }).topologyGraph)
         state.bulkStatus = 'success'
-        state.bulkMessage = 'Koneksi antar-device dikonfirmasi. Graph dan tracing diperbarui.'
+        state.bulkMessage = 'Koneksi antar-device dikonfirmasi. Graph dan diagram diperbarui.'
         dialog.close()
         renderAll()
       } catch (error) {
@@ -1545,7 +1545,7 @@ async function initializeReview(container, mapData) {
           ? `Hubungkan ${count} koneksi terpilih?`
         : `Konfirmasi ${count} koneksi yang direkomendasikan?`
     dialog.querySelector('.bulk-dialog-description').textContent = destructive
-      ? 'Semua relasi confirmed akan dikeluarkan dari graph dan tidak lagi dapat dipakai tracing.'
+      ? 'Semua relasi confirmed akan dikeluarkan dari graph dan diagram.'
       : lineLabelAction
         ? 'Sistem memakai urutan nama device pada garis dan lokasi sumbernya. Garis yang ambigu tidak ikut.'
         : selectedAction
@@ -1613,12 +1613,12 @@ async function initializeReview(container, mapData) {
       state.bulkStatus = 'success'
       if (action === 'confirm-selected') {
         selectedCandidateIds.forEach((candidateId) => state.selectedCandidateIds.delete(candidateId))
-        state.bulkMessage = `${result.affectedCount} koneksi terpilih dihubungkan. Graph dan tracing telah diperbarui.`
+        state.bulkMessage = `${result.affectedCount} koneksi terpilih dihubungkan. Graph dan diagram telah diperbarui.`
       } else if (['confirm-all', 'confirm-line-labels'].includes(action)) {
         const remaining = action === 'confirm-line-labels'
           ? result.remainingLineLabelCount
           : result.remainingRecommendedCount
-        state.bulkMessage = `${result.affectedCount} koneksi dikonfirmasi. Graph dan tracing telah diperbarui.${
+        state.bulkMessage = `${result.affectedCount} koneksi dikonfirmasi. Graph dan diagram telah diperbarui.${
           remaining ? ` ${remaining} kandidat baru masih perlu ditinjau.` : ''
         }`
       } else {
@@ -2206,7 +2206,7 @@ function decisionDialogCopy(action) {
     reject: {
       icon: 'link_off',
       title: 'Tandai tidak terhubung?',
-      description: 'Koneksi ini tidak akan dipakai oleh graph dan tracing.',
+      description: 'Koneksi ini tidak akan dipakai oleh graph dan diagram.',
       submit: 'Tandai tidak terhubung',
       reasons: [
         'Endpoint tidak tersambung',
@@ -2231,7 +2231,7 @@ function decisionDialogCopy(action) {
     revoke: {
       icon: 'undo',
       title: 'Batalkan koneksi?',
-      description: 'Koneksi akan dikeluarkan dari graph dan tidak dipakai untuk tracing.',
+      description: 'Koneksi akan dikeluarkan dari graph dan diagram.',
       submit: 'Batalkan koneksi',
       reasons: [
         'Konfirmasi sebelumnya salah',

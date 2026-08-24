@@ -125,7 +125,6 @@ export function renderTopologyDiagramSvg({
           .topology-unresolved-label{font:750 10px Inter,ui-sans-serif,system-ui;fill:${THEME.unresolved}}
           .topology-edge-underlay{fill:none;stroke:${THEME.edgeUnderlay};stroke-width:6;stroke-linecap:round;stroke-linejoin:round}
           .topology-edge{fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
-          .topology-edge.trace{stroke:${THEME.selected};stroke-width:5}
           .topology-edge.selected{stroke:${THEME.selected};stroke-width:4}
           .topology-edge.dimmed{stroke:${THEME.dimmed};opacity:.32}
           .topology-edge.direct{stroke-width:4}
@@ -192,7 +191,7 @@ export function renderTopologyDiagramSvg({
         ${edges.map((edge) => renderEdge({
           ...model.edgeById.get(edge.id),
           ...edge,
-          dimmed: edge.dimmed || (selectionActive && !edge.trace && (
+          dimmed: edge.dimmed || (selectionActive && (
             selectedEdgeId ? edge.id !== selectedEdgeId : !directIds.has(edge.id)
           )),
         }, {
@@ -210,7 +209,7 @@ export function renderTopologyDiagramSvg({
         ${nodes.map((node) => renderNode({
           ...model.nodeById.get(node.id),
           ...node,
-          dimmed: node.dimmed || (selectionActive && !node.trace && (
+          dimmed: node.dimmed || (selectionActive && (
             selectedAssetId
               ? !directNodes.has(node.id) && node.id !== selectedAssetId
               : !selectedEdgeNodes.has(node.id)
@@ -473,13 +472,12 @@ function renderEdge(edge, { selectedEdgeId, directIds, minimap }) {
   const classes = [
     'topology-edge',
     `family-${family}`,
-    edge.trace ? 'trace' : '',
     selected ? 'selected' : '',
     direct ? 'direct' : '',
     edge.dimmed ? 'dimmed' : '',
   ].filter(Boolean).join(' ')
-  const color = edge.trace || selected ? THEME.selected : edge.dimmed ? THEME.dimmed : THEME.edge
-  const marker = edge.trace || selected ? 'topology-arrow-selected' : 'topology-arrow'
+  const color = selected ? THEME.selected : edge.dimmed ? THEME.dimmed : THEME.edge
+  const marker = selected ? 'topology-arrow-selected' : 'topology-arrow'
   const arrow = !edge.dimmed && !minimap && edge.direction !== 'undirected'
     ? `${edge.direction === 'target_to_source' || edge.direction === 'bidirectional'
       ? ` marker-start="url(#${marker})"`

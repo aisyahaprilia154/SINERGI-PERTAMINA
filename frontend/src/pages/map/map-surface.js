@@ -4,14 +4,12 @@ export function renderNetworkMapCanvas(activeContext, {
   selectedArea = null,
   counts = {},
   confirmedConnectionCount = 0,
-  selectedAssetId = null,
   topologyReadiness = null,
 } = {}) {
   const displayedConfirmedConnectionCount = Number(confirmedConnectionCount) || 0
   const operationalReadiness = {
     operational: true,
     ready: true,
-    traceAvailable: displayedConfirmedConnectionCount > 0,
     diagramAvailable: Number(counts.assetNodeCount) > 0,
     status: 'ready',
   }
@@ -55,18 +53,7 @@ export function renderNetworkMapCanvas(activeContext, {
           confirmedConnectionCount: displayedConfirmedConnectionCount,
         })}
       </div>
-      ${renderMapFloatingControls(activeContext, operationalReadiness, { selectedAssetId })}
-
-      <div class="trace-banner" hidden>
-        <span class="trace-step">1</span>
-        <div>
-          <strong>Pilih titik awal</strong>
-          <span>Klik aset pada peta untuk memulai tracing.</span>
-        </div>
-        <button class="icon-button cancel-trace" type="button" aria-label="Batalkan tracing">
-          <span class="material-symbols-outlined" aria-hidden="true">close</span>
-        </button>
-      </div>
+      ${renderMapFloatingControls(activeContext, operationalReadiness)}
 
       ${renderMapLegend()}
 
@@ -151,28 +138,17 @@ export function renderMapContextPill(
 export function renderMapFloatingControls(
   activeContext = null,
   topologyReadiness = null,
-  { selectedAssetId = null } = {},
 ) {
   const operationalReadiness = topologyReadiness?.operational === true
     ? topologyReadiness
     : null
-  const traceAvailable = operationalReadiness?.traceAvailable
-    ?? activeContext?.topologyReady
-    ?? true
   const diagramAvailable = operationalReadiness?.diagramAvailable
     ?? activeContext?.topologyReady
     ?? true
-  const topologyMessage = 'Belum ada relasi terkonfirmasi untuk ditelusuri.'
-  const traceActionMessage = !traceAvailable ? topologyMessage : ''
-  const traceActionAttributes = traceActionMessage
-    ? `disabled aria-disabled="true" title="${escapeHtml(traceActionMessage)}"`
-    : `title="${escapeHtml(selectedAssetId
-      ? 'Telusuri koneksi dari aset terpilih.'
-      : 'Klik lalu pilih aset awal pada peta.')}"`
   const diagramActionAttributes = diagramAvailable
     ? ''
     : `disabled aria-disabled="true" title="${escapeHtml(
-      topologyMessage,
+      'Belum ada aset yang dapat ditampilkan pada diagram.',
     )}"`
   return `
     <button class="open-sidebar sidebar-reopen" type="button" title="Buka panel"
@@ -182,11 +158,6 @@ export function renderMapFloatingControls(
 
     <div class="map-floating-top">
       <div class="map-action-group" aria-label="Aksi peta">
-        <button class="tool-button trace-toggle map-action-primary" type="button"
-          aria-label="Tracing" ${traceActionAttributes || 'title="Telusuri hubungan antar aset"'}>
-          <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>
-          <span>Tracing</span>
-        </button>
         <button class="tool-button diagram-toggle map-action-secondary" type="button"
           aria-label="Diagram Topologi" ${diagramAvailable
             ? 'title="Lihat jaringan dalam Diagram Topologi"'
@@ -275,7 +246,6 @@ function renderMapLegend() {
         <small>Jenis jalur</small>
         <span><i class="legend-route geographic"></i>Jalur geografis</span>
         <span><i class="legend-route confirmed"></i>Relasi terkonfirmasi</span>
-        <span><i class="legend-route trace"></i>Tracing aktif</span>
       </section>
       <span class="legend-coordinate-note"><i class="legend-leader"></i>Offset visual tetap menunjuk koordinat KML</span>
     </div>

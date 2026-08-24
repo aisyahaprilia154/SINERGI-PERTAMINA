@@ -8,7 +8,6 @@ import {
   buildImportPreviewModel,
   calculateAssetBounds,
   createImportPreviewState,
-  findConnectedAssetIds,
   getVisiblePreviewData,
 } from '../src/pages/admin/preview-import-state.js'
 
@@ -101,25 +100,6 @@ test('issue focus bounds preserve longitude-latitude orientation', () => {
   assert.ok(bounds.east > 110.01)
   assert.ok(bounds.south < -7.01)
   assert.ok(bounds.north > -7)
-})
-
-test('connected traversal follows explicit relation only and is cycle-safe', () => {
-  const model = buildImportPreviewModel({
-    ...payload,
-    assets: [...payload.assets, asset('node-nearby', 'NEARBY', 'CCTV', 'CCTV')],
-    relations: [
-      ...payload.relations,
-      {
-        id: 'relation-b-a',
-        sourceAssetId: 'B',
-        targetAssetId: 'A',
-        relationType: 'connected_to',
-      },
-    ],
-  })
-
-  assert.deepEqual([...findConnectedAssetIds(model, 'A')].sort(), ['A', 'B'])
-  assert.deepEqual([...findConnectedAssetIds(model, 'NEARBY')], ['NEARBY'])
 })
 
 test('SVG renderer exposes keyboard targets and non-color change cues', () => {

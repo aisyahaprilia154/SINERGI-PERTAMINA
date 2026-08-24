@@ -29,24 +29,22 @@ test('URL state keeps only stable identifiers from the active dataset', () => {
 
   assert.deepEqual(parsed.selectedNetworkIds, ['cctv'])
   assert.equal(parsed.selectedAssetId, 'SW-PNG-01')
-  assert.equal(parsed.traceFrom, 'CCTV-01')
-  assert.equal(parsed.traceTo, 'SW-PNG-01')
+  assert.equal(parsed.traceFrom, undefined)
+  assert.equal(parsed.traceTo, undefined)
 })
 
 test('URL serialization stores small shareable selection values', () => {
   const query = serializeMapUrlState('?view=map', {
     selectedNetworkIds: new Set(['cctv', 'fiber-optic']),
     selectedAssetId: 'SW-PNG-01',
-    traceFrom: 'CCTV-01',
-    traceTo: 'SW-PNG-01',
   })
   const params = new URLSearchParams(query)
 
   assert.equal(params.get('view'), 'map')
   assert.equal(params.get('selectedNetworkIds'), 'cctv,fiber-optic')
   assert.equal(params.get('selectedAssetId'), 'SW-PNG-01')
-  assert.equal(params.get('traceFrom'), 'CCTV-01')
-  assert.equal(params.get('traceTo'), 'SW-PNG-01')
+  assert.equal(params.has('traceFrom'), false)
+  assert.equal(params.has('traceTo'), false)
 })
 
 test('URL serialization preserves active branch context while selections change', () => {
@@ -55,8 +53,6 @@ test('URL serialization preserves active branch context while selections change'
     {
       selectedNetworkIds: new Set(['layer:fo', 'layer:cctv']),
       selectedAssetId: 'CCTV-01',
-      traceFrom: 'CCTV-01',
-      traceTo: 'NVR-01',
     },
   )
   const params = new URLSearchParams(result)
@@ -65,21 +61,19 @@ test('URL serialization preserves active branch context while selections change'
   assert.equal(params.get('datasetId'), 'dataset-semarang')
   assert.equal(params.get('selectedNetworkIds'), 'layer:fo,layer:cctv')
   assert.equal(params.get('selectedAssetId'), 'CCTV-01')
-  assert.equal(params.get('traceFrom'), 'CCTV-01')
-  assert.equal(params.get('traceTo'), 'NVR-01')
+  assert.equal(params.has('traceFrom'), false)
+  assert.equal(params.has('traceTo'), false)
 })
 
-test('URL state drops trace identifiers outside the active dataset', () => {
+test('URL state ignores retired trace identifiers', () => {
   const parsed = parseMapUrlState('?traceFrom=other&traceTo=SW-PNG-01', validIds)
   const query = serializeMapUrlState('', {
     selectedNetworkIds: new Set(['cctv']),
     selectedAssetId: null,
-    traceFrom: null,
-    traceTo: 'SW-PNG-01',
   })
 
-  assert.equal(parsed.traceFrom, null)
-  assert.equal(parsed.traceTo, 'SW-PNG-01')
+  assert.equal(parsed.traceFrom, undefined)
+  assert.equal(parsed.traceTo, undefined)
   assert.equal(new URLSearchParams(query).has('traceTo'), false)
 })
 

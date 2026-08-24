@@ -5,8 +5,8 @@ import { renderSchematicSvg } from '../src/pages/map/schematic-svg.js'
 
 const graph = {
   status: 'ready',
-  mode: 'trace',
-  title: 'Jalur koneksi CCTV',
+  mode: 'selected',
+  title: 'Relasi CCTV terpilih',
   anchorAssetId: 'cam',
   nodes: [
     {
@@ -57,7 +57,7 @@ test('SVG renderer includes context, asset identity, legend, and schematic discl
   })
 
   assert.match(svg, /<svg/)
-  assert.match(svg, /Jalur koneksi CCTV/)
+  assert.match(svg, /Relasi CCTV terpilih/)
   assert.match(svg, /Kantor Cabang Semarang/)
   assert.match(svg, /Dataset v12/)
   assert.match(svg, /data-asset-id="cam"/)

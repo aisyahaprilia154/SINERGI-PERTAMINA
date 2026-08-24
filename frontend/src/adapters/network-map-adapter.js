@@ -40,8 +40,6 @@ function normalizeContext(rawContext) {
     ...(readString(rawContext.sourceFilename) ? { sourceFilename: rawContext.sourceFilename.trim() } : {}),
     selectedNetworkIds: asArray(rawContext.selectedNetworkIds).filter((id) => typeof id === 'string'),
     ...(readString(rawContext.selectedAssetId) ? { selectedAssetId: rawContext.selectedAssetId.trim() } : {}),
-    ...(readString(rawContext.traceFrom) ? { traceFrom: rawContext.traceFrom.trim() } : {}),
-    ...(readString(rawContext.traceTo) ? { traceTo: rawContext.traceTo.trim() } : {}),
   }
 }
 
@@ -327,7 +325,7 @@ export function adaptNetworkMapData({ parserOutput, context: inputContext } = {}
     context.selectedNetworkIds = networks.filter((network) => network.isDefaultVisible).map((network) => network.id)
   }
 
-  for (const key of ['selectedAssetId', 'traceFrom', 'traceTo']) {
+  for (const key of ['selectedAssetId']) {
     if (context[key]) {
       const canonicalAssetId = assetAliases.get(context[key])
       if (canonicalAssetId) context[key] = canonicalAssetId

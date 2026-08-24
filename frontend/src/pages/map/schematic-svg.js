@@ -55,7 +55,6 @@ export function renderSchematicSvg({
           .category-section-count{font:600 10px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.textSecondary}}
           .diagram-edge-underlay{fill:none;stroke:${SVG_THEME.edgeUnderlay};stroke-width:6;stroke-linecap:round;stroke-linejoin:round}
           .diagram-edge{fill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
-          .diagram-edge.trace{stroke-width:4}
           .diagram-edge.logical{stroke-dasharray:6 5;stroke-width:2}
           .diagram-edge.recommended{stroke-dasharray:9 7;stroke-width:2.5}
           .diagram-edge.recommended-underlay{stroke-dasharray:9 7}
@@ -107,7 +106,7 @@ export function renderSchematicSvg({
       </g>
 
       <g class="diagram-edges" aria-label="Relasi aset">
-        ${renderedEdges.map((edge) => renderEdge(edge, graph.mode)).join('')}
+          ${renderedEdges.map((edge) => renderEdge(edge)).join('')}
       </g>
 
       <g class="diagram-nodes" aria-label="Aset">
@@ -208,16 +207,15 @@ function nodeCenter(node) {
   }
 }
 
-function renderEdge(edge, mode) {
+function renderEdge(edge) {
   const path = roundedPath(edge.routePoints)
   const color = sanitizeColor(edge.networkColor)
   const logicalClass = edge.networkType === 'Server' ? 'logical' : ''
-  const traceClass = mode === 'trace' ? 'trace' : ''
   const recommendedClass = edge.relationStatus === 'recommended' ? 'recommended' : ''
   return `
     <path class="diagram-edge-underlay ${recommendedClass ? 'recommended-underlay' : ''}"
       d="${path}" aria-hidden="true"/>
-    <path class="diagram-edge ${traceClass} ${logicalClass} ${recommendedClass}"
+    <path class="diagram-edge ${logicalClass} ${recommendedClass}"
       d="${path}" stroke="${color}" data-edge-id="${escapeAttribute(edge.id)}"
       data-network-id="${escapeAttribute(edge.networkId || '')}"
       data-relation-status="${escapeAttribute(edge.relationStatus || 'confirmed')}">
@@ -557,7 +555,6 @@ function nodeGlyph(type = '') {
 
 function modeLabel(mode) {
   if (mode === 'selected') return 'relasi aset terpilih'
-  if (mode === 'trace') return 'hasil tracing'
   if (mode === 'all-assets') return 'seluruh aset'
   if (mode === 'full-map') return 'peta jaringan lengkap'
   if (mode === 'focus') return 'relasi langsung aset fokus'

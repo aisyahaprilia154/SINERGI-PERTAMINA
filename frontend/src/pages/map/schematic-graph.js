@@ -15,8 +15,6 @@ export function buildSchematicGraph({
   poleGroups = [],
   selectedNetworkIds = [],
   focusedAssetId = null,
-  tracePath = [],
-  traceRelations = [],
   scope = 'auto',
 }) {
   const assetById = new Map(assets.map((asset) => [asset.id, asset]))
@@ -82,23 +80,9 @@ export function buildSchematicGraph({
     nodeIds = selectedGraph.nodes.map((asset) => asset.id)
     sourceEdges = selectedGraph.edges
     categorySummary = selectedGraph.categorySummary
-  } else if (scope === 'trace' && tracePath.length < 2) {
-    return {
-      status: 'empty',
-      message: 'Jalur terpilih belum tersedia. Jalankan tracing terlebih dahulu.',
-      mode: 'trace',
-      nodes: [],
-      edges: [],
-      poleGroups: [],
-    }
   }
 
-  if ((scope === 'auto' || scope === 'trace') && tracePath.length > 1) {
-    mode = 'trace'
-    anchorAssetId = tracePath[0]
-    nodeIds = tracePath.filter((assetId) => assetById.has(assetId))
-    sourceEdges = buildTraceEdges(tracePath, traceRelations, networks)
-  } else if (scope === 'all-assets') {
+  if (scope === 'all-assets') {
     mode = 'all-assets'
     nodeIds = uniqueIds(assets.map(({ id }) => id))
     sourceEdges = [
@@ -236,7 +220,7 @@ export function buildSchematicGraph({
     edges,
     candidates: topologyCandidates,
   })
-  const nodes = nodeIds.map((assetId, index) => {
+  const nodes = nodeIds.map((assetId) => {
     const asset = assetById.get(assetId)
     const nodeEvidence = evidenceByNode.get(assetId)
     return {
@@ -261,7 +245,7 @@ export function buildSchematicGraph({
       sourceFeatureId: asset.sourceFeatureId ?? asset.featureId ?? asset.id,
       networkIds: networks.filter((network) => network.nodeIds?.includes(asset.id))
         .map((network) => network.id),
-      order: mode === 'trace' ? index : null,
+      order: null,
     }
   })
 
@@ -469,31 +453,6 @@ function networkFamilyLabel(value) {
   return 'Relasi topologi'
 }
 
-function buildTraceEdges(tracePath, traceRelations, networks) {
-  return tracePath.slice(1).map((targetId, index) => {
-    const sourceId = tracePath[index]
-    const relation = traceRelations[index]
-    const fallbackNetwork = networks.find((network) =>
-      (network.edges || []).some(([left, right]) =>
-        (left === sourceId && right === targetId)
-        || (left === targetId && right === sourceId),
-      ),
-    )
-    return {
-      sourceId,
-      targetId,
-      networkId: relation?.networkId || fallbackNetwork?.id || null,
-      relationType: relation?.relationType || 'explicit-network-edge',
-      relationSource: relation?.relationSource || 'explicit',
-      sourceGeometryId: relation?.sourceGeometryId,
-      sourceGeometryIds: relation?.sourceGeometryIds ?? [],
-      pathAssetIds: relation?.pathAssetIds ?? [],
-      id: relation?.edgeId || relation?.id,
-      order: index,
-    }
-  })
-}
-
 function chooseCoreAnchor(nodeIds, edges, assetById) {
   const degree = new Map(nodeIds.map((assetId) => [assetId, 0]))
   edges.forEach((edge) => {
@@ -603,7 +562,6 @@ function isConnectorType(type = '') {
 
 function getDiagramTitle(mode, nodes, networkById, selectedIds) {
   if (mode === 'selected') return `Relasi ${nodes.find((node) => node.isAnchor)?.name || 'aset'}`
-  if (mode === 'trace') return 'Jalur koneksi terpilih'
   if (mode === 'all-assets') return 'Seluruh aset'
   if (mode === 'full-map') return 'Peta jaringan lengkap'
   if (mode === 'focus') return `Relasi langsung ${nodes.find((node) => node.isAnchor)?.name || 'aset fokus'}`

@@ -869,62 +869,6 @@
   font-size: 18px;
 }
 
-.trace-banner {
-  width: min(420px, calc(100% - var(--space-8)));
-  min-height: 64px;
-  padding: var(--space-2);
-  position: absolute;
-  top: 80px;
-  left: 50%;
-  grid-template-columns: 36px 1fr 36px;
-  align-items: center;
-  gap: var(--space-3);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-popover);
-  transform: translateX(-50%);
-}
-
-.trace-banner:not([hidden]) {
-  display: grid;
-}
-
-.trace-step {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  color: var(--color-text-inverse);
-  background: var(--color-primary);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-caption);
-  font-weight: 700;
-}
-
-.trace-step .material-symbols-outlined {
-  font-size: 18px;
-}
-
-.trace-banner div {
-  display: flex;
-  flex-direction: column;
-}
-
-.trace-banner strong {
-  font-size: var(--font-size-body);
-}
-
-.trace-banner div span {
-  margin-top: var(--space-1);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-caption);
-}
-
-.trace-banner .icon-button {
-  border-color: transparent;
-}
-
 .map-legend {
   padding: 10px var(--space-3);
   position: absolute;
@@ -1105,40 +1049,6 @@
   margin: 0;
   color: var(--color-text-secondary);
   font-size: var(--font-size-caption);
-}
-
-.trace-result-card {
-  margin: var(--space-4) var(--space-4) 0;
-  padding: var(--space-3);
-  background: var(--color-surface-subtle);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-}
-
-.trace-result-card > div {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.trace-result-card > div .material-symbols-outlined {
-  color: var(--color-success);
-  font-size: 18px;
-  font-variation-settings: "FILL" 1;
-}
-
-.trace-result-card strong {
-  font-size: var(--font-size-body);
-}
-
-.trace-result-card p {
-  margin: var(--space-1) 0 var(--space-3) var(--space-6);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-caption);
-}
-
-.trace-result-card .button {
-  width: 100%;
 }
 
 .asset-properties {
@@ -1549,10 +1459,6 @@
 
   .tool-button span:not(.material-symbols-outlined) {
     display: none;
-  }
-
-  .trace-banner {
-    top: 124px;
   }
 
   .map-legend {
@@ -2567,11 +2473,6 @@
   gap: var(--space-2);
 }
 
-.trace-banner {
-  top: 84px;
-  z-index: 7;
-}
-
 .asset-drawer {
   width: clamp(380px, var(--map-drawer-width), 420px);
   max-width: calc(100% - var(--space-8));
@@ -2657,10 +2558,6 @@
     top: 76px;
   }
 
-  .trace-banner {
-    top: 140px;
-  }
-
   .map-workspace.drawer-open .map-floating-top,
   .map-workspace.drawer-open .map-floating-bottom {
     right: var(--space-4);
@@ -2742,10 +2639,6 @@
 
   .context-readonly {
     padding: 0 var(--space-2);
-  }
-
-  .trace-banner {
-    top: 124px;
   }
 
   .map-floating-bottom {
@@ -3159,7 +3052,7 @@
   }
 }
 
-/* Asset detail drawer and explicit relation tracing */
+/* Asset detail drawer and explicit relation links */
 .asset-drawer {
   display: flex;
   flex-direction: column;
@@ -3336,8 +3229,7 @@
 }
 
 .drawer-section > h3,
-.drawer-section-heading h3,
-.trace-panel h3 {
+.drawer-section-heading h3 {
   margin: 0;
   color: var(--color-text-primary);
   font-size: var(--font-size-section-title);
@@ -3668,167 +3560,6 @@
   overflow-wrap: anywhere;
 }
 
-.trace-panel {
-  background: var(--color-surface-subtle);
-}
-
-.trace-panel-heading {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-}
-
-.trace-panel-heading > .material-symbols-outlined {
-  color: var(--color-primary);
-  font-size: 20px;
-}
-
-.trace-panel-heading.success > .material-symbols-outlined {
-  color: var(--color-success);
-  font-variation-settings: "FILL" 1;
-}
-
-.trace-panel-heading > div {
-  min-width: 0;
-}
-
-.trace-panel-heading p {
-  margin: var(--space-1) 0 0;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-caption);
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-
-.trace-error {
-  background: color-mix(in srgb, var(--color-danger) 7%, var(--color-surface));
-}
-
-.trace-error .trace-panel-heading > .material-symbols-outlined {
-  color: var(--color-danger);
-}
-
-.trace-destinations {
-  max-height: 260px;
-  margin-top: var(--space-3);
-  overflow-y: auto;
-  border-top: 1px solid var(--color-divider);
-}
-
-.trace-destinations button {
-  width: 100%;
-  min-height: 52px;
-  padding: var(--space-2) 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  color: var(--color-text-primary);
-  text-align: left;
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid var(--color-divider);
-  cursor: pointer;
-}
-
-.trace-destinations button:hover {
-  color: var(--color-primary);
-  background: var(--color-surface-hover);
-}
-
-.trace-destinations button > span:first-child {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.trace-destinations strong,
-.trace-destinations small {
-  overflow-wrap: anywhere;
-}
-
-.trace-destinations strong {
-  font-size: var(--font-size-caption);
-}
-
-.trace-destinations small {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-micro);
-}
-
-.trace-destinations .material-symbols-outlined {
-  font-size: 18px;
-}
-
-.trace-sequence {
-  margin: var(--space-4) 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.trace-sequence li {
-  min-height: 48px;
-  position: relative;
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  gap: var(--space-2);
-}
-
-.trace-sequence li:not(:last-child)::after {
-  width: 1px;
-  position: absolute;
-  top: 26px;
-  bottom: 0;
-  left: 13px;
-  content: "";
-  background: var(--color-border-strong);
-}
-
-.trace-order {
-  width: 27px;
-  height: 27px;
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  color: var(--color-text-inverse);
-  background: var(--color-primary);
-  border: 2px solid var(--color-surface-subtle);
-  border-radius: var(--radius-pill);
-  font-size: var(--font-size-micro);
-  font-weight: 700;
-}
-
-.trace-sequence li > span:last-child {
-  min-width: 0;
-  padding-bottom: var(--space-3);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.trace-sequence strong,
-.trace-sequence small,
-.trace-sequence em {
-  overflow-wrap: anywhere;
-}
-
-.trace-sequence strong {
-  font-size: var(--font-size-caption);
-}
-
-.trace-sequence small {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-micro);
-}
-
-.trace-sequence em {
-  margin-top: 2px;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-micro);
-  font-style: normal;
-}
-
 .asset-drawer .drawer-actions {
   padding: var(--space-3) var(--space-4) var(--space-4);
   flex: 0 0 auto;
@@ -3837,7 +3568,7 @@
 }
 
 .drawer-secondary-actions {
-  margin-top: var(--space-2);
+  margin-top: 0;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--space-2);
@@ -3920,10 +3651,6 @@
 
 .drawer-skeleton i:nth-child(4) {
   width: 58%;
-}
-
-.trace-skeleton {
-  margin-top: var(--space-3);
 }
 
 @media (max-width: 960px) {
@@ -4822,7 +4549,6 @@
 }
 
 .legend-route.confirmed { border-top-width: 3px; border-top-color: var(--color-cctv); }
-.legend-route.trace { border-top-width: 5px; border-top-color: var(--color-primary); }
 .legend-route.pending { border-top: 2px dashed var(--color-warning); }
 
 .legend-coordinate-note {
@@ -5016,11 +4742,6 @@
     width: 300px;
   }
 
-  .map-workspace.drawer-open .trace-banner {
-    width: min(420px, calc(100% - var(--map-drawer-width) - var(--space-8)));
-    top: 128px;
-    left: calc((100% - var(--map-drawer-width) - var(--space-8)) / 2);
-  }
 }
 
 @media (min-width: 961px) and (max-width: 1180px) {
@@ -5029,9 +4750,6 @@
     top: 68px;
   }
 
-  .map-workspace.drawer-open .trace-banner {
-    top: 184px;
-  }
 }
 
 /* Peta Aset UI shell refinement. Map rendering remains isolated in map-canvas.css. */
@@ -6060,59 +5778,13 @@
   }
 }
 
-/* Tracing overlay safe area. The drawer state is applied before its loading
-   content is rendered, so every tracing state reserves the same right space. */
+/* Keep the map context and toolbar clear of the detail drawer. */
 .map-workspace.drawer-open .map-stage {
   --map-safe-right: calc(var(--map-drawer-width) + var(--space-4) + var(--map-control-gap));
 }
 
 .map-workspace.sidebar-collapsed .map-stage {
   --map-safe-left: 74px;
-}
-
-.map-stage .trace-banner {
-  width: fit-content;
-  max-width: min(640px, calc(100% - var(--map-safe-left) - var(--map-safe-right)));
-  top: calc(var(--map-context-row-height) + var(--space-4) + var(--space-3));
-  right: var(--map-safe-right);
-  left: var(--map-safe-left);
-  z-index: 420;
-  transform: none;
-  pointer-events: auto;
-  transition: right var(--panel-transition-duration) ease,
-    top var(--panel-transition-duration) ease,
-    width var(--panel-transition-duration) ease,
-    max-width var(--panel-transition-duration) ease;
-}
-
-.map-workspace.drawer-open .map-stage .trace-banner {
-  left: var(--map-safe-left);
-  right: var(--map-safe-right);
-  width: fit-content;
-  max-width: min(640px, calc(100% - var(--map-safe-left) - var(--map-safe-right)));
-  transform: none;
-}
-
-.map-stage .trace-banner > div {
-  min-width: 0;
-}
-
-.map-stage .trace-banner strong,
-.map-stage .trace-banner div span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.map-stage .trace-banner strong {
-  white-space: nowrap;
-}
-
-.map-stage .trace-banner div span {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-height: 1.35;
 }
 
 @media (min-width: 961px) and (max-width: 1450px) {
@@ -6137,10 +5809,6 @@
     --map-safe-right: var(--space-3);
   }
 
-  .map-stage .trace-banner {
-    top: calc(var(--map-context-row-height) + 76px + var(--space-3));
-    max-width: calc(100% - var(--space-6));
-  }
 }
 
 @media (max-width: 620px) {
@@ -6152,9 +5820,6 @@
     top: calc(64px + var(--map-context-row-height) + var(--space-3));
   }
 
-  .map-stage .trace-banner {
-    top: calc(66px + var(--map-context-row-height) + var(--space-3));
-  }
 }
 
 .asset-technical-metadata {
@@ -6241,19 +5906,16 @@
     position: static;
   }
 
-  .map-action-group > .trace-toggle,
   .map-action-group > .diagram-toggle {
     width: auto;
     min-width: 44px;
     padding-inline: 10px;
   }
 
-  .map-action-group > .trace-toggle span:not(.material-symbols-outlined),
   .map-action-group > .diagram-toggle span:not(.material-symbols-outlined) {
     display: inline;
   }
 
-  .map-action-group > .trace-toggle,
   .map-action-group > .diagram-toggle,
   .map-action-group > .export-toggle {
     min-height: 44px;

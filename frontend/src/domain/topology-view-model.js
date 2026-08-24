@@ -23,8 +23,6 @@ export function buildTopologyViewModel({
       return []
     }))
     : new Set()
-  const traceIds = new Set(state.traceAssetIds ?? [])
-
   const nodes = confirmedGraph.nodes.map((node) => {
     const asset = assetById.get(node.id) ?? assetById.get(node.assetId)
     const category = categoryKey(asset?.category, asset?.type, node.networkFamily)
@@ -43,7 +41,6 @@ export function buildTopologyViewModel({
       degree: degreeByNode[node.id] ?? 0,
       selected: node.id === selectedId,
       neighbor: neighborIds.has(node.id),
-      traced: traceIds.has(node.id),
       dimmed: !matchesCategory || !matchesSearch || !inFocus,
       candidateCount: candidates.filter((candidate) => (
         candidate.targetAssetId === node.id
@@ -60,7 +57,6 @@ export function buildTopologyViewModel({
       ...edge,
       sourceId: edge.sourceAssetId,
       targetId: edge.targetAssetId,
-      traced: traceIds.has(edge.sourceAssetId) && traceIds.has(edge.targetAssetId),
       dimmed: nodes.find(({ id }) => id === edge.sourceAssetId)?.dimmed
         || nodes.find(({ id }) => id === edge.targetAssetId)?.dimmed,
     }))

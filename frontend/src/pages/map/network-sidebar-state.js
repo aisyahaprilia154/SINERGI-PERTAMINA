@@ -12,17 +12,12 @@ export function parseMapUrlState(
   const resolvedAssetId = assetAliases instanceof Map
     ? assetAliases.get(requestedAssetId) ?? requestedAssetId
     : assetAliases[requestedAssetId] ?? requestedAssetId
-  const requestedTraceFrom = params.get('traceFrom')
-  const requestedTraceTo = params.get('traceTo')
-
   return {
     datasetId: safeUrlValue(params.get('datasetId')),
     branchId: safeUrlValue(params.get('branchId')),
     siteId: safeUrlValue(params.get('siteId')),
     selectedNetworkIds,
     selectedAssetId: validAssetIds.has(resolvedAssetId) ? resolvedAssetId : null,
-    traceFrom: validAssetIds.has(requestedTraceFrom) ? requestedTraceFrom : null,
-    traceTo: validAssetIds.has(requestedTraceTo) ? requestedTraceTo : null,
     networkFamily: parseUrlList(params, 'networkFamily'),
     category: parseUrlList(params, 'category'),
     assetType: parseUrlList(params, 'assetType'),
@@ -38,8 +33,6 @@ export function serializeMapUrlState(
     siteId,
     selectedNetworkIds,
     selectedAssetId,
-    traceFrom = null,
-    traceTo = null,
     networkFamily = [],
     category = [],
     assetType = [],
@@ -54,12 +47,6 @@ export function serializeMapUrlState(
 
   if (selectedAssetId) params.set('selectedAssetId', selectedAssetId)
   else params.delete('selectedAssetId')
-
-  if (traceFrom) params.set('traceFrom', traceFrom)
-  else params.delete('traceFrom')
-
-  if (traceFrom && traceTo) params.set('traceTo', traceTo)
-  else params.delete('traceTo')
 
   setUrlList(params, 'networkFamily', networkFamily)
   setUrlList(params, 'category', category)

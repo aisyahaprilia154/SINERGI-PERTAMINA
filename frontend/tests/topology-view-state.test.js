@@ -20,11 +20,11 @@ test('topology URL state keeps only valid opaque asset and candidate identifiers
   assert.equal(state.groupingMode, 'network')
   assert.equal(state.labelMode, 'all')
   assert.deepEqual([...state.selectedCategories], ['cctv', 'fiber-optic'])
-  assert.equal(state.traceFrom, 'CAM-01')
-  assert.equal(state.traceTo, 'SW-01')
+  assert.equal(state.traceFrom, undefined)
+  assert.equal(state.traceTo, undefined)
 })
 
-test('topology URL serialization preserves cross-view selection and trace', () => {
+test('topology URL serialization preserves cross-view selection without retired trace state', () => {
   const query = serializeTopologyViewState('?datasetId=dataset-1&branchId=site-1', {
     selectedAssetId: 'CAM-01',
     reviewCandidateId: null,
@@ -33,8 +33,6 @@ test('topology URL serialization preserves cross-view selection and trace', () =
     selectedCategories: new Set(['cctv']),
     search: '',
     focusOnly: true,
-    traceFrom: 'CAM-01',
-    traceTo: 'SW-01',
   })
   const params = new URLSearchParams(query)
 
@@ -43,5 +41,6 @@ test('topology URL serialization preserves cross-view selection and trace', () =
   assert.equal(params.get('selectedAssetId'), 'CAM-01')
   assert.equal(params.get('categories'), 'cctv')
   assert.equal(params.get('focus'), 'neighbors')
-  assert.equal(params.get('traceTo'), 'SW-01')
+  assert.equal(params.has('traceFrom'), false)
+  assert.equal(params.has('traceTo'), false)
 })

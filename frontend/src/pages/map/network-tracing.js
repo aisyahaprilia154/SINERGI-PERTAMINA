@@ -101,96 +101,6 @@ export function getConnectedAssets(graph, assetId) {
   return uniqueRelations(graph.get(assetId) || [])
 }
 
-export function findReachableDestinations(graph, sourceAssetId) {
-  if (!graph.has(sourceAssetId)) return []
-
-  const destinations = []
-  const visited = new Set([sourceAssetId])
-  const queue = [{ assetId: sourceAssetId, distance: 0 }]
-
-  while (queue.length) {
-    const current = queue.shift()
-    for (const relation of graph.get(current.assetId) || []) {
-      if (visited.has(relation.targetAssetId)) continue
-      visited.add(relation.targetAssetId)
-      const destination = {
-        assetId: relation.targetAssetId,
-        distance: current.distance + 1,
-      }
-      destinations.push(destination)
-      queue.push(destination)
-    }
-  }
-
-  return destinations
-}
-
-export function findTracePath(graph, sourceAssetId, targetAssetId) {
-  if (!graph.has(sourceAssetId)) {
-    return traceError('invalid-source', 'Aset awal tidak tersedia pada dataset aktif.')
-  }
-  if (!graph.has(targetAssetId)) {
-    return traceError('invalid-target', 'Aset tujuan tidak tersedia pada dataset aktif.')
-  }
-  if (sourceAssetId === targetAssetId) {
-    return {
-      status: 'found',
-      assetIds: [sourceAssetId],
-      relations: [],
-      explanation: 'Titik awal dan tujuan adalah aset yang sama.',
-    }
-  }
-
-  const visited = new Set([sourceAssetId])
-  const queue = [sourceAssetId]
-  const predecessor = new Map()
-
-  while (queue.length) {
-    const currentAssetId = queue.shift()
-    for (const relation of graph.get(currentAssetId) || []) {
-      if (visited.has(relation.targetAssetId)) continue
-      visited.add(relation.targetAssetId)
-      predecessor.set(relation.targetAssetId, {
-        assetId: currentAssetId,
-        relation,
-      })
-
-      if (relation.targetAssetId === targetAssetId) {
-        return reconstructPath(predecessor, sourceAssetId, targetAssetId)
-      }
-      queue.push(relation.targetAssetId)
-    }
-  }
-
-  return traceError(
-    'unreachable',
-    'Tidak ada jalur topologi terkonfirmasi antara aset awal dan tujuan pada dataset aktif.',
-  )
-}
-
-function reconstructPath(predecessor, sourceAssetId, targetAssetId) {
-  const assetIds = [targetAssetId]
-  const relations = []
-  let currentAssetId = targetAssetId
-
-  while (currentAssetId !== sourceAssetId) {
-    const previous = predecessor.get(currentAssetId)
-    if (!previous) {
-      return traceError('broken-relation', 'Urutan relasi tidak dapat disusun secara lengkap.')
-    }
-    relations.unshift(previous.relation)
-    assetIds.unshift(previous.assetId)
-    currentAssetId = previous.assetId
-  }
-
-  return {
-    status: 'found',
-    assetIds,
-    relations,
-    explanation: 'Jalur terpendek berdasarkan graph topologi terkonfirmasi pada dataset aktif.',
-  }
-}
-
 function uniqueRelations(relations) {
   const seenAssetIds = new Set()
   return relations.filter((relation) => {
@@ -198,13 +108,4 @@ function uniqueRelations(relations) {
     seenAssetIds.add(relation.targetAssetId)
     return true
   })
-}
-
-function traceError(status, message) {
-  return {
-    status,
-    message,
-    assetIds: [],
-    relations: [],
-  }
 }

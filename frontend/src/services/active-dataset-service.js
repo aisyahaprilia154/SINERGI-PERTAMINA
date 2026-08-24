@@ -430,42 +430,6 @@ function smallerCandidatePageLimit(error, limit) {
   return Math.max(1, Math.floor(currentLimit / 2))
 }
 
-export async function traceTopology({
-  datasetVersionId,
-  sourceAssetId,
-  targetAssetId = null,
-  graphRevision,
-  direction = 'both',
-  mode = null,
-  maxDepth = null,
-  scopeAssetIds = null,
-  token = getDefaultMapToken(),
-  signal,
-  apiBase = '',
-} = {}) {
-  if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
-  if (!sourceAssetId) throw new TypeError('Source asset ID wajib tersedia.')
-  if (!graphRevision) throw new TypeError('Graph revision wajib tersedia.')
-  return topologyRequest(
-    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
-      + '/topology/trace',
-    {
-      token,
-      signal,
-      method: 'POST',
-      body: {
-        sourceAssetId,
-        graphRevision,
-        direction,
-        ...(mode ? { mode } : {}),
-        ...(maxDepth !== null && maxDepth !== undefined ? { maxDepth } : {}),
-        ...(Array.isArray(scopeAssetIds) ? { scopeAssetIds } : {}),
-        ...(targetAssetId ? { targetAssetId } : {}),
-      },
-    },
-  )
-}
-
 export async function loadTopologyRoots({
   datasetVersionId,
   graphRevision = null,

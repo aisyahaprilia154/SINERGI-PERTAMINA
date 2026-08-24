@@ -12,7 +12,6 @@ import {
   loadTopologyRoots,
   reviewTopologyBulk,
   reviewTopologyCandidate,
-  traceTopology,
 } from '../src/services/active-dataset-service.js'
 
 test('topology projection uses the versioned backend endpoint', async () => {
@@ -400,77 +399,6 @@ test('manual topology relation forwards optional graph evidence references', asy
       sourceGeometryIds: ['geometry:fo-01'],
       reason: 'Diverifikasi dari dokumentasi resmi.',
       evidenceRefs: ['document:network-plan:page-3'],
-    })
-  } finally {
-    globalThis.fetch = originalFetch
-  }
-})
-
-test('authoritative trace request includes source, target, direction, and graph revision', async () => {
-  const originalFetch = globalThis.fetch
-  let request
-  globalThis.fetch = async (url, options) => {
-    request = { url, options }
-    return new Response(JSON.stringify({
-      status: 'found',
-      graphRevision: 'topology-graph:abc',
-    }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    })
-  }
-  try {
-    const result = await traceTopology({
-      datasetVersionId: 'dv-1',
-      sourceAssetId: 'asset-a',
-      targetAssetId: 'asset-b',
-      graphRevision: 'topology-graph:abc',
-      direction: 'both',
-      token: 'viewer',
-    })
-    assert.equal(result.status, 'found')
-    assert.equal(request.url, '/api/dataset-versions/dv-1/topology/trace')
-    assert.equal(request.options.method, 'POST')
-    assert.equal(request.options.headers.Authorization, 'Bearer viewer')
-    assert.deepEqual(JSON.parse(request.options.body), {
-      sourceAssetId: 'asset-a',
-      targetAssetId: 'asset-b',
-      graphRevision: 'topology-graph:abc',
-      direction: 'both',
-    })
-  } finally {
-    globalThis.fetch = originalFetch
-  }
-})
-
-test('fase 4 trace client adds explicit mode and bounded depth without changing legacy payloads', async () => {
-  const originalFetch = globalThis.fetch
-  let request
-  globalThis.fetch = async (url, options) => {
-    request = { url, options }
-    return new Response(JSON.stringify({ status: 'found' }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    })
-  }
-  try {
-    await traceTopology({
-      datasetVersionId: 'dv-1',
-      sourceAssetId: 'cam-1',
-      targetAssetId: 'core-1',
-      graphRevision: 'topology-graph:abc',
-      mode: 'point_to_point',
-      direction: 'upstream',
-      maxDepth: 25,
-      token: 'viewer',
-    })
-    assert.deepEqual(JSON.parse(request.options.body), {
-      sourceAssetId: 'cam-1',
-      targetAssetId: 'core-1',
-      graphRevision: 'topology-graph:abc',
-      direction: 'upstream',
-      mode: 'point_to_point',
-      maxDepth: 25,
     })
   } finally {
     globalThis.fetch = originalFetch

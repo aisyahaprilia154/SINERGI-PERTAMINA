@@ -442,13 +442,6 @@
   transform: translate(-50%, -50%) scale(1.04);
 }
 
-.map-adaptive-asset.trace {
-  box-shadow:
-    0 0 0 2px #fff,
-    0 0 0 4px #1367d1,
-    0 5px 12px rgba(3, 12, 24, .34);
-}
-
 .map-adaptive-asset.inactive {
   opacity: .3;
 }

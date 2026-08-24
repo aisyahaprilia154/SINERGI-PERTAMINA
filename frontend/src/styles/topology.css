@@ -1497,18 +1497,6 @@
 }
 .topology-admin-warning p { margin: 0; font-size: 10px; line-height: 1.4; }
 .topology-admin-warning .material-symbols-outlined { font-size: 16px; }
-.topology-trace-summary {
-  margin-top: 14px;
-  padding: 10px;
-  background: #eff8f4;
-  border: 1px solid #b9dfd0;
-  border-radius: var(--radius-sm);
-}
-.topology-trace-summary h3 { margin: 0 0 5px; color: #17684f; font-size: 10px; }
-.topology-trace-summary p { margin: 0; color: var(--color-text-secondary); font-size: 9px; }
-.topology-trace-summary ol { max-height: 120px; margin: 7px 0; padding-left: 17px; color: var(--color-text-primary); font-size: 9px; }
-.topology-trace-summary small { color: var(--color-text-muted); font-size: 8px; line-height: 1.35; }
-
 .topology-diagram-status {
   max-width: min(640px, calc(100% - 32px));
   padding: 0;

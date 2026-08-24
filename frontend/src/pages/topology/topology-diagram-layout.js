@@ -506,8 +506,6 @@ export function createTopologyLayoutWorkerModel(model) {
     edgeById: undefined,
     adjacency: undefined,
     selectedFamilies: [...(model.selectedFamilies ?? [])],
-    traceAssetIds: [...(model.traceAssetIds ?? [])],
-    traceEdgeIds: [...(model.traceEdgeIds ?? [])],
   }
 }
 

@@ -77,8 +77,6 @@ export function createMapLibreSurface(element, {
     selectedNetworkIds: new Set(networks.filter(({ isDefaultVisible }) => isDefaultVisible)
       .map(({ id }) => id)),
     selectedAssetId: null,
-    traceNodeIds: [],
-    traceGeometryIds: [],
     connectedNodeIds: [],
     selectedCandidateId: null,
     dimOthers: true,
@@ -351,7 +349,6 @@ export function createMapLibreSurface(element, {
 
   function syncAdaptiveMarkers() {
     if (!loaded || destroyed) return
-    const traceIds = new Set(state.traceNodeIds)
     const selectedCandidate = currentCandidates.find(({ candidateId }) => (
       candidateId === state.selectedCandidateId
     ))
@@ -411,7 +408,6 @@ export function createMapLibreSurface(element, {
           candidateEndpoint: focusedAssetIds.has(asset.id),
           candidateContext: Boolean(selectedCandidate && !focusedAssetIds.has(asset.id)),
           selected: asset.id === state.selectedAssetId,
-          trace: traceIds.has(asset.id),
           isCoreNode: asset.isCoreNode,
           isPole: isPoleAsset(asset),
         }
@@ -575,19 +571,6 @@ export function createMapLibreSurface(element, {
     context.lineCap = 'round'
     context.lineJoin = 'round'
 
-    const traceIds = new Set(state.traceNodeIds)
-    const requestedTraceGeometryIds = new Set(state.traceGeometryIds ?? [])
-    const traceGeometryIds = new Set((currentTopologyGraph.edges ?? []).flatMap((edge) => {
-      const sourceId = edge.sourceAssetId ?? edge.sourceNodeId
-      const targetId = edge.targetAssetId ?? edge.targetNodeId
-      const isTraceEdge = requestedTraceGeometryIds.size
-        ? (edge.sourceGeometryIds ?? []).some((id) => requestedTraceGeometryIds.has(id))
-        : traceIds.has(sourceId) && traceIds.has(targetId)
-      return isTraceEdge
-        ? edge.sourceGeometryIds ?? []
-        : []
-    }))
-    requestedTraceGeometryIds.forEach((id) => traceGeometryIds.add(id))
     const selectedCandidate = currentCandidates.find(({ candidateId }) => (
       candidateId === state.selectedCandidateId
     ))
@@ -641,16 +624,14 @@ export function createMapLibreSurface(element, {
           focused,
           focusContext,
           candidateFocused: selectedCandidateFocus && !selectedCandidateGeometry,
-          trace: selectedCandidateGeometry
-            || traceGeometryIds.has(geometry.id)
-            || traceGeometryIds.has(geometry.sourceGeometryId),
+          candidateGeometry: selectedCandidateGeometry,
         }
       })
       .filter(({ active }) => active)
-      .filter(({ trace }) => !isolateCandidate || trace)
+      .filter(({ candidateGeometry }) => !isolateCandidate || candidateGeometry)
       .sort((left, right) => Number(left.focused) - Number(right.focused)
         || Number(left.active) - Number(right.active)
-        || Number(left.trace) - Number(right.trace))
+      )
 
     linework
       .filter(({ focused }) => !focused)
@@ -917,7 +898,6 @@ function addOperationalLayers(map) {
     paint: {
       'line-color': [
         'case',
-        ['get', 'trace'], '#1367d1',
         ['get', 'selectedCandidate'], '#1367d1',
         ['get', 'color'],
       ],
@@ -969,9 +949,9 @@ function addOperationalLayers(map) {
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 9, 17, 13, 20, 17],
       'circle-color': '#ffffff',
-      'circle-opacity': ['case', ['get', 'selected'], 0.34, ['get', 'trace'], 0.22, 0],
+      'circle-opacity': ['case', ['get', 'selected'], 0.34, 0],
       'circle-stroke-color': ['case', ['get', 'selected'], '#1367d1', '#ffffff'],
-      'circle-stroke-width': ['case', ['get', 'selected'], 3, ['get', 'trace'], 2, 0],
+      'circle-stroke-width': ['case', ['get', 'selected'], 3, 0],
     },
   })
   map.addLayer({
@@ -1087,7 +1067,6 @@ function drawProjectedLine(context, map, {
   focused,
   focusContext,
   focusColor: entryFocusColor,
-  trace,
   candidateFocused,
 }, pass) {
   const isFocusGlow = pass === 'focus-glow'
@@ -1106,7 +1085,7 @@ function drawProjectedLine(context, map, {
           : focusContext
             ? 0.32
             : 0.94
-  const width = isFocusGlow ? 10 : isFocusMain ? 4.5 : trace ? 5.5 : highlighted ? 4.8 : 3
+  const width = isFocusGlow ? 10 : isFocusMain ? 4.5 : highlighted ? 4.8 : 3
   context.beginPath()
   geometry.coordinates.forEach((coordinate, index) => {
     if (!validPosition(coordinate)) return
@@ -1119,8 +1098,6 @@ function drawProjectedLine(context, map, {
     ? 'rgba(2, 8, 16, .88)'
     : isFocusGlow || isFocusMain
       ? focusColor
-      : trace
-      ? '#2f8dff'
       : operationalLineColor(network, geometry.category)
   context.lineWidth = pass === 'casing' ? width + 3.5 : width
   context.shadowBlur = isFocusGlow ? 8 : pass === 'color' && active ? 4 : 0
@@ -1157,7 +1134,6 @@ function renderAdaptiveAssetMarker(marker) {
     'map-adaptive-asset',
     marker.showLabel ? 'show-label' : '',
     marker.selected ? 'selected' : '',
-    marker.trace ? 'trace' : '',
     marker.displaced ? 'displaced' : '',
     marker.networkFocused ? 'network-focused' : '',
     marker.focusContext ? 'focus-context' : '',
@@ -1302,8 +1278,6 @@ function buildFeatureCollections({
   networks.forEach((network) => {
     network.geometryIds?.forEach((geometryId) => networkByGeometry.set(geometryId, network))
   })
-  const traceIds = new Set(state.traceNodeIds)
-  const requestedTraceGeometryIds = new Set(state.traceGeometryIds ?? [])
   const confirmedGeometryIds = new Set((topologyGraph.edges ?? []).flatMap(
     (edge) => edge.sourceGeometryIds ?? edge.sourceGeometryId ?? [],
   ))
@@ -1330,15 +1304,6 @@ function buildFeatureCollections({
     && selectedCandidateItem
     && selectedCandidateGeometryIds.size,
   )
-  const traceGeometryIds = new Set((topologyGraph.edges ?? []).flatMap((edge) => {
-    const sourceId = edge.sourceAssetId ?? edge.sourceNodeId
-    const targetId = edge.targetAssetId ?? edge.targetNodeId
-    const inTrace = requestedTraceGeometryIds.size
-      ? (edge.sourceGeometryIds ?? []).some((id) => requestedTraceGeometryIds.has(id))
-      : traceIds.has(sourceId) && traceIds.has(targetId)
-    return inTrace ? edge.sourceGeometryIds ?? [] : []
-  }))
-  requestedTraceGeometryIds.forEach((id) => traceGeometryIds.add(id))
   const connectedIds = new Set(state.connectedNodeIds)
   const collections = {
     points: [],
@@ -1403,8 +1368,6 @@ function buildFeatureCollections({
             ? 0.16
             : focusContext ? 0.32 : 1,
       selected: geometry.assetId === state.selectedAssetId,
-      trace: traceIds.has(geometry.assetId) || traceGeometryIds.has(geometry.id)
-        || traceGeometryIds.has(geometry.sourceGeometryId),
       connected: connectedIds.has(geometry.assetId),
       highlighted,
       focused,

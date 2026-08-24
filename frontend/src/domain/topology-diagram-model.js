@@ -76,8 +76,6 @@ export function buildTopologyDiagramModel({
   selectedFamilies = new Set(),
   search = '',
   showAdminLayers = false,
-  traceAssetIds = [],
-  traceEdgeIds = [],
   readiness = null,
   publicationProfile = null,
   isDraft = false,
@@ -169,7 +167,6 @@ export function buildTopologyDiagramModel({
       position: null,
       directEdgeIds: [],
       matched: matchesSearch(asset, graphNode, search),
-      trace: false,
       dimmed: false,
     }
   })
@@ -433,23 +430,16 @@ export function buildTopologyDiagramModel({
     areaByKey.set(key, areaModel)
   })
 
-  const traceAssets = new Set(traceAssetIds.filter((id) => scopedIds.has(id)))
-  const traceEdges = new Set(traceEdgeIds.filter((id) => edgeById.has(id)))
   nodes.forEach((node) => {
-    node.trace = traceAssets.has(node.id)
     node.dimmed = shouldDimNode(node, {
       search,
       selectedFamilies,
-      traceAssets,
     })
   })
   edges.forEach((edge) => {
-    edge.trace = traceEdges.has(edge.id)
     edge.dimmed = shouldDimEdge(edge, {
       search,
       selectedFamilies,
-      traceAssets,
-      traceEdges,
     })
   })
 
@@ -572,8 +562,6 @@ export function buildTopologyDiagramModel({
     completeness,
     diagnostics,
     edgeGroups,
-    traceAssetIds: traceAssets,
-    traceEdgeIds: traceEdges,
   }
 }
 
@@ -1252,21 +1240,17 @@ function normalizeSearch(value) {
   return String(value ?? '').trim().toLowerCase()
 }
 
-function shouldDimNode(node, { search, selectedFamilies, traceAssets }) {
+function shouldDimNode(node, { search, selectedFamilies }) {
   const hasSearch = normalizeSearch(search).length > 0
   const familyFiltered = selectedFamilies?.size > 0
     && !selectedFamilies.has(node.networkFamily)
-  const traceActive = traceAssets?.size > 0
-  return (hasSearch && !node.matched) || (familyFiltered && !traceActive)
+  return (hasSearch && !node.matched) || familyFiltered
 }
 
-function shouldDimEdge(edge, { search, selectedFamilies, traceAssets, traceEdges }) {
+function shouldDimEdge(edge, { search, selectedFamilies }) {
   const familyFiltered = selectedFamilies?.size > 0
     && !selectedFamilies.has(edge.networkFamily)
-  const traceActive = traceAssets?.size > 0
-  const traceEdge = traceAssets?.has(edge.sourceId) && traceAssets?.has(edge.targetId)
-  const explicitTraceEdge = traceEdges?.has(edge.id)
-  return (familyFiltered && !traceActive) || (traceActive && !traceEdge && !explicitTraceEdge)
+  return familyFiltered
 }
 
 function uniqueNetworkFamilies(nodes, edges) {

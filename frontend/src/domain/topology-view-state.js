@@ -43,8 +43,6 @@ export function parseTopologyViewState(search, {
     selectedCategories: splitParam(params.get('categories')),
     search: params.get('q') ?? '',
     focusOnly: params.get('focus') === 'neighbors',
-    traceFrom: validAssets.has(params.get('traceFrom')) ? params.get('traceFrom') : null,
-    traceTo: validAssets.has(params.get('traceTo')) ? params.get('traceTo') : null,
     hideFiltered: params.get('hideFiltered') === 'true',
     adminLayers: params.get('layers') === 'admin',
     showMountingPhysical: params.get('mounting') !== 'off',
@@ -62,8 +60,6 @@ export function serializeTopologyViewState(search, state) {
   setOrDelete(params, 'categories', [...(state.selectedCategories ?? [])].join(','))
   setOrDelete(params, 'q', state.search)
   setOrDelete(params, 'focus', state.focusOnly ? 'neighbors' : null)
-  setOrDelete(params, 'traceFrom', state.traceFrom)
-  setOrDelete(params, 'traceTo', state.traceFrom && state.traceTo ? state.traceTo : null)
   setOrDelete(params, 'networkFamily', [...(state.selectedFamilies ?? [])].join(','))
   setOrDelete(params, 'hideFiltered', state.hideFiltered ? 'true' : null)
   setOrDelete(params, 'layers', state.adminLayers ? 'admin' : null)
