@@ -132,7 +132,6 @@ export function renderNetworkList({
   assets,
   selectedNetworkIds,
   expandedNetworkIds,
-  search,
   focusedNetworkId = null,
   showCctvCoverage = false,
 }) {
@@ -140,14 +139,11 @@ export function renderNetworkList({
   if (status === 'error') return renderErrorState(errorMessage)
   if (!networks.length) return renderEmptyState('Belum ada jaringan pada dataset aktif.', 'dataset')
 
-  const normalizedSearch = search.trim().toLowerCase()
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
-  const filtered = networks.filter((network) => (
-    matchesNetworkSearch(network, assetById, normalizedSearch)
-  ))
-  if (!filtered.length) return renderEmptyState('Asset atau jaringan tidak ditemukan.', 'search')
 
-  return filtered.map((network) => renderNetworkItem({
+  // Pencarian aset ditampilkan di combobox terpisah. Daftar jaringan tetap utuh
+  // agar pengguna dapat mengubah visibilitas jaringan tanpa kehilangan konteks.
+  return networks.map((network) => renderNetworkItem({
     network,
     assetById,
     selected: selectedNetworkIds.has(network.id),
@@ -230,19 +226,6 @@ function renderNetworkItem({
       </div>
     </article>
   `
-}
-
-function matchesNetworkSearch(network, assetById, search) {
-  if (!search) return true
-  const networkText = `${network.id} ${network.name} ${network.type} `
-    + `${network.description} ${network.sourceFolderPath || ''}`.toLowerCase()
-  if (networkText.includes(search)) return true
-  return network.nodeIds.some((assetId) => {
-    const asset = assetById[assetId]
-    if (!asset) return false
-    return `${asset.id} ${asset.name} ${asset.location} ${asset.hostname || ''}`
-      .toLowerCase().includes(search)
-  })
 }
 
 function getNetworkSubcategories(network, assetById) {

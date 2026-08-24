@@ -97,33 +97,66 @@ test('selection state supports multi-select, show all, hide all, and asset selec
   assert.equal(selection.selectedAssetId, 'SW-PNG-01')
 })
 
-test('sidebar search matches asset ID, asset name, and location within a network', () => {
+test('asset search does not remove the network context', () => {
   const html = renderNetworkList({
     status: 'ready',
     networks: [{
-      id: 'lan',
-      name: 'LAN Kantor',
+      id: 'network:cctv',
+      name: 'Jaringan CCTV',
+      type: 'CCTV',
+      categoryKey: 'cctv',
+      health: 'Aktif',
+      color: '#9698f4',
+      assetCount: 1,
+      nodeIds: ['C-022'],
+      edges: [],
+    }, {
+      id: 'network:fiber-optic',
+      name: 'Jaringan Fiber Optic',
+      type: 'Fiber optic',
+      categoryKey: 'fiber-optic',
+      health: 'Aktif',
+      color: '#70cfb5',
+      assetCount: 0,
+      nodeIds: [],
+      edges: [],
+    }, {
+      id: 'network:lan',
+      name: 'Jaringan LAN',
       type: 'LAN',
-      description: 'Jaringan kantor',
+      categoryKey: 'lan',
       health: 'Aktif',
       color: '#aeb8c5',
-      assetCount: 1,
-      nodeIds: ['SW-PNG-01'],
+      assetCount: 0,
+      nodeIds: [],
+      edges: [],
+    }, {
+      id: 'network:infrastructure',
+      name: 'Jaringan Infrastruktur',
+      type: 'Infrastructure',
+      categoryKey: 'infrastructure',
+      health: 'Aktif',
+      color: '#efc35d',
+      assetCount: 0,
+      nodeIds: [],
       edges: [],
     }],
     assets: [{
-      id: 'SW-PNG-01',
-      name: 'Switch Pangkal',
-      type: 'Access switch',
-      location: 'Ruang Server',
+      id: 'C-022',
+      name: 'C-022',
+      type: 'CCTV',
+      location: 'Lokasi tidak tersedia',
     }],
-    selectedNetworkIds: new Set(['lan']),
+    selectedNetworkIds: new Set(['network:cctv', 'network:fiber-optic', 'network:lan', 'network:infrastructure']),
     expandedNetworkIds: new Set(),
-    search: 'ruang server',
+    search: 'C-022',
   })
 
-  assert.match(html, /LAN Kantor/)
-  assert.match(html, /data-network-select="lan"/)
+  assert.match(html, /Jaringan CCTV/)
+  assert.match(html, /Jaringan Fiber Optic/)
+  assert.match(html, /Jaringan LAN/)
+  assert.match(html, /Jaringan Infrastruktur/)
+  assert.equal((html.match(/class="network-item/g) || []).length, 4)
 })
 
 test('sidebar prioritizes area, search, filters, and networks before compact context', () => {
