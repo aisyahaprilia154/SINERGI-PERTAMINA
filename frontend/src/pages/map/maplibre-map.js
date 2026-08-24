@@ -358,6 +358,10 @@ export function createMapLibreSurface(element, {
       selectedCandidate?.targetAssetId,
       selectedCandidate?.targetPathAssetId,
     ].filter(Boolean))
+    const focusedNetwork = state.focusedNetworkId
+      ? networkById.get(state.focusedNetworkId)
+      : null
+    const hidePoleGroupLabels = isInfrastructureNetwork(focusedNetwork)
     const isAssetActive = (asset) => (
       !asset.networkIds?.length
         || asset.networkIds.some((networkId) => state.selectedNetworkIds.has(networkId))
@@ -432,7 +436,7 @@ export function createMapLibreSurface(element, {
         const poleGroup = marker.representativePole
           ? poleGroupByPoleAssetId.get(marker.representativePole.id)
           : poleGroupById.get(clusterGroupIds.get(marker.key))
-        return renderClusterMarker(marker, key, poleGroup)
+        return renderClusterMarker(marker, key, poleGroup, { hidePoleGroupLabels })
       }
       return renderAdaptiveAssetMarker(marker)
     }).join('')
@@ -1156,7 +1160,7 @@ function renderAdaptiveAssetMarker(marker) {
   `
 }
 
-function renderClusterMarker(marker, key, poleGroup = null) {
+function renderClusterMarker(marker, key, poleGroup = null, { hidePoleGroupLabels = false } = {}) {
   const classes = [
     'map-adaptive-cluster',
     marker.networkFocused ? 'network-focused' : '',
@@ -1171,6 +1175,7 @@ function renderClusterMarker(marker, key, poleGroup = null) {
       }
     : null)
   if (representedPole) {
+    if (hidePoleGroupLabels) return ''
     const poleName = shortAssetLabel(representedPole.label)
     const nearbyCount = Math.max(0, marker.count - (marker.representativePole ? 1 : 0))
     const countLabel = poleGroup?.childCount > 0
@@ -1215,6 +1220,12 @@ function isPoleAsset(asset) {
   const name = String(asset?.name || '').trim()
   return /\b(tiang|pole)\b/.test(identity)
     || /^t[-_ ]?\d+[a-z]?$/i.test(name)
+}
+
+function isInfrastructureNetwork(network) {
+  const source = `${network?.categoryKey || ''} ${network?.type || ''} ${network?.name || ''}`
+    .toLowerCase()
+  return /infrastructure|infrastruktur/.test(source)
 }
 
 function shortAssetLabel(value) {
