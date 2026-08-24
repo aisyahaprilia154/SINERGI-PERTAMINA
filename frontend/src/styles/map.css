@@ -3546,6 +3546,51 @@
   font-size: 17px;
 }
 
+/* Keep physical mounting rows inset from the card edge. The generic relation
+   list rule above intentionally has no horizontal padding, so these scoped
+   rules must come after it to keep mounting lists visually self-contained. */
+.relation-list.mounting-asset-list,
+.relation-list.mounting-candidate-list {
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .06);
+}
+
+.mounting-current {
+  min-height: 62px;
+  padding: var(--space-2) var(--space-3);
+  grid-template-columns: 34px minmax(0, 1fr) 20px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .06);
+}
+
+.relation-list.mounting-asset-list button,
+.relation-list.mounting-candidate-list button {
+  min-height: 62px;
+  padding: var(--space-2) var(--space-3);
+  grid-template-columns: 34px minmax(0, 1fr) 20px;
+  gap: var(--space-2);
+}
+
+.relation-list.mounting-asset-list li:last-child,
+.relation-list.mounting-candidate-list li:last-child {
+  border-bottom: 0;
+}
+
+.relation-list.mounting-asset-list button:focus-visible,
+.relation-list.mounting-candidate-list button:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.relation-list.mounting-asset-list strong,
+.relation-list.mounting-asset-list small,
+.relation-list.mounting-candidate-list strong,
+.relation-list.mounting-candidate-list small {
+  display: block;
+  line-height: 1.3;
+}
+
 .relation-list button > .material-symbols-outlined:last-child {
   color: var(--color-text-muted);
   font-size: 18px;
