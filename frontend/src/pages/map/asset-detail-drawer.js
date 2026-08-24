@@ -337,6 +337,7 @@ function renderMountingSection({
       </button>
     </li>
   `).join('')
+  const orderedMountedAssets = [...mountedAssets].sort(compareMountedAssets)
 
   return `
     <section class="drawer-section mounting-section" aria-labelledby="asset-mounting-title">
@@ -359,9 +360,9 @@ function renderMountingSection({
       ${pole ? `
         <div class="mounting-assignment">
           <span class="mounting-label">Aset terpasang</span>
-          ${mountedAssets.length ? `
+          ${orderedMountedAssets.length ? `
             <ul class="relation-list mounting-asset-list">
-              ${mountedAssets.map((mountedAsset) => `
+              ${orderedMountedAssets.map((mountedAsset) => `
                 <li>
                   <button type="button" data-connected-asset="${escapeAttribute(mountedAsset.id)}">
                     <span class="relation-icon material-symbols-outlined" aria-hidden="true">${assetIcon(mountedAsset.type)}</span>
@@ -669,7 +670,20 @@ function isMountableAsset(asset) {
 function isPoleAsset(asset) {
   return /\b(tiang|pole|pylon)\b/i.test(
     `${asset?.type || ''} ${asset?.category || ''} ${asset?.name || ''}`,
-  )
+  ) || /^T-(?:\d+|TOWER)\b/i.test(String(asset?.name || ''))
+}
+
+function compareMountedAssets(left, right) {
+  const assetRank = (asset) => {
+    const source = `${asset?.type || ''} ${asset?.category || ''} ${asset?.name || ''}`
+    if (/junction|\bjb\b/i.test(source)) return 0
+    if (/cctv|camera|kamera/i.test(source)) return 1
+    return 2
+  }
+
+  return assetRank(left) - assetRank(right)
+    || displayAssetName(left).localeCompare(displayAssetName(right), 'id', { numeric: true })
+    || String(left?.id || '').localeCompare(String(right?.id || ''), 'id', { numeric: true })
 }
 
 function formatDistance(value) {

@@ -135,6 +135,7 @@ async function initializeTopologyWorkspace(container, initial) {
   })
   const state = {
     ...parsed,
+    labelMode: !urlState.has('labels') && parsed.area ? 'all' : parsed.labelMode,
     area: parsed.area
       ?? assets.find(({ id }) => id === parsed.selectedAssetId)?.locationGroupKey
       ?? null,
@@ -265,6 +266,8 @@ async function initializeTopologyWorkspace(container, initial) {
         && !state.selectedCandidateId
         && !state.selectedUnresolvedId
         && !state.tracePath.length,
+      layoutStyle: 'compound-poles',
+      componentColumns: 1,
     })
     const cached = layoutCache.get(cacheKey)
     if (cached) {
@@ -291,6 +294,11 @@ async function initializeTopologyWorkspace(container, initial) {
           && !state.selectedCandidateId
           && !state.selectedUnresolvedId
           && !state.tracePath.length,
+        // Wrap large endpoint fan-outs into semantic rows in the workspace.
+        // The layout module keeps its historical central-backbone default for
+        // callers such as the export and compatibility tests.
+        layoutStyle: 'compound-poles',
+        componentColumns: 1,
       }))
       cacheLayout(cacheKey, cloneLayout(layout))
     }
@@ -308,7 +316,11 @@ async function initializeTopologyWorkspace(container, initial) {
       && !state.selectedUnresolvedId
       && !state.tracePath.length
     if (overview || typeof Worker === 'undefined' || nextModel.nodes.length < 160) {
-      return calculateTopologyDiagramLayout(nextModel, { overview })
+      return calculateTopologyDiagramLayout(nextModel, {
+        overview,
+        layoutStyle: 'compound-poles',
+        componentColumns: 1,
+      })
     }
     if (!layoutWorker) {
       layoutWorker = new Worker(new URL('./topology-layout.worker.js', import.meta.url), {
@@ -340,7 +352,15 @@ async function initializeTopologyWorkspace(container, initial) {
       layoutWorker.addEventListener('message', onMessage)
       layoutWorker.addEventListener('error', onError)
       try {
-        layoutWorker.postMessage({ requestId, model: workerModel })
+        layoutWorker.postMessage({
+          requestId,
+          model: workerModel,
+          options: {
+            overview,
+            layoutStyle: 'compound-poles',
+            componentColumns: 1,
+          },
+        })
       } catch (error) {
         onError(error)
       }
@@ -433,6 +453,21 @@ async function initializeTopologyWorkspace(container, initial) {
     if (candidateCounts) candidateCounts.textContent = adminDataLoaded
       ? `${model.allCandidates.length} kandidat · ${model.allUnresolved.length} unresolved`
       : `${model.allCandidates.length}+ kandidat · ${model.allUnresolved.length} unresolved`
+    const audit = container.querySelector('[data-topology-completeness]')
+    if (audit) {
+      const completeness = model.completeness ?? {}
+      const complete = completeness.complete === true
+      audit.className = `topology-completeness${complete ? ' complete' : ' incomplete'}`
+      audit.innerHTML = `
+        <div class="topology-completeness-heading">
+          <span class="material-symbols-outlined" aria-hidden="true">${complete ? 'verified' : 'warning'}</span>
+          <strong>${complete ? 'Kelengkapan terverifikasi' : 'Kelengkapan perlu diperiksa'}</strong>
+          <b>${complete ? 'LENGKAP' : `${completeness.issueCount ?? 0} MASALAH`}</b>
+        </div>
+        <p>${completeness.renderedAssetCount ?? model.nodes.length}/${completeness.sourceAssetCount ?? model.nodes.length} asset · ${model.summary.confirmedEdgeCount ?? model.edges.length}/${completeness.visibleEdgeCount ?? model.edges.length} edge terlihat</p>
+        <small>Blok tiang: ${completeness.renderedMountingAssetCount ?? 0} asset terpasang · ${model.summary.mountingGroupCount} kelompok fisik</small>
+      `
+    }
     const searchResults = container.querySelector('.topology-diagram-search-results')
     if (searchResults && document.activeElement === container.querySelector('[data-topology-search]')) {
       renderSearchResults()
@@ -490,9 +525,17 @@ async function initializeTopologyWorkspace(container, initial) {
     const canvas = container.querySelector('.topology-diagram-canvas')
     const frame = canvas?.querySelector('.topology-diagram-frame')
     if (!canvas || !frame) return
-    canvas.style.width = `${layout.width * state.zoom}px`
-    canvas.style.height = `${layout.height * state.zoom}px`
-    frame.style.transform = `translateX(-50%) scale(${state.zoom})`
+    const viewport = container.querySelector('.topology-diagram-viewport')
+    const displayWidth = layout.width * state.zoom
+    const displayHeight = layout.height * state.zoom
+    const availableWidth = viewport?.clientWidth || displayWidth
+    // Keep the diagram's left edge reachable. The old centered transform
+    // could place the first lane outside the scrollable canvas on wide graphs.
+    const leftOffset = Math.max(0, (availableWidth - displayWidth) / (2 * state.zoom))
+    canvas.style.width = `${Math.max(displayWidth, availableWidth)}px`
+    canvas.style.height = `${Math.max(displayHeight, viewport?.clientHeight || displayHeight)}px`
+    frame.style.left = `${leftOffset}px`
+    frame.style.transform = `scale(${state.zoom})`
     const label = container.querySelector('[data-topology-zoom-label]')
     if (label) label.textContent = `${Math.round(state.zoom * 100)}%`
   }
@@ -719,6 +762,11 @@ async function initializeTopologyWorkspace(container, initial) {
           </button></li>`
         )).join('')}</ul>` : '<p class="topology-inspector-muted">Tidak ada aset jaringan dalam scope area ini.</p>'}
       </section>
+      <footer class="topology-inspector-actions">
+        <button class="button primary" type="button" data-open-map="${escapeAttribute(group.hostId)}">
+          <span class="material-symbols-outlined" aria-hidden="true">location_on</span>Buka Tiang di Peta Aset
+        </button>
+      </footer>
     `
   }
 
@@ -836,6 +884,9 @@ async function initializeTopologyWorkspace(container, initial) {
     }
     if (state.layoutError) messages.push(`Layout worker gagal; fallback dipakai: ${state.layoutError}`)
     if (model.diagnostics.invalid) messages.push(model.diagnostics.message || 'Graph topology perlu diperiksa.')
+    if (model.completeness && !model.completeness.complete) {
+      messages.push(`Audit kelengkapan menemukan ${model.completeness.issueCount} ketidaksesuaian.`)
+    }
     if (model.components.some(({ rootVerified }) => !rootVerified)) {
       messages.push('Root terverifikasi tidak tersedia; anchor layout ditandai dan bukan root operasional.')
     }
@@ -886,6 +937,7 @@ async function initializeTopologyWorkspace(container, initial) {
       const item = event.target.closest('[data-search-kind]')
       if (!item) return
       if (item.dataset.searchKind === 'asset') selectAsset(item.dataset.searchId)
+      else if (item.dataset.searchKind === 'mounting') selectMountingGroup(item.dataset.searchId)
       else selectEdge(item.dataset.searchId)
       event.currentTarget.hidden = true
     })
@@ -975,34 +1027,55 @@ async function initializeTopologyWorkspace(container, initial) {
     if (!layout) return
     const viewport = container.querySelector('.topology-diagram-viewport')
     const availableWidth = Math.max(320, (viewport?.clientWidth || 1000) - 72)
-    const nextZoom = clamp(availableWidth / Math.max(layout.width, 1), .35, 1)
+    // Keep the overview readable. Larger diagrams remain horizontally
+    // scrollable instead of shrinking cards below a useful reading size.
+    const nextZoom = clamp(availableWidth / Math.max(layout.width, 1), .52, 1)
     setZoom(nextZoom, () => {
       if (!viewport) return
-      viewport.scrollLeft = Math.max(0, (layout.width * nextZoom - viewport.clientWidth) / 2)
+      viewport.scrollLeft = 0
       viewport.scrollTop = 0
     })
   }
 
   async function exportSvg() {
-    const svg = container.querySelector('.topology-diagram-canvas .topology-diagram-svg')
-    if (!svg) return
     try {
+      const svg = createExportSvg()
+      if (!svg) return
       downloadSchematicSvg(svg, exportFilename('svg'))
-      showToast('SVG Diagram Topologi berhasil diekspor.')
+      showToast('SVG Diagram Topologi berhasil diekspor dengan seluruh label aset.')
     } catch (error) {
       showToast(error.message, 'error')
     }
   }
 
   async function exportPng() {
-    const svg = container.querySelector('.topology-diagram-canvas .topology-diagram-svg')
-    if (!svg) return
     try {
+      const svg = createExportSvg()
+      if (!svg) return
       await downloadSchematicPng(svg, exportFilename('png'), 2)
-      showToast('PNG Diagram Topologi berhasil diekspor.')
+      showToast('PNG Diagram Topologi berhasil diekspor dengan seluruh label aset.')
     } catch (error) {
       showToast(error.message, 'error')
     }
+  }
+
+  function createExportSvg() {
+    if (!model || !layout || model.status !== 'ready' || layout.status !== 'ready') return null
+    const markup = renderTopologyDiagramSvg({
+      model,
+      layout,
+      context: activeContext,
+      // Export is a documentation artifact, not a zoomed viewport. It must
+      // never inherit the screen's auto-label decision or selection dimming.
+      labelMode: 'all',
+      zoom: 1,
+      showAdminLayers: state.showAdminLayers,
+      showMountingPhysical: state.showMountingPhysical,
+    })
+    const parsed = new DOMParser().parseFromString(markup, 'image/svg+xml')
+    const parseError = parsed.querySelector('parsererror')
+    if (parseError) throw new Error('Diagram SVG tidak dapat disiapkan untuk ekspor.')
+    return parsed.documentElement
   }
 
   function selectAsset(assetId) {
@@ -1038,10 +1111,26 @@ async function initializeTopologyWorkspace(container, initial) {
     else renderWorkspace()
   }
 
+  function selectMountingGroup(groupId) {
+    const group = model.mountingGroups.find(({ id }) => id === groupId)
+    if (!group) return
+    state.selectedMountingGroupId = group.id
+    state.selectedAssetId = null
+    state.selectedEdgeId = null
+    state.selectedCandidateId = null
+    state.selectedUnresolvedId = null
+    renderWorkspace()
+  }
+
   function centerOnNode(node) {
     const viewport = container.querySelector('.topology-diagram-viewport')
-    if (!viewport || !node?.diagram) return
-    viewport.scrollLeft = Math.max(0, node.diagram.centerX * state.zoom - viewport.clientWidth / 2)
+    const frame = container.querySelector('.topology-diagram-frame')
+    if (!viewport || !frame || !node?.diagram) return
+    const leftOffset = Number.parseFloat(frame.style.left) || 0
+    viewport.scrollLeft = Math.max(
+      0,
+      (leftOffset + node.diagram.centerX) * state.zoom - viewport.clientWidth / 2,
+    )
     viewport.scrollTop = Math.max(0, node.diagram.centerY * state.zoom - viewport.clientHeight / 2)
   }
 
@@ -1354,7 +1443,7 @@ function renderWorkspaceShell({
               </label>` : `<p class="topology-admin-locked"><span class="material-symbols-outlined">lock</span>Layer kandidat/unresolved hanya tersedia untuk administrator.</p>`}
               <label class="topology-diagram-toggle topology-mounting-toggle">
                 <input type="checkbox" data-toggle-mounting-physical${showMountingPhysical ? ' checked' : ''}>
-                <span><strong>Area tiang</strong><small>Bubble berwarna = perangkat terpasang pada tiang yang sama</small></span>
+                <span><strong>Blok tiang</strong><small>Blok fisik mengelompokkan JB dan CCTV pada tiang yang sama</small></span>
                 <b aria-hidden="true">${showMountingPhysical ? 'ON' : 'OFF'}</b>
               </label>
               <label for="topology-label-mode">Label aset</label>
@@ -1365,6 +1454,7 @@ function renderWorkspaceShell({
               </select>
             </section>
             <section class="topology-diagram-stats" aria-label="Ringkasan diagram"></section>
+            <section class="topology-completeness" data-topology-completeness aria-label="Audit kelengkapan diagram"></section>
           </div>
           <div class="topology-diagram-sidebar-note">
             <span class="material-symbols-outlined" aria-hidden="true">route</span>

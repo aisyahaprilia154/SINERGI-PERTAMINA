@@ -107,6 +107,18 @@ test('auto label visibility keeps endpoint labels hidden until close zoom', () =
   assert.match(close, /<text class="topology-node-name"[^>]*>Camera<\/text>/)
 })
 
+test('documentation render keeps every endpoint label visible regardless of screen zoom', () => {
+  const { model, layout } = renderFixture()
+  const documentation = renderTopologyDiagramSvg({
+    model,
+    layout,
+    labelMode: 'all',
+    zoom: 1,
+  })
+  assert.match(documentation, /<text class="topology-node-name"[^>]*>Camera<\/text>/)
+  assert.match(documentation, /topology-mounting-header/)
+})
+
 test('SVG preserves selection and trace presentation without dropping graph nodes', () => {
   const { model, layout } = renderFixture()
   const selectedSvg = renderTopologyDiagramSvg({

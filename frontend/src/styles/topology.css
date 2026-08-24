@@ -1228,6 +1228,41 @@
 .topology-stat-card.candidate strong { color: #aa7118; }
 .topology-stat-card.unresolved strong { color: var(--color-danger); }
 
+.topology-completeness {
+  margin-top: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 5px;
+  background: #f3fbf7;
+  border: 1px solid #c6e9dd;
+  border-radius: var(--radius-md);
+}
+
+.topology-completeness.incomplete {
+  background: #fff8e9;
+  border-color: #efdcad;
+}
+
+.topology-completeness-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.topology-completeness-heading .material-symbols-outlined { color: #16805f; font-size: 16px; }
+.topology-completeness.incomplete .topology-completeness-heading .material-symbols-outlined { color: #aa7118; }
+.topology-completeness-heading strong { color: var(--color-text-primary); font-size: 10px; }
+.topology-completeness-heading b {
+  color: #16805f;
+  font-size: 8px;
+  letter-spacing: .04em;
+}
+.topology-completeness.incomplete .topology-completeness-heading b { color: #aa7118; }
+.topology-completeness p,
+.topology-completeness small { margin: 0; color: var(--color-text-secondary); font-size: 9px; line-height: 1.35; }
+.topology-completeness small { color: var(--color-text-muted); }
+
 .topology-diagram-sidebar-note {
   min-height: 64px;
   padding: 11px 16px;
@@ -1359,8 +1394,8 @@
 .topology-diagram-frame {
   position: absolute;
   top: 0;
-  left: 50%;
-  transform-origin: top center;
+  left: 0;
+  transform-origin: top left;
 }
 .topology-diagram-svg { display: block; overflow: visible; }
 .topology-diagram-svg [data-node-id],

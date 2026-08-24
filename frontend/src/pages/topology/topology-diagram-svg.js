@@ -107,10 +107,14 @@ export function renderTopologyDiagramSvg({
           .topology-band-title{font:800 8px Inter,ui-sans-serif,system-ui;fill:${THEME.muted};letter-spacing:.09em}
           .topology-band-divider{stroke:${THEME.laneBorder};stroke-width:1;stroke-dasharray:3 5}
           .topology-mounting-group{cursor:pointer;outline:none}
-          .topology-mounting-bubble{fill-opacity:.56;stroke-width:1.4;vector-effect:non-scaling-stroke}
-          .topology-mounting-group:hover .topology-mounting-bubble,.topology-mounting-group.selected .topology-mounting-bubble{stroke:${THEME.selected};stroke-width:2.2}
-          .topology-mounting-label-bg{fill:rgba(255,255,255,.88);stroke:rgba(113,132,146,.28);stroke-width:1}
-          .topology-mounting-label{font:800 8px Inter,ui-sans-serif,system-ui;fill:#4e6879;letter-spacing:.03em}
+          .topology-mounting-bubble{fill-opacity:1;stroke-width:1.7;stroke-dasharray:none;vector-effect:non-scaling-stroke}
+          .topology-mounting-group:hover .topology-mounting-bubble,.topology-mounting-group.selected .topology-mounting-bubble{stroke:${THEME.selected};stroke-width:2.5}
+          .topology-mounting-header{fill:rgba(255,255,255,.98);stroke-width:1.2}
+          .topology-mounting-pole-mark{fill:#fff;stroke-width:1.5}
+          .topology-mounting-label-bg{fill:rgba(255,255,255,.98);stroke:rgba(113,132,146,.28);stroke-width:1}
+          .topology-mounting-label{font:850 12px Inter,ui-sans-serif,system-ui;fill:#29495f;letter-spacing:.02em}
+          .topology-mounting-summary{font:600 10px Inter,ui-sans-serif,system-ui;fill:#6d7f8d}
+          .topology-mounting-count{font:850 9px Inter,ui-sans-serif,system-ui;fill:#4e6879}
           .topology-cross-area-gateway{pointer-events:none}
           .topology-cross-area-line{stroke:#7294a7;stroke-width:1.4;stroke-dasharray:4 4}
           .topology-cross-area-marker{fill:#fff;stroke:#7294a7;stroke-width:1.3}
@@ -130,6 +134,9 @@ export function renderTopologyDiagramSvg({
           .topology-edge.candidate.dimmed{opacity:.22}
           .topology-node{cursor:pointer;outline:none}
           .topology-node-card{fill:#fff;stroke:#d7e0e8;stroke-width:1.2}
+          .topology-node.physical .topology-node-card{fill:#fff;stroke:#c7d8e2;stroke-width:1.45}
+          .topology-node.physical .topology-node-name{font-size:12px}
+          .topology-node.physical .topology-node-type{font-size:10px}
           .topology-node-accent{opacity:.92}
           .topology-node:hover .topology-node-card,.topology-node:focus .topology-node-card{fill:#fff;stroke:${THEME.selected};stroke-width:2}
           .topology-node.core .topology-node-card{fill:#f1f8fc;stroke:#a8c8da;stroke-width:1.6}
@@ -157,6 +164,7 @@ export function renderTopologyDiagramSvg({
           .topology-compact-type{font:500 8px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary}}
           .topology-node-warning{fill:#fff7e5;stroke:${THEME.candidate};stroke-width:1.5}
           .topology-node-warning-text{font:900 9px Inter,ui-sans-serif,system-ui;fill:${THEME.candidate};text-anchor:middle}
+          .topology-node-status-dot{stroke:#fff;stroke-width:1.2}
           .topology-candidate{cursor:pointer}
           .topology-candidate-marker{fill:#fff9ed;stroke:${THEME.candidate};stroke-width:2;stroke-dasharray:4 3}
           .topology-candidate-text{font:800 8px Inter,ui-sans-serif,system-ui;fill:${THEME.candidate}}
@@ -314,36 +322,75 @@ function renderAreaOverview(layout) {
 
 function renderMountingGroups(model, layout, { selectedMountingGroupId = null, minimap = false } = {}) {
   const layoutNodeById = new Map(layout.nodes.map((node) => [node.id, node]))
+  const boundsById = new Map((layout.mountingGroupBounds ?? []).map((bounds) => [bounds.id, bounds]))
   return (model.mountingGroups ?? []).map((group, index) => {
     const childNodes = group.childIds.map((id) => layoutNodeById.get(id)).filter(Boolean)
     if (!childNodes.length) return ''
     const hostName = shorten(group.hostName || group.hostId, 18)
-    const minX = Math.min(...childNodes.map((node) => node.diagram.x))
-    const minY = Math.min(...childNodes.map((node) => node.diagram.y))
-    const maxX = Math.max(...childNodes.map((node) => node.diagram.x + node.diagram.width))
-    const maxY = Math.max(...childNodes.map((node) => node.diagram.y + node.diagram.height))
-    const width = maxX - minX
-    const height = maxY - minY
-    const cx = minX + width / 2
-    const cy = minY + height / 2
-    const rx = Math.max(54, width / 2 + 26)
-    const ry = Math.max(48, height / 2 + 30)
+    const fallbackBounds = {
+      x: Math.min(...childNodes.map((node) => node.diagram.x)) - 16,
+      y: Math.min(...childNodes.map((node) => node.diagram.y)) - 36,
+      width: Math.max(...childNodes.map((node) => node.diagram.x + node.diagram.width))
+        - Math.min(...childNodes.map((node) => node.diagram.x)) + 32,
+      height: Math.max(...childNodes.map((node) => node.diagram.y + node.diagram.height))
+        - Math.min(...childNodes.map((node) => node.diagram.y)) + 52,
+    }
+    const bounds = boundsById.get(group.id) ?? fallbackBounds
+    const panelX = bounds.x
+    const panelY = bounds.y
+    const panelWidth = bounds.width
+    const panelHeight = bounds.height
+    const headerHeight = Math.min(42, Math.max(30, bounds.headerHeight ?? 32))
     const palette = mountingBubblePalette(group.hostId, index)
     const label = `${hostName} · ${childNodes.length} aset`
-    const labelWidth = Math.max(64, label.length * 5.1 + 18)
-    const labelX = cx - rx + 14
-    const labelY = cy - ry + 12
+    const typeSummary = summarizeMountedAssets(group.childAssets ?? childNodes)
+    const headerWidth = Math.max(120, panelWidth - 12)
+    const labelX = panelX + 6
+    const labelY = panelY + 6
+    const labelTextX = labelX + 32
+    const labelText = fitMountingText(label, headerWidth - 42, 7.2)
+    const summaryText = fitMountingText(typeSummary, headerWidth - 42, 5.6)
     return `<g class="topology-mounting-group${selectedMountingGroupId === group.id ? ' selected' : ''}"
-      data-mounting-group-id="${escapeAttribute(group.id)}" tabindex="0" role="button"
+      data-mounting-group-id="${escapeAttribute(group.id)}"
+      data-mounted-asset-ids="${escapeAttribute(childNodes.map((node) => node.id).join('|'))}"
+      tabindex="0" role="button"
       aria-label="${escapeAttribute(label)} terpasang pada tiang yang sama">
-      <ellipse class="topology-mounting-bubble" cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}"
+      <rect class="topology-mounting-bubble" x="${panelX}" y="${panelY}"
+        width="${panelWidth}" height="${panelHeight}" rx="14"
         fill="${palette.fill}" stroke="${palette.stroke}"/>
-      ${minimap ? '' : `<rect class="topology-mounting-label-bg" x="${labelX}" y="${labelY}"
-        width="${labelWidth}" height="20" rx="10"/>
-      <text class="topology-mounting-label" x="${labelX + 9}" y="${labelY + 13}">${escapeXml(label)}</text>`}
-      <title>${escapeXml(label)} · area berwarna menunjukkan perangkat pada tiang yang sama</title>
+      ${minimap ? '' : `<rect class="topology-mounting-header" x="${labelX}" y="${labelY}"
+        width="${headerWidth}" height="${headerHeight}" rx="9"
+        fill="${palette.fill}" stroke="${palette.stroke}"/>
+      <circle class="topology-mounting-pole-mark" cx="${labelX + 16}" cy="${labelY + headerHeight / 2}" r="10" stroke="${palette.stroke}"/>
+      <text class="topology-mounting-count" x="${labelX + 16}" y="${labelY + headerHeight / 2 + 3}" text-anchor="middle">P</text>
+      <text class="topology-mounting-label" x="${labelTextX}" y="${labelY + 15}">${escapeXml(labelText)}</text>
+      <text class="topology-mounting-summary" x="${labelTextX}" y="${labelY + 30}">${escapeXml(summaryText)}</text>`}
+      <title>${escapeXml(label)} · ${escapeXml(typeSummary)} · blok fisik terpisah dari edge jaringan</title>
     </g>`
   }).join('')
+}
+
+function fitMountingText(value, maxWidth, averageCharWidth) {
+  const text = String(value ?? '')
+  const maxChars = Math.max(6, Math.floor(Math.max(24, maxWidth) / averageCharWidth))
+  return text.length > maxChars ? `${text.slice(0, maxChars - 1)}…` : text
+}
+
+function summarizeMountedAssets(assets = []) {
+  const counts = new Map()
+  assets.forEach((asset) => {
+    const source = `${asset?.type ?? ''} ${asset?.assetType ?? ''} ${asset?.name ?? ''}`.toLowerCase()
+    const label = /cctv|camera|kamera/.test(source)
+      ? 'CCTV'
+      : /junction|\bjb\b/.test(source)
+        ? 'JB'
+        : asset?.type || asset?.assetType || 'Aset'
+    counts.set(label, (counts.get(label) ?? 0) + 1)
+  })
+  return [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right, 'id'))
+    .map(([label, count]) => `${label} ${count}`)
+    .join(' · ') || 'Aset terpasang'
 }
 
 function renderLane(lane, section) {
@@ -356,6 +403,16 @@ function renderLane(lane, section) {
         ${lane.nodes.length} perangkat · ${lane.edgeCount} koneksi
       </text>
       <line class="topology-lane-header-line" x1="${x + 4}" y1="${y + 23}" x2="${x + lane.width - 4}" y2="${y + 23}"/>
+      </g>`
+  }
+  if (lane.presentation === 'compound-poles') {
+    return `<g class="topology-lane-group topology-lane-compound" data-component-id="${escapeAttribute(lane.componentId)}">
+      <text class="topology-lane-kicker" x="${x + 4}" y="${y + 13}">${escapeXml(lane.title.toUpperCase())}</text>
+      <text class="topology-lane-meta" x="${x + lane.width - 4}" y="${y + 13}" text-anchor="end">
+        ${lane.nodes.length} perangkat · ${lane.edgeCount} koneksi · blok fisik terpetakan
+      </text>
+      <line class="topology-lane-header-line" x1="${x + 4}" y1="${y + 23}" x2="${x + lane.width - 4}" y2="${y + 23}"/>
+      ${lane.bands.map((band) => renderBand(band, x, y)).join('')}
     </g>`
   }
   return `
@@ -452,6 +509,7 @@ function renderNode(node, {
   const direct = directNodes.has(node.id) && !selected
   const classes = [
     'topology-node',
+    node.compoundGroupId ? 'physical' : '',
     node.dimmed ? 'dimmed' : '',
     node.isCore || ['root', 'core'].includes(node.topologyRole) ? 'core' : '',
     selected ? 'selected' : '',
@@ -461,17 +519,21 @@ function renderNode(node, {
     node.connectivityStatus === 'suggested-only' ? 'suggested-only' : '',
   ].filter(Boolean).join(' ')
   const color = networkFamilyColor(node.networkFamily)
+  const physical = Boolean(node.compoundGroupId)
   const iconX = x + width / 2
-  const iconY = y + (node.presentation === 'compact' ? 38 : 42)
-  const labelY = y + 13
-  const typeY = y + 25
+  const iconY = y + (physical ? Math.min(32, height * .38) : node.presentation === 'compact' ? 38 : 42)
+  const labelY = physical ? y + height - 23 : y + 13
+  const typeY = physical ? y + height - 8 : y + 25
   const warning = node.connectivityStatus === 'disconnected'
     ? '!'
     : node.connectivityStatus === 'suggested-only' ? 'S' : ''
-  const showLabels = labelVisibility === 'all'
+  const showLabels = physical || labelVisibility === 'all'
     || (labelVisibility === 'core-peer'
       && ['rack-root', 'junction-peer', 'junction-extended'].includes(node.diagramClass))
   const showType = showLabels && node.presentation !== 'hub-spoke'
+  const statusColor = node.connectivityStatus === 'disconnected'
+    ? THEME.unresolved
+    : node.connectivityStatus === 'suggested-only' ? THEME.candidate : THEME.connected
   return `
     <g class="${classes}" data-node-id="${escapeAttribute(node.id)}" tabindex="0" role="button"
       aria-label="Pilih aset ${escapeAttribute(node.id)}">
@@ -486,6 +548,7 @@ function renderNode(node, {
         <text class="topology-node-name" x="${iconX}" y="${labelY}">${escapeXml(shorten(node.name || node.id, node.presentation === 'hub-spoke' ? 18 : 24))}</text>
         ${showType ? `<text class="topology-node-type" x="${iconX}" y="${typeY}">${escapeXml(shorten(node.type || 'Aset', 27))}</text>` : ''}
       ` : ''}
+      <circle class="topology-node-status-dot" cx="${x + width - 10}" cy="${y + 10}" r="4" fill="${statusColor}"/>
       ${warning ? `<circle class="topology-node-warning" cx="${x + width - 8}" cy="${y + 8}" r="8"/>
         <text class="topology-node-warning-text" x="${x + width - 8}" y="${y + 11}">${warning}</text>` : ''}
       ${node.isVerifiedRoot && !minimap ? `
@@ -584,8 +647,8 @@ function renderLegend(bottom, width, showMountingPhysical) {
       <text class="topology-legend-label" x="254" y="${bottom + 37}">Saran koneksi</text>
       <circle cx="366" cy="${bottom + 31}" r="7" fill="#fff" stroke="${THEME.unresolved}" stroke-dasharray="4 3"/>
       <text class="topology-legend-label" x="380" y="${bottom + 34}">Belum terhubung</text>
-      ${showMountingPhysical ? `<ellipse cx="506" cy="${bottom + 31}" rx="14" ry="9" fill="#dfeff5" stroke="#8fb8c8"/>
-      <text class="topology-legend-label" x="528" y="${bottom + 34}">Satu tiang</text>` : ''}
+       ${showMountingPhysical ? `<rect x="492" y="${bottom + 22}" width="28" height="18" rx="5" fill="#dfeff5" fill-opacity=".35" stroke="#8fb8c8" stroke-dasharray="4 3"/>
+       <text class="topology-legend-label" x="528" y="${bottom + 34}">Satu tiang · blok fisik</text>` : ''}
       <text class="topology-disclaimer" x="32" y="${bottom + 64}">Klik perangkat atau garis untuk melihat identitas dan detail relasinya.</text>
     </g>
   `

@@ -1,7 +1,9 @@
 import { resolveTopologyReadiness } from '../domain/topology-readiness.js'
 import {
   buildPoleGroups,
+  mergeMountingRelations,
   MOUNTING_RELATION_TYPE,
+  inferSpatialMountingRelations,
 } from '../domain/pole-groups.js'
 import { filterConflictingCameraEdges } from '../domain/device-edge-policy.js'
 
@@ -100,7 +102,7 @@ export function adaptActiveDatasetForMap(payload) {
       sourceAssetId: edge.sourceNodeId,
       targetAssetId: edge.targetNodeId,
     }))
-  const mountingRelations = normalizeMountingRelations(
+  const explicitMountingRelations = normalizeMountingRelations(
     payload.mountingRelations
       ?? (payload.relations ?? []).filter((relation) => (
         relation?.relationType === MOUNTING_RELATION_TYPE
@@ -110,6 +112,15 @@ export function adaptActiveDatasetForMap(payload) {
     validNodeIds.has(relation.sourceAssetId)
       && validNodeIds.has(relation.targetAssetId)
   ))
+  const inferredMountingRelations = inferSpatialMountingRelations({
+    assets,
+    mountingRelations: explicitMountingRelations,
+    mountingOverrides: payload.mountingOverrides ?? [],
+  })
+  const mountingRelations = mergeMountingRelations([
+    explicitMountingRelations,
+    inferredMountingRelations,
+  ])
   const mountingOptions = normalizeMountingOptions(
     payload.mountingOptions ?? payload.mountingCandidates,
     resolver,
