@@ -10,7 +10,6 @@ import {
   loadActiveDataset,
   loadTopologyProjection,
   loadTopologyRoots,
-  traceTopology,
 } from '../../services/active-dataset-service.js'
 import { downloadSchematicPng, downloadSchematicSvg } from '../map/schematic-export.js'
 import { bindUserAccountMenu, renderTopNavigation } from '../map/map-page.js'
@@ -120,9 +119,6 @@ function mountTopologyWorkspace(container, {
     labelMode: 'auto',
     showMountingPhysical: true,
     zoom: DEFAULT_ZOOM,
-    traceStatus: 'idle',
-    traceAssetIds: [],
-    traceEdgeIds: [],
     filterOpen: false,
     viewOpen: false,
     exportOpen: false,
@@ -148,8 +144,6 @@ function mountTopologyWorkspace(container, {
     poleGroups: mapData.poleGroups,
     selectedFamilies: state.selectedFamilies,
     search: state.search,
-    traceAssetIds: state.traceAssetIds,
-    traceEdgeIds: state.traceEdgeIds,
     showMountingPhysical: state.showMountingPhysical,
     publicationProfile: activeContext.publicationProfile,
     readiness: mapData.topologyReadiness,
@@ -280,14 +274,6 @@ function mountTopologyWorkspace(container, {
     }
     if (action === 'clear-selection') {
       clearSelection()
-      return
-    }
-    if (action === 'trace') return void runTrace()
-    if (action === 'clear-trace') {
-      state.traceAssetIds = []
-      state.traceEdgeIds = []
-      state.traceStatus = 'idle'
-      rebuild()
       return
     }
     if (action === 'open-map') return openAssetMap(event.target.closest('[data-action]')?.dataset.assetId)
@@ -502,7 +488,6 @@ function mountTopologyWorkspace(container, {
     const path = networkPathFor(node.id)
     const relations = directRelationsFor(node.id)
     const online = node.connectivityStatus !== 'disconnected' && !isOfflineStatus(node.status)
-    const traceActive = state.traceAssetIds.length > 0
     return `
       <div class="topology-stitch-inspector-head">
         <h3>Detail Perangkat</h3>
@@ -538,7 +523,7 @@ function mountTopologyWorkspace(container, {
           <label>Endpoint Terhubung (${relations.length})</label>
           <div class="topology-stitch-relations">
             ${relations.length ? relations.map(({ other, edge }) => `
-              <button type="button" class="topology-stitch-relation ${state.traceAssetIds.includes(other.id) ? 'traced' : ''}" data-select-asset="${escapeAttribute(other.id)}">
+              <button type="button" class="topology-stitch-relation" data-select-asset="${escapeAttribute(other.id)}">
                 <span class="topology-stitch-relation-main"><span class="material-symbols-outlined" aria-hidden="true">${iconForNode(other)}</span><strong>${escapeHtml(other.name || other.id)}</strong></span>
                 <span class="topology-stitch-relation-meta">${escapeHtml(edge.networkFamilyLabel || networkFamilyLabel(other.networkFamily))}<i class="${other.connectivityStatus === 'disconnected' ? 'offline' : ''}"></i></span>
               </button>
@@ -547,11 +532,6 @@ function mountTopologyWorkspace(container, {
         </section>
       </div>
       <div class="topology-stitch-inspector-footer">
-        <button type="button" class="topology-stitch-primary-button" data-action="trace" ${relations.length ? '' : 'disabled'}>
-          <span class="material-symbols-outlined" aria-hidden="true">${state.traceStatus === 'loading' ? 'progress_activity' : traceActive ? 'route' : 'route'}</span>
-          ${state.traceStatus === 'loading' ? 'Tracing…' : traceActive ? 'Tracing aktif' : 'Mulai tracing'}
-        </button>
-        ${traceActive ? '<button type="button" class="topology-stitch-text-button" data-action="clear-trace">Hapus tracing</button>' : ''}
         <button type="button" class="topology-stitch-secondary-button" data-action="open-map" data-asset-id="${escapeAttribute(node.id)}">
           <span class="material-symbols-outlined" aria-hidden="true">map</span>Buka di Peta Aset
         </button>
@@ -652,49 +632,6 @@ function mountTopologyWorkspace(container, {
     container.querySelector('[data-action="toggle-filter"]')?.classList.toggle('active', state.filterOpen)
     container.querySelector('[data-action="toggle-view"]')?.classList.toggle('active', state.viewOpen)
     container.querySelector('[data-action="toggle-export"]')?.classList.toggle('active', state.exportOpen)
-  }
-
-  async function runTrace() {
-    if (!state.selectedAssetId || state.traceStatus === 'loading') return
-    state.traceStatus = 'loading'
-    renderInspector()
-    const local = localTrace(state.selectedAssetId)
-    try {
-      const result = await traceTopology({
-        datasetVersionId: activeContext.datasetVersionId,
-        sourceAssetId: state.selectedAssetId,
-        graphRevision: graph.graphRevision,
-        direction: 'both',
-        mode: 'component',
-        maxDepth: 100,
-      })
-      const remote = traceResultIds(result)
-      state.traceAssetIds = remote.assetIds.length ? remote.assetIds : local.assetIds
-      state.traceEdgeIds = remote.edgeIds.length ? remote.edgeIds : local.edgeIds
-    } catch {
-      state.traceAssetIds = local.assetIds
-      state.traceEdgeIds = local.edgeIds
-      showToast('Tracing server tidak tersedia; jalur lokal ditampilkan.')
-    }
-    state.traceStatus = 'idle'
-    rebuild()
-  }
-
-  function localTrace(sourceId) {
-    const visited = new Set([sourceId])
-    const edgeIds = []
-    const queue = [sourceId]
-    while (queue.length) {
-      const current = queue.shift()
-      for (const next of model.adjacency.get(current) ?? []) {
-        if (!visited.has(next.id)) {
-          visited.add(next.id)
-          queue.push(next.id)
-          edgeIds.push(next.edge.id)
-        }
-      }
-    }
-    return { assetIds: [...visited], edgeIds: [...new Set(edgeIds)] }
   }
 
   function exportDiagram(kind) {
@@ -896,22 +833,6 @@ function iconForNode(node) {
 
 function isOfflineStatus(value) {
   return /offline|down|inactive|rusak|mati|disconnected/i.test(String(value ?? ''))
-}
-
-function traceResultIds(result) {
-  const candidate = result?.path ?? result?.trace ?? result ?? {}
-  const assetIds = candidate.assetIds
-    ?? candidate.nodeIds
-    ?? candidate.nodes?.map((node) => typeof node === 'string' ? node : node.id ?? node.assetId)
-    ?? []
-  const edgeIds = candidate.edgeIds
-    ?? candidate.relationIds
-    ?? candidate.edges?.map((edge) => typeof edge === 'string' ? edge : edge.id ?? edge.edgeId)
-    ?? []
-  return {
-    assetIds: [...new Set(assetIds.filter(Boolean))],
-    edgeIds: [...new Set(edgeIds.filter(Boolean))],
-  }
 }
 
 function slugify(value) {
