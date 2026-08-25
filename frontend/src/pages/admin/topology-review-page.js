@@ -51,6 +51,7 @@ import {
 } from '../../services/active-dataset-service.js'
 import { bindUserAccountMenu, renderTopNavigation, scopeMapData } from '../map/map-page.js'
 import { createMapLibreSurface } from '../map/maplibre-map.js'
+import { initializeMountingReview } from './mounting-review-panel.js'
 
 export async function renderTopologyReviewPage(container) {
   document.title = 'Konfirmasi Koneksi — SINERGI'
@@ -62,6 +63,10 @@ export async function renderTopologyReviewPage(container) {
   const requested = readContext()
   try {
     const activePayload = await loadActiveDataset(requested)
+    if (new URLSearchParams(window.location.search).get('mode') === 'mounting') {
+      await initializeMountingReview(container, adaptActiveDatasetForMap(activePayload))
+      return
+    }
     const identitySync = await synchronizeAutomaticIdentity(
       activePayload.datasetVersion?.id,
       container,
@@ -193,6 +198,10 @@ async function initializeReview(container, mapData) {
             escapeHtml(mapData.activeContext.version)
           }</p>
         </div>
+        <nav class="review-mode-switch" aria-label="Mode review">
+          <a class="active" href="/admin/topology-review">Sambungan jaringan</a>
+          <a href="/admin/topology-review?mode=mounting">Mounting fisik</a>
+        </nav>
         <label class="site-picker">
           <span>Site operasional</span>
           <span class="site-picker-control">

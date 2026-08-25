@@ -164,6 +164,7 @@ export class ImportPipeline {
           config: this.topology,
           previousMountingRelations: activeRecord?.mountingRelations ?? [],
           previousMountingOverrides: activeRecord?.mountingOverrides ?? [],
+          previousMountingExpectations: activeRecord?.mountingExpectations ?? [],
           generatedAt: this.clock().toISOString(),
         },
       )

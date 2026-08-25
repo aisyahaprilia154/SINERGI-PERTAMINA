@@ -351,6 +351,8 @@ export class DatasetVersionLifecycleService {
       mountingCandidates: structuredClone(record.mountingCandidates ?? []),
       mountingOptions,
       mountingOverrides: structuredClone(record.mountingOverrides ?? []),
+      mountingExpectations: filterResolvedMountingExpectations(record, resolver),
+      mountingReviewItems: filterResolvedMountingReviewItems(record, resolver),
       mountingSummary: structuredClone(record.mountingSummary ?? null),
       assetIdentityMap: identityMap,
       readiness: record.readiness ?? null,
@@ -505,6 +507,10 @@ export class DatasetVersionLifecycleService {
         targetAssetId: resolver.resolve(candidate.targetAssetId) ?? candidate.targetAssetId,
       })),
       mountingOptions,
+      mountingExpectations: filterResolvedMountingExpectations(record, resolver)
+        .filter(({ assetId }) => assetId === canonicalAssetId),
+      mountingReviewItems: filterResolvedMountingReviewItems(record, resolver)
+        .filter(({ assetId }) => assetId === canonicalAssetId),
       mountingSummary: structuredClone(record.mountingSummary ?? null),
       topologyReadiness: record.topologyReadiness ?? null,
       topologyIdentity: topology.identity,
@@ -1125,6 +1131,8 @@ function toActiveTopologyDataset(resolved) {
     mountingCandidates: structuredClone(record.mountingCandidates ?? []),
     mountingOptions: filterResolvedMountingOptions(record, resolver),
     mountingOverrides: structuredClone(record.mountingOverrides ?? []),
+    mountingExpectations: filterResolvedMountingExpectations(record, resolver),
+    mountingReviewItems: filterResolvedMountingReviewItems(record, resolver),
     mountingSummary: structuredClone(record.mountingSummary ?? null),
     assetIdentityMap: projectTopologyIdentityMap(assetIdentityMap, assets),
     readiness: record.readiness ?? null,
@@ -1397,6 +1405,8 @@ function toActiveMapDataset(resolved, { siteId = null, siteBoundaries = {} } = {
     mountingCandidates: structuredClone(record.mountingCandidates ?? []),
     mountingOptions,
     mountingOverrides: structuredClone(record.mountingOverrides ?? []),
+    mountingExpectations: filterResolvedMountingExpectations(record, resolver),
+    mountingReviewItems: filterResolvedMountingReviewItems(record, resolver),
     mountingSummary: structuredClone(record.mountingSummary ?? null),
     topologyGraph: mapTopologyGraph,
     topologySummary: normalizeTopologySummary(
@@ -1989,6 +1999,36 @@ function filterResolvedMountingOptions(record, resolver = createAssetIdentityRes
       (!option.datasetVersionId || option.datasetVersionId === record.datasetVersion.id)
         && option.optionStatus !== 'rejected'
     ))
+}
+
+function filterResolvedMountingExpectations(record, resolver = createAssetIdentityResolver(
+  buildAssetIdentityMapFromRecord(record),
+)) {
+  return (record.mountingExpectations ?? []).flatMap((item) => {
+    const assetId = resolver.resolve(item?.assetId ?? item?.sourceAssetId)
+    if (!assetId) return []
+    return [{ ...structuredClone(item), assetId }]
+  })
+}
+
+function filterResolvedMountingReviewItems(record, resolver = createAssetIdentityResolver(
+  buildAssetIdentityMapFromRecord(record),
+)) {
+  return (record.mountingReviewItems ?? []).flatMap((item) => {
+    const assetId = resolver.resolve(item?.assetId)
+    if (!assetId) return []
+    return [{
+      ...structuredClone(item),
+      assetId,
+      targetAssetId: item?.targetAssetId
+        ? resolver.resolve(item.targetAssetId) ?? item.targetAssetId
+        : null,
+      options: (item?.options ?? []).map((option) => ({
+        ...structuredClone(option),
+        targetAssetId: resolver.resolve(option.targetAssetId) ?? option.targetAssetId,
+      })),
+    }]
+  })
 }
 
 function isRenderableGeometry(geometry) {

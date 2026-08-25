@@ -657,6 +657,8 @@ function topologyReviewPayloadPatch(record) {
     'mountingCandidates',
     'mountingOptions',
     'mountingOverrides',
+    'mountingExpectations',
+    'mountingReviewItems',
     'mountingSummary',
     'readiness',
   ]) {

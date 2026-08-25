@@ -20,6 +20,8 @@ import {
   generateMountingArtifacts,
   isMountableNode,
   isPoleNode,
+  MOUNTING_EXPECTATIONS,
+  mountingFacilityScopeKey,
   sameFacilityScope,
 } from './mounting-relations.js'
 import { filterConflictingCameraEdges } from './device-edge-policy.js'
@@ -49,6 +51,7 @@ import {
 
 const MAX_SELECTED_CANDIDATE_IDS = 5000
 const MAX_MANUAL_REFERENCE_IDS = 256
+const MAX_MOUNTING_BULK_DECISIONS = 200
 
 export class TopologyService {
   constructor({
@@ -92,10 +95,23 @@ export class TopologyService {
     reason,
     correlationId = null,
     jobId = null,
+    expectedRecordRevision = undefined,
   } = {}) {
     return this.#withMutationTransaction(async ({ repository, auditLog }) => {
       const current = await repository.get(datasetVersionId)
       assertTopologyBundle(current)
+      if (expectedRecordRevision !== undefined
+        && expectedRecordRevision !== recordRevision(current)) {
+        throw new AppError('Dataset berubah setelah preview mounting. Muat ulang preview.', {
+          code: 'dataset_version_stale_revision',
+          statusCode: 409,
+          details: {
+            datasetVersionId,
+            expectedRecordRevision,
+            currentRecordRevision: recordRevision(current),
+          },
+        })
+      }
       const repaired = rebuildStoredTopologyInputBundle(current)
       const topologyInputBundle = repaired.topologyInputBundle ?? current.topologyInputBundle
       const generatedAt = this.clock().toISOString()
@@ -108,9 +124,20 @@ export class TopologyService {
           ?? [],
         previousMountingRelations: current.mountingRelations,
         previousMountingOverrides: current.mountingOverrides,
+        previousMountingExpectations: current.mountingExpectations,
         generatedAt,
       })
       assertPublishableTopologyArtifacts(artifacts, datasetVersionId)
+      const mountingIntegrity = validateMountingProjection(topologyInputBundle, {
+        relations: artifacts.mountingRelations ?? [],
+      })
+      if (!mountingIntegrity.valid) {
+        throw new AppError('Regenerasi dibatalkan karena relasi mounting tidak valid.', {
+          code: 'invalid_mounting_regeneration',
+          statusCode: 409,
+          details: mountingIntegrity,
+        })
+      }
       recordTopologyMetrics(this.metrics, artifacts, {
         inputBundle: topologyInputBundle,
         previousRecord: current,
@@ -199,6 +226,15 @@ export class TopologyService {
           },
           before: current.topologySummary ?? null,
           after: artifacts.summary,
+          mounting: {
+            before: current.mountingSummary ?? summarizeStoredMounting(current),
+            after: artifacts.mountingSummary ?? null,
+            delta: mountingProjectionDelta(
+              current.mountingRelations ?? [],
+              artifacts.mountingRelations ?? [],
+            ),
+            integrity: mountingIntegrity,
+          },
         },
       })
       return repository.update(datasetVersionId, (record) => applyArtifacts({
@@ -1781,6 +1817,7 @@ export class TopologyService {
           ?? [],
         previousMountingRelations: record.mountingRelations,
         previousMountingOverrides: record.mountingOverrides,
+        previousMountingExpectations: record.mountingExpectations,
         affectedAssetIds: [source.topologyAssetId, target.topologyAssetId],
         eligibilityIssues: [
           ...(record.topologyEligibilityIssues ?? []),
@@ -1835,12 +1872,430 @@ export class TopologyService {
     }
   }
 
+  async getMountingReview(datasetVersionId, query = {}) {
+    const record = await this.repository.get(datasetVersionId)
+    assertTopologyBundle(record)
+    const projection = ensureMountingProjection(record, this.config, this.clock().toISOString())
+    return mountingReviewResponse(projection, query)
+  }
+
+  async previewMountingRegeneration(datasetVersionId) {
+    const record = await this.repository.get(datasetVersionId)
+    assertTopologyBundle(record)
+    const generatedAt = this.clock().toISOString()
+    const mounting = generateMountingArtifacts(record.topologyInputBundle, {
+      config: this.config,
+      previousRelations: record.mountingRelations,
+      previousOverrides: record.mountingOverrides,
+      previousExpectations: record.mountingExpectations,
+      generatedAt,
+    })
+    const integrity = validateMountingProjection(record.topologyInputBundle, mounting)
+    if (!integrity.valid) {
+      throw new AppError('Preview mounting menghasilkan relasi yang tidak valid.', {
+        code: 'invalid_mounting_preview',
+        statusCode: 409,
+        details: integrity,
+      })
+    }
+    const before = record.mountingSummary ?? summarizeStoredMounting(record)
+    const after = mounting.summary
+    return canonicalizeJsonValue({
+      datasetVersionId,
+      generatedAt,
+      expectedRecordRevision: recordRevision(record),
+      before,
+      after,
+      delta: mountingProjectionDelta(record.mountingRelations ?? [], mounting.relations),
+      integrity,
+      mountingReviewItems: mounting.reviewItems,
+      mountingExpectations: mounting.expectations,
+    })
+  }
+
+  async regenerateMounting(datasetVersionId, actorId, {
+    reason,
+    expectedRecordRevision,
+    idempotencyKey,
+    correlationId,
+  } = {}) {
+    const normalizedReason = normalizeReason(reason, false)
+    const normalizedIdempotencyKey = normalizeTopologyIdempotencyKey(idempotencyKey)
+    const fingerprint = normalizedIdempotencyKey
+      ? createTopologyMutationFingerprint({
+        action: 'regenerate_mounting',
+        resourceId: datasetVersionId,
+        actorId,
+        input: {
+          reason: normalizedReason,
+          expectedRecordRevision: expectedRecordRevision ?? null,
+        },
+      })
+      : null
+    try {
+      return await this.#withMutationTransaction(async ({ repository, auditLog }) => {
+        const replay = await findMutationReceipt(
+          repository,
+          normalizedIdempotencyKey,
+          fingerprint,
+        )
+        if (replay) return replay
+        const record = await repository.get(datasetVersionId)
+        assertTopologyBundle(record)
+        assertExpectedRecordRevision(record, expectedRecordRevision)
+        const generatedAt = this.clock().toISOString()
+        const mounting = generateMountingArtifacts(record.topologyInputBundle, {
+          config: this.config,
+          previousRelations: record.mountingRelations,
+          previousOverrides: record.mountingOverrides,
+          previousExpectations: record.mountingExpectations,
+          generatedAt,
+        })
+        const integrity = validateMountingProjection(record.topologyInputBundle, mounting)
+        if (!integrity.valid) {
+          throw new AppError('Regenerasi mounting dibatalkan karena relasi tidak valid.', {
+            code: 'invalid_mounting_regeneration',
+            statusCode: 409,
+            details: integrity,
+          })
+        }
+        const before = record.mountingSummary ?? summarizeStoredMounting(record)
+        const delta = mountingProjectionDelta(record.mountingRelations ?? [], mounting.relations)
+        const event = await auditLog.record('topology.mounting_regenerated', {
+          actorId,
+          datasetVersionId,
+          branchId: record.datasetVersion.branchId,
+          correlationId,
+          outcome: 'regenerated',
+          details: {
+            reason: normalizedReason,
+            before,
+            after: mounting.summary,
+            delta,
+            integrity,
+          },
+        })
+        const responseFor = (revision) => canonicalizeJsonValue({
+          datasetVersionId,
+          recordRevision: revision,
+          auditEventId: event.id,
+          generatedAt,
+          before,
+          after: mounting.summary,
+          delta,
+          integrity,
+        })
+        const updated = await repository.update(datasetVersionId, (currentRecord) => {
+          const nextRecord = { ...currentRecord, ...mountingRecordPatch(mounting) }
+          if (!normalizedIdempotencyKey) return nextRecord
+          return appendTopologyMutationReceipt(nextRecord, {
+            key: normalizedIdempotencyKey,
+            fingerprint,
+            action: 'regenerate_mounting',
+            resourceId: datasetVersionId,
+            actorId,
+            response: responseFor(recordRevision(currentRecord) + 1),
+            createdAt: generatedAt,
+          })
+        }, {
+          expectedRevision: expectedRecordRevision ?? recordRevision(record),
+          projectionMode: 'topology-review',
+        })
+        if (normalizedIdempotencyKey) {
+          const receipt = findTopologyMutationReceipt(updated, normalizedIdempotencyKey)
+          if (receipt) return structuredClone(receipt.response)
+        }
+        return responseFor(recordRevision(updated))
+      })
+    } catch (error) {
+      if (!normalizedIdempotencyKey || error?.code !== 'dataset_version_stale_revision') throw error
+      const replay = await findMutationReceipt(this.repository, normalizedIdempotencyKey, fingerprint)
+      if (replay) return replay
+      throw error
+    }
+  }
+
+  async setMountingExpectation(datasetVersionId, actorId, {
+    assetId,
+    expectation,
+    reason,
+    expectedRecordRevision,
+    idempotencyKey,
+    correlationId,
+  } = {}) {
+    const normalizedAssetReference = normalizeTopologyAssetReference(assetId, 'assetId')
+    const normalizedExpectation = normalizeMountingExpectationInput(expectation)
+    const normalizedReason = normalizeReason(reason, true)
+    const normalizedIdempotencyKey = normalizeTopologyIdempotencyKey(idempotencyKey)
+    const fingerprint = normalizedIdempotencyKey
+      ? createTopologyMutationFingerprint({
+        action: 'set_mounting_expectation',
+        resourceId: datasetVersionId,
+        actorId,
+        input: {
+          assetId: normalizedAssetReference,
+          expectation: normalizedExpectation,
+          reason: normalizedReason,
+          expectedRecordRevision: expectedRecordRevision ?? null,
+        },
+      })
+      : null
+    let event = null
+    try {
+    return await this.#withMutationTransaction(async ({ repository, auditLog }) => {
+      const replay = await findMutationReceipt(repository, normalizedIdempotencyKey, fingerprint)
+      if (replay) return replay
+      const record = await repository.get(datasetVersionId)
+      assertTopologyBundle(record)
+      assertExpectedRecordRevision(record, expectedRecordRevision)
+      const asset = resolveManualDevice(record, normalizedAssetReference, 'assetId')
+      assertMountableAsset(asset)
+      const updatedAt = this.clock().toISOString()
+      event = await auditLog.record('topology.mounting_expectation_updated', {
+        actorId,
+        datasetVersionId,
+        branchId: record.datasetVersion.branchId,
+        correlationId,
+        outcome: 'confirmed',
+        details: {
+          assetId: asset.canonicalAssetId,
+          expectation: normalizedExpectation,
+          reason: normalizedReason,
+        },
+      })
+      const nextExpectations = replaceMountingExpectation(
+        record.mountingExpectations,
+        asset.canonicalAssetId,
+        {
+          assetId: asset.canonicalAssetId,
+          expectation: normalizedExpectation,
+          provenance: 'manual_admin',
+          actorId,
+          updatedAt,
+          reason: normalizedReason,
+          auditEventId: event.id,
+        },
+        record,
+      )
+      const nextOverrides = reconcileExpectationOverride({
+        overrides: record.mountingOverrides,
+        assetId: asset.canonicalAssetId,
+        expectation: normalizedExpectation,
+        actorId,
+        updatedAt,
+        reason: normalizedReason,
+        auditEventId: event.id,
+        record,
+      })
+      const mounting = generateMountingArtifacts(record.topologyInputBundle, {
+        config: this.config,
+        previousRelations: record.mountingRelations,
+        previousOverrides: nextOverrides,
+        previousExpectations: nextExpectations,
+        generatedAt: updatedAt,
+      })
+      const updated = await repository.update(datasetVersionId, (currentRecord) => {
+        const nextRecord = {
+          ...currentRecord,
+          ...mountingRecordPatch(mounting),
+        }
+        if (!normalizedIdempotencyKey) return nextRecord
+        return appendTopologyMutationReceipt(nextRecord, {
+          key: normalizedIdempotencyKey,
+          fingerprint,
+          action: 'set_mounting_expectation',
+          resourceId: datasetVersionId,
+          actorId,
+          response: mountingRelationResponse(nextRecord, event.id, normalizedAssetReference),
+          createdAt: updatedAt,
+        })
+      }, {
+        expectedRevision: expectedRecordRevision ?? recordRevision(record),
+        projectionMode: 'topology-review',
+      })
+      if (normalizedIdempotencyKey) {
+        const receipt = findTopologyMutationReceipt(updated, normalizedIdempotencyKey)
+        if (receipt) return structuredClone(receipt.response)
+      }
+      return mountingRelationResponse(updated, event?.id ?? null, normalizedAssetReference)
+    })
+    } catch (error) {
+      if (!normalizedIdempotencyKey || error?.code !== 'dataset_version_stale_revision') throw error
+      const replay = await findMutationReceipt(this.repository, normalizedIdempotencyKey, fingerprint)
+      if (replay) return replay
+      throw error
+    }
+  }
+
+  async reviewMountingBulk(datasetVersionId, actorId, {
+    decisions = [],
+    reason,
+    expectedRecordRevision,
+    idempotencyKey,
+    correlationId,
+  } = {}) {
+    const normalizedDecisions = normalizeMountingBulkDecisions(decisions)
+    const normalizedReason = normalizeReason(reason, true)
+    const normalizedIdempotencyKey = normalizeTopologyIdempotencyKey(idempotencyKey)
+    const fingerprint = normalizedIdempotencyKey
+      ? createTopologyMutationFingerprint({
+        action: 'review_mounting_bulk',
+        resourceId: datasetVersionId,
+        actorId,
+        input: {
+          decisions: normalizedDecisions,
+          reason: normalizedReason,
+          expectedRecordRevision: expectedRecordRevision ?? null,
+        },
+      })
+      : null
+    let event = null
+    try {
+    return await this.#withMutationTransaction(async ({ repository, auditLog }) => {
+      const replay = await findMutationReceipt(repository, normalizedIdempotencyKey, fingerprint)
+      if (replay) return replay
+      const record = await repository.get(datasetVersionId)
+      assertTopologyBundle(record)
+      assertExpectedRecordRevision(record, expectedRecordRevision)
+      const updatedAt = this.clock().toISOString()
+      const resolved = normalizedDecisions.map((decision) => {
+        const asset = resolveManualDevice(record, decision.assetId, 'assetId')
+        assertMountableAsset(asset)
+        const pole = decision.action === 'assign'
+          ? resolveManualDevice(record, decision.poleAssetId, 'poleAssetId')
+          : null
+        if (pole) {
+          assertPoleAsset(pole)
+          assertSameManualDeviceSite(asset, pole, record)
+        }
+        return { decision, asset, pole }
+      })
+      event = await auditLog.record('topology.mounting_bulk_reviewed', {
+        actorId,
+        datasetVersionId,
+        branchId: record.datasetVersion.branchId,
+        correlationId,
+        outcome: 'confirmed',
+        details: {
+          decisionCount: resolved.length,
+          reason: normalizedReason,
+          decisions: resolved.map(({ decision, asset, pole }) => ({
+            assetId: asset.canonicalAssetId,
+            action: decision.action,
+            poleAssetId: pole?.canonicalAssetId ?? null,
+            expectation: decision.expectation ?? null,
+          })),
+        },
+      })
+      let nextOverrides = structuredClone(record.mountingOverrides ?? [])
+      let nextExpectations = structuredClone(record.mountingExpectations ?? [])
+      resolved.forEach(({ decision, asset, pole }) => {
+        const canonicalAssetId = asset.canonicalAssetId
+        if (decision.action === 'set_expectation') {
+          nextExpectations = replaceMountingExpectation(nextExpectations, canonicalAssetId, {
+            assetId: canonicalAssetId,
+            expectation: decision.expectation,
+            provenance: 'manual_admin',
+            actorId,
+            updatedAt,
+            reason: normalizedReason,
+            auditEventId: event.id,
+          }, record)
+          nextOverrides = reconcileExpectationOverride({
+            overrides: nextOverrides,
+            assetId: canonicalAssetId,
+            expectation: decision.expectation,
+            actorId,
+            updatedAt,
+            reason: normalizedReason,
+            auditEventId: event.id,
+            record,
+          })
+          return
+        }
+        nextOverrides = replaceMountingOverride(nextOverrides, canonicalAssetId, {
+          assetId: canonicalAssetId,
+          targetAssetId: pole?.canonicalAssetId ?? null,
+          action: decision.action,
+          provenance: 'manual_admin',
+          actorId,
+          updatedAt,
+          reason: normalizedReason,
+          auditEventId: event.id,
+        }, record)
+        if (decision.action === 'assign') {
+          nextExpectations = replaceMountingExpectation(nextExpectations, canonicalAssetId, {
+            assetId: canonicalAssetId,
+            expectation: 'pole',
+            provenance: 'manual_admin',
+            actorId,
+            updatedAt,
+            reason: normalizedReason,
+            auditEventId: event.id,
+          }, record)
+        }
+      })
+      const mounting = generateMountingArtifacts(record.topologyInputBundle, {
+        config: this.config,
+        previousRelations: record.mountingRelations,
+        previousOverrides: nextOverrides,
+        previousExpectations: nextExpectations,
+        generatedAt: updatedAt,
+      })
+      const updated = await repository.update(datasetVersionId, (currentRecord) => {
+        const nextRecord = {
+          ...currentRecord,
+          ...mountingRecordPatch(mounting),
+        }
+        if (!normalizedIdempotencyKey) return nextRecord
+        return appendTopologyMutationReceipt(nextRecord, {
+          key: normalizedIdempotencyKey,
+          fingerprint,
+          action: 'review_mounting_bulk',
+          resourceId: datasetVersionId,
+          actorId,
+          response: {
+            ...mountingRelationResponse(
+              nextRecord,
+              event.id,
+              normalizedDecisions[0]?.assetId,
+            ),
+            decisionCount: normalizedDecisions.length,
+          },
+          createdAt: updatedAt,
+        })
+      }, {
+        expectedRevision: expectedRecordRevision ?? recordRevision(record),
+        projectionMode: 'topology-review',
+      })
+      if (normalizedIdempotencyKey) {
+        const receipt = findTopologyMutationReceipt(updated, normalizedIdempotencyKey)
+        if (receipt) return structuredClone(receipt.response)
+      }
+      return canonicalizeJsonValue({
+        ...mountingRelationResponse(
+          updated,
+          event?.id ?? null,
+          normalizedDecisions[0]?.assetId,
+        ),
+        decisionCount: normalizedDecisions.length,
+      })
+    })
+    } catch (error) {
+      if (!normalizedIdempotencyKey || error?.code !== 'dataset_version_stale_revision') throw error
+      const replay = await findMutationReceipt(this.repository, normalizedIdempotencyKey, fingerprint)
+      if (replay) return replay
+      throw error
+    }
+  }
+
   async setMountingRelation(datasetVersionId, actorId, {
     assetId,
     poleAssetId = null,
     action = poleAssetId ? 'assign' : 'detach',
     reason,
     expectedRecordRevision,
+    idempotencyKey,
     correlationId,
   } = {}) {
     const normalizedAssetReference = normalizeTopologyAssetReference(assetId, 'assetId')
@@ -1849,6 +2304,27 @@ export class TopologyService {
       : normalizeTopologyAssetReference(poleAssetId, 'poleAssetId')
     const normalizedAction = normalizeMountingAction(action, normalizedPoleReference)
     const normalizedReason = normalizeReason(reason, true)
+    const normalizedIdempotencyKey = normalizeTopologyIdempotencyKey(idempotencyKey)
+    const fingerprint = normalizedIdempotencyKey
+      ? createTopologyMutationFingerprint({
+        action: 'set_mounting_relation',
+        resourceId: datasetVersionId,
+        actorId,
+        input: {
+          assetId: normalizedAssetReference,
+          poleAssetId: normalizedPoleReference,
+          action: normalizedAction,
+          reason: normalizedReason,
+          expectedRecordRevision: expectedRecordRevision ?? null,
+        },
+      })
+      : null
+    const initialReplay = await findMutationReceipt(
+      this.repository,
+      normalizedIdempotencyKey,
+      fingerprint,
+    )
+    if (initialReplay) return initialReplay
     const current = await this.repository.get(datasetVersionId)
     assertTopologyBundle(current)
     const initialChild = resolveManualDevice(current, normalizedAssetReference, 'assetId')
@@ -1860,9 +2336,13 @@ export class TopologyService {
     if (initialPole) assertSameManualDeviceSite(initialChild, initialPole, current)
 
     let event = null
-    const updated = await this.#withMutationTransaction(async ({ repository, auditLog }) => {
+    try {
+    return await this.#withMutationTransaction(async ({ repository, auditLog }) => {
+      const replay = await findMutationReceipt(repository, normalizedIdempotencyKey, fingerprint)
+      if (replay) return replay
       const record = await repository.get(datasetVersionId)
       assertTopologyBundle(record)
+      assertExpectedRecordRevision(record, expectedRecordRevision)
       const child = resolveManualDevice(record, normalizedAssetReference, 'assetId')
       assertMountableAsset(child)
       const pole = normalizedAction === 'assign'
@@ -1911,21 +2391,40 @@ export class TopologyService {
         config: this.config,
         previousRelations: record.mountingRelations,
         previousOverrides: nextOverrides,
+        previousExpectations: record.mountingExpectations,
         generatedAt: updatedAt,
       })
-      return repository.update(datasetVersionId, (currentRecord) => ({
-        ...currentRecord,
-        mountingRelations: mounting.relations,
-        mountingCandidates: mounting.candidates,
-        mountingOptions: mounting.options,
-        mountingOverrides: mounting.overrides,
-        mountingSummary: mounting.summary,
-      }), {
+      const updated = await repository.update(datasetVersionId, (currentRecord) => {
+        const nextRecord = {
+          ...currentRecord,
+          ...mountingRecordPatch(mounting),
+        }
+        if (!normalizedIdempotencyKey) return nextRecord
+        return appendTopologyMutationReceipt(nextRecord, {
+          key: normalizedIdempotencyKey,
+          fingerprint,
+          action: 'set_mounting_relation',
+          resourceId: datasetVersionId,
+          actorId,
+          response: mountingRelationResponse(nextRecord, event.id, normalizedAssetReference),
+          createdAt: updatedAt,
+        })
+      }, {
         expectedRevision: expectedRecordRevision ?? recordRevision(record),
         projectionMode: 'topology-review',
       })
+      if (normalizedIdempotencyKey) {
+        const receipt = findTopologyMutationReceipt(updated, normalizedIdempotencyKey)
+        if (receipt) return structuredClone(receipt.response)
+      }
+      return mountingRelationResponse(updated, event?.id ?? null, normalizedAssetReference)
     })
-    return mountingRelationResponse(updated, event?.id ?? null, normalizedAssetReference)
+    } catch (error) {
+      if (!normalizedIdempotencyKey || error?.code !== 'dataset_version_stale_revision') throw error
+      const replay = await findMutationReceipt(this.repository, normalizedIdempotencyKey, fingerprint)
+      if (replay) return replay
+      throw error
+    }
   }
 
   async revokeRelation(relationId, actorId, {
@@ -2488,7 +2987,7 @@ export function createFullTopologyRegenerationJobHandler(topologyService) {
     throw new TypeError('Topology service untuk durable regeneration tidak valid.')
   }
   return async (
-    { actorId, reason, correlationId } = {},
+    { actorId, reason, correlationId, expectedRecordRevision } = {},
     { job, updateProgress } = {},
   ) => {
     const datasetVersionId = String(job?.datasetVersionId ?? '').trim()
@@ -2500,6 +2999,7 @@ export function createFullTopologyRegenerationJobHandler(topologyService) {
       reason: normalizeTopologyRegenerationReason(reason),
       correlationId,
       jobId: job?.jobId ?? null,
+      expectedRecordRevision,
     })
     await updateProgress?.(90, 'topology_persisting')
     return summarizeTopologyRegeneration(regenerated)
@@ -2573,6 +3073,12 @@ export function applyArtifacts(record, artifacts, {
     mountingCandidates: structuredClone(artifacts.mountingCandidates ?? record.mountingCandidates ?? []),
     mountingOptions: structuredClone(artifacts.mountingOptions ?? record.mountingOptions ?? []),
     mountingOverrides: structuredClone(artifacts.mountingOverrides ?? record.mountingOverrides ?? []),
+    mountingExpectations: structuredClone(
+      artifacts.mountingExpectations ?? record.mountingExpectations ?? [],
+    ),
+    mountingReviewItems: structuredClone(
+      artifacts.mountingReviewItems ?? record.mountingReviewItems ?? [],
+    ),
     mountingSummary: structuredClone(artifacts.mountingSummary ?? record.mountingSummary ?? null),
     topologyCandidateHistory: candidateHistory,
     topologyRuns: topologyRun
@@ -2872,6 +3378,7 @@ function rebuildFromReviewedCandidates(
       ?? [],
     previousMountingRelations: record.mountingRelations,
     previousMountingOverrides: record.mountingOverrides,
+    previousMountingExpectations: record.mountingExpectations,
     affectedAssetIds,
     eligibilityIssues: record.topologyEligibilityIssues,
     lineworkIssues: record.topologyLineworkIssues,
@@ -2953,6 +3460,8 @@ function mountingRelationResponse(record, auditEventId, assetReference) {
     mountingCandidates: structuredClone(record.mountingCandidates ?? []),
     mountingOptions: structuredClone(record.mountingOptions ?? []),
     mountingOverrides: structuredClone(record.mountingOverrides ?? []),
+    mountingExpectations: structuredClone(record.mountingExpectations ?? []),
+    mountingReviewItems: structuredClone(record.mountingReviewItems ?? []),
     mountingSummary: structuredClone(record.mountingSummary ?? null),
     graph: structuredClone(record.topologyGraph),
     auditEventId,
@@ -3900,6 +4409,269 @@ function normalizeMountingAction(value, poleAssetId) {
     code: 'invalid_mounting_action',
     statusCode: 400,
     details: { supportedActions: ['assign', 'detach'] },
+  })
+}
+
+function normalizeMountingExpectationInput(value) {
+  const expectation = String(value ?? '').trim().toLowerCase()
+  if (MOUNTING_EXPECTATIONS.includes(expectation)) return expectation
+  throw new AppError('Status kebutuhan mounting tidak valid.', {
+    code: 'invalid_mounting_expectation',
+    statusCode: 400,
+    details: { supportedExpectations: MOUNTING_EXPECTATIONS },
+  })
+}
+
+function normalizeMountingBulkDecisions(value) {
+  if (!Array.isArray(value) || value.length < 1
+    || value.length > MAX_MOUNTING_BULK_DECISIONS) {
+    throw new AppError('Daftar keputusan mounting tidak valid.', {
+      code: 'invalid_mounting_bulk_decisions',
+      statusCode: 400,
+      details: { max: MAX_MOUNTING_BULK_DECISIONS },
+    })
+  }
+  const assetIds = new Set()
+  return value.map((item, index) => {
+    const assetId = normalizeTopologyAssetReference(item?.assetId, `decisions[${index}].assetId`)
+    if (assetIds.has(assetId)) {
+      throw new AppError('Satu aset hanya boleh memiliki satu keputusan dalam satu batch.', {
+        code: 'duplicate_mounting_bulk_asset',
+        statusCode: 400,
+        details: { assetId },
+      })
+    }
+    assetIds.add(assetId)
+    const action = String(item?.action ?? '').trim().toLowerCase()
+    if (action === 'set_expectation') {
+      return {
+        assetId,
+        action,
+        expectation: normalizeMountingExpectationInput(item?.expectation),
+      }
+    }
+    if (action === 'assign') {
+      return {
+        assetId,
+        action,
+        poleAssetId: normalizeTopologyAssetReference(
+          item?.poleAssetId,
+          `decisions[${index}].poleAssetId`,
+        ),
+      }
+    }
+    if (action === 'detach') return { assetId, action }
+    throw new AppError('Action keputusan mounting tidak valid.', {
+      code: 'invalid_mounting_bulk_action',
+      statusCode: 400,
+      details: { index, supportedActions: ['assign', 'detach', 'set_expectation'] },
+    })
+  })
+}
+
+function replaceMountingExpectation(items = [], assetId, next, record) {
+  const resolver = createAssetIdentityResolver(buildAssetIdentityMapFromRecord(record))
+  return [
+    ...items.filter((item) => (
+      (resolver.resolve(item?.assetId ?? item?.sourceAssetId)
+        ?? item?.assetId ?? item?.sourceAssetId) !== assetId
+    )),
+    next,
+  ]
+}
+
+function replaceMountingOverride(items = [], assetId, next, record) {
+  const resolver = createAssetIdentityResolver(buildAssetIdentityMapFromRecord(record))
+  return [
+    ...items.filter((item) => (
+      (resolver.resolve(item?.assetId ?? item?.sourceAssetId)
+        ?? item?.assetId ?? item?.sourceAssetId) !== assetId
+    )),
+    next,
+  ]
+}
+
+function reconcileExpectationOverride({
+  overrides = [],
+  assetId,
+  expectation,
+  actorId,
+  updatedAt,
+  reason,
+  auditEventId,
+  record,
+}) {
+  const resolver = createAssetIdentityResolver(buildAssetIdentityMapFromRecord(record))
+  const current = overrides.find((item) => (
+    (resolver.resolve(item?.assetId ?? item?.sourceAssetId)
+      ?? item?.assetId ?? item?.sourceAssetId) === assetId
+  ))
+  if (['indoor', 'standalone'].includes(expectation)) {
+    return replaceMountingOverride(overrides, assetId, {
+      assetId,
+      targetAssetId: null,
+      action: 'detach',
+      provenance: 'manual_admin',
+      actorId,
+      updatedAt,
+      reason,
+      auditEventId,
+    }, record)
+  }
+  if (current?.action !== 'detach') return overrides
+  return overrides.filter((item) => (
+    (resolver.resolve(item?.assetId ?? item?.sourceAssetId)
+      ?? item?.assetId ?? item?.sourceAssetId) !== assetId
+  ))
+}
+
+function mountingRecordPatch(mounting) {
+  return {
+    mountingRelations: mounting.relations,
+    mountingCandidates: mounting.candidates,
+    mountingOptions: mounting.options,
+    mountingOverrides: mounting.overrides,
+    mountingExpectations: mounting.expectations,
+    mountingReviewItems: mounting.reviewItems,
+    mountingSummary: mounting.summary,
+  }
+}
+
+function ensureMountingProjection(record, config, generatedAt) {
+  if (Array.isArray(record.mountingReviewItems)
+    && Array.isArray(record.mountingExpectations)) return record
+  const mounting = generateMountingArtifacts(record.topologyInputBundle, {
+    config,
+    previousRelations: record.mountingRelations,
+    previousOverrides: record.mountingOverrides,
+    previousExpectations: record.mountingExpectations,
+    generatedAt,
+  })
+  return { ...record, ...mountingRecordPatch(mounting) }
+}
+
+function mountingReviewResponse(record, query = {}) {
+  const area = String(query.area ?? '').trim().toLowerCase()
+  const status = String(query.status ?? '').trim().toLowerCase()
+  const search = String(query.q ?? '').trim().toLocaleLowerCase('id')
+  const limit = Math.min(2000, Math.max(1, Number(query.limit) || 1000))
+  const items = (record.mountingReviewItems ?? []).filter((item) => (
+    (!area || String(item.areaKey ?? '').toLowerCase() === area)
+      && (!status || item.reviewStatus === status)
+      && (!search || `${item.assetName} ${item.assetId}`.toLocaleLowerCase('id').includes(search))
+  ))
+  return canonicalizeJsonValue({
+    datasetVersionId: record.datasetVersion.id,
+    recordRevision: recordRevision(record),
+    mountingSummary: record.mountingSummary ?? null,
+    totalMatched: items.length,
+    items: items.slice(0, limit),
+    truncated: items.length > limit,
+    poles: mountingPoleCatalog(record, area),
+  })
+}
+
+function mountingPoleCatalog(record, requestedArea = '') {
+  return (record.topologyInputBundle?.classifiedNodes ?? [])
+    .filter(isPoleNode)
+    .map((node) => ({
+      assetId: node.canonicalAssetId ?? node.assetId ?? node.stableAssetId,
+      name: node.sourceName ?? node.name
+        ?? node.canonicalAssetId ?? node.assetId ?? node.stableAssetId,
+      areaKey: node.locationGroupKey
+        ?? mountingFacilityScopeKey(node.sourceFolderPath)
+        ?? null,
+      siteId: node.siteId ?? null,
+    }))
+    .filter((pole) => pole.assetId
+      && (!requestedArea || String(pole.areaKey ?? '').toLowerCase() === requestedArea))
+    .sort((left, right) => left.name.localeCompare(right.name, 'id')
+      || left.assetId.localeCompare(right.assetId, 'id'))
+}
+
+function mountingProjectionDelta(beforeRelations = [], afterRelations = []) {
+  const before = new Map(beforeRelations.map((item) => [item.sourceAssetId, item]))
+  const after = new Map(afterRelations.map((item) => [item.sourceAssetId, item]))
+  const added = []
+  const removed = []
+  const retargeted = []
+  after.forEach((relation, assetId) => {
+    const previous = before.get(assetId)
+    if (!previous) added.push(relation)
+    else if (previous.targetAssetId !== relation.targetAssetId) {
+      retargeted.push({
+        assetId,
+        previousTargetAssetId: previous.targetAssetId,
+        targetAssetId: relation.targetAssetId,
+      })
+    }
+  })
+  before.forEach((relation, assetId) => {
+    if (!after.has(assetId)) removed.push(relation)
+  })
+  return {
+    addedCount: added.length,
+    removedCount: removed.length,
+    retargetedCount: retargeted.length,
+    added,
+    removed,
+    retargeted,
+  }
+}
+
+function validateMountingProjection(bundle, mounting) {
+  const nodes = (bundle?.classifiedNodes ?? []).map((node) => ({
+    ...node,
+    id: node.canonicalAssetId ?? node.assetId ?? node.stableAssetId,
+    branchId: node.branchId ?? bundle?.datasetVersion?.branchId ?? bundle?.site,
+  })).filter(({ id }) => id)
+  const nodeById = new Map(nodes.map((node) => [node.id, node]))
+  const issues = []
+  const seenSources = new Set()
+  mounting.relations.forEach((relation) => {
+    const source = nodeById.get(relation.sourceAssetId)
+    const target = nodeById.get(relation.targetAssetId)
+    if (!source) issues.push({ code: 'orphan_mounting_source', relationId: relation.relationId })
+    if (!target) issues.push({ code: 'orphan_mounting_target', relationId: relation.relationId })
+    if (source && !isMountableNode(source)) {
+      issues.push({ code: 'mounting_source_not_mountable', relationId: relation.relationId })
+    }
+    if (target && !isPoleNode(target)) {
+      issues.push({ code: 'mounting_target_not_pole', relationId: relation.relationId })
+    }
+    if (source && target && !sameFacilityScope(source, target, bundle)) {
+      issues.push({ code: 'cross_facility_mounting', relationId: relation.relationId })
+    }
+    if (seenSources.has(relation.sourceAssetId)) {
+      issues.push({ code: 'duplicate_mounting_source', relationId: relation.relationId })
+    }
+    seenSources.add(relation.sourceAssetId)
+  })
+  return { valid: issues.length === 0, issueCount: issues.length, issues }
+}
+
+function summarizeStoredMounting(record) {
+  const relations = record.mountingRelations ?? []
+  return {
+    relationCount: relations.length,
+    automaticRelationCount: relations.filter(({ provenance }) => provenance === 'spatial_inference').length,
+    manualRelationCount: relations.filter(({ provenance }) => provenance === 'manual_admin').length,
+    candidateCount: (record.mountingCandidates ?? []).length,
+    optionCount: (record.mountingOptions ?? []).length,
+  }
+}
+
+function assertExpectedRecordRevision(record, expectedRecordRevision) {
+  if (expectedRecordRevision === undefined
+    || expectedRecordRevision === recordRevision(record)) return
+  throw new AppError('Dataset berubah sejak review mounting dimuat. Muat ulang data.', {
+    code: 'dataset_version_stale_revision',
+    statusCode: 409,
+    details: {
+      datasetVersionId: record.datasetVersion?.id ?? null,
+      expectedRecordRevision,
+      currentRecordRevision: recordRevision(record),
+    },
   })
 }
 
