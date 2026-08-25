@@ -1,83 +1,64 @@
 const DEFAULT_OPTIONS = Object.freeze({
-  margin: 42,
-  sectionGap: 30,
-  sectionHeaderHeight: 42,
-  sectionPadding: 22,
-  laneGap: 26,
-  laneHeaderHeight: 24,
-  lanePadding: 18,
-  bandHeaderHeight: 22,
-  bandGap: 24,
-  nodeGapX: 18,
-  nodeGapY: 18,
-  levelGapY: 84,
-  nodeWidth: 108,
-  nodeHeight: 64,
-  coreWidth: 132,
-  coreHeight: 76,
-  distributionWidth: 108,
-  distributionHeight: 64,
-  endpointWidth: 92,
-  endpointHeight: 58,
-  compactWidth: 84,
-  compactHeight: 54,
-  unresolvedHeight: 58,
-  footerHeight: 86,
-  minWidth: 1120,
+  margin: 28,
+  sectionGap: 26,
+  sectionHeaderHeight: 36,
+  sectionPadding: 16,
+  laneGap: 24,
+  laneHeaderHeight: 16,
+  lanePadding: 14,
+  bandHeaderHeight: 18,
+  bandGap: 18,
+  nodeGapX: 14,
+  nodeGapY: 14,
+  levelGapY: 56,
+  nodeWidth: 56,
+  nodeHeight: 48,
+  coreWidth: 72,
+  coreHeight: 56,
+  distributionWidth: 64,
+  distributionHeight: 48,
+  endpointWidth: 36,
+  endpointHeight: 36,
+  compactWidth: 36,
+  compactHeight: 36,
+  unresolvedHeight: 44,
+  footerHeight: 44,
+  minWidth: 920,
   layoutStyle: 'central-backbone',
-  componentColumns: 3,
-  componentGapX: 28,
-  componentGapY: 28,
-  hubMinWidth: 420,
-  hubPadding: 20,
-  hubHeaderHeight: 34,
-  hubNodeGapX: 10,
-  hubLevelGapY: 58,
-  hubRootWidth: 132,
-  hubRootHeight: 76,
-  hubJunctionWidth: 94,
-  hubJunctionHeight: 64,
-  hubEndpointWidth: 64,
-  hubEndpointHeight: 56,
+  componentColumns: 2,
+  componentMaxColumns: 4,
+  componentPackingAspectRatio: 2.2,
+  componentGapX: 18,
+  componentGapY: 18,
+  hubMinWidth: 280,
+  hubPadding: 14,
+  hubHeaderHeight: 10,
+  hubNodeGapX: 12,
+  hubLevelGapY: 28,
+  hubRootWidth: 72,
+  hubRootHeight: 56,
+  hubJunctionWidth: 56,
+  hubJunctionHeight: 48,
+  hubEndpointWidth: 36,
+  hubEndpointHeight: 36,
+  mountingBoxMinWidth: 196,
+  mountingBoxPadding: 16,
+  mountingBoxHeaderHeight: 30,
+  mountingBoxGapX: 24,
+  mountingBoxGapY: 26,
+  mountingBoxLevelGapY: 34,
+  mountingBoxNodeGapX: 18,
+  backboneCoreGapY: 70,
   peerColumns: 10,
   extendedColumns: 8,
   endpointColumns: 12,
-  compoundColumns: 4,
-  compoundHeaderHeight: 32,
-  compoundPaddingX: 14,
-  compoundPaddingBottom: 14,
-  compoundNodeGapX: 12,
   overview: false,
   overviewColumns: 3,
-  overviewCardHeight: 136,
-  overviewMargin: 28,
+  overviewCardHeight: 156,
+  overviewMargin: 24,
   overviewGapX: 16,
   overviewGapY: 22,
-  overviewMinWidth: 1000,
-})
-
-const COMPOUND_LAYOUT_OPTIONS = Object.freeze({
-  // A detail view is intentionally taller rather than wider. This keeps the
-  // physical groups readable when a real site contains many poles.
-  minWidth: 1240,
-  nodeGapX: 24,
-  nodeGapY: 28,
-  bandGap: 34,
-  compoundColumns: 3,
-  compoundHeaderHeight: 38,
-  compoundPaddingX: 20,
-  compoundPaddingTop: 14,
-  compoundPaddingBottom: 18,
-  compoundNodeGapX: 16,
-  compoundRowGapY: 18,
-  coreWidth: 188,
-  coreHeight: 96,
-  distributionWidth: 156,
-  distributionHeight: 82,
-  endpointWidth: 134,
-  endpointHeight: 82,
-  nodeWidth: 134,
-  nodeHeight: 78,
+  overviewMinWidth: 920,
 })
 
 export function calculateTopologyDiagramLayout(model, options = {}) {
@@ -95,11 +76,7 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
     }
   }
 
-  const settings = {
-    ...DEFAULT_OPTIONS,
-    ...(options.layoutStyle === 'compound-poles' ? COMPOUND_LAYOUT_OPTIONS : {}),
-    ...options,
-  }
+  const settings = { ...DEFAULT_OPTIONS, ...options }
   if (settings.overview) return calculateAreaOverviewLayout(model, settings)
   const nodeById = new Map(model.nodes.map((node) => [node.id, node]))
   const componentById = new Map(model.components.map((component) => [component.componentId, component]))
@@ -115,14 +92,22 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
       .filter(Boolean)
       .sort((left, right) => compareComponentPriority(left, right, nodeById)
         || left.componentId.localeCompare(right.componentId, 'id'))
-    const laneSpecs = areaComponents.map((component, index) => buildLaneSpec({
-      component,
-      index,
-      nodeById,
-      edges: model.edges,
-      mountingGroups: model.mountingGroups,
-      settings,
-    }))
+    const laneSpecs = settings.layoutStyle === 'central-backbone' && areaComponents.length
+      ? [buildPoleBackboneAreaLaneSpec({
+        area,
+        components: areaComponents,
+        nodeById,
+        edges: model.edges,
+        mountingGroups: model.mountingGroups,
+        settings,
+      })]
+      : areaComponents.map((component, index) => buildLaneSpec({
+        component,
+        index,
+        nodeById,
+        edges: model.edges,
+        settings,
+      }))
     const disconnectedNodes = (area.isolatedNodeIds ?? [])
       .map((id) => nodeById.get(id))
       .filter(Boolean)
@@ -172,7 +157,9 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
       width: sectionWidth,
       height: sectionHeight,
       nodeCount: area.nodeIds.length,
-      componentCount: laneSpecs.length,
+      componentCount: areaComponents.length,
+      componentColumns: laneGrid.columns ?? 0,
+      componentRows: laneGrid.rows ?? 0,
       isolatedCount: disconnectedNodes.length,
       suggestedOnlyCount: suggestedOnlyNodes.length,
       unresolvedCount: unresolvedSpec.length,
@@ -195,7 +182,13 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
   sections.forEach((section) => {
     section.x = (finalWidth - section.width) / 2
     section.lanes.forEach((lane) => {
-      lane.nodes.forEach((node) => translateNode(node, section.x + lane.x, section.y + lane.y))
+      const offsetX = section.x + lane.x
+      const offsetY = section.y + lane.y
+      lane.nodes.forEach((node) => translateNode(node, offsetX, offsetY))
+      ;(lane.mountingBoxes ?? []).forEach((box) => {
+        box.x += offsetX
+        box.y += offsetY
+      })
     })
     if (section.isolated) {
       section.isolated.nodes.forEach((node) => translateNode(
@@ -205,15 +198,6 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
       ))
     }
   })
-
-  // Physical mounting panels are presentation boundaries. Calculate them
-  // only after every node has its final section offset so edge routing and
-  // SVG rendering use exactly the same geometry.
-  const mountingGroupBounds = buildMountingGroupBounds(
-    model.mountingGroups,
-    layoutNodes,
-    settings,
-  )
 
   const crossAreaMarkers = buildCrossAreaMarkers(model.crossAreaEdges, layoutNodes, finalWidth)
 
@@ -227,6 +211,10 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
     }))
   ))
 
+  const mountingBoxes = sections.flatMap((section) => (
+    section.lanes.flatMap((lane) => lane.mountingBoxes ?? [])
+  ))
+  const mountingBoxById = new Map(mountingBoxes.map((box) => [box.id, box]))
   const allEdges = model.edges.filter((edge) => (
     layoutNodes.has(edge.sourceId) && layoutNodes.has(edge.targetId)
   ))
@@ -235,29 +223,41 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
     const target = layoutNodes.get(edge.targetId)
     layoutEdges.push({
       ...edge,
-      routePoints: routeEdge(source, target, {
-        mountingGroupBounds,
-        nodeObstacles: [...layoutNodes.values()],
-        avoidPhysicalGroups: settings.layoutStyle === 'compound-poles',
-      }),
+      routePoints: routeEdge(source, target, mountingBoxById),
       linePoints: straightLinkPoints(source, target),
     })
   })
+  const backboneGaps = (model.backboneGaps ?? [])
+    .map((gap, index) => {
+      const source = layoutNodes.get(gap.sourceId)
+      const target = layoutNodes.get(gap.targetId)
+      if (!source || !target) return null
+      const routePoints = routeBackboneGap(source, target, layoutNodes, index)
+      return {
+        ...gap,
+        routePoints,
+        linePoints: [routePoints[0], routePoints[routePoints.length - 1]],
+        labelX: routePoints[2]?.x ?? target.diagram.centerX,
+        labelY: ((routePoints[2]?.y ?? target.diagram.centerY)
+          + (routePoints[3]?.y ?? target.diagram.centerY)) / 2,
+      }
+    })
+    .filter(Boolean)
 
   const layout = {
     status: 'ready',
     strategy: settings.layoutStyle === 'central-backbone'
       ? 'central-backbone-network'
-      : settings.layoutStyle === 'compound-poles'
-        ? 'compound-pole-network'
-        : 'top-down-area-semantic-tier',
+      : 'top-down-area-semantic-tier',
+    networkAtlasStrategy: 'backbone-first-component-islands',
     width: finalWidth,
     height: finalHeight,
     options: settings,
     nodes: [...layoutNodes.values()].sort(compareLayoutNodes),
     edges: layoutEdges.sort((left, right) => left.id.localeCompare(right.id, 'id')),
+    mountingBoxes,
+    backboneGaps,
     sections,
-    mountingGroupBounds,
     unresolvedMarkers,
     crossAreaMarkers,
     bounds: {
@@ -272,6 +272,7 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
 
 function calculateAreaOverviewLayout(model, settings) {
   const areas = [...(model.areas ?? [])]
+    .filter((area) => (area.nodeIds ?? []).length > 0)
     .sort((left, right) => String(left.name).localeCompare(String(right.name), 'id')
       || String(left.key).localeCompare(String(right.key), 'id'))
   const nodeById = new Map((model.nodes ?? []).map((node) => [node.id, node]))
@@ -290,6 +291,15 @@ function calculateAreaOverviewLayout(model, settings) {
     const column = index % columns
     const areaNodes = area.nodeIds.map((id) => nodeById.get(id)).filter(Boolean)
     const connectedCount = areaNodes.filter(({ confirmedDegree }) => confirmedDegree > 0).length
+    const areaMountingGroups = (model.mountingGroups ?? []).filter((group) => (
+      group.areaKey === area.key
+    ))
+    const occupiedPoleCount = areaMountingGroups.filter(({ childIds }) => childIds.length > 0).length
+    const unmountedCount = areaNodes.filter((node) => (
+      /junction|\bjb\b|cctv|camera|kamera/i.test(`${node.type ?? ''} ${node.category ?? ''}`)
+        && !['indoor', 'standalone'].includes(node.mountingExpectation)
+        && !(node.mountingGroupIds ?? []).length
+    )).length
     return {
       ...area,
       x: settings.overviewMargin + column * (cardWidth + settings.overviewGapX),
@@ -300,6 +310,10 @@ function calculateAreaOverviewLayout(model, settings) {
       connectedCount,
       componentCount: area.componentIds.length,
       disconnectedCount: area.isolatedNodeIds.length,
+      poleCount: areaMountingGroups.length,
+      occupiedPoleCount,
+      emptyPoleCount: areaMountingGroups.length - occupiedPoleCount,
+      unmountedCount,
       crossAreaEdgeCount: area.crossAreaEdgeCount ?? 0,
       crossAreaNeighborKeys: area.crossAreaNeighborKeys ?? [],
     }
@@ -340,74 +354,86 @@ function calculateAreaOverviewLayout(model, settings) {
 
 function layoutComponentLanes(lanes, settings) {
   if (!lanes.length) return { width: 0, height: 0, lanes: [] }
-  const columns = Math.max(1, Math.min(
-    settings.componentColumns,
+  const maximumSeedCount = Math.max(1, Math.min(
+    settings.componentMaxColumns ?? settings.componentColumns ?? 2,
     lanes.length,
   ))
-  const rows = Math.ceil(lanes.length / columns)
-  const slotOrder = Array.from({ length: lanes.length }, (_, index) => index)
-  if (columns >= 3 && lanes.length >= columns) {
-    const centerColumn = Math.floor(columns / 2)
-    const firstRowSlots = [
-      centerColumn,
-      ...Array.from({ length: columns }, (_, column) => column)
-        .filter((column) => column !== centerColumn),
-    ]
-    firstRowSlots.forEach((slot, index) => {
-      slotOrder[index] = slot
-    })
+  const widths = [...lanes]
+    .map(({ width }) => width)
+    .sort((left, right) => right - left)
+  const candidates = []
+  let targetWidth = 0
+  for (let seedCount = 1; seedCount <= maximumSeedCount; seedCount += 1) {
+    targetWidth += widths[seedCount - 1]
+    if (seedCount > 1) targetWidth += settings.componentGapX
+    candidates.push(packComponentLanes(lanes, settings, targetWidth))
   }
-  const placements = lanes.map((lane, index) => {
-    const slot = slotOrder[index]
-    return {
-      lane,
-      row: Math.floor(slot / columns),
-      column: slot % columns,
+  candidates.sort((left, right) => componentPackingScore(left, settings)
+    - componentPackingScore(right, settings)
+    || left.width - right.width
+    || left.height - right.height
+    || left.columns - right.columns)
+  return candidates[0]
+}
+
+function packComponentLanes(lanes, settings, requestedWidth) {
+  const minimumWidth = settings.minWidth - settings.sectionPadding * 2
+  const shelfLimit = Math.max(minimumWidth, requestedWidth)
+  const shelves = []
+  let currentShelf = null
+  lanes.forEach((lane) => {
+    const nextWidth = currentShelf
+      ? currentShelf.width + settings.componentGapX + lane.width
+      : lane.width
+    if (currentShelf && nextWidth > shelfLimit) currentShelf = null
+    if (!currentShelf) {
+      currentShelf = { lanes: [], width: 0, height: 0 }
+      shelves.push(currentShelf)
     }
+    if (currentShelf.lanes.length) currentShelf.width += settings.componentGapX
+    currentShelf.lanes.push(lane)
+    currentShelf.width += lane.width
+    currentShelf.height = Math.max(currentShelf.height, lane.height)
   })
-  const columnWidths = Array.from({ length: columns }, (_, column) => Math.max(
-    ...placements.filter(({ column: laneColumn }) => laneColumn === column)
-      .map(({ lane }) => lane.width),
-    settings.hubMinWidth,
-  ))
-  const rowHeights = Array.from({ length: rows }, (_, row) => Math.max(
-    ...placements.filter(({ row: laneRow }) => laneRow === row)
-      .map(({ lane }) => lane.height),
-    settings.hubPadding * 2,
-  ))
-  const gridWidth = columnWidths.reduce((total, width) => total + width, 0)
-    + Math.max(0, columns - 1) * settings.componentGapX
-  const gridHeight = rowHeights.reduce((total, height) => total + height, 0)
-    + Math.max(0, rows - 1) * settings.componentGapY
-  const rowY = []
-  rowHeights.forEach((height, row) => {
-    rowY[row] = row === 0
-      ? 0
-      : rowY[row - 1] + rowHeights[row - 1] + settings.componentGapY
-  })
-  const columnX = []
-  columnWidths.forEach((width, column) => {
-    columnX[column] = column === 0
-      ? 0
-      : columnX[column - 1] + columnWidths[column - 1] + settings.componentGapX
-  })
+  const packedWidth = Math.max(...shelves.map(({ width }) => width), minimumWidth)
+  const packedHeight = shelves.reduce((total, shelf) => total + shelf.height, 0)
+    + Math.max(0, shelves.length - 1) * settings.componentGapY
   const contentWidth = Math.max(
-    settings.minWidth - settings.sectionPadding * 2,
-    gridWidth,
+    minimumWidth,
+    packedWidth,
   )
-  const offsetX = (contentWidth - gridWidth) / 2
-  const positioned = placements.map(({ lane, row, column }) => {
-    return {
-      ...lane,
-      x: settings.sectionPadding + offsetX + columnX[column],
-      y: settings.sectionHeaderHeight + settings.sectionPadding + rowY[row],
-    }
+  const positioned = []
+  let shelfY = 0
+  shelves.forEach((shelf) => {
+    let laneX = (contentWidth - shelf.width) / 2
+    shelf.lanes.forEach((lane) => {
+      positioned.push({
+        ...lane,
+        x: settings.sectionPadding + laneX,
+        y: settings.sectionHeaderHeight + settings.sectionPadding + shelfY,
+      })
+      laneX += lane.width + settings.componentGapX
+    })
+    shelfY += shelf.height + settings.componentGapY
   })
   return {
     width: contentWidth,
-    height: gridHeight,
+    height: packedHeight,
+    columns: Math.max(...shelves.map(({ lanes: shelfLanes }) => shelfLanes.length)),
+    rows: shelves.length,
     lanes: positioned,
   }
+}
+
+function componentPackingScore(grid, settings) {
+  const target = Math.max(.1, Number(settings.componentPackingAspectRatio) || 1.45)
+  const aspect = Math.max(.1, grid.width / Math.max(1, grid.height))
+  const aspectDistance = Math.abs(Math.log(aspect / target))
+  const widthLimit = Math.max(settings.minWidth * 2, settings.minWidth + 640)
+  const widthPenalty = Math.max(0, grid.width - widthLimit) / widthLimit
+  const laneArea = grid.lanes.reduce((total, lane) => total + lane.width * lane.height, 0)
+  const whitespaceRatio = 1 - laneArea / Math.max(1, grid.width * grid.height)
+  return aspectDistance + widthPenalty * .35 + whitespaceRatio * .18
 }
 
 export function createTopologyDiagramLayoutCacheKey({
@@ -418,8 +444,6 @@ export function createTopologyDiagramLayoutCacheKey({
   selectedFamilies = model?.selectedFamilies,
   hideFiltered = false,
   overview = false,
-  layoutStyle = 'central-backbone',
-  componentColumns = null,
 } = {}) {
   const nodeIds = (model?.nodes ?? []).map(({ id }) => id).sort().join(',')
   const edgeIds = (model?.edges ?? []).map(({ id }) => id).sort().join(',')
@@ -439,8 +463,6 @@ export function createTopologyDiagramLayoutCacheKey({
     families,
     hideFiltered ? 'hide' : 'dim',
     overview ? 'overview' : 'detail',
-    layoutStyle,
-    componentColumns ?? '',
   ].join('|')
 }
 
@@ -475,25 +497,32 @@ export function updateTopologyDiagramLayoutPositions(layout, positions = {}) {
 export function refreshTopologyDiagramLinks(layout) {
   if (!layout || layout.status !== 'ready') return layout
   const nodeById = new Map(layout.nodes.map((node) => [node.id, node]))
-  const settings = layout.options ?? DEFAULT_OPTIONS
-  const mountingGroupBounds = buildMountingGroupBounds(
-    layout.mountingGroupBounds ?? [],
-    nodeById,
-    settings,
+  const mountingBoxById = new Map(
+    (layout.mountingBoxes ?? []).map((box) => [box.id, box]),
   )
-  layout.mountingGroupBounds = mountingGroupBounds
+  const settings = layout.options ?? DEFAULT_OPTIONS
   layout.edges = layout.edges.map((edge) => {
     const source = nodeById.get(edge.sourceId)
     const target = nodeById.get(edge.targetId)
     if (!source || !target) return edge
     return {
       ...edge,
-      routePoints: routeEdge(source, target, {
-        mountingGroupBounds,
-        nodeObstacles: layout.nodes,
-        avoidPhysicalGroups: settings.layoutStyle === 'compound-poles',
-      }),
+      routePoints: routeEdge(source, target, mountingBoxById),
       linePoints: straightLinkPoints(source, target),
+    }
+  })
+  layout.backboneGaps = (layout.backboneGaps ?? []).map((gap, index) => {
+    const source = nodeById.get(gap.sourceId)
+    const target = nodeById.get(gap.targetId)
+    if (!source || !target) return gap
+    const routePoints = routeBackboneGap(source, target, nodeById, index)
+    return {
+      ...gap,
+      routePoints,
+      linePoints: [routePoints[0], routePoints[routePoints.length - 1]],
+      labelX: routePoints[2]?.x ?? target.diagram.centerX,
+      labelY: ((routePoints[2]?.y ?? target.diagram.centerY)
+        + (routePoints[3]?.y ?? target.diagram.centerY)) / 2,
     }
   })
   return layout
@@ -506,6 +535,8 @@ export function createTopologyLayoutWorkerModel(model) {
     edgeById: undefined,
     adjacency: undefined,
     selectedFamilies: [...(model.selectedFamilies ?? [])],
+    traceAssetIds: [...(model.traceAssetIds ?? [])],
+    traceEdgeIds: [...(model.traceEdgeIds ?? [])],
   }
 }
 
@@ -513,251 +544,647 @@ function buildLaneSpec(args) {
   if (args.settings.layoutStyle === 'central-backbone') {
     return buildCentralBackboneLaneSpec(args)
   }
-  if (args.settings.layoutStyle === 'compound-poles') {
-    return buildCompoundPoleLaneSpec(args)
-  }
   return buildSemanticLaneSpec(args)
 }
 
-/**
- * Presents a network component as a small set of compound device groups.
- *
- * Mounting is not a network edge, so it must not be inserted into the graph
- * traversal. It is nevertheless a strong visual grouping signal: a JB and
- * its CCTV devices should occupy one readable block while their confirmed
- * network edges remain independently routable. This layout does exactly that
- * and keeps unmounted nodes as ordinary cards, so no graph node is discarded.
- */
-function buildCompoundPoleLaneSpec({
-  component,
-  index,
+function buildPoleBackboneAreaLaneSpec({
+  area,
+  components,
   nodeById,
   edges,
   mountingGroups = [],
   settings,
 }) {
-  const componentNodes = component.nodeIds.map((id) => nodeById.get(id)).filter(Boolean)
-  const componentNodeIds = new Set(componentNodes.map(({ id }) => id))
-  const componentEdges = edges.filter((edge) => (
-    componentNodeIds.has(edge.sourceId) && componentNodeIds.has(edge.targetId)
+  const componentByNodeId = new Map()
+  components.forEach((component) => {
+    component.nodeIds.forEach((nodeId) => componentByNodeId.set(nodeId, component))
+  })
+  const connectedIds = new Set(componentByNodeId.keys())
+  const connectedNodes = [...connectedIds].map((id) => nodeById.get(id)).filter(Boolean)
+  const coreNodes = connectedNodes
+    .filter((node) => node.diagramClass === 'rack-root')
+    .sort(compareNodes)
+  const assignedNodeIds = new Set(coreNodes.map(({ id }) => id))
+  const confirmedGroups = [...mountingGroups]
+    .filter((group) => !(group.childIds ?? []).length
+      || (group.childIds ?? []).some((id) => connectedIds.has(id)))
+    .sort((left, right) => String(left.hostName ?? left.hostId).localeCompare(
+      String(right.hostName ?? right.hostId),
+      'id',
+    ) || String(left.id).localeCompare(String(right.id), 'id'))
+    .flatMap((group) => {
+      const emptyMount = !(group.childIds ?? []).length
+      const nodeIds = (group.childIds ?? []).filter((id) => (
+        connectedIds.has(id) && !assignedNodeIds.has(id)
+      ))
+      if (!nodeIds.length && !emptyMount) return []
+      nodeIds.forEach((id) => assignedNodeIds.add(id))
+      return [{
+        id: group.id,
+        hostId: group.hostId,
+        hostName: group.hostName || group.hostId,
+        hostType: group.hostType || 'Tiang',
+        kind: emptyMount ? 'empty' : 'confirmed',
+        nodeIds,
+        mountingConflict: nodeIds.some((id) => (
+          (nodeById.get(id)?.mountingGroupIds ?? []).length > 1
+        )),
+      }]
+    })
+  attachNamedJunctionFamiliesToMountingGroups({
+    confirmedGroups,
+    connectedNodes,
+    assignedNodeIds,
+  })
+  const unmountedNodes = connectedNodes
+    .filter((node) => node.diagramClass !== 'rack-root' && !assignedNodeIds.has(node.id))
+  const excludedNodeIds = unmountedNodes
+    .filter((node) => ['indoor', 'standalone'].includes(node.mountingExpectation))
+    .map(({ id }) => id)
+    .sort((left, right) => compareNodes(nodeById.get(left), nodeById.get(right)))
+  const needsMountingNodeIds = unmountedNodes
+    .filter((node) => !['indoor', 'standalone'].includes(node.mountingExpectation))
+    .map(({ id }) => id)
+    .sort((left, right) => compareNodes(nodeById.get(left), nodeById.get(right)))
+  const groupSpecs = [
+    ...confirmedGroups,
+    ...(needsMountingNodeIds.length ? [{
+      id: `needs-mounting:${area.key}`,
+      hostId: null,
+      hostName: 'Perlu mounting',
+      hostType: 'Aset pole/unknown tanpa relasi mounting tiang',
+      kind: 'needs-mounting',
+      nodeIds: needsMountingNodeIds,
+      mountingConflict: false,
+    }] : []),
+    ...(excludedNodeIds.length ? [{
+      id: `excluded-mounting:${area.key}`,
+      hostId: null,
+      hostName: 'Area non-tiang / indoor',
+      hostType: 'Aset indoor atau standalone',
+      kind: 'excluded',
+      nodeIds: excludedNodeIds,
+      mountingConflict: false,
+    }] : []),
+  ]
+  const edgeAdjacency = buildLayoutEdgeAdjacency(connectedNodes, edges)
+  const mountingBoxes = groupSpecs.map((group) => buildMountingBoxSpec({
+    group,
+    nodeById,
+    componentByNodeId,
+    edgeAdjacency,
+    settings,
+  })).sort((left, right) => (
+    mountingBoxOrder(left.kind) - mountingBoxOrder(right.kind)
+      || left.entryDepth - right.entryDepth
+      || left.label.localeCompare(right.label, 'id')
+      || left.id.localeCompare(right.id, 'id')
   ))
-  const traversal = buildTraversal(component.rootId, componentNodes, componentEdges)
-  const traversalIndex = traversal.indexById
-  const semanticLevelFor = (node) => ({
-    'rack-root': 0,
-    'junction-peer': 1,
-    'junction-extended': 2,
-    endpoint: 3,
-  }[node?.diagramClass] ?? Math.max(0, Number(node?.depth) || 0))
-  const groupByNodeId = new Map()
-  const compoundItems = []
 
-  ;(Array.isArray(mountingGroups) ? mountingGroups : [])
-    .slice()
-    .sort((left, right) => String(left.id).localeCompare(String(right.id), 'id'))
-    .forEach((group) => {
-      const childNodes = (group.childIds ?? [])
-        .map((id) => nodeById.get(id))
-        .filter((node) => node && componentNodeIds.has(node.id))
-        .sort((left, right) => (
-          semanticLevelFor(left) - semanticLevelFor(right)
-            || (traversalIndex.get(left.id) ?? Number.MAX_SAFE_INTEGER)
-              - (traversalIndex.get(right.id) ?? Number.MAX_SAFE_INTEGER)
-            || left.id.localeCompare(right.id, 'id')
-        ))
-      if (!childNodes.length) return
-      const groupId = group.id
-      childNodes.forEach((node) => groupByNodeId.set(node.id, groupId))
-      compoundItems.push({
-        id: `compound:${groupId}`,
-        groupId,
-        nodes: childNodes,
-        level: Math.min(...childNodes.map(semanticLevelFor)),
-        traversalIndex: Math.min(...childNodes.map((node) => (
-          traversalIndex.get(node.id) ?? Number.MAX_SAFE_INTEGER
-        ))),
-      })
-    })
-
-  componentNodes.forEach((node) => {
-    if (groupByNodeId.has(node.id)) return
-    compoundItems.push({
-      id: `asset:${node.id}`,
-      groupId: null,
-      nodes: [node],
-      level: semanticLevelFor(node),
-      traversalIndex: traversalIndex.get(node.id) ?? Number.MAX_SAFE_INTEGER,
-    })
+  attachCrossBoxJunctionFamilies({
+    mountingBoxes,
+    connectedNodes,
+    edgeAdjacency,
   })
-
-  const itemSize = (item) => {
-    const rows = compoundRows(item)
-    const rowGap = item.groupId ? settings.compoundNodeGapX : settings.nodeGapX
-    const rowSizes = rows.map((row) => {
-      const sizes = row.map((node) => nodeSize(node, settings))
-      return {
-        width: sizes.reduce((total, size) => total + size.width, 0)
-          + Math.max(0, sizes.length - 1) * rowGap,
-        height: Math.max(...sizes.map((size) => size.height), settings.nodeHeight),
-      }
-    })
-    const contentWidth = Math.max(...rowSizes.map(({ width }) => width), settings.nodeWidth)
-    const contentHeight = item.groupId
-      ? rowSizes.reduce((total, { height }) => total + height, 0)
-        + Math.max(0, rowSizes.length - 1) * settings.compoundRowGapY
-      : Math.max(...rowSizes.map(({ height }) => height), settings.nodeHeight)
-    if (!item.groupId) return { width: contentWidth, height: contentHeight }
-    return {
-      width: contentWidth + settings.compoundPaddingX * 2,
-      height: settings.compoundHeaderHeight + settings.compoundPaddingTop
-        + contentHeight + settings.compoundPaddingBottom,
-      rowSizes,
-    }
-  }
-  compoundItems.forEach((item) => { item.size = itemSize(item) })
-
-  const levels = [0, 1, 2, 3]
-  const bands = []
-  const nodes = []
-  let cursorY = settings.laneHeaderHeight + settings.lanePadding
-  levels.forEach((level) => {
-    const items = compoundItems
-      .filter((item) => item.level === level)
-      .sort((left, right) => left.traversalIndex - right.traversalIndex
-        || left.id.localeCompare(right.id, 'id'))
-    if (!items.length) return
-    const columns = Math.max(1, Math.min(settings.compoundColumns, items.length))
-    const rows = chunk(items, columns)
-    const rowHeights = rows.map((row) => Math.max(...row.map((item) => item.size.height)))
-    const contentHeight = rowHeights.reduce((total, height) => total + height, 0)
-      + Math.max(0, rows.length - 1) * settings.nodeGapY
-    const bandHeight = settings.bandHeaderHeight + 8 + contentHeight + settings.lanePadding
-    const bandNodeIds = []
-    let rowY = cursorY + settings.bandHeaderHeight + 8
-    rows.forEach((row, rowIndex) => {
-      const rowWidth = row.reduce((total, item) => total + item.size.width, 0)
-        + Math.max(0, row.length - 1) * settings.nodeGapX
-      let itemX = settings.lanePadding + (settings.minWidth - settings.sectionPadding * 2
-        - settings.lanePadding * 2 - rowWidth) / 2
-      row.forEach((item) => {
-        const itemY = rowY + (rowHeights[rowIndex] - item.size.height) / 2
-        const placementRows = compoundRows(item)
-        let contentY = item.groupId
-          ? itemY + settings.compoundHeaderHeight + settings.compoundPaddingTop
-          : itemY
-        placementRows.forEach((placementRow, placementRowIndex) => {
-          const rowSizes = placementRow.map((node) => nodeSize(node, settings))
-          const rowGap = item.groupId ? settings.compoundNodeGapX : settings.nodeGapX
-          const rowWidth = rowSizes.reduce((total, size) => total + size.width, 0)
-            + Math.max(0, rowSizes.length - 1) * rowGap
-          const rowHeight = Math.max(...rowSizes.map((size) => size.height), settings.nodeHeight)
-          let nodeX = item.groupId
-            ? itemX + (item.size.width - rowWidth) / 2
-            : itemX
-          placementRow.forEach((node, nodeIndex) => {
-            const size = rowSizes[nodeIndex]
-            const nodeY = item.groupId
-              ? contentY + (rowHeight - size.height) / 2
-              : itemY + (item.size.height - size.height) / 2
-            const layoutNode = toLayoutNode(node, {
-              x: nodeX,
-              y: nodeY,
-              width: size.width,
-              height: size.height,
-              laneId: component.componentId,
-              laneIndex: index,
-              areaKey: node.areaKey,
-              presentation: item.groupId ? 'compound' : 'card',
-              depth: node.depth,
-              diagramClass: node.diagramClass,
-              semanticTier: node.semanticTier,
-              parentId: traversal.parentById.get(node.id) ?? null,
-              bandId: `compound-level-${level}`,
-              rowIndex,
-              traversalIndex: traversalIndex.get(node.id) ?? Number.MAX_SAFE_INTEGER,
-              compoundGroupId: item.groupId,
-              compoundRole: item.groupId ? node.diagramClass : null,
-            })
-            nodes.push(layoutNode)
-            bandNodeIds.push(node.id)
-            nodeX += size.width + rowGap
-          })
-          if (item.groupId) contentY += rowHeight + settings.compoundRowGapY
-          if (!item.groupId && placementRowIndex === 0) contentY += rowHeight
-        })
-        itemX += item.size.width + settings.nodeGapX
-      })
-      rowY += rowHeights[rowIndex] + settings.nodeGapY
-    })
-    bands.push({
-      id: `compound-level-${level}`,
-      title: compoundBandTitle(level),
-      kind: level === 0 ? 'rack-root' : level === 1 ? 'junction-peer'
-        : level === 2 ? 'junction-extended' : 'endpoint',
-      x: 0,
-      y: cursorY,
-      width: Math.max(settings.minWidth - settings.sectionPadding * 2, settings.hubMinWidth),
-      height: bandHeight,
-      nodeIds: bandNodeIds,
-      rowCount: rows.length,
-    })
-    cursorY += bandHeight + settings.bandGap
-  })
-
-  const laneWidth = Math.max(
-    settings.minWidth - settings.sectionPadding * 2,
-    ...compoundItems.map((item) => item.size.width + settings.lanePadding * 2),
+  const mountingBoxTree = buildMountingBoxTree(mountingBoxes, settings)
+  const boxesWidth = mountingBoxTree.width
+  const coreWidth = coreNodes.reduce(
+    (total, node) => total + hubNodeSize(node, settings).width,
+    0,
+  ) + Math.max(0, coreNodes.length - 1) * settings.hubNodeGapX
+  const laneWidth = Math.max(settings.hubMinWidth, boxesWidth, coreWidth)
+  const coreY = settings.hubPadding + settings.hubHeaderHeight
+  const coreHeight = Math.max(
+    settings.hubRootHeight,
+    ...coreNodes.map((node) => hubNodeSize(node, settings).height),
   )
-  bands.forEach((band) => { band.width = laneWidth })
-  // Re-center the rows after the lane width is known. The initial placement
-  // uses minWidth as a safe estimate; this pass keeps wider compound cards
-  // deterministic without changing any source asset coordinates.
-  const rowGroups = new Map()
-  nodes.forEach((node) => {
-    const key = `${node.bandId}:${node.rowIndex}`
-    const list = rowGroups.get(key) ?? []
-    list.push(node)
-    rowGroups.set(key, list)
-  })
-  rowGroups.forEach((rowNodes) => {
-    const minX = Math.min(...rowNodes.map((node) => node.diagram.x))
-    const maxX = Math.max(...rowNodes.map((node) => node.diagram.x + node.diagram.width))
-    const offsetX = (laneWidth - (maxX - minX)) / 2 - minX
-    rowNodes.forEach((node) => translateNode(node, offsetX, 0))
+  const boxesY = coreNodes.length
+    ? coreY + coreHeight + settings.backboneCoreGapY
+    : settings.hubPadding + settings.hubHeaderHeight
+  placeMountingBoxTree(
+    mountingBoxTree,
+    (laneWidth - boxesWidth) / 2,
+    boxesY,
+    settings,
+  )
+  mountingBoxes.forEach((box) => {
+    box.nodes.forEach((node) => translateNode(node, box.x, box.y))
   })
 
+  const boxCentersByComponent = new Map()
+  mountingBoxes.forEach((box) => {
+    box.componentIds.forEach((componentId) => {
+      boxCentersByComponent.set(componentId, [
+        ...(boxCentersByComponent.get(componentId) ?? []),
+        box.x + box.width / 2,
+      ])
+    })
+  })
+  const placedCoreNodes = []
+  const coreSpecs = coreNodes.map((node) => {
+    const size = hubNodeSize(node, settings)
+    const centers = boxCentersByComponent.get(node.componentId) ?? []
+    const desiredCenter = centers.length
+      ? centers.reduce((total, value) => total + value, 0) / centers.length
+      : laneWidth / 2
+    return { node, size, desiredCenter }
+  }).sort((left, right) => left.desiredCenter - right.desiredCenter
+    || compareNodes(left.node, right.node))
+  let previousRight = -Infinity
+  coreSpecs.forEach(({ node, size, desiredCenter }) => {
+    const x = Math.max(
+      0,
+      Math.min(laneWidth - size.width, Math.max(desiredCenter - size.width / 2, previousRight)),
+    )
+    previousRight = x + size.width + settings.hubNodeGapX
+    placedCoreNodes.push(toLayoutNode(node, {
+      x,
+      y: coreY,
+      width: size.width,
+      height: size.height,
+      laneId: `area:${area.key}:pole-backbone`,
+      laneIndex: 0,
+      areaKey: area.key,
+      presentation: 'pole-backbone',
+      depth: node.depth,
+      diagramClass: node.diagramClass,
+      semanticTier: node.semanticTier,
+      parentId: null,
+      bandId: 'rack-root',
+      rowIndex: 0,
+      traversalIndex: 0,
+      mountingBoxId: null,
+      mountingRole: 'core',
+    }))
+  })
+  const boxNodes = mountingBoxes.flatMap((box) => box.nodes)
+  const laneHeight = Math.max(
+    coreY + coreHeight + settings.hubPadding,
+    boxesY + mountingBoxTree.height + settings.hubPadding,
+  )
   return {
-    kind: 'component',
-    componentId: component.componentId,
-    title: `Jalur ${String(index + 1).padStart(2, '0')}`,
-    rootId: component.rootId,
-    rootVerified: component.rootVerified,
-    rootReason: component.rootReason,
+    kind: 'area-backbone',
+    componentId: `area:${area.key}:pole-backbone`,
+    componentIds: components.map(({ componentId }) => componentId),
+    islandIndex: 1,
+    title: '',
+    rootId: placedCoreNodes[0]?.id ?? mountingBoxes[0]?.entryJunctionIds?.[0] ?? null,
+    rootVerified: components.some(({ rootVerified }) => rootVerified),
+    rootReason: 'pole-group backbone presentation',
     x: 0,
     y: 0,
     width: laneWidth,
-    height: cursorY - settings.bandGap + settings.lanePadding,
-    nodes: nodes.sort(compareLayoutNodes),
-    bands,
-    edgeCount: component.edgeIds.length,
-    presentation: 'compound-poles',
+    height: laneHeight,
+    nodes: [...placedCoreNodes, ...boxNodes].sort(compareLayoutNodes),
+    bands: [],
+    edgeCount: components.reduce((total, component) => total + component.edgeIds.length, 0),
+    presentation: 'pole-backbone',
+    mountingBoxes,
   }
 }
 
-function compoundBandTitle(level) {
-  return {
-    0: 'RACK / CORE',
-    1: 'AKSES · JB + CCTV PADA TIANG',
-    2: 'JB EXTENDED · PERALATAN AKSES',
-    3: 'ENDPOINT YANG BELUM TERPASANG',
-  }[level] ?? 'PERANGKAT'
+function mountingBoxOrder(kind) {
+  if (kind === 'confirmed') return 0
+  if (kind === 'empty') return 1
+  if (kind === 'needs-mounting') return 2
+  if (kind === 'excluded') return 3
+  return 4
 }
 
-function compoundRows(item) {
-  if (!item?.groupId) return [item?.nodes ?? []]
-  const hubs = item.nodes.filter((node) => node.diagramClass !== 'endpoint')
-  const endpoints = item.nodes.filter((node) => node.diagramClass === 'endpoint')
-  return [hubs, endpoints].filter((row) => row.length)
+function buildMountingBoxSpec({
+  group,
+  nodeById,
+  componentByNodeId,
+  edgeAdjacency,
+  settings,
+}) {
+  const nodes = group.nodeIds.map((id) => nodeById.get(id)).filter(Boolean)
+  const nodeIds = new Set(nodes.map(({ id }) => id))
+  const byComponent = new Map()
+  nodes.forEach((node) => {
+    const componentId = componentByNodeId.get(node.id)?.componentId ?? 'unscoped'
+    byComponent.set(componentId, [...(byComponent.get(componentId) ?? []), node])
+  })
+  const junctions = nodes.filter((node) => (
+    ['junction-peer', 'junction-extended'].includes(node.diagramClass)
+  ))
+  const namedParentById = buildNamedJunctionParents(junctions, edgeAdjacency)
+  const entryJunctionIds = []
+  byComponent.forEach((componentNodes) => {
+    const regularJunctions = componentNodes.filter((node) => {
+      if (node.diagramClass !== 'junction-peer') return false
+      return junctionNumberIdentity(node.name)?.childIndex == null
+    })
+    if (!regularJunctions.length) return
+    regularJunctions.sort((left, right) => (
+      externalConfirmedDegree(right.id, nodeIds, edgeAdjacency)
+        - externalConfirmedDegree(left.id, nodeIds, edgeAdjacency)
+      || (left.depth ?? Number.MAX_SAFE_INTEGER) - (right.depth ?? Number.MAX_SAFE_INTEGER)
+      || (right.confirmedDegree ?? 0) - (left.confirmedDegree ?? 0)
+      || compareNodes(left, right)
+    ))
+    entryJunctionIds.push(regularJunctions[0].id)
+  })
+  namedParentById.forEach((parentId) => entryJunctionIds.push(parentId))
+  const uniqueEntryJunctionIds = [...new Set(entryJunctionIds)]
+  uniqueEntryJunctionIds.sort((left, right) => compareNodes(nodeById.get(left), nodeById.get(right)))
+  const levelById = new Map(uniqueEntryJunctionIds.map((id) => [id, 0]))
+  const parentById = new Map()
+  const queue = [...uniqueEntryJunctionIds]
+  while (queue.length) {
+    const parentId = queue.shift()
+    const parentLevel = levelById.get(parentId) ?? 0
+    const candidates = (edgeAdjacency.get(parentId) ?? [])
+      .map(({ id }) => nodeById.get(id))
+      .filter((node) => nodeIds.has(node?.id)
+        && ['junction-peer', 'junction-extended'].includes(node?.diagramClass)
+        && (!namedParentById.has(node.id) || namedParentById.get(node.id) === parentId)
+        && !levelById.has(node.id))
+      .sort(compareNodes)
+    candidates.forEach((node) => {
+      levelById.set(node.id, parentLevel + 1)
+      parentById.set(node.id, parentId)
+      queue.push(node.id)
+    })
+  }
+  junctions
+    .filter((node) => !levelById.has(node.id))
+    .sort((left, right) => (
+      (left.depth ?? Number.MAX_SAFE_INTEGER) - (right.depth ?? Number.MAX_SAFE_INTEGER)
+      || compareNodes(left, right)
+    ))
+    .forEach((node) => {
+      const namedParent = nodeById.get(namedParentById.get(node.id))
+      const parent = namedParent && levelById.has(namedParent.id)
+        ? namedParent
+        : bestJunctionParent(node, nodeIds, levelById, nodeById, edgeAdjacency)
+      const parentLevel = parent ? levelById.get(parent.id) ?? 0 : 0
+      levelById.set(node.id, Math.max(1, parentLevel + 1))
+      if (parent) parentById.set(node.id, parent.id)
+    })
+  const maximumJunctionLevel = Math.max(0, ...junctions.map((node) => levelById.get(node.id) ?? 0))
+  const endpointLevel = maximumJunctionLevel + 1
+  nodes.filter((node) => !levelById.has(node.id)).forEach((node) => {
+    levelById.set(node.id, endpointLevel)
+    const parent = bestEndpointParent(node, nodeIds, nodeById, edgeAdjacency)
+    if (parent) parentById.set(node.id, parent.id)
+  })
+  const rows = new Map()
+  nodes.forEach((node) => {
+    const level = levelById.get(node.id) ?? endpointLevel
+    rows.set(level, [...(rows.get(level) ?? []), node])
+  })
+  rows.forEach((row) => row.sort((left, right) => (
+    compareLayoutParents(
+      parentById.get(left.id),
+      parentById.get(right.id),
+      nodeById,
+    )
+      || (left.diagramClass === 'junction-peer' ? 0 : left.diagramClass === 'junction-extended' ? 1 : 2)
+        - (right.diagramClass === 'junction-peer' ? 0 : right.diagramClass === 'junction-extended' ? 1 : 2)
+      || compareNodes(left, right)
+  )))
+  const rowWidths = new Map()
+  const rowHeights = new Map()
+  rows.forEach((row, level) => {
+    rowWidths.set(level, row.reduce(
+      (total, node) => total + hubNodeSize(node, settings).width,
+      Math.max(0, row.length - 1) * settings.mountingBoxNodeGapX,
+    ))
+    rowHeights.set(level, Math.max(...row.map((node) => hubNodeSize(node, settings).height)))
+  })
+  const width = Math.max(
+    settings.mountingBoxMinWidth,
+    ...rowWidths.values(),
+  ) + settings.mountingBoxPadding * 2
+  const levels = [...rows.keys()].sort((left, right) => left - right)
+  let rowY = settings.mountingBoxHeaderHeight + settings.mountingBoxPadding
+  const layoutNodes = []
+  levels.forEach((level) => {
+    const row = rows.get(level)
+    let rowX = (width - rowWidths.get(level)) / 2
+    row.forEach((node, index) => {
+      const size = hubNodeSize(node, settings)
+      const entry = uniqueEntryJunctionIds.includes(node.id)
+      const layoutNode = toLayoutNode(node, {
+        x: rowX,
+        y: rowY,
+        width: size.width,
+        height: size.height,
+        laneId: group.id,
+        laneIndex: 0,
+        areaKey: node.areaKey,
+        presentation: 'pole-backbone',
+        depth: node.depth,
+        diagramClass: node.diagramClass,
+        semanticTier: node.semanticTier,
+        parentId: parentById.get(node.id) ?? null,
+        bandId: hubBandId(node.diagramClass),
+        rowIndex: level,
+        traversalIndex: index,
+        mountingBoxId: group.id,
+        mountingRole: entry
+          ? 'entry-junction'
+          : ['junction-peer', 'junction-extended'].includes(node.diagramClass)
+            ? 'downstream-junction'
+            : 'endpoint',
+      })
+      layoutNode.mountingRelationStatus = group.presentationInheritedNodeIds?.includes(node.id)
+        ? ['indoor', 'standalone'].includes(node.mountingExpectation)
+          ? 'excluded'
+          : 'needs-mounting'
+        : group.kind === 'confirmed'
+          ? 'confirmed'
+          : group.kind === 'excluded'
+            ? 'excluded'
+            : 'needs-mounting'
+      layoutNodes.push(layoutNode)
+      rowX += size.width + settings.mountingBoxNodeGapX
+    })
+    rowY += rowHeights.get(level) + settings.mountingBoxLevelGapY
+  })
+  const height = Math.max(
+    settings.mountingBoxHeaderHeight + settings.mountingBoxPadding * 2 + settings.hubEndpointHeight,
+    rowY - settings.mountingBoxLevelGapY + settings.mountingBoxPadding,
+  )
+  return {
+    ...group,
+    label: group.hostName,
+    x: 0,
+    y: 0,
+    width,
+    height,
+    nodes: layoutNodes.sort(compareLayoutNodes),
+    nodeIds: layoutNodes.map(({ id }) => id),
+    entryJunctionIds: uniqueEntryJunctionIds,
+    entryDepth: Math.min(
+      ...uniqueEntryJunctionIds.map((id) => nodeById.get(id)?.depth ?? Number.MAX_SAFE_INTEGER),
+      Number.MAX_SAFE_INTEGER,
+    ),
+    componentIds: [...new Set(layoutNodes.map((node) => node.componentId).filter(Boolean))],
+  }
+}
+
+function attachNamedJunctionFamiliesToMountingGroups({
+  confirmedGroups,
+  connectedNodes,
+  assignedNodeIds,
+}) {
+  const connectedNodeById = new Map(connectedNodes.map((node) => [node.id, node]))
+  const junctions = connectedNodes.filter((node) => (
+    ['junction-peer', 'junction-extended'].includes(node.diagramClass)
+  ))
+  const families = new Map()
+  junctions.forEach((node) => {
+    const identity = junctionNumberIdentity(node.name)
+    if (!identity) return
+    families.set(identity.baseNumber, [
+      ...(families.get(identity.baseNumber) ?? []),
+      { node, identity },
+    ])
+  })
+  const groupByNodeId = new Map()
+  confirmedGroups.forEach((group) => {
+    group.nodeIds.forEach((nodeId) => groupByNodeId.set(nodeId, group))
+  })
+  families.forEach((members) => {
+    const base = members.find(({ identity }) => identity.childIndex === null)?.node ?? null
+    const candidateGroups = [...new Set(members
+      .map(({ node }) => groupByNodeId.get(node.id))
+      .filter(Boolean))]
+    if (!candidateGroups.length) return
+    const baseGroup = base ? groupByNodeId.get(base.id) : null
+    const targetGroup = baseGroup ?? candidateGroups.sort((left, right) => {
+      const firstChildIndex = (group) => Math.min(
+        ...members
+          .filter(({ node }) => group.nodeIds.includes(node.id))
+          .map(({ identity }) => identity.childIndex ?? -1),
+      )
+      return firstChildIndex(left) - firstChildIndex(right)
+        || String(left.id).localeCompare(String(right.id), 'id')
+    })[0]
+    const inheritedIds = members
+      .map(({ node }) => node.id)
+      .filter((nodeId) => !assignedNodeIds.has(nodeId))
+    if (!inheritedIds.length) return
+    inheritedIds.forEach((nodeId) => assignedNodeIds.add(nodeId))
+    targetGroup.nodeIds = [...new Set([...targetGroup.nodeIds, ...inheritedIds])]
+      .sort((left, right) => compareNodes(
+        connectedNodeById.get(left),
+        connectedNodeById.get(right),
+      ))
+    targetGroup.presentationInheritedNodeIds = [
+      ...new Set([...(targetGroup.presentationInheritedNodeIds ?? []), ...inheritedIds]),
+    ].sort((left, right) => left.localeCompare(right, 'id'))
+  })
+}
+
+function buildNamedJunctionParents(junctions, adjacency) {
+  const identityById = new Map(junctions.map((node) => [node.id, junctionNumberIdentity(node.name)]))
+  const rootsByNumber = new Map()
+  junctions.forEach((node) => {
+    const identity = identityById.get(node.id)
+    if (!identity || identity.childIndex !== null) return
+    rootsByNumber.set(identity.baseNumber, [
+      ...(rootsByNumber.get(identity.baseNumber) ?? []),
+      node,
+    ])
+  })
+  const parentById = new Map()
+  junctions.forEach((node) => {
+    const identity = identityById.get(node.id)
+    if (!identity || identity.childIndex === null) return
+    const candidates = rootsByNumber.get(identity.baseNumber) ?? []
+    const adjacentIds = new Set((adjacency.get(node.id) ?? []).map(({ id }) => id))
+    const parent = [...candidates].sort((left, right) => (
+      Number(adjacentIds.has(right.id)) - Number(adjacentIds.has(left.id))
+      || Number(right.diagramClass === 'junction-peer')
+        - Number(left.diagramClass === 'junction-peer')
+      || compareNodes(left, right)
+    ))[0]
+    if (parent) parentById.set(node.id, parent.id)
+  })
+  return parentById
+}
+
+function junctionNumberIdentity(value) {
+  const match = String(value ?? '').match(/\bjb[\s_-]*0*(\d+)(?:\.(\d+))?/i)
+  if (!match) return null
+  return {
+    baseNumber: String(Number(match[1])),
+    childIndex: match[2] === undefined ? null : Number(match[2]),
+  }
+}
+
+function compareLayoutParents(leftParentId, rightParentId, nodeById) {
+  if (leftParentId === rightParentId) return 0
+  if (!leftParentId) return -1
+  if (!rightParentId) return 1
+  const left = nodeById.get(leftParentId)
+  const right = nodeById.get(rightParentId)
+  if (left && right) return compareNodes(left, right)
+  return String(leftParentId).localeCompare(String(rightParentId), 'id')
+}
+
+function attachCrossBoxJunctionFamilies({
+  mountingBoxes,
+  connectedNodes,
+  edgeAdjacency,
+}) {
+  const junctions = connectedNodes.filter((node) => (
+    ['junction-peer', 'junction-extended'].includes(node.diagramClass)
+  ))
+  const boxByNodeId = new Map()
+  mountingBoxes.forEach((box) => {
+    box.nodeIds.forEach((nodeId) => boxByNodeId.set(nodeId, box))
+  })
+  const parentCandidatesByBoxId = new Map()
+  buildNamedJunctionParents(junctions, edgeAdjacency).forEach((parentNodeId, childNodeId) => {
+    const childBox = boxByNodeId.get(childNodeId)
+    const parentBox = boxByNodeId.get(parentNodeId)
+    if (!childBox || !parentBox || childBox.id === parentBox.id) return
+    const confirmedSibling = (edgeAdjacency.get(childNodeId) ?? [])
+      .some(({ id }) => id === parentNodeId)
+    if (!confirmedSibling || childBox.entryJunctionIds.length) return
+    parentCandidatesByBoxId.set(childBox.id, [
+      ...(parentCandidatesByBoxId.get(childBox.id) ?? []),
+      { childNodeId, parentNodeId, parentBox },
+    ])
+  })
+  parentCandidatesByBoxId.forEach((candidates, childBoxId) => {
+    const childBox = mountingBoxes.find(({ id }) => id === childBoxId)
+    if (!childBox) return
+    const selected = [...candidates].sort((left, right) => (
+      left.parentBox.label.localeCompare(right.parentBox.label, 'id')
+      || left.parentNodeId.localeCompare(right.parentNodeId, 'id')
+      || left.childNodeId.localeCompare(right.childNodeId, 'id')
+    ))[0]
+    childBox.layoutParentBoxId = selected.parentBox.id
+    childBox.layoutParentNodeId = selected.parentNodeId
+    childBox.layoutChildNodeId = selected.childNodeId
+    const childNode = childBox.nodes.find(({ id }) => id === selected.childNodeId)
+    if (childNode) {
+      childNode.layoutParentId = selected.parentNodeId
+      childNode.mountingRole = 'downstream-junction'
+      childNode.rowIndex = Math.max(1, childNode.rowIndex ?? 1)
+    }
+  })
+}
+
+function buildMountingBoxTree(mountingBoxes, settings) {
+  const boxById = new Map(mountingBoxes.map((box) => [box.id, box]))
+  const childrenById = new Map(mountingBoxes.map((box) => [box.id, []]))
+  mountingBoxes.forEach((box) => {
+    if (!boxById.has(box.layoutParentBoxId)) return
+    childrenById.get(box.layoutParentBoxId).push(box)
+  })
+  childrenById.forEach((children) => children.sort(compareMountingBoxes))
+  const roots = mountingBoxes
+    .filter((box) => !boxById.has(box.layoutParentBoxId))
+    .sort(compareMountingBoxes)
+  const visiting = new Set()
+  const measure = (box) => {
+    if (box.treeWidth && box.treeHeight) return box
+    if (visiting.has(box.id)) {
+      box.layoutParentBoxId = null
+      box.treeWidth = box.width
+      box.treeHeight = box.height
+      return box
+    }
+    visiting.add(box.id)
+    const children = childrenById.get(box.id) ?? []
+    children.forEach(measure)
+    const childrenWidth = children.reduce((total, child) => total + child.treeWidth, 0)
+      + Math.max(0, children.length - 1) * settings.mountingBoxGapX
+    const childrenHeight = Math.max(0, ...children.map((child) => child.treeHeight))
+    box.treeWidth = Math.max(box.width, childrenWidth)
+    box.treeHeight = box.height + (children.length
+      ? settings.mountingBoxGapY + childrenHeight
+      : 0)
+    visiting.delete(box.id)
+    return box
+  }
+  roots.forEach(measure)
+  return {
+    roots,
+    childrenById,
+    width: roots.reduce((total, root) => total + root.treeWidth, 0)
+      + Math.max(0, roots.length - 1) * settings.mountingBoxGapX,
+    height: Math.max(0, ...roots.map((root) => root.treeHeight)),
+  }
+}
+
+function placeMountingBoxTree(tree, x, y, settings) {
+  const place = (box, subtreeX, subtreeY) => {
+    box.treeX = subtreeX
+    box.x = subtreeX + (box.treeWidth - box.width) / 2
+    box.y = subtreeY
+    const children = tree.childrenById.get(box.id) ?? []
+    if (!children.length) return
+    const childrenWidth = children.reduce((total, child) => total + child.treeWidth, 0)
+      + Math.max(0, children.length - 1) * settings.mountingBoxGapX
+    let childX = subtreeX + (box.treeWidth - childrenWidth) / 2
+    const childY = subtreeY + box.height + settings.mountingBoxGapY
+    children.forEach((child) => {
+      place(child, childX, childY)
+      childX += child.treeWidth + settings.mountingBoxGapX
+    })
+  }
+  let rootX = x
+  tree.roots.forEach((root) => {
+    place(root, rootX, y)
+    rootX += root.treeWidth + settings.mountingBoxGapX
+  })
+}
+
+function compareMountingBoxes(left, right) {
+  return mountingBoxOrder(left.kind) - mountingBoxOrder(right.kind)
+    || left.entryDepth - right.entryDepth
+    || left.label.localeCompare(right.label, 'id')
+    || left.id.localeCompare(right.id, 'id')
+}
+
+function buildLayoutEdgeAdjacency(nodes, edges) {
+  const adjacency = new Map(nodes.map(({ id }) => [id, []]))
+  edges.forEach((edge) => {
+    if (!adjacency.has(edge.sourceId) || !adjacency.has(edge.targetId)) return
+    adjacency.get(edge.sourceId).push({ id: edge.targetId, edge })
+    adjacency.get(edge.targetId).push({ id: edge.sourceId, edge })
+  })
+  adjacency.forEach((neighbors) => neighbors.sort((left, right) => left.id.localeCompare(right.id, 'id')))
+  return adjacency
+}
+
+function externalConfirmedDegree(nodeId, localNodeIds, adjacency) {
+  return (adjacency.get(nodeId) ?? []).filter(({ id }) => !localNodeIds.has(id)).length
+}
+
+function bestJunctionParent(node, localNodeIds, levelById, nodeById, adjacency) {
+  return (adjacency.get(node.id) ?? [])
+    .map(({ id }) => nodeById.get(id))
+    .filter((candidate) => localNodeIds.has(candidate?.id)
+      && levelById.has(candidate.id)
+      && ['junction-peer', 'junction-extended'].includes(candidate.diagramClass))
+    .sort((left, right) => (levelById.get(left.id) ?? 0) - (levelById.get(right.id) ?? 0)
+      || compareNodes(left, right))[0] ?? null
+}
+
+function bestEndpointParent(node, localNodeIds, nodeById, adjacency) {
+  const neighbors = (adjacency.get(node.id) ?? [])
+    .map(({ id }) => nodeById.get(id))
+    .filter(Boolean)
+  return neighbors
+    .filter((candidate) => localNodeIds.has(candidate.id)
+      && ['junction-peer', 'junction-extended'].includes(candidate.diagramClass))
+    .sort((left, right) => (right.confirmedDegree ?? 0) - (left.confirmedDegree ?? 0)
+      || compareNodes(left, right))[0]
+    ?? neighbors
+      .filter((candidate) => ['rack-root', 'junction-peer', 'junction-extended']
+        .includes(candidate.diagramClass))
+      .sort((left, right) => (left.depth ?? Number.MAX_SAFE_INTEGER)
+        - (right.depth ?? Number.MAX_SAFE_INTEGER)
+        || compareNodes(left, right))[0]
+    ?? null
 }
 
 function buildCentralBackboneLaneSpec({ component, index, nodeById, edges, settings }) {
@@ -775,6 +1202,7 @@ function buildCentralBackboneLaneSpec({ component, index, nodeById, edges, setti
     return {
       kind: 'component',
       componentId: component.componentId,
+      islandIndex: index + 1,
       title: `Komponen ${String(index + 1).padStart(2, '0')}`,
       rootId: null,
       rootVerified: false,
@@ -829,7 +1257,12 @@ function buildCentralBackboneLaneSpec({ component, index, nodeById, edges, setti
     childIds.forEach((childId) => {
       const child = nodeById.get(childId)
       const semanticLevel = semanticLevelFor(child) - rootSemanticLevel
-      levelById.set(childId, Math.max(parentLevel + 1, semanticLevel, 1))
+      const parent = nodeById.get(parentId)
+      const endpointLeaf = child?.diagramClass === 'endpoint'
+        && ['rack-root', 'junction-peer', 'junction-extended'].includes(parent?.diagramClass)
+      levelById.set(childId, endpointLeaf
+        ? parentLevel + 1
+        : Math.max(parentLevel + 1, semanticLevel, 1))
       queue.push(childId)
     })
   }
@@ -942,7 +1375,8 @@ function buildCentralBackboneLaneSpec({ component, index, nodeById, edges, setti
   return {
     kind: 'component',
     componentId: component.componentId,
-    title: `Jalur ${String(index + 1).padStart(2, '0')}`,
+    islandIndex: index + 1,
+    title: '',
     rootId,
     rootVerified: component.rootVerified,
     rootReason: component.rootReason,
@@ -959,9 +1393,10 @@ function buildCentralBackboneLaneSpec({ component, index, nodeById, edges, setti
 }
 
 function centralParentFor(node, parentById, nodeById, rootId) {
-  let candidate = nearestVisualParent(node.id, parentById, nodeById)
-  const sameTier = (id) => id && nodeById.get(id)?.diagramClass === node.diagramClass
-  while (sameTier(candidate) && candidate !== rootId) {
+  // Preserve the confirmed JB-to-JB backbone. Only skip endpoint ancestors so
+  // a camera/device does not become a visual parent for another device.
+  let candidate = parentById.get(node.id) ?? null
+  while (candidate && nodeById.get(candidate)?.diagramClass === 'endpoint') {
     candidate = parentById.get(candidate) ?? null
   }
   return candidate || rootId
@@ -1036,7 +1471,7 @@ function buildSemanticLaneSpec({ component, index, nodeById, edges, settings }) 
       row.forEach((node) => {
         const size = nodeSize(node, settings)
         const parentId = visualParentById.get(node.id) ?? null
-        const layoutNode = toLayoutNode(node, {
+    const layoutNode = toLayoutNode(node, {
           x,
           y: rowY,
           width: size.width,
@@ -1051,8 +1486,8 @@ function buildSemanticLaneSpec({ component, index, nodeById, edges, settings }) 
           parentId,
           bandId: band.id,
           rowIndex,
-          traversalIndex: traversalIndex.get(node.id) ?? Number.MAX_SAFE_INTEGER,
-        })
+      traversalIndex: traversalIndex.get(node.id) ?? Number.MAX_SAFE_INTEGER,
+    })
         nodes.push(layoutNode)
         bandNodeIds.push(node.id)
         x += size.width + settings.nodeGapX
@@ -1076,6 +1511,7 @@ function buildSemanticLaneSpec({ component, index, nodeById, edges, settings }) 
   return {
     kind: 'component',
     componentId: component.componentId,
+    islandIndex: index + 1,
     // Kept in the layout model for inspector/debugging; the main SVG does not
     // render this component label because component IDs are not user-facing.
     title: `Komponen ${String(index + 1).padStart(2, '0')}`,
@@ -1094,7 +1530,7 @@ function buildSemanticLaneSpec({ component, index, nodeById, edges, settings }) 
 
 function buildIsolatedSpec(nodes, settings) {
   const sorted = [...nodes].sort(compareNodes)
-  const columns = Math.max(1, Math.min(8, sorted.length))
+  const columns = Math.max(1, Math.min(14, sorted.length))
   const rows = Math.ceil(sorted.length / columns)
   const width = settings.minWidth - settings.sectionPadding * 2
   const contentWidth = columns * settings.compactWidth
@@ -1114,7 +1550,7 @@ function buildIsolatedSpec(nodes, settings) {
       y: 46 + settings.lanePadding + row * (settings.compactHeight + 14),
       width: settings.compactWidth,
       height: settings.compactHeight,
-      presentation: 'compact',
+      presentation: 'tray',
       laneId: null,
       areaKey: node.areaKey,
       depth: null,
@@ -1157,8 +1593,8 @@ function toLayoutNode(node, {
   bandId = null,
   rowIndex = 0,
   traversalIndex = Number.MAX_SAFE_INTEGER,
-  compoundGroupId = null,
-  compoundRole = null,
+  mountingBoxId = node.mountingBoxId ?? null,
+  mountingRole = node.mountingRole ?? null,
 } = {}) {
   return {
     ...node,
@@ -1170,11 +1606,12 @@ function toLayoutNode(node, {
     diagramClass,
     semanticTier,
     parentId,
+    layoutParentId: parentId,
     bandId,
     rowIndex,
     traversalIndex,
-    compoundGroupId,
-    compoundRole,
+    mountingBoxId,
+    mountingRole,
     position: { x, y },
     diagram: {
       x,
@@ -1189,43 +1626,6 @@ function toLayoutNode(node, {
       bottomY: y + height,
     },
   }
-}
-
-function buildMountingGroupBounds(groups = [], layoutNodes, settings = DEFAULT_OPTIONS) {
-  const nodeById = layoutNodes instanceof Map
-    ? layoutNodes
-    : new Map((layoutNodes ?? []).map((node) => [node.id, node]))
-  const headerHeight = settings.compoundHeaderHeight ?? DEFAULT_OPTIONS.compoundHeaderHeight
-  const paddingX = settings.compoundPaddingX ?? DEFAULT_OPTIONS.compoundPaddingX
-  const paddingTop = settings.compoundPaddingTop ?? 12
-  const paddingBottom = settings.compoundPaddingBottom ?? DEFAULT_OPTIONS.compoundPaddingBottom
-  return (Array.isArray(groups) ? groups : []).flatMap((group) => {
-    const childIds = [...(group.childIds ?? [])]
-    const childNodes = childIds.map((id) => nodeById.get(id)).filter(Boolean)
-    if (!childNodes.length) return []
-    const minX = Math.min(...childNodes.map((node) => node.diagram.x))
-    const minY = Math.min(...childNodes.map((node) => node.diagram.y))
-    const maxX = Math.max(...childNodes.map((node) => node.diagram.x + node.diagram.width))
-    const maxY = Math.max(...childNodes.map((node) => node.diagram.y + node.diagram.height))
-    const bounds = {
-      id: group.id,
-      childIds,
-      headerHeight,
-      x: minX - paddingX - 8,
-      y: minY - headerHeight - paddingTop - 8,
-      width: maxX - minX + (paddingX + 8) * 2,
-      height: maxY - minY + headerHeight + paddingTop + paddingBottom + 16,
-    }
-    return [{
-      ...bounds,
-      left: bounds.x,
-      top: bounds.y,
-      right: bounds.x + bounds.width,
-      bottom: bounds.y + bounds.height,
-      centerX: bounds.x + bounds.width / 2,
-      centerY: bounds.y + bounds.height / 2,
-    }]
-  })
 }
 
 function translateNode(node, offsetX, offsetY) {
@@ -1295,7 +1695,10 @@ function compareComponentPriority(left, right, nodeById) {
     return 3
   }
   return rank(leftNodes) - rank(rightNodes)
+    || right.nodeIds.length - left.nodeIds.length
+    || Number(right.rootVerified) - Number(left.rootVerified)
     || Number(right.suggestedLinkIds?.length > 0) - Number(left.suggestedLinkIds?.length > 0)
+    || String(left.rootId ?? '').localeCompare(String(right.rootId ?? ''), 'id')
 }
 
 function buildTraversal(rootId, nodes, edges) {
@@ -1354,8 +1757,8 @@ function chunk(items, size) {
 
 function straightLinkPoints(source, target) {
   if (!source || !target) return []
-  const sourceBox = source.diagram
-  const targetBox = target.diagram
+  const sourceBox = connectionBoxForNode(source)
+  const targetBox = connectionBoxForNode(target)
   if (Math.abs(targetBox.centerY - sourceBox.centerY) < 10) {
     return targetBox.centerX >= sourceBox.centerX
       ? [
@@ -1382,84 +1785,75 @@ function rowHeight(nodes, settings) {
   return Math.max(...nodes.map((node) => nodeSize(node, settings).height), settings.nodeHeight)
 }
 
-function routeEdge(source, target, {
-  mountingGroupBounds = [],
-  nodeObstacles = [],
-  avoidPhysicalGroups = false,
-} = {}) {
-  if (!avoidPhysicalGroups || !mountingGroupBounds.length) {
-    return routeBasicEdge(source, target)
-  }
-  const boundsById = new Map(mountingGroupBounds.map((bounds) => [bounds.id, bounds]))
-  const sourceGroup = boundsById.get(source?.compoundGroupId)
-  const targetGroup = boundsById.get(target?.compoundGroupId)
-  if (!sourceGroup && !targetGroup) return routeBasicEdge(source, target)
-  if (sourceGroup?.id === targetGroup?.id) {
-    return routeCompoundInternalEdge(source, target)
-  }
-
-  const sourceAnchor = createPhysicalRouteAnchor(source, sourceGroup, targetGroup ?? target?.diagram)
-  const targetAnchor = createPhysicalRouteAnchor(target, targetGroup, sourceGroup ?? source?.diagram)
-  if (!sourceAnchor || !targetAnchor) return routeBasicEdge(source, target)
-
-  const endpointGroupIds = new Set([sourceGroup?.id, targetGroup?.id].filter(Boolean))
-  const obstacles = [
-    ...mountingGroupBounds
-      .filter((bounds) => !endpointGroupIds.has(bounds.id)),
-    ...nodeObstacles
-      .filter((node) => node.id !== source.id && node.id !== target.id
-        && !endpointGroupIds.has(node.compoundGroupId))
-      .map((node) => ({
-        left: node.diagram.x,
-        top: node.diagram.y,
-        right: node.diagram.x + node.diagram.width,
-        bottom: node.diagram.y + node.diagram.height,
-      })),
-  ]
-  const middle = findOrthogonalRoute(sourceAnchor.outer, targetAnchor.outer, obstacles)
-  if (!middle.length) return routeBasicEdge(source, target)
-  return compactPoints([
-    sourceAnchor.node,
-    sourceAnchor.outer,
-    ...middle.slice(1, -1),
-    targetAnchor.outer,
-    targetAnchor.node,
-  ])
-}
-
-function routeCompoundInternalEdge(source, target) {
-  if (!source?.diagram || !target?.diagram) return []
-  const sourceBox = source.diagram
-  const targetBox = target.diagram
-  const sourceBelow = targetBox.centerY >= sourceBox.centerY
-  const sourcePoint = {
-    x: sourceBox.centerX,
-    y: sourceBelow ? sourceBox.bottomY : sourceBox.topY,
-  }
-  const targetPoint = {
-    x: targetBox.centerX,
-    y: sourceBelow ? targetBox.topY : targetBox.bottomY,
-  }
-  if (Math.abs(targetPoint.x - sourcePoint.x) < 1) {
-    return [sourcePoint, targetPoint]
-  }
-  const middleY = sourceBelow
-    ? sourcePoint.y + Math.max(12, (targetPoint.y - sourcePoint.y) / 2)
-    : sourcePoint.y - Math.max(12, (sourcePoint.y - targetPoint.y) / 2)
-  return compactPoints([
-    sourcePoint,
-    { x: sourcePoint.x, y: middleY },
-    { x: targetPoint.x, y: middleY },
-    targetPoint,
-  ])
-}
-
-function routeBasicEdge(source, target) {
+function routeEdge(source, target, mountingBoxById = new Map()) {
   if (!source || !target) return []
-  const sourceBox = source.diagram
-  const targetBox = target.diagram
+  const sourceBox = connectionBoxForNode(source)
+  const targetBox = connectionBoxForNode(target)
   const sourceCenter = { x: sourceBox.centerX, y: sourceBox.centerY }
   const targetCenter = { x: targetBox.centerX, y: targetBox.centerY }
+  const sourceMountingBox = mountingBoxById.get(source.mountingBoxId)
+  const targetMountingBox = mountingBoxById.get(target.mountingBoxId)
+  const crossesMountingBoxes = source.mountingBoxId !== target.mountingBoxId
+    && (sourceMountingBox || targetMountingBox)
+
+  const sourceParentsTargetBox = sourceMountingBox
+    && targetMountingBox?.layoutParentBoxId === sourceMountingBox.id
+    && targetMountingBox.layoutParentNodeId === source.id
+    && targetMountingBox.layoutChildNodeId === target.id
+  const targetParentsSourceBox = targetMountingBox
+    && sourceMountingBox?.layoutParentBoxId === targetMountingBox.id
+    && sourceMountingBox.layoutParentNodeId === target.id
+    && sourceMountingBox.layoutChildNodeId === source.id
+  if (sourceParentsTargetBox || targetParentsSourceBox) {
+    const parentNode = sourceParentsTargetBox ? source : target
+    const childNode = sourceParentsTargetBox ? target : source
+    const parentPoint = {
+      x: parentNode.diagram.centerX,
+      y: parentNode.diagram.bottomY,
+    }
+    const childPoint = {
+      x: childNode.diagram.centerX,
+      y: childNode.diagram.topY,
+    }
+    if (Math.abs(parentPoint.x - childPoint.x) < 1) {
+      return sourceParentsTargetBox
+        ? [parentPoint, childPoint]
+        : [childPoint, parentPoint]
+    }
+    const middleY = parentPoint.y + (childPoint.y - parentPoint.y) / 2
+    const points = [
+      parentPoint,
+      { x: parentPoint.x, y: middleY },
+      { x: childPoint.x, y: middleY },
+      childPoint,
+    ]
+    return sourceParentsTargetBox ? points : points.reverse()
+  }
+
+  if (crossesMountingBoxes) {
+    const sourcePoint = sourceMountingBox
+      ? { x: sourceCenter.x, y: sourceBox.topY }
+      : {
+        x: sourceCenter.x,
+        y: targetCenter.y >= sourceCenter.y ? sourceBox.bottomY : sourceBox.topY,
+      }
+    const targetPoint = targetMountingBox
+      ? { x: targetCenter.x, y: targetBox.topY }
+      : {
+        x: targetCenter.x,
+        y: targetCenter.y >= sourceCenter.y ? targetBox.topY : targetBox.bottomY,
+      }
+    const mountingBoxTops = [sourceMountingBox?.y, targetMountingBox?.y]
+      .filter((value) => Number.isFinite(value))
+    const railY = Math.min(...mountingBoxTops) - 18
+    return compactPoints([
+      sourcePoint,
+      { x: sourcePoint.x, y: railY },
+      { x: targetPoint.x, y: railY },
+      targetPoint,
+    ])
+  }
+
   if (Math.abs(targetCenter.y - sourceCenter.y) < 10) {
     const sourceRight = targetCenter.x >= sourceCenter.x
     const sourcePoint = {
@@ -1496,174 +1890,47 @@ function routeBasicEdge(source, target) {
   ]
 }
 
-function createPhysicalRouteAnchor(node, group, other) {
-  if (!node?.diagram || !other) return null
-  const box = node.diagram
-  const center = {
-    x: box.centerX,
-    y: box.centerY,
-  }
-  const otherCenter = {
-    x: other.centerX ?? other.x + other.width / 2,
-    y: other.centerY ?? other.y + other.height / 2,
-  }
-  const direction = routeDirection(
-    group ?? {
-      left: box.x,
-      right: box.x + box.width,
-      top: box.y,
-      bottom: box.y + box.height,
-      centerX: center.x,
-      centerY: center.y,
-    },
-    otherCenter,
-  )
-  const nodePoint = sidePoint(box, direction)
-  if (!group) return { node: nodePoint, outer: nodePoint }
-
-  const groupPoint = sidePoint(group, direction)
-  if (direction === 'left' || direction === 'right') groupPoint.y = nodePoint.y
-  else groupPoint.x = nodePoint.x
-  // Keep the internal lead aligned with the selected port. It is allowed to
-  // live inside the source/target compound panel; the external route never
-  // crosses a different physical panel.
-  return { node: nodePoint, outer: groupPoint }
-}
-
-function routeDirection(box, other) {
-  const deltaX = other.x - box.centerX
-  const deltaY = other.y - box.centerY
-  if (Math.abs(deltaX) >= Math.abs(deltaY)) return deltaX >= 0 ? 'right' : 'left'
-  return deltaY >= 0 ? 'bottom' : 'top'
-}
-
-function sidePoint(box, direction, gap = 0) {
-  const left = box.left ?? box.x
-  const top = box.top ?? box.y
-  const right = box.right ?? box.x + box.width
-  const bottom = box.bottom ?? box.y + box.height
-  const centerX = box.centerX ?? box.x + box.width / 2
-  const centerY = box.centerY ?? box.y + box.height / 2
-  if (direction === 'right') return { x: right + gap, y: centerY }
-  if (direction === 'left') return { x: left - gap, y: centerY }
-  if (direction === 'bottom') return { x: centerX, y: bottom + gap }
-  return { x: centerX, y: top - gap }
-}
-
-function findOrthogonalRoute(start, end, obstacles = []) {
-  if (!start || !end) return []
-  if (start.x === end.x && start.y === end.y) return [start, end]
-  const expanded = obstacles.map((bounds) => ({
-    left: bounds.left - 10,
-    right: bounds.right + 10,
-    top: bounds.top - 10,
-    bottom: bounds.bottom + 10,
-  }))
-  if (clearOrthogonalSegment(start, end, expanded)) return [start, end]
-
-  const xs = uniqueSorted([
-    start.x,
-    end.x,
-    ...expanded.flatMap((bounds) => [bounds.left, bounds.right]),
-  ])
-  const ys = uniqueSorted([
-    start.y,
-    end.y,
-    ...expanded.flatMap((bounds) => [bounds.top, bounds.bottom]),
-  ])
-  const startX = xs.indexOf(start.x)
-  const startY = ys.indexOf(start.y)
-  const endX = xs.indexOf(end.x)
-  const endY = ys.indexOf(end.y)
-  if (startX < 0 || startY < 0 || endX < 0 || endY < 0) return []
-
-  const startKey = `${startX},${startY},none`
-  const distances = new Map([[startKey, 0]])
-  const previous = new Map()
-  const queue = [{ x: startX, y: startY, direction: 'none', key: startKey, cost: 0 }]
-  const directions = [
-    { dx: 1, dy: 0, name: 'horizontal' },
-    { dx: 0, dy: 1, name: 'vertical' },
-    { dx: -1, dy: 0, name: 'horizontal' },
-    { dx: 0, dy: -1, name: 'vertical' },
+function routeBackboneGap(source, target, layoutNodes, index = 0) {
+  const targetBox = connectionBoxForNode(target)
+  const targetPoint = { x: targetBox.centerX, y: targetBox.topY }
+  // A missing rack path is a diagnostic, not a suggested or confirmed edge.
+  // Keep it as a short local callout at the affected island root instead of
+  // drawing a synthetic cable across unrelated components.
+  const calloutY = Math.max(12, targetPoint.y - 22)
+  return [
+    { x: targetPoint.x, y: calloutY },
+    targetPoint,
   ]
-  let endKey = null
-  while (queue.length) {
-    queue.sort((left, right) => (
-      (left.cost + manhattanDistance(left.x, left.y, endX, endY, xs, ys))
-        - (right.cost + manhattanDistance(right.x, right.y, endX, endY, xs, ys))
-        || left.key.localeCompare(right.key, 'id')
-    ))
-    const current = queue.shift()
-    if (!current) break
-    if (current.x === endX && current.y === endY) {
-      endKey = current.key
-      break
-    }
-    directions.forEach(({ dx, dy, name }) => {
-      const nextX = current.x + dx
-      const nextY = current.y + dy
-      if (nextX < 0 || nextX >= xs.length || nextY < 0 || nextY >= ys.length) return
-      const from = { x: xs[current.x], y: ys[current.y] }
-      const to = { x: xs[nextX], y: ys[nextY] }
-      if (!clearOrthogonalSegment(from, to, expanded)) return
-      const bendPenalty = current.direction !== 'none' && current.direction !== name ? 90 : 0
-      const cost = current.cost + Math.abs(to.x - from.x) + Math.abs(to.y - from.y) + bendPenalty
-      const key = `${nextX},${nextY},${name}`
-      if (cost >= (distances.get(key) ?? Number.POSITIVE_INFINITY)) return
-      distances.set(key, cost)
-      previous.set(key, current.key)
-      queue.push({ x: nextX, y: nextY, direction: name, key, cost })
-    })
+}
+
+function connectionBoxForNode(node) {
+  const diagram = node?.diagram
+  if (!diagram) return null
+  const visualSize = node.diagramClass === 'rack-root'
+    ? { width: 60, height: 52 }
+    : ['junction-peer', 'junction-extended'].includes(node.diagramClass)
+      ? { width: 44, height: 38 }
+      : { width: 24, height: 24 }
+  const centerX = diagram.centerX
+  const centerY = diagram.centerY
+  return {
+    x: centerX - visualSize.width / 2,
+    y: centerY - visualSize.height / 2,
+    width: visualSize.width,
+    height: visualSize.height,
+    centerX,
+    centerY,
+    topX: centerX,
+    topY: centerY - visualSize.height / 2,
+    bottomX: centerX,
+    bottomY: centerY + visualSize.height / 2,
   }
-  if (!endKey) return []
-
-  const points = []
-  let cursor = endKey
-  while (cursor) {
-    const [x, y] = cursor.split(',').map(Number)
-    points.push({ x: xs[x], y: ys[y] })
-    cursor = previous.get(cursor)
-  }
-  points.reverse()
-  return compactPoints(points)
-}
-
-function clearOrthogonalSegment(start, end, obstacles) {
-  if (start.x !== end.x && start.y !== end.y) return false
-  return !obstacles.some((bounds) => {
-    if (start.x === end.x) {
-      return start.x > bounds.left && start.x < bounds.right
-        && Math.max(Math.min(start.y, end.y), bounds.top)
-          < Math.min(Math.max(start.y, end.y), bounds.bottom)
-    }
-    return start.y > bounds.top && start.y < bounds.bottom
-      && Math.max(Math.min(start.x, end.x), bounds.left)
-        < Math.min(Math.max(start.x, end.x), bounds.right)
-  })
-}
-
-function uniqueSorted(values) {
-  return [...new Set(values.map((value) => Number(value)).filter(Number.isFinite))]
-    .sort((left, right) => left - right)
-}
-
-function manhattanDistance(x, y, targetX, targetY, xs, ys) {
-  return Math.abs(xs[x] - xs[targetX]) + Math.abs(ys[y] - ys[targetY])
 }
 
 function compactPoints(points) {
-  return points.filter((point, index) => {
-    if (index === 0 || index === points.length - 1) return true
-    const previous = points[index - 1]
-    const next = points[index + 1]
-    return !(
-      (previous.x === point.x && point.x === next.x)
-      || (previous.y === point.y && point.y === next.y)
-    )
-  }).filter((point, index, result) => index === 0
-    || point.x !== result[index - 1].x
-    || point.y !== result[index - 1].y)
+  return points.filter((point, index) => index === 0
+    || point.x !== points[index - 1].x
+    || point.y !== points[index - 1].y)
 }
 
 function buildCrossAreaMarkers(edges = [], layoutNodes = new Map(), width = 0) {
@@ -1713,6 +1980,12 @@ function validateLayoutBounds(layout) {
     maxY: node.diagram.y + node.diagram.height,
   }))
   layout.edges.forEach((edge) => edge.routePoints.forEach((point) => extents.push({
+    minX: point.x,
+    minY: point.y,
+    maxX: point.x,
+    maxY: point.y,
+  })))
+  ;(layout.backboneGaps ?? []).forEach((gap) => gap.routePoints.forEach((point) => extents.push({
     minX: point.x,
     minY: point.y,
     maxX: point.x,

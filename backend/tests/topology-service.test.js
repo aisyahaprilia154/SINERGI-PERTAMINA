@@ -155,6 +155,145 @@ test('mounting override updates only physical placement and survives detach', as
   )
 })
 
+test('mounting preview is read-only and exposes review, integrity, and relation delta', async () => {
+  const bundle = mountingBundle()
+  const initial = generateRelationArtifacts(bundle, {
+    config: { mountingSearchRadiusMeters: 5 },
+    generatedAt: '2026-08-19T01:00:00.000Z',
+  })
+  const record = applyArtifacts(baseRecord(bundle), initial)
+  record.mountingRelations = []
+  record.mountingReviewItems = undefined
+  record.mountingExpectations = undefined
+  const repository = new MemoryRepository([record])
+  const service = new TopologyService({
+    repository,
+    auditLog: new MemoryAuditLog(),
+    config: { mountingSearchRadiusMeters: 25 },
+    clock: () => new Date('2026-08-19T02:00:00.000Z'),
+  })
+  const before = await repository.get('dv-review')
+
+  const preview = await service.previewMountingRegeneration('dv-review')
+  const review = await service.getMountingReview('dv-review')
+
+  assert.equal(preview.integrity.valid, true)
+  assert.equal(preview.delta.addedCount, 1)
+  assert.equal(preview.after.searchRadiusMeters, 25)
+  assert.equal(review.items[0].reviewStatus, 'mounted')
+  assert.deepEqual(await repository.get('dv-review'), before)
+})
+
+test('mounting regeneration applies only the mounting projection with revision and idempotency guards', async () => {
+  const bundle = mountingBundle()
+  const initial = generateRelationArtifacts(bundle, {
+    config: { mountingSearchRadiusMeters: 5 },
+    generatedAt: '2026-08-19T01:00:00.000Z',
+  })
+  const record = applyArtifacts(baseRecord(bundle), initial)
+  record.mountingRelations = []
+  const repository = new MemoryRepository([record])
+  const auditLog = new MemoryAuditLog()
+  const service = new TopologyService({
+    repository,
+    auditLog,
+    config: { maxAutoDistanceMeters: 25 },
+    clock: () => new Date('2026-08-19T02:00:00.000Z'),
+  })
+  const before = await repository.get('dv-review')
+  const input = {
+    reason: 'Preview mounting 25 meter disetujui.',
+    expectedRecordRevision: before.recordRevision ?? 0,
+    idempotencyKey: 'mounting-regenerate-1',
+  }
+
+  const first = await service.regenerateMounting('dv-review', 'admin-1', input)
+  const retry = await service.regenerateMounting('dv-review', 'admin-1', input)
+  const after = await repository.get('dv-review')
+
+  assert.deepEqual(retry, first)
+  assert.equal(first.integrity.valid, true)
+  assert.equal(first.delta.addedCount, 1)
+  assert.equal(after.mountingRelations.length, 1)
+  assert.deepEqual(after.confirmedRelations, before.confirmedRelations)
+  assert.equal(auditLog.entries.length, 1)
+  assert.equal(auditLog.entries[0].event, 'topology.mounting_regenerated')
+})
+
+test('mounting expectation is audited, excludes indoor assets, and replays idempotently', async () => {
+  const bundle = mountingBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const auditLog = new MemoryAuditLog()
+  const service = new TopologyService({ repository, auditLog })
+  const input = {
+    assetId: 'CAM-01',
+    expectation: 'indoor',
+    reason: 'Kamera terpasang di dalam ruang kontrol.',
+    idempotencyKey: 'mounting-expectation-1',
+  }
+
+  const first = await service.setMountingExpectation('dv-review', 'admin-1', input)
+  const retry = await service.setMountingExpectation('dv-review', 'admin-1', input)
+
+  assert.deepEqual(retry, first)
+  assert.equal(first.relation, null)
+  assert.equal(first.mountingReviewItems[0].reviewStatus, 'indoor')
+  assert.equal(first.mountingExpectations[0].expectation, 'indoor')
+  assert.equal(auditLog.entries.length, 1)
+  assert.equal((await repository.get('dv-review')).topologyMutationReceipts.length, 1)
+})
+
+test('mounting bulk review validates every decision before one atomic write', async () => {
+  const bundle = mountingBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const auditLog = new MemoryAuditLog()
+  const service = new TopologyService({ repository, auditLog })
+  const before = await repository.get('dv-review')
+
+  await assert.rejects(service.reviewMountingBulk('dv-review', 'admin-1', {
+    decisions: [
+      { action: 'set_expectation', assetId: 'CAM-01', expectation: 'standalone' },
+      { action: 'assign', assetId: 'MISSING-ASSET', poleAssetId: 'POLE-NEAR' },
+    ],
+    reason: 'Validasi atomicity mounting.',
+  }))
+
+  assert.deepEqual(await repository.get('dv-review'), before)
+  assert.equal(auditLog.entries.length, 0)
+
+  const applied = await service.reviewMountingBulk('dv-review', 'admin-1', {
+    decisions: [{
+      action: 'assign',
+      assetId: 'CAM-01',
+      poleAssetId: 'POLE-FIELD',
+    }],
+    reason: 'Konfirmasi pemasangan hasil survei.',
+  })
+  assert.equal(applied.decisionCount, 1)
+  assert.equal(applied.relation.targetAssetId, 'POLE-FIELD')
+  assert.equal(auditLog.entries.length, 1)
+})
+
+test('mounting mutation rejects a stale aggregate revision before audit', async () => {
+  const bundle = mountingBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const record = applyArtifacts(baseRecord(bundle), initial)
+  record.recordRevision = 4
+  const repository = new SerializedMemoryRepository([record])
+  const auditLog = new MemoryAuditLog()
+  const service = new TopologyService({ repository, auditLog })
+
+  await assert.rejects(service.setMountingExpectation('dv-review', 'admin-1', {
+    assetId: 'CAM-01',
+    expectation: 'indoor',
+    reason: 'Klasifikasi hasil survei.',
+    expectedRecordRevision: 3,
+  }), (error) => error.code === 'dataset_version_stale_revision')
+  assert.equal(auditLog.entries.length, 0)
+})
+
 test('bulk review confirms recommended candidates and revokes every confirmed relation atomically', async () => {
   const bundle = reviewBundle()
   const initial = generateRelationArtifacts(bundle)

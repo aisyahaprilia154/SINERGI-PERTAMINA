@@ -1,29 +1,59 @@
 import {
-  networkFamilyColor,
   networkFamilyLabel,
   normalizeTopologyRole,
 } from '../../domain/topology-diagram-model.js'
+import { semanticZoomLevelForZoom } from './topology-viewport.js'
 
 const THEME = Object.freeze({
-  background: '#ffffff',
+  background: '#fdfcfb',
   surface: '#ffffff',
-  section: '#eef4f8',
-  sectionBorder: '#cfdae4',
+  section: '#f3f4f5',
+  sectionBorder: '#c7c5ce',
   lane: '#ffffff',
-  laneBorder: '#d7e0e8',
-  text: '#172231',
-  secondary: '#5e6e7d',
-  muted: '#8a98a5',
-  grid: '#e9f0f4',
+  laneBorder: '#c7c5ce',
+  text: '#03071d',
+  secondary: '#46464d',
+  muted: '#77767e',
+  grid: '#e7e8e9',
   edgeUnderlay: '#ffffff',
-  edge: '#64798b',
-  selected: '#174a73',
-  dimmed: '#b6c0c9',
-  candidate: '#bf7e16',
-  suggested: '#b87913',
-  unresolved: '#c4464f',
-  connected: '#137c61',
+  edge: '#006c4b',
+  selected: '#5b7eff',
+  dimmed: '#c7c5ce',
+  candidate: '#f97316',
+  suggested: '#f97316',
+  unresolved: '#ba1a1a',
+  connected: '#006c4b',
 })
+
+export function getTopologySelectionRoute(layout, selectedAssetId) {
+  if (!layout || !selectedAssetId || layout.mode === 'area-overview') {
+    return { nodeIds: [], edgeIds: [] }
+  }
+  const nodeById = new Map((layout.nodes ?? []).map((node) => [node.id, node]))
+  const edgeByNodePair = new Map()
+  ;(layout.edges ?? []).forEach((edge) => {
+    edgeByNodePair.set(nodePairKey(edge.sourceId, edge.targetId), edge.id)
+  })
+  const nodeIds = []
+  const edgeIds = []
+  const visited = new Set()
+  let current = nodeById.get(selectedAssetId)
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id)
+    nodeIds.push(current.id)
+    const parentId = current.layoutParentId ?? current.parentId
+    if (!parentId) break
+    const edgeId = edgeByNodePair.get(nodePairKey(current.id, parentId))
+    if (!edgeId) break
+    edgeIds.push(edgeId)
+    current = nodeById.get(parentId)
+  }
+  return { nodeIds: nodeIds.reverse(), edgeIds: edgeIds.reverse() }
+}
+
+function nodePairKey(sourceId, targetId) {
+  return [sourceId, targetId].sort().join('\u0000')
+}
 
 export function renderTopologyDiagramSvg({
   model,
@@ -38,13 +68,24 @@ export function renderTopologyDiagramSvg({
   showAdminLayers = false,
   showMountingPhysical = true,
   zoom = 1,
+  semanticLevel = null,
+  renderMode = 'interactive',
+  hoveredAssetId = null,
+  highlightAssetId = null,
   minimap = false,
 } = {}) {
   if (!model || model.status !== 'ready' || !layout || layout.status !== 'ready') return ''
   const nodes = layout.nodes
   const edges = layout.edges
   const bottom = layout.height - layout.options.footerHeight
-  const labelVisibility = getTopologyLabelVisibility({ labelMode, zoom, minimap })
+  const resolvedSemanticLevel = semanticLevel ?? semanticZoomLevelForZoom(zoom)
+  const labelVisibility = getTopologyLabelVisibility({
+    labelMode,
+    zoom,
+    minimap,
+    semanticLevel: resolvedSemanticLevel,
+    renderMode,
+  })
   const directIds = selectedAssetId ? new Set(
     model.nodeById.get(selectedAssetId)?.directEdgeIds ?? [],
   ) : new Set()
@@ -55,6 +96,9 @@ export function renderTopologyDiagramSvg({
         return edge ? [edge.sourceId, edge.targetId] : []
       }))
     : new Set()
+  const selectionRoute = getTopologySelectionRoute(layout, selectedAssetId)
+  const selectionPathIds = new Set(selectionRoute.edgeIds)
+  const selectionPathNodes = new Set([...directNodes, ...selectionRoute.nodeIds])
   const selectedEdge = selectedEdgeId ? model.edgeById.get(selectedEdgeId) : null
   const selectedEdgeNodes = selectedEdge
     ? new Set([selectedEdge.sourceId, selectedEdge.targetId])
@@ -62,6 +106,8 @@ export function renderTopologyDiagramSvg({
   const selectionActive = Boolean(selectedAssetId || selectedEdgeId)
   return `
     <svg class="topology-diagram-svg${minimap ? ' is-minimap' : ''}"
+      data-semantic-level="${escapeAttribute(resolvedSemanticLevel)}"
+      data-render-mode="${escapeAttribute(renderMode)}"
       xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${layout.width} ${layout.height}"
       width="${layout.width}" height="${layout.height}" role="img"
       aria-labelledby="topology-diagram-title topology-diagram-description">
@@ -82,11 +128,12 @@ export function renderTopologyDiagramSvg({
           <path d="M 0 0 L 10 5 L 0 10 z" fill="${THEME.selected}"/>
         </marker>
         <style>
-          .topology-bg{fill:${THEME.background}}
+          .topology-bg{fill:${renderMode === 'export' ? THEME.background : 'transparent'}}
           .topology-heading{font:700 20px Inter,ui-sans-serif,system-ui;fill:${THEME.text}}
           .topology-meta{font:500 11px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary}}
           .topology-summary{font:700 11px Inter,ui-sans-serif,system-ui;fill:${THEME.text}}
           .topology-section{fill:none;stroke:none}
+          .topology-region-boundary{fill:rgba(243,244,245,.16);stroke:rgba(199,197,206,.58);stroke-width:1;pointer-events:none;vector-effect:non-scaling-stroke}
           .topology-section-title{font:800 11px Inter,ui-sans-serif,system-ui;fill:${THEME.text};letter-spacing:.08em}
           .topology-section-count{font:600 10px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary}}
           .topology-section-divider{stroke:${THEME.sectionBorder};stroke-width:1}
@@ -98,6 +145,17 @@ export function renderTopologyDiagramSvg({
           .topology-area-overview-count{font:700 10px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary}}
           .topology-area-overview-metric{font:500 10px Inter,ui-sans-serif,system-ui;fill:${THEME.muted}}
           .topology-area-overview-action{font:800 10px Inter,ui-sans-serif,system-ui;fill:${THEME.selected}}
+          .topology-area-overview-badge{font:800 9px Inter,ui-sans-serif,system-ui;fill:#8a5d17}
+          .topology-area-overview-badge-bg{fill:#fff4d9;stroke:#efd8a8;stroke-width:1}
+          .topology-island-boundary{fill:rgba(243,244,245,.18);stroke:rgba(199,197,206,.62);stroke-width:1;pointer-events:none;vector-effect:non-scaling-stroke}
+          .topology-island-label{font:750 10px Inter,ui-sans-serif,system-ui;fill:#77767e;letter-spacing:.06em;pointer-events:none}
+          .topology-island-root{font:700 10px Inter,ui-sans-serif,system-ui;fill:#03071d;pointer-events:none}
+          .topology-island-meta{font:550 9px Inter,ui-sans-serif,system-ui;fill:#77767e;pointer-events:none}
+          .topology-diagram-svg[data-semantic-level="overview"] .topology-island-boundary{fill:rgba(243,244,245,.24);stroke:rgba(199,197,206,.72);stroke-width:1}
+          .topology-diagram-svg[data-semantic-level="overview"] .topology-island-label{font-size:16px;letter-spacing:.1em}
+          .topology-diagram-svg[data-semantic-level="overview"] .topology-island-root{font-size:14px}
+          .topology-diagram-svg[data-semantic-level="overview"] .topology-island-meta{font-size:12px}
+          .topology-diagram-svg[data-semantic-level="overview"] .topology-node.core .topology-node-name{display:none}
           .topology-lane{fill:none;stroke:none}
           .topology-lane-kicker{font:800 8px Inter,ui-sans-serif,system-ui;fill:#718492;letter-spacing:.09em}
           .topology-lane-meta{font:600 8px Inter,ui-sans-serif,system-ui;fill:#91a0ab}
@@ -107,14 +165,22 @@ export function renderTopologyDiagramSvg({
           .topology-band-title{font:800 8px Inter,ui-sans-serif,system-ui;fill:${THEME.muted};letter-spacing:.09em}
           .topology-band-divider{stroke:${THEME.laneBorder};stroke-width:1;stroke-dasharray:3 5}
           .topology-mounting-group{cursor:pointer;outline:none}
-          .topology-mounting-bubble{fill-opacity:1;stroke-width:1.7;stroke-dasharray:none;vector-effect:non-scaling-stroke}
-          .topology-mounting-group:hover .topology-mounting-bubble,.topology-mounting-group.selected .topology-mounting-bubble{stroke:${THEME.selected};stroke-width:2.5}
-          .topology-mounting-header{fill:rgba(255,255,255,.98);stroke-width:1.2}
-          .topology-mounting-pole-mark{fill:#fff;stroke-width:1.5}
-          .topology-mounting-label-bg{fill:rgba(255,255,255,.98);stroke:rgba(113,132,146,.28);stroke-width:1}
-          .topology-mounting-label{font:850 12px Inter,ui-sans-serif,system-ui;fill:#29495f;letter-spacing:.02em}
-          .topology-mounting-summary{font:600 10px Inter,ui-sans-serif,system-ui;fill:#6d7f8d}
-          .topology-mounting-count{font:850 9px Inter,ui-sans-serif,system-ui;fill:#4e6879}
+          .topology-mounting-group.excluded,.topology-mounting-group.needs-mounting{cursor:default}
+          .topology-mounting-bubble{fill-opacity:.42;stroke-width:1.3;vector-effect:non-scaling-stroke;pointer-events:all}
+          .topology-mounting-group.excluded .topology-mounting-bubble{fill:#fff4e8;stroke:#f97316}
+          .topology-mounting-group.needs-mounting .topology-mounting-bubble{fill:#fff9db;stroke:#d89b00;stroke-dasharray:5 3}
+          .topology-mounting-group.empty .topology-mounting-bubble{fill:#f8fafc;stroke:#94a3b8;stroke-dasharray:4 3}
+          .topology-mounting-group:hover .topology-mounting-bubble,.topology-mounting-group.selected .topology-mounting-bubble{stroke:${THEME.selected};stroke-width:2.2}
+          .topology-mounting-header-line{stroke:rgba(113,132,146,.28);stroke-width:1;vector-effect:non-scaling-stroke;pointer-events:none}
+          .topology-mounting-label-bg{fill:rgba(255,255,255,.88);stroke:rgba(113,132,146,.28);stroke-width:1}
+          .topology-mounting-label{font:800 9px Inter,ui-sans-serif,system-ui;fill:#4e6879;letter-spacing:.03em;pointer-events:none}
+          .topology-mounting-meta{font:600 8px Inter,ui-sans-serif,system-ui;fill:#718492;pointer-events:none}
+          .topology-mounting-group.excluded .topology-mounting-label{fill:#c44f0a}
+          .topology-mounting-group.excluded .topology-mounting-meta{fill:#a44810}
+          .topology-mounting-group.needs-mounting .topology-mounting-label{fill:#9a6700}
+          .topology-mounting-group.needs-mounting .topology-mounting-meta{fill:#805600}
+          .topology-mounting-group.empty .topology-mounting-label{fill:#526474}
+          .topology-mounting-group.empty .topology-mounting-meta{fill:#718492}
           .topology-cross-area-gateway{pointer-events:none}
           .topology-cross-area-line{stroke:#7294a7;stroke-width:1.4;stroke-dasharray:4 4}
           .topology-cross-area-marker{fill:#fff;stroke:#7294a7;stroke-width:1.3}
@@ -125,7 +191,8 @@ export function renderTopologyDiagramSvg({
           .topology-unresolved-label{font:750 10px Inter,ui-sans-serif,system-ui;fill:${THEME.unresolved}}
           .topology-edge-underlay{fill:none;stroke:${THEME.edgeUnderlay};stroke-width:6;stroke-linecap:round;stroke-linejoin:round}
           .topology-edge{fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
-          .topology-edge.selected{stroke:${THEME.selected};stroke-width:4}
+          .topology-edge.trace{stroke:${THEME.selected};stroke-width:5}
+          .topology-edge.selected,.topology-edge.selected-path{stroke:${THEME.selected};stroke-width:4}
           .topology-edge.dimmed{stroke:${THEME.dimmed};opacity:.32}
           .topology-edge.direct{stroke-width:4}
           .topology-edge.suggested{stroke:${THEME.suggested};stroke-dasharray:9 7;stroke-width:2.8}
@@ -133,25 +200,34 @@ export function renderTopologyDiagramSvg({
           .topology-edge.candidate.dimmed{opacity:.22}
           .topology-node{cursor:pointer;outline:none}
           .topology-node-card{fill:#fff;stroke:#d7e0e8;stroke-width:1.2}
-          .topology-node.physical .topology-node-card{fill:#fff;stroke:#c7d8e2;stroke-width:1.45}
-          .topology-node.physical .topology-node-name{font-size:12px}
-          .topology-node.physical .topology-node-type{font-size:10px}
           .topology-node-accent{opacity:.92}
           .topology-node:hover .topology-node-card,.topology-node:focus .topology-node-card{fill:#fff;stroke:${THEME.selected};stroke-width:2}
-          .topology-node.core .topology-node-card{fill:#f1f8fc;stroke:#a8c8da;stroke-width:1.6}
-          .topology-node.core .topology-device-icon{fill:#2388b9;stroke:#12638c;stroke-width:2.8}
+          .topology-node.core .topology-node-card{fill:#fff;stroke:#c7c5ce;stroke-width:1.6}
+          .topology-node.core .topology-device-icon{fill:#fff;stroke:#03071d;stroke-width:2.4}
           .topology-node.core .topology-device-glyph{fill:#fff}
           .topology-node.selected .topology-device-icon,.topology-node:focus .topology-device-icon{stroke:${THEME.selected};stroke-width:3.4}
+          .topology-node.mounting-excluded:not(.selected) .topology-device-icon{stroke:#f97316;stroke-width:2.4}
+          .topology-node.mounting-needs:not(.selected) .topology-device-icon{stroke:#d89b00;stroke-width:2.4}
+          .topology-node.selected-path .topology-device-icon{stroke:${THEME.selected};stroke-width:2.6}
           .topology-node.selected .topology-node-card{fill:#eef7fc;stroke:${THEME.selected};stroke-width:2.4}
-          .topology-node.direct .topology-device-icon{stroke:#5a8bad;stroke-width:2.5}
-          .topology-node.direct .topology-node-card{stroke:#83a9bf;stroke-width:1.8}
+          .topology-node.direct .topology-device-icon{stroke:${THEME.selected};stroke-width:2.5}
+          .topology-node.direct .topology-node-card{stroke:${THEME.selected};stroke-width:1.8}
           .topology-node.dimmed{opacity:.28}
           .topology-node.match .topology-device-icon{stroke:#13906d;stroke-width:2.5}
+          .topology-node.pulse .topology-node-halo{opacity:.9;stroke:${THEME.selected};stroke-width:3;animation:topology-node-pulse 1.5s ease-out}
+          @keyframes topology-node-pulse{0%{r:24;opacity:.85}100%{r:46;opacity:0}}
           .topology-node-hitbox{fill:transparent;stroke:none}
           .topology-node.disconnected .topology-node-card{fill:#fafbfc;stroke:#aeb9c3;stroke-dasharray:4 3}
           .topology-node.suggested-only .topology-node-card{fill:#fffaf0;stroke:${THEME.candidate};stroke-dasharray:5 3}
           .topology-node-halo{fill:none;stroke:${THEME.selected};stroke-width:2;opacity:0}
           .topology-node.selected .topology-node-halo,.topology-node:focus .topology-node-halo{opacity:.32}
+          .topology-node-selection-glow{fill:rgba(91,126,255,.08);stroke:${THEME.selected};stroke-width:2;opacity:0;vector-effect:non-scaling-stroke}
+          .topology-node.selected .topology-node-selection-glow,.topology-node:focus .topology-node-selection-glow{opacity:1}
+          .topology-node.pulse .topology-node-selection-glow{animation:topology-selection-pulse 1.4s ease-out}
+          @keyframes topology-selection-pulse{0%{opacity:1;stroke-width:4}100%{opacity:.35;stroke-width:2}}
+          .topology-node-status-dot{stroke:#fff;stroke-width:2;vector-effect:non-scaling-stroke}
+          .topology-node-status-dot.online{fill:#006c4b}
+          .topology-node-status-dot.offline{fill:#ba1a1a}
           .topology-device-icon{fill:${THEME.surface};stroke-width:2.2}
           .topology-device-glyph{font:900 8px Inter,ui-sans-serif,system-ui;fill:${THEME.text};pointer-events:none}
           .topology-node-name{font:750 11px Inter,ui-sans-serif,system-ui;fill:${THEME.text};text-anchor:middle}
@@ -163,7 +239,6 @@ export function renderTopologyDiagramSvg({
           .topology-compact-type{font:500 8px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary}}
           .topology-node-warning{fill:#fff7e5;stroke:${THEME.candidate};stroke-width:1.5}
           .topology-node-warning-text{font:900 9px Inter,ui-sans-serif,system-ui;fill:${THEME.candidate};text-anchor:middle}
-          .topology-node-status-dot{stroke:#fff;stroke-width:1.2}
           .topology-candidate{cursor:pointer}
           .topology-candidate-marker{fill:#fff9ed;stroke:${THEME.candidate};stroke-width:2;stroke-dasharray:4 3}
           .topology-candidate-text{font:800 8px Inter,ui-sans-serif,system-ui;fill:${THEME.candidate}}
@@ -174,29 +249,71 @@ export function renderTopologyDiagramSvg({
           .topology-unresolved-x{stroke:${THEME.unresolved};stroke-width:1.7}
           .topology-legend-label{font:600 9px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary}}
           .topology-legend-title{font:800 8px Inter,ui-sans-serif,system-ui;fill:${THEME.muted};letter-spacing:.08em}
-          .topology-disclaimer{font:500 9px Inter,ui-sans-serif,system-ui;fill:${THEME.muted}}
-        </style>
+           .topology-disclaimer{font:500 9px Inter,ui-sans-serif,system-ui;fill:${THEME.muted}}
+           .topology-node-card{fill:none;stroke:none}
+           .topology-node:hover .topology-node-card,.topology-node:focus .topology-node-card,.topology-node.selected .topology-node-card,.topology-node.core .topology-node-card,.topology-node.disconnected .topology-node-card,.topology-node.suggested-only .topology-node-card{fill:none;stroke:none;stroke-width:0}
+           .topology-node-hitbox{fill:transparent;stroke:none;pointer-events:all}
+           .topology-node-accent{display:none}
+           .topology-device-icon{fill:#fff;stroke-width:1.8;vector-effect:non-scaling-stroke}
+           .topology-device-glyph{fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+           .topology-device-glyph-fill,.topology-device-led{fill:currentColor;stroke:none}
+           .topology-rack-glyph .topology-device-glyph,.topology-distribution-glyph .topology-device-glyph,.topology-switch-glyph .topology-device-glyph{stroke:${THEME.secondary}}
+           .topology-endpoint-glyph .topology-device-icon{fill:${THEME.surface};stroke-width:1.8}
+           .topology-node-name{font:700 10px Inter,ui-sans-serif,system-ui;fill:${THEME.text};text-anchor:middle;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round}
+           .topology-node-type{font:500 8px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary};text-anchor:middle;paint-order:stroke;stroke:#fff;stroke-width:3px}
+           .topology-node[data-label-detail="true"] .topology-node-name,.topology-node[data-label-detail="true"] .topology-node-type{opacity:0}
+           .topology-node[data-label-detail="true"]:hover .topology-node-name,.topology-node[data-label-detail="true"]:focus .topology-node-name,.topology-node[data-label-detail="true"].selected .topology-node-name,.topology-node[data-label-detail="true"].hovered .topology-node-name,.topology-node[data-label-detail="true"]:hover .topology-node-type,.topology-node[data-label-detail="true"]:focus .topology-node-type,.topology-node[data-label-detail="true"].selected .topology-node-type,.topology-node[data-label-detail="true"].hovered .topology-node-type{opacity:1}
+           .topology-node.selected .topology-device-icon,.topology-node:focus .topology-device-icon{stroke:${THEME.selected};stroke-width:2.8}
+           .topology-node.selected-path .topology-device-icon{stroke:${THEME.selected};stroke-width:2.5}
+           .topology-node.selected .topology-device-glyph,.topology-node.selected .topology-device-glyph-fill,.topology-node.selected .topology-device-led,.topology-node.selected-path .topology-device-glyph,.topology-node.selected-path .topology-device-glyph-fill,.topology-node.selected-path .topology-device-led{color:${THEME.selected};stroke:${THEME.selected};fill:${THEME.selected}}
+           .topology-node.disconnected .topology-device-icon{fill:#ffdad6;stroke:#ba1a1a}
+           .topology-node.disconnected .topology-device-glyph{color:#ba1a1a;stroke:#ba1a1a}
+           .topology-node.dimmed{opacity:.26}
+           .topology-edge-underlay{stroke:${THEME.edgeUnderlay};stroke-width:5;stroke-linecap:round;stroke-linejoin:round}
+           .topology-edge{stroke:${THEME.edge};stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+           .topology-edge.edge-role-backbone{stroke-width:3.4}
+           .topology-edge.edge-role-access{stroke-width:1.7;opacity:.76}
+          .topology-edge.edge-role-peer{stroke-width:2;opacity:.82}
+          .topology-backbone-gap-underlay{fill:none;stroke:#fff;stroke-width:6;stroke-linecap:round;stroke-linejoin:round}
+          .topology-backbone-gap-line{fill:none;stroke:${THEME.candidate};stroke-width:2.8;stroke-dasharray:10 8;stroke-linecap:round;stroke-linejoin:round;opacity:.9}
+          .topology-backbone-gap-target{fill:#fff8e9;stroke:${THEME.candidate};stroke-width:2;stroke-dasharray:3 2}
+          .topology-backbone-gap-label{font:800 8px Inter,ui-sans-serif,system-ui;fill:#9a691b;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round}
+          .topology-edge.trace,.topology-edge.selected,.topology-edge.selected-path{stroke:${THEME.selected};stroke-width:4.6;opacity:1}
+           .topology-edge.dimmed{stroke:${THEME.dimmed};opacity:.24}
+           .topology-mounting-member-halo{fill:none;stroke-width:2;stroke-dasharray:2 4;opacity:.55;vector-effect:non-scaling-stroke}
+           .topology-disconnected-tray-line{stroke:${THEME.sectionBorder};stroke-width:1;stroke-dasharray:4 5}
+           .topology-disconnected-tray .topology-isolated-title{font:700 9px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary}}
+           .topology-area-overview-card rect{fill:#fff;stroke:${THEME.sectionBorder};stroke-width:1}
+           .topology-area-overview-card:hover rect,.topology-area-overview-card:focus rect{stroke:${THEME.selected};stroke-width:1.8}
+         </style>
       </defs>
       <rect class="topology-bg" width="${layout.width}" height="${layout.height}"/>
-      ${renderHeading(model, layout, context, minimap)}
       ${layout.mode === 'area-overview'
         ? renderAreaOverview(layout)
         : `<g class="topology-sections" aria-label="Area fasilitas">
           ${layout.sections.map((section) => renderSection(section)).join('')}
         </g>`}
       ${showMountingPhysical && layout.mode !== 'area-overview'
-        ? renderMountingGroups(model, layout, { selectedMountingGroupId, minimap })
+        ? renderMountingGroups(model, layout, {
+          selectedAssetId,
+          selectedMountingGroupId,
+          minimap,
+        })
         : ''}
+      ${layout.mode === 'area-overview' ? '' : renderBackboneGaps(layout, { minimap })}
       <g class="topology-edges" aria-label="Relasi terkonfirmasi">
         ${edges.map((edge) => renderEdge({
           ...model.edgeById.get(edge.id),
           ...edge,
-          dimmed: edge.dimmed || (selectionActive && (
-            selectedEdgeId ? edge.id !== selectedEdgeId : !directIds.has(edge.id)
+          dimmed: edge.dimmed || (selectionActive && !edge.trace && (
+            selectedEdgeId
+              ? edge.id !== selectedEdgeId
+              : !directIds.has(edge.id) && !selectionPathIds.has(edge.id)
           )),
         }, {
           selectedEdgeId,
           directIds,
+          selectionPathIds,
           minimap,
         })).join('')}
       </g>
@@ -209,20 +326,26 @@ export function renderTopologyDiagramSvg({
         ${nodes.map((node) => renderNode({
           ...model.nodeById.get(node.id),
           ...node,
-          dimmed: node.dimmed || (selectionActive && (
+          dimmed: node.dimmed || (selectionActive && !node.trace && (
             selectedAssetId
-              ? !directNodes.has(node.id) && node.id !== selectedAssetId
+              ? !selectionPathNodes.has(node.id) && node.id !== selectedAssetId
               : !selectedEdgeNodes.has(node.id)
           )),
         }, {
           selectedAssetId,
           directNodes,
+          selectionPathNodes,
           labelVisibility,
+          semanticLevel: resolvedSemanticLevel,
+          hoveredAssetId,
           minimap,
+          highlightAssetId,
         })).join('')}
       </g>
       ${layout.mode === 'area-overview' ? '' : renderCrossAreaMarkers(layout)}
-      ${minimap ? '' : renderLegend(bottom, layout.width, showMountingPhysical)}
+      ${renderMode === 'export' && !minimap
+        ? renderLegend(bottom, layout.width, showMountingPhysical)
+        : ''}
     </svg>
   `
 }
@@ -231,10 +354,19 @@ export function getTopologyLabelVisibility({
   labelMode = 'auto',
   zoom = 1,
   minimap = false,
+  semanticLevel = null,
+  renderMode = 'interactive',
 } = {}) {
   if (minimap || labelMode === 'off') return 'off'
-  if (labelMode === 'all') return 'all'
-  return Number(zoom) >= .75 ? 'all' : 'core-peer'
+  if (renderMode === 'export' || labelMode === 'all') return 'all'
+  const level = semanticLevel ?? semanticZoomLevelForZoom(zoom)
+  if (level === 'overview') return 'core-peer'
+  if (level === 'detail') return 'detail'
+  return 'all'
+}
+
+export function getTopologySemanticLevel({ zoom = 1, renderMode = 'interactive' } = {}) {
+  return renderMode === 'export' ? 'focus' : semanticZoomLevelForZoom(zoom)
 }
 
 export function renderTopologyDiagramLegend(model) {
@@ -272,16 +404,18 @@ function renderHeading(model, layout, context, minimap) {
 }
 
 function renderSection(section) {
+  const regionHeight = section.isolated
+    ? Math.max(80, section.isolated.y - 10)
+    : section.height
   return `
     <g class="topology-section-group" data-area-key="${escapeAttribute(section.key)}">
-      <text class="topology-section-title" x="${section.x + 24}" y="${section.y + 30}">
-        ${escapeXml(section.name.toUpperCase())}
+      <rect class="topology-region-boundary" x="${section.x}" y="${section.y}" width="${section.width}" height="${regionHeight}" rx="12"/>
+      <text class="topology-section-title" x="${section.x + 14}" y="${section.y + 22}">
+        ${escapeXml(section.name)}
       </text>
-      <text class="topology-section-count" x="${section.x + section.width - 24}" y="${section.y + 30}" text-anchor="end">
-        ${section.nodeCount} aset · ${section.componentCount} kelompok jalur · ${section.isolatedCount} belum terhubung${section.suggestedOnlyCount ? ` · ${section.suggestedOnlyCount} memiliki saran` : ''}${section.crossAreaCount ? ` · ${section.crossAreaCount} lintas area` : ''}
+      <text class="topology-section-count" x="${section.x + section.width - 14}" y="${section.y + 22}" text-anchor="end">
+        ${section.nodeCount} perangkat${section.isolatedCount ? ` · ${section.isolatedCount} belum terhubung` : ''}${section.crossAreaCount ? ` · ${section.crossAreaCount} lintas area` : ''}
       </text>
-      <line class="topology-section-divider" x1="${section.x + 24}" y1="${section.y + 42}"
-        x2="${section.x + section.width - 24}" y2="${section.y + 42}"/>
       ${section.lanes.map((lane) => renderLane(lane, section)).join('')}
       ${section.isolated ? renderIsolated(section.isolated, section) : ''}
       ${section.unresolved ? renderUnresolvedPanel(section.unresolved, section) : ''}
@@ -290,11 +424,7 @@ function renderSection(section) {
 }
 
 function renderAreaOverview(layout) {
-  const margin = layout.options.overviewMargin ?? layout.options.margin
   return `<g class="topology-area-overview" aria-label="Ringkasan area fasilitas">
-    <text class="topology-overview-kicker" x="${margin}" y="${margin + 78}">
-      AREA OVERVIEW · PILIH AREA UNTUK DETAIL
-    </text>
     ${(layout.overviewAreas ?? []).map((area) => `
       <g class="topology-area-overview-card" data-area-overview="${escapeAttribute(area.key)}"
         tabindex="0" role="button" aria-label="Buka detail area ${escapeAttribute(area.name)}">
@@ -303,14 +433,18 @@ function renderAreaOverview(layout) {
           shorten(area.name, 34),
         )}</text>
         <text class="topology-area-overview-count" x="${area.x + 18}" y="${area.y + 53}">
-          ${area.nodeCount} aset · ${area.componentCount} kelompok jalur
+          ${area.nodeCount} aset · ${area.poleCount} tiang total
         </text>
         <text class="topology-area-overview-metric" x="${area.x + 18}" y="${area.y + 78}">
-          ${area.connectedCount} terhubung · ${area.disconnectedCount} tanpa relasi
+          ${area.occupiedPoleCount} terisi · ${area.emptyPoleCount} kosong
         </text>
         <text class="topology-area-overview-metric" x="${area.x + 18}" y="${area.y + 100}">
-          ${area.crossAreaEdgeCount ? `${area.crossAreaEdgeCount} koneksi antar-area` : 'Tidak ada koneksi antar-area'}
+          ${area.unmountedCount} perlu mounting · ${area.disconnectedCount} tanpa relasi
         </text>
+        ${(area.unmountedCount || area.disconnectedCount) ? `<g class="topology-area-overview-badge">
+          <rect class="topology-area-overview-badge-bg" x="${area.x + 18}" y="${area.y + 112}" width="${Math.max(110, String(area.unmountedCount).length * 6 + 94)}" height="18" rx="9"/>
+          <text class="topology-area-overview-badge" x="${area.x + 27}" y="${area.y + 124}">${area.unmountedCount} belum dimount</text>
+        </g>` : ''}
         <text class="topology-area-overview-action" x="${area.x + area.width - 18}" y="${area.y + area.height - 18}" text-anchor="end">
           Buka detail →
         </text>
@@ -319,99 +453,80 @@ function renderAreaOverview(layout) {
   </g>`
 }
 
-function renderMountingGroups(model, layout, { selectedMountingGroupId = null, minimap = false } = {}) {
-  const layoutNodeById = new Map(layout.nodes.map((node) => [node.id, node]))
-  const boundsById = new Map((layout.mountingGroupBounds ?? []).map((bounds) => [bounds.id, bounds]))
-  return (model.mountingGroups ?? []).map((group, index) => {
-    const childNodes = group.childIds.map((id) => layoutNodeById.get(id)).filter(Boolean)
-    if (!childNodes.length) return ''
-    const hostName = shorten(group.hostName || group.hostId, 18)
-    const fallbackBounds = {
-      x: Math.min(...childNodes.map((node) => node.diagram.x)) - 16,
-      y: Math.min(...childNodes.map((node) => node.diagram.y)) - 36,
-      width: Math.max(...childNodes.map((node) => node.diagram.x + node.diagram.width))
-        - Math.min(...childNodes.map((node) => node.diagram.x)) + 32,
-      height: Math.max(...childNodes.map((node) => node.diagram.y + node.diagram.height))
-        - Math.min(...childNodes.map((node) => node.diagram.y)) + 52,
-    }
-    const bounds = boundsById.get(group.id) ?? fallbackBounds
-    const panelX = bounds.x
-    const panelY = bounds.y
-    const panelWidth = bounds.width
-    const panelHeight = bounds.height
-    const headerHeight = Math.min(42, Math.max(30, bounds.headerHeight ?? 32))
-    const palette = mountingBubblePalette(group.hostId, index)
-    const label = `${hostName} · ${childNodes.length} aset`
-    const typeSummary = summarizeMountedAssets(group.childAssets ?? childNodes)
-    const headerWidth = Math.max(120, panelWidth - 12)
-    const labelX = panelX + 6
-    const labelY = panelY + 6
-    const labelTextX = labelX + 32
-    const labelText = fitMountingText(label, headerWidth - 42, 7.2)
-    const summaryText = fitMountingText(typeSummary, headerWidth - 42, 5.6)
-    return `<g class="topology-mounting-group${selectedMountingGroupId === group.id ? ' selected' : ''}"
-      data-mounting-group-id="${escapeAttribute(group.id)}"
-      data-mounted-asset-ids="${escapeAttribute(childNodes.map((node) => node.id).join('|'))}"
-      tabindex="0" role="button"
-      aria-label="${escapeAttribute(label)} terpasang pada tiang yang sama">
-      <rect class="topology-mounting-bubble" x="${panelX}" y="${panelY}"
-        width="${panelWidth}" height="${panelHeight}" rx="14"
+function renderMountingGroups(model, layout, {
+  selectedAssetId = null,
+  selectedMountingGroupId = null,
+  minimap = false,
+} = {}) {
+  const boxes = layout.mountingBoxes ?? []
+  return boxes.map((box, index) => {
+    const hostName = shorten(box.label || box.hostName || box.hostId, 26)
+    const palette = box.kind === 'excluded'
+      ? { fill: '#fff4e8', stroke: '#f97316' }
+      : box.kind === 'needs-mounting'
+        ? { fill: '#fff9db', stroke: '#d89b00' }
+      : box.kind === 'empty'
+        ? { fill: '#f8fafc', stroke: '#94a3b8' }
+        : mountingBubblePalette(box.hostId || box.id, index)
+    const label = box.kind === 'excluded'
+      ? 'Area non-tiang / indoor'
+      : box.kind === 'needs-mounting'
+        ? 'Perlu mounting'
+      : hostName
+    const active = selectedMountingGroupId === box.id || box.nodeIds.includes(selectedAssetId)
+    const classes = [
+      'topology-mounting-group',
+      box.kind === 'excluded'
+        ? 'excluded'
+        : box.kind === 'needs-mounting'
+          ? 'needs-mounting'
+          : box.kind === 'empty' ? 'empty' : 'confirmed',
+      active ? 'selected' : '',
+    ].filter(Boolean).join(' ')
+    const interaction = !['excluded', 'needs-mounting'].includes(box.kind)
+      ? ` data-mounting-group-id="${escapeAttribute(box.id)}" tabindex="0" role="button"`
+      : ' role="group"'
+    const inheritedCount = box.presentationInheritedNodeIds?.length ?? 0
+    const mountedCount = Math.max(0, box.nodeIds.length - inheritedCount)
+    const meta = box.kind === 'excluded'
+      ? `${box.nodeIds.length} aset · indoor/standalone`
+      : box.kind === 'needs-mounting'
+        ? `${box.nodeIds.length} aset · perlu ditetapkan`
+      : box.kind === 'empty'
+        ? '0 aset · belum ada mounting'
+      : inheritedCount
+        ? `${mountedCount} terpasang · ${inheritedCount} non-tiang`
+        : `${box.nodeIds.length} aset terpasang`
+    return `<g class="${classes}"${interaction}
+      aria-label="${escapeAttribute(`${label} · ${meta}`)}">
+      <rect class="topology-mounting-bubble" x="${box.x}" y="${box.y}"
+        width="${box.width}" height="${box.height}" rx="12"
         fill="${palette.fill}" stroke="${palette.stroke}"/>
-      ${minimap ? '' : `<rect class="topology-mounting-header" x="${labelX}" y="${labelY}"
-        width="${headerWidth}" height="${headerHeight}" rx="9"
-        fill="${palette.fill}" stroke="${palette.stroke}"/>
-      <circle class="topology-mounting-pole-mark" cx="${labelX + 16}" cy="${labelY + headerHeight / 2}" r="10" stroke="${palette.stroke}"/>
-      <text class="topology-mounting-count" x="${labelX + 16}" y="${labelY + headerHeight / 2 + 3}" text-anchor="middle">P</text>
-      <text class="topology-mounting-label" x="${labelTextX}" y="${labelY + 15}">${escapeXml(labelText)}</text>
-      <text class="topology-mounting-summary" x="${labelTextX}" y="${labelY + 30}">${escapeXml(summaryText)}</text>`}
-      <title>${escapeXml(label)} · ${escapeXml(typeSummary)} · blok fisik terpisah dari edge jaringan</title>
+      <line class="topology-mounting-header-line" x1="${box.x}" y1="${box.y + 30}"
+        x2="${box.x + box.width}" y2="${box.y + 30}"/>
+      <text class="topology-mounting-label" x="${box.x + 12}" y="${box.y + 19}">${escapeXml(label)}</text>
+      <text class="topology-mounting-meta" x="${box.x + box.width - 12}" y="${box.y + 19}"
+        text-anchor="end">${escapeXml(meta)}</text>
+      ${box.mountingConflict && !minimap ? `<text class="topology-mounting-meta" x="${box.x + 12}"
+        y="${box.y + box.height - 8}">Periksa konflik mounting</text>` : ''}
+      <title>${escapeXml(`${label} · ${meta}`)}</title>
     </g>`
   }).join('')
-}
-
-function fitMountingText(value, maxWidth, averageCharWidth) {
-  const text = String(value ?? '')
-  const maxChars = Math.max(6, Math.floor(Math.max(24, maxWidth) / averageCharWidth))
-  return text.length > maxChars ? `${text.slice(0, maxChars - 1)}…` : text
-}
-
-function summarizeMountedAssets(assets = []) {
-  const counts = new Map()
-  assets.forEach((asset) => {
-    const source = `${asset?.type ?? ''} ${asset?.assetType ?? ''} ${asset?.name ?? ''}`.toLowerCase()
-    const label = /cctv|camera|kamera/.test(source)
-      ? 'CCTV'
-      : /junction|\bjb\b/.test(source)
-        ? 'JB'
-        : asset?.type || asset?.assetType || 'Aset'
-    counts.set(label, (counts.get(label) ?? 0) + 1)
-  })
-  return [...counts.entries()]
-    .sort(([left], [right]) => left.localeCompare(right, 'id'))
-    .map(([label, count]) => `${label} ${count}`)
-    .join(' · ') || 'Aset terpasang'
 }
 
 function renderLane(lane, section) {
   const x = section.x + lane.x
   const y = section.y + lane.y
-  if (lane.presentation === 'hub-spoke') {
-    return `<g class="topology-lane-group topology-lane-hub-spoke" data-component-id="${escapeAttribute(lane.componentId)}">
-      <text class="topology-lane-kicker" x="${x + 4}" y="${y + 13}">${escapeXml(lane.title.toUpperCase())}</text>
-      <text class="topology-lane-meta" x="${x + lane.width - 4}" y="${y + 13}" text-anchor="end">
-        ${lane.nodes.length} perangkat · ${lane.edgeCount} koneksi
-      </text>
-      <line class="topology-lane-header-line" x1="${x + 4}" y1="${y + 23}" x2="${x + lane.width - 4}" y2="${y + 23}"/>
-      </g>`
+  if (lane.presentation === 'pole-backbone') {
+    const label = `Backbone tiang · ${lane.componentIds?.length ?? 0} komponen · ${lane.nodes.length} perangkat`
+    return `<g class="topology-lane-group topology-lane-pole-backbone" data-component-id="${escapeAttribute(lane.componentId)}"
+      aria-label="${escapeAttribute(label)}"><title>${escapeXml(label)}</title></g>`
   }
-  if (lane.presentation === 'compound-poles') {
-    return `<g class="topology-lane-group topology-lane-compound" data-component-id="${escapeAttribute(lane.componentId)}">
-      <text class="topology-lane-kicker" x="${x + 4}" y="${y + 13}">${escapeXml(lane.title.toUpperCase())}</text>
-      <text class="topology-lane-meta" x="${x + lane.width - 4}" y="${y + 13}" text-anchor="end">
-        ${lane.nodes.length} perangkat · ${lane.edgeCount} koneksi · blok fisik terpetakan
-      </text>
-      <line class="topology-lane-header-line" x1="${x + 4}" y1="${y + 23}" x2="${x + lane.width - 4}" y2="${y + 23}"/>
-      ${lane.bands.map((band) => renderBand(band, x, y)).join('')}
+  if (lane.presentation === 'hub-spoke') {
+    const islandLabel = `Network island ${String(lane.islandIndex ?? '').padStart(2, '0')}`.trim()
+    return `<g class="topology-lane-group topology-lane-hub-spoke" data-component-id="${escapeAttribute(lane.componentId)}"
+      aria-label="${escapeAttribute(`${islandLabel} · ${lane.nodes.length} perangkat · ${lane.edgeCount} koneksi`)}">
+      <title>${escapeXml(`${islandLabel} · ${lane.nodes.length} perangkat · ${lane.edgeCount} koneksi`)}</title>
     </g>`
   }
   return `
@@ -438,10 +553,10 @@ function renderIsolated(spec, section) {
     ? 'Belum Terhubung · Aset tanpa relasi terkonfirmasi'
     : 'Aset dengan saran koneksi'
   return `
-    <g class="topology-isolated-group">
-      <rect class="topology-isolated" x="${x}" y="${y}" width="${spec.width}" height="${spec.height}" rx="13"/>
-      <text class="topology-isolated-title" x="${x + 18}" y="${y + 27}">${title}</text>
-      <text class="topology-section-count" x="${x + spec.width - 18}" y="${y + 27}" text-anchor="end">
+    <g class="topology-disconnected-tray topology-isolated-group">
+      <line class="topology-disconnected-tray-line" x1="${x}" y1="${y + 5}" x2="${x + spec.width}" y2="${y + 5}"/>
+      <text class="topology-isolated-title" x="${x + 2}" y="${y + 24}">${title}</text>
+      <text class="topology-section-count" x="${x + spec.width - 2}" y="${y + 24}" text-anchor="end">
         ${spec.disconnectedCount} tanpa relasi${spec.suggestedOnlyCount ? ` · ${spec.suggestedOnlyCount} memiliki saran` : ''} · tidak ada koneksi buatan
       </text>
     </g>
@@ -464,20 +579,28 @@ function renderUnresolvedPanel(panel, section) {
   `
 }
 
-function renderEdge(edge, { selectedEdgeId, directIds, minimap }) {
+function renderEdge(edge, { selectedEdgeId, directIds, selectionPathIds, minimap }) {
   const path = orthogonalPath(edge.routePoints ?? edge.linePoints)
   const family = normalizeFamilyClass(edge.networkFamily)
   const selected = edge.id === selectedEdgeId
   const direct = directIds.has(edge.id)
+  const selectedPath = selectionPathIds.has(edge.id)
   const classes = [
     'topology-edge',
     `family-${family}`,
+    edge.trace ? 'trace' : '',
     selected ? 'selected' : '',
+    selectedPath ? 'selected-path' : '',
     direct ? 'direct' : '',
+    edge.edgeVisualRole ? `edge-role-${edge.edgeVisualRole}` : '',
     edge.dimmed ? 'dimmed' : '',
   ].filter(Boolean).join(' ')
-  const color = selected ? THEME.selected : edge.dimmed ? THEME.dimmed : THEME.edge
-  const marker = selected ? 'topology-arrow-selected' : 'topology-arrow'
+  const color = edge.trace || selected || selectedPath
+    ? THEME.selected
+    : edge.dimmed ? THEME.dimmed : THEME.edge
+  const marker = edge.trace || selected || selectedPath
+    ? 'topology-arrow-selected'
+    : 'topology-arrow'
   const arrow = !edge.dimmed && !minimap && edge.direction !== 'undirected'
     ? `${edge.direction === 'target_to_source' || edge.direction === 'bidirectional'
       ? ` marker-start="url(#${marker})"`
@@ -499,62 +622,84 @@ function renderEdge(edge, { selectedEdgeId, directIds, minimap }) {
 function renderNode(node, {
   selectedAssetId,
   directNodes,
+  selectionPathNodes = new Set(),
   labelVisibility,
+  semanticLevel = 'overview',
+  hoveredAssetId = null,
   minimap,
+  highlightAssetId = null,
 }) {
   const { x, y, width, height } = node.diagram
   const selected = node.id === selectedAssetId
   const direct = directNodes.has(node.id) && !selected
+  const selectedPath = selectionPathNodes.has(node.id) && !selected
   const classes = [
     'topology-node',
-    node.compoundGroupId ? 'physical' : '',
     node.dimmed ? 'dimmed' : '',
     node.isCore || ['root', 'core'].includes(node.topologyRole) ? 'core' : '',
     selected ? 'selected' : '',
+    selectedPath ? 'selected-path' : '',
+    node.id === hoveredAssetId ? 'hovered' : '',
+    node.id === highlightAssetId ? 'pulse' : '',
     direct ? 'direct' : '',
     node.matched ? 'match' : '',
     node.connectivityStatus === 'disconnected' ? 'disconnected' : '',
     node.connectivityStatus === 'suggested-only' ? 'suggested-only' : '',
+    node.mountingRelationStatus === 'excluded' ? 'mounting-excluded' : '',
+    ['needs-mounting', 'unmounted'].includes(node.mountingRelationStatus) ? 'mounting-needs' : '',
   ].filter(Boolean).join(' ')
-  const color = networkFamilyColor(node.networkFamily)
-  const physical = Boolean(node.compoundGroupId)
   const iconX = x + width / 2
-  const iconY = y + (physical ? Math.min(32, height * .38) : node.presentation === 'compact' ? 38 : 42)
-  const labelY = physical ? y + height - 23 : y + 13
-  const typeY = physical ? y + height - 8 : y + 25
+  const iconY = y + height / 2
+  const visualBox = topologyNodeVisualBox(node, iconX, iconY)
+  const labelY = visualBox.y + visualBox.height + 15
+  const typeY = visualBox.y + visualBox.height + 27
   const warning = node.connectivityStatus === 'disconnected'
-    ? '!'
-    : node.connectivityStatus === 'suggested-only' ? 'S' : ''
-  const showLabels = physical || labelVisibility === 'all'
-    || (labelVisibility === 'core-peer'
-      && ['rack-root', 'junction-peer', 'junction-extended'].includes(node.diagramClass))
-  const showType = showLabels && node.presentation !== 'hub-spoke'
-  const statusColor = node.connectivityStatus === 'disconnected'
-    ? THEME.unresolved
-    : node.connectivityStatus === 'suggested-only' ? THEME.candidate : THEME.connected
+    || node.connectivityStatus === 'suggested-only'
+  const isCoreOrJunction = ['rack-root', 'junction-peer', 'junction-extended']
+    .includes(node.diagramClass)
+  const color = node.isCore
+    ? THEME.text
+    : isCoreOrJunction ? THEME.text : THEME.secondary
+  const showLabels = labelVisibility === 'all'
+    || labelVisibility === 'detail'
+    || (labelVisibility === 'core-peer' && isCoreOrJunction)
+  const endpointLabel = labelVisibility === 'all'
+    || (labelVisibility === 'detail' && !isCoreOrJunction)
+  const showType = labelVisibility === 'all' && node.presentation !== 'hub-spoke'
+  const detailLabel = labelVisibility === 'detail' && !isCoreOrJunction
+  const labelDetailAttribute = detailLabel
+    ? ' data-label-detail="true"'
+    : ''
+  const focused = selected || node.id === hoveredAssetId
+  const labelText = shorten(node.name || node.id, node.presentation === 'hub-spoke' ? 24 : 32)
   return `
-    <g class="${classes}" data-node-id="${escapeAttribute(node.id)}" tabindex="0" role="button"
+    <g class="${classes}" data-node-id="${escapeAttribute(node.id)}"${detailLabel ? ' data-label-detail="true"' : ''} tabindex="0" role="button"
       aria-label="Pilih aset ${escapeAttribute(node.id)}">
       <title>${escapeXml(describeNode(node))}</title>
-      <rect class="topology-node-card" x="${x}" y="${y}" width="${width}" height="${height}" rx="10"/>
-      <rect class="topology-node-accent" x="${x + 8}" y="${y}" width="${Math.max(14, width - 16)}" height="3" rx="1.5"
-        fill="${escapeAttribute(color)}"/>
-      <rect class="topology-node-hitbox" x="${x}" y="${y}" width="${width}" height="${height}"/>
-      <circle class="topology-node-halo" cx="${iconX}" cy="${iconY}" r="${node.isCore ? 28 : 24}"/>
+      <rect class="topology-node-card topology-node-hitbox" x="${x}" y="${y}" width="${Math.max(36, width)}" height="${Math.max(36, height)}"/>
+      <rect class="topology-node-selection-glow" x="${visualBox.x - 6}" y="${visualBox.y - 6}"
+        width="${visualBox.width + 12}" height="${visualBox.height + 12}" rx="${visualBox.radius + 4}"/>
       ${renderNodeGlyph(node, iconX, iconY, color)}
-      ${showLabels ? `
-        <text class="topology-node-name" x="${iconX}" y="${labelY}">${escapeXml(shorten(node.name || node.id, node.presentation === 'hub-spoke' ? 18 : 24))}</text>
-        ${showType ? `<text class="topology-node-type" x="${iconX}" y="${typeY}">${escapeXml(shorten(node.type || 'Aset', 27))}</text>` : ''}
-      ` : ''}
-      <circle class="topology-node-status-dot" cx="${x + width - 10}" cy="${y + 10}" r="4" fill="${statusColor}"/>
-      ${warning ? `<circle class="topology-node-warning" cx="${x + width - 8}" cy="${y + 8}" r="8"/>
-        <text class="topology-node-warning-text" x="${x + width - 8}" y="${y + 11}">${warning}</text>` : ''}
-      ${node.isVerifiedRoot && !minimap ? `
-        <rect class="topology-root-badge" x="${iconX - 24}" y="${y - 15}" width="48" height="14" rx="7"/>
-        <text class="topology-root-text" x="${iconX}" y="${y - 5}" text-anchor="middle">ROOT</text>
+      <circle class="topology-node-status-dot${warning ? ' offline' : ' online'}"
+        cx="${visualBox.x + visualBox.width - 1}" cy="${visualBox.y + 1}" r="${node.isEndpoint ? 3 : 4}"/>
+      ${showLabels && (isCoreOrJunction || endpointLabel) ? `
+        <text class="topology-node-name"${labelDetailAttribute} x="${iconX}" y="${labelY}">${escapeXml(labelText)}</text>
+        ${showType ? `<text class="topology-node-type"${labelDetailAttribute} x="${iconX}" y="${typeY}">${escapeXml(shorten(node.type || 'Aset', 27))}</text>` : ''}
       ` : ''}
     </g>
   `
+}
+
+function topologyNodeVisualBox(node, centerX, centerY) {
+  const role = normalizeTopologyRole(node.topologyRole)
+  if (node.iconType === 'server-rack-core' || ['root', 'core', 'server', 'nvr', 'router'].includes(role)) {
+    return { x: centerX - 30, y: centerY - 26, width: 60, height: 52, radius: 6 }
+  }
+  if (node.iconType === 'junction-box' || role === 'junction' || role === 'otb'
+    || node.iconType === 'switch-otb' || role === 'switch' || role === 'distribution') {
+    return { x: centerX - 22, y: centerY - 19, width: 44, height: 38, radius: 6 }
+  }
+  return { x: centerX - 12, y: centerY - 12, width: 24, height: 24, radius: 4 }
 }
 
 function renderCrossAreaMarkers(layout) {
@@ -572,6 +717,28 @@ function renderCrossAreaMarkers(layout) {
       <text class="topology-cross-area-label" x="${labelX}" y="${labelY}">${escapeXml(
         marker.label,
       )}</text>
+    </g>`
+  }).join('')
+}
+
+function renderBackboneGaps(layout, { minimap = false } = {}) {
+  const layoutNodeById = new Map((layout.nodes ?? []).map((node) => [node.id, node]))
+  return (layout.backboneGaps ?? []).map((gap) => {
+    const target = layoutNodeById.get(gap.targetId)
+    if (!target || !(gap.routePoints ?? []).length) return ''
+    const path = orthogonalPath(gap.routePoints)
+    const labelX = target.diagram.centerX
+    const labelY = target.diagram.topY - 27
+    return `<g class="topology-backbone-gap" aria-label="Network island ${escapeAttribute(
+      gap.targetId,
+    )} belum memiliki jalur terkonfirmasi ke rack">
+      <path class="topology-backbone-gap-underlay" d="${path}"/>
+      <path class="topology-backbone-gap-line" d="${path}">
+        ${minimap ? '' : `<title>Diagnostik island · jalur ke JB Rack Server belum terkonfirmasi</title>`}
+      </path>
+      <circle class="topology-backbone-gap-target" cx="${target.diagram.centerX}"
+        cy="${target.diagram.topY}" r="5"/>
+      ${minimap ? '' : `<text class="topology-backbone-gap-label" x="${labelX}" y="${labelY}" text-anchor="middle">GAP KE RACK</text>`}
     </g>`
   }).join('')
 }
@@ -613,25 +780,40 @@ function renderAdminLayer(model, layout, { selectedCandidateId, selectedUnresolv
 
 function renderNodeGlyph(node, x, y, color) {
   const role = normalizeTopologyRole(node.topologyRole)
-  const radius = node.isCore ? 18 : 15
   if (node.iconType === 'server-rack-core' || ['root', 'core', 'server', 'nvr', 'router'].includes(role)) {
-    return `<rect class="topology-device-icon" x="${x - 18}" y="${y - 18}" width="36" height="36" rx="6" stroke="${color}"/>
-      <text class="topology-device-glyph" x="${x}" y="${y + 3}" text-anchor="middle">${role === 'router' ? 'R' : 'SR'}</text>`
+    return `<g class="topology-rack-glyph" stroke="${escapeAttribute(color)}">
+      <rect class="topology-device-icon" x="${x - 30}" y="${y - 26}" width="60" height="52" rx="6"/>
+      <rect class="topology-device-glyph" x="${x - 10}" y="${y - 13}" width="20" height="8" rx="1"/>
+      <rect class="topology-device-glyph" x="${x - 10}" y="${y + 1}" width="20" height="8" rx="1"/>
+      <circle class="topology-device-led" cx="${x + 6}" cy="${y - 9}" r="1.5"/>
+      <circle class="topology-device-led" cx="${x + 6}" cy="${y + 5}" r="1.5"/>
+    </g>`
   }
   if (node.iconType === 'junction-box' || role === 'junction' || role === 'otb') {
-    return `<polygon class="topology-device-icon" points="${x},${y - radius} ${x + radius},${y} ${x},${y + radius} ${x - radius},${y}" stroke="${color}"/>
-      <text class="topology-device-glyph" x="${x}" y="${y + 3}" text-anchor="middle">${role === 'otb' ? 'OT' : 'JB'}</text>`
+    return `<g class="topology-distribution-glyph" stroke="${escapeAttribute(color)}">
+      <rect class="topology-device-icon" x="${x - 22}" y="${y - 19}" width="44" height="38" rx="6"/>
+      <circle class="topology-device-glyph-fill" cx="${x}" cy="${y - 7}" r="2.2"/>
+      <path class="topology-device-glyph" d="M ${x} ${y - 4} V ${y + 3} M ${x - 9} ${y + 3} H ${x + 9} M ${x - 9} ${y + 3} V ${y + 10} M ${x + 9} ${y + 3} V ${y + 10}"/>
+      <circle class="topology-device-glyph-fill" cx="${x - 9}" cy="${y + 11}" r="1.8"/>
+      <circle class="topology-device-glyph-fill" cx="${x + 9}" cy="${y + 11}" r="1.8"/>
+    </g>`
   }
   if (node.iconType === 'switch-otb' || role === 'switch' || role === 'distribution') {
-    return `<rect class="topology-device-icon" x="${x - radius}" y="${y - radius}" width="${radius * 2}" height="${radius * 2}" rx="5" stroke="${color}"/>
-      <text class="topology-device-glyph" x="${x}" y="${y + 3}" text-anchor="middle">SW</text>`
+    return `<g class="topology-switch-glyph" stroke="${escapeAttribute(color)}">
+      <rect class="topology-device-icon" x="${x - 22}" y="${y - 19}" width="44" height="38" rx="6"/>
+      <path class="topology-device-glyph" d="M ${x - 10} ${y - 5} H ${x + 10} M ${x - 10} ${y + 5} H ${x + 10}"/>
+    </g>`
   }
   if (node.iconType === 'pole-mounting') {
-    return `<path class="topology-device-icon" d="M ${x} ${y - 18} L ${x + 13} ${y + 14} L ${x - 13} ${y + 14} Z" stroke="${color}"/>
-      <text class="topology-device-glyph" x="${x}" y="${y + 6}" text-anchor="middle">P</text>`
+    return `<path class="topology-device-icon" d="M ${x} ${y - 17} L ${x + 12} ${y + 13} L ${x - 12} ${y + 13} Z" stroke="${escapeAttribute(color)}"/>`
   }
-  return `<circle class="topology-device-icon" cx="${x}" cy="${y}" r="${radius}" stroke="${color}"/>
-    <text class="topology-device-glyph" x="${x}" y="${y + 3}" text-anchor="middle">${escapeXml(glyphFor(node))}</text>`
+  if (node.iconType === 'cctv' || node.isEndpoint) {
+    return `<g class="topology-endpoint-glyph" stroke="${escapeAttribute(color)}">
+      <rect class="topology-device-icon" x="${x - 12}" y="${y - 12}" width="24" height="24" rx="4"/>
+      <path class="topology-device-glyph" d="M ${x - 7} ${y - 4} H ${x + 3} Q ${x + 7} ${y - 4} ${x + 7} ${y} Q ${x + 7} ${y + 4} ${x + 3} ${y + 4} H ${x - 7} Z M ${x - 2} ${y + 4} L ${x - 6} ${y + 9}"/>
+    </g>`
+  }
+  return `<rect class="topology-device-icon" x="${x - 12}" y="${y - 12}" width="24" height="24" rx="4" stroke="${escapeAttribute(color)}"/>`
 }
 
 function renderLegend(bottom, width, showMountingPhysical) {
@@ -639,14 +821,22 @@ function renderLegend(bottom, width, showMountingPhysical) {
     <line x1="32" y1="${bottom + 8}" x2="${width - 32}" y2="${bottom + 8}" stroke="${THEME.sectionBorder}"/>
     <g class="topology-legend">
       <text class="topology-legend-title" x="32" y="${bottom + 37}">KETERANGAN</text>
-      <line x1="112" y1="${bottom + 34}" x2="134" y2="${bottom + 34}" stroke="${THEME.edge}" stroke-width="2.6"/>
-      <text class="topology-legend-label" x="142" y="${bottom + 37}">Terhubung</text>
-      <line x1="224" y1="${bottom + 34}" x2="246" y2="${bottom + 34}" stroke="${THEME.candidate}" stroke-width="2.5" stroke-dasharray="8 6"/>
-      <text class="topology-legend-label" x="254" y="${bottom + 37}">Saran koneksi</text>
-      <circle cx="366" cy="${bottom + 31}" r="7" fill="#fff" stroke="${THEME.unresolved}" stroke-dasharray="4 3"/>
-      <text class="topology-legend-label" x="380" y="${bottom + 34}">Belum terhubung</text>
-       ${showMountingPhysical ? `<rect x="492" y="${bottom + 22}" width="28" height="18" rx="5" fill="#dfeff5" fill-opacity=".35" stroke="#8fb8c8" stroke-dasharray="4 3"/>
-       <text class="topology-legend-label" x="528" y="${bottom + 34}">Satu tiang · blok fisik</text>` : ''}
+      <line x1="112" y1="${bottom + 34}" x2="134" y2="${bottom + 34}" stroke="${THEME.edge}" stroke-width="3.4"/>
+      <text class="topology-legend-label" x="142" y="${bottom + 37}">Backbone core/JB</text>
+      <line x1="256" y1="${bottom + 34}" x2="278" y2="${bottom + 34}" stroke="${THEME.edge}" stroke-width="1.7"/>
+      <text class="topology-legend-label" x="286" y="${bottom + 37}">Akses endpoint</text>
+      <line x1="382" y1="${bottom + 34}" x2="404" y2="${bottom + 34}" stroke="${THEME.candidate}" stroke-width="2.5" stroke-dasharray="8 6"/>
+      <text class="topology-legend-label" x="412" y="${bottom + 37}">Suggested link</text>
+      <circle cx="530" cy="${bottom + 31}" r="7" fill="${THEME.selected}"/>
+      <text class="topology-legend-label" x="544" y="${bottom + 34}">Selected / trace</text>
+      <circle cx="646" cy="${bottom + 31}" r="7" fill="#fff" stroke="${THEME.unresolved}" stroke-dasharray="4 3"/>
+      <text class="topology-legend-label" x="660" y="${bottom + 34}">Disconnected</text>
+      ${showMountingPhysical ? `<rect x="765" y="${bottom + 23}" width="18" height="15" rx="3" fill="#dfeff5" stroke="#8fb8c8"/>
+      <text class="topology-legend-label" x="790" y="${bottom + 34}">Terikat tiang</text>
+      <rect x="866" y="${bottom + 23}" width="18" height="15" rx="3" fill="#fff4e8" stroke="#f97316"/>
+      <text class="topology-legend-label" x="891" y="${bottom + 34}">Indoor / standalone</text>
+      <rect x="1015" y="${bottom + 23}" width="18" height="15" rx="3" fill="#fff9db" stroke="#d89b00"/>
+      <text class="topology-legend-label" x="1040" y="${bottom + 34}">Perlu mounting</text>` : ''}
       <text class="topology-disclaimer" x="32" y="${bottom + 64}">Klik perangkat atau garis untuk melihat identitas dan detail relasinya.</text>
     </g>
   `
@@ -694,7 +884,35 @@ function candidateRoute(source, target) {
 
 function orthogonalPath(points = []) {
   if (!points.length) return ''
-  return points.map((point, index) => `${index ? 'L' : 'M'} ${round(point.x)} ${round(point.y)}`).join(' ')
+  if (points.length < 3) {
+    return points.map((point, index) => `${index ? 'L' : 'M'} ${round(point.x)} ${round(point.y)}`).join(' ')
+  }
+  const commands = [`M ${round(points[0].x)} ${round(points[0].y)}`]
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const previous = points[index - 1]
+    const current = points[index]
+    const next = points[index + 1]
+    const previousLength = Math.hypot(current.x - previous.x, current.y - previous.y)
+    const nextLength = Math.hypot(next.x - current.x, next.y - current.y)
+    const radius = Math.min(7, previousLength / 2, nextLength / 2)
+    if (!radius || (previous.x === current.x && current.x === next.x)
+      || (previous.y === current.y && current.y === next.y)) {
+      commands.push(`L ${round(current.x)} ${round(current.y)}`)
+      continue
+    }
+    const before = {
+      x: current.x + (previous.x - current.x) * radius / previousLength,
+      y: current.y + (previous.y - current.y) * radius / previousLength,
+    }
+    const after = {
+      x: current.x + (next.x - current.x) * radius / nextLength,
+      y: current.y + (next.y - current.y) * radius / nextLength,
+    }
+    commands.push(`L ${round(before.x)} ${round(before.y)} Q ${round(current.x)} ${round(current.y)} ${round(after.x)} ${round(after.y)}`)
+  }
+  const last = points.at(-1)
+  commands.push(`L ${round(last.x)} ${round(last.y)}`)
+  return commands.join(' ')
 }
 
 function straightPath(points = []) {

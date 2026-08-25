@@ -151,6 +151,9 @@ export function buildTopologyDiagramModel({
       topologyRole,
       diagramClass,
       semanticTier: DIAGRAM_CLASS_TIERS[diagramClass] ?? diagramClass,
+      visualTier: visualTierFor(diagramClass),
+      labelPriority: labelPriorityFor(diagramClass),
+      layoutParentId: null,
       isCore: diagramClass === 'rack-root'
         || isCoreRole(topologyRole, asset.type ?? graphNode.assetType ?? graphNode.type),
       isEndpoint: diagramClass === 'endpoint'
@@ -185,6 +188,12 @@ export function buildTopologyDiagramModel({
       &&
     areaKeyFor(nodeById.get(edge.sourceId)) === areaKeyFor(nodeById.get(edge.targetId))
   ))
+  edges.forEach((edge) => {
+    edge.edgeVisualRole = edgeVisualRoleFor(
+      nodeById.get(edge.sourceId),
+      nodeById.get(edge.targetId),
+    )
+  })
   const crossAreaEdges = allEdges
     .filter((edge) => {
       const sourceInScope = scopedIds.has(edge.sourceId)
@@ -210,6 +219,7 @@ export function buildTopologyDiagramModel({
         outsideNodeId: outsideAsset?.id ?? null,
         outsideAreaKey: areaKeyFor(outsideAsset),
         outsideAreaName: areaNameFor(outsideAsset, locationGroups),
+        edgeVisualRole: edgeVisualRoleFor(sourceAsset, targetAsset),
       }
     })
   const edgeById = new Map()
@@ -326,6 +336,12 @@ export function buildTopologyDiagramModel({
   const componentByNodeId = new Map()
   componentModels.forEach((component) => {
     component.nodeIds.forEach((nodeId) => componentByNodeId.set(nodeId, component))
+  })
+  const backboneGaps = buildBackboneGaps({
+    components: componentModels,
+    nodeById,
+    componentByNodeId,
+    area,
   })
   const suggestedLinksByComponent = new Map()
   allSuggestedLinks.forEach((link) => {
@@ -493,7 +509,9 @@ export function buildTopologyDiagramModel({
     suggestedLinkCount: allSuggestedLinks.length,
     suggestedOnlyAssetCount: suggestedOnlyNodes.length,
     disconnectedAssetCount: isolatedNodes.length,
+    backboneGapCount: backboneGaps.length,
     physicalMountCount: physicalAssetById.size,
+    emptyPhysicalMountCount: mountingGroups.filter(({ childIds }) => !childIds.length).length,
     mountingGroupCount: mountingGroups.length,
     activeAdminLayer,
     draft: Boolean(isDraft),
@@ -542,6 +560,7 @@ export function buildTopologyDiagramModel({
     suggestedLinks: visibleSuggestedLinks,
     allSuggestedLinks,
     topologyLinks,
+    backboneGaps,
     areas,
     components: componentModels.sort((left, right) => left.componentId.localeCompare(right.componentId)),
     isolatedNodes: isolatedNodes.sort(compareNodes),
@@ -573,7 +592,10 @@ export function getTopologyDiagramSearchResults(model, query, limit = 12) {
       kind: 'asset',
       id: node.id,
       label: node.name || node.id,
-      detail: `${node.type || 'Aset'} · ${node.location || node.areaName || 'Lokasi belum tersedia'}`,
+      typeLabel: translatedTopologyType(node.type),
+      area: node.areaName || node.areaKey || 'Area belum tersedia',
+      statusLabel: connectivityLabel(node.connectivityStatus),
+      detail: `${translatedTopologyType(node.type)} · ${node.areaName || node.areaKey || 'Area belum tersedia'} · ${connectivityLabel(node.connectivityStatus)}`,
       score: searchScore(node, normalized),
     }))
     .filter(({ score }) => score > 0)
@@ -592,7 +614,10 @@ export function getTopologyDiagramSearchResults(model, query, limit = 12) {
         kind: 'edge',
         id: edge.id,
         label: edge.sourceGeometryId || edge.relationId || edge.id,
-        detail: `${source?.name ?? edge.sourceId} → ${target?.name ?? edge.targetId}`,
+        typeLabel: 'Relasi terkonfirmasi',
+        area: source?.areaName || target?.areaName || source?.areaKey || 'Area belum tersedia',
+        statusLabel: 'Terkonfirmasi',
+        detail: `${source?.name ?? edge.sourceId} → ${target?.name ?? edge.targetId} · ${source?.areaName || target?.areaName || 'Area belum tersedia'} · Terkonfirmasi`,
         score,
       }
     })
@@ -621,6 +646,28 @@ export function getTopologyDiagramSearchResults(model, query, limit = 12) {
       || left.label.localeCompare(right.label, 'id')
       || left.id.localeCompare(right.id, 'id'))
     .slice(0, limit)
+}
+
+function translatedTopologyType(value) {
+  const source = String(value ?? '').trim()
+  if (!source || /^unknown$/i.test(source)) return 'Belum terklasifikasi'
+  const normalized = source.toLowerCase()
+  if (/cctv|camera|kamera/.test(normalized)) return 'Kamera CCTV'
+  if (/junction|\bjb\b/.test(normalized)) return 'Junction box'
+  if (/router/.test(normalized)) return 'Router'
+  if (/switch/.test(normalized)) return 'Switch'
+  if (/server|rack|nvr/.test(normalized)) return 'Server / rack'
+  if (/access.?point|\bap\b/.test(normalized)) return 'Access point'
+  if (/printer/.test(normalized)) return 'Printer'
+  return source
+}
+
+function connectivityLabel(value) {
+  return {
+    confirmed: 'Terkonfirmasi',
+    'suggested-only': 'Hanya memiliki saran',
+    disconnected: 'Belum terhubung',
+  }[value] ?? 'Belum terklasifikasi'
 }
 
 export function isConfirmedTopologyEdge(edge) {
@@ -696,6 +743,28 @@ export function normalizeTopologyDiagramClass(value) {
     'physical-mount': 'physical-mount',
     mounting: 'physical-mount',
   }[source] ?? null
+}
+
+function visualTierFor(diagramClass) {
+  if (diagramClass === 'rack-root') return 'core'
+  if (diagramClass === 'junction-peer' || diagramClass === 'junction-extended') {
+    return 'junction'
+  }
+  return 'endpoint'
+}
+
+function labelPriorityFor(diagramClass) {
+  if (diagramClass === 'rack-root') return 0
+  if (diagramClass === 'junction-peer' || diagramClass === 'junction-extended') return 1
+  return 2
+}
+
+function edgeVisualRoleFor(source, target) {
+  const sourceEndpoint = source?.diagramClass === 'endpoint'
+  const targetEndpoint = target?.diagramClass === 'endpoint'
+  if (sourceEndpoint && targetEndpoint) return 'peer'
+  if (sourceEndpoint || targetEndpoint) return 'access'
+  return 'backbone'
 }
 
 export function classifyTopologyNode(value = {}) {
@@ -926,6 +995,7 @@ function normalizeSuggestedLinks(candidates) {
     networkFamilyLabel: networkFamilyLabel(candidate.networkFamily ?? candidate.candidateType),
     networkColor: candidate.networkColor
       ?? networkFamilyColor(candidate.networkFamily ?? candidate.candidateType),
+    edgeVisualRole: 'access',
     pathAssetIds: [...new Set([
       ...(candidate.pathAssetIds ?? []),
       ...(candidate.pathAssetId ? [candidate.pathAssetId] : []),
@@ -978,13 +1048,13 @@ function normalizeMountingGroups({
 
   const recordById = (id) => assetById.get(id) ?? nodeById.get(id) ?? null
 
-  const addGroup = (hostId, childIds = [], relationIds = []) => {
+  const addGroup = (hostId, childIds = [], relationIds = [], { allowEmpty = false } = {}) => {
     if (!hostId) return
     const host = recordById(hostId)
     if (host && classifyTopologyNode(host) !== 'physical-mount') return
     const scopedChildren = childIds
       .filter((id) => id && id !== hostId && nodeById.has(id))
-    if (!scopedChildren.length) return
+    if (!scopedChildren.length && !allowEmpty) return
     const id = `pole-group:${hostId}`
     const current = groups.get(id) ?? {
       id,
@@ -997,6 +1067,15 @@ function normalizeMountingGroups({
       .sort(compareIds)
     groups.set(id, current)
   }
+
+  // Physical mounts are part of the facility inventory even when no device is
+  // assigned to them yet. Keeping an empty group makes the diagram reconcile
+  // with the source pole list instead of silently dropping unused poles.
+  assetById.forEach((asset, assetId) => {
+    if (classifyTopologyNode(asset) === 'physical-mount') {
+      addGroup(assetId, [], [], { allowEmpty: true })
+    }
+  })
 
   ;(Array.isArray(poleGroups) ? poleGroups : []).forEach((group) => {
     const hostId = group?.poleAssetId ?? group?.hostAssetId ?? group?.targetAssetId
@@ -1031,6 +1110,7 @@ function normalizeMountingGroups({
       hostType: recordById(group.hostId)?.type
         ?? recordById(group.hostId)?.assetType
         ?? 'Tiang',
+      areaKey: areaKeyFor(recordById(group.hostId)),
       diagramClass: 'physical-mount',
       childCount: group.childIds.length,
       childAssets: group.childIds.map((id) => recordById(id)).filter(Boolean),
@@ -1135,6 +1215,48 @@ function componentIdFor(graph, nodeIds, index) {
     (component.nodeIds ?? []).some((id) => nodeIds.includes(id))
   ))
   return source?.componentId ?? source?.id ?? `component:${String(index + 1).padStart(4, '0')}`
+}
+
+function buildBackboneGaps({ components = [], nodeById, componentByNodeId, area }) {
+  // This is presentation evidence only. It deliberately stays outside the
+  // confirmed graph, so tracing and relation counts remain authoritative.
+  if (!area) return []
+  const rackRoots = [...(nodeById?.values() ?? [])]
+    .filter((node) => node.diagramClass === 'rack-root')
+    .sort((left, right) => (
+      Number(right.isCore) - Number(left.isCore)
+        || (right.confirmedDegree ?? 0) - (left.confirmedDegree ?? 0)
+        || compareNodes(left, right)
+    ))
+  const anchor = rackRoots[0]
+  if (!anchor) return []
+  const anchorComponentId = componentByNodeId.get(anchor.id)?.componentId ?? null
+
+  return components
+    .filter((component) => component.componentId !== anchorComponentId)
+    .map((component) => {
+      const junction = component.nodeIds
+        .map((id) => nodeById.get(id))
+        .filter((node) => ['junction-peer', 'junction-extended'].includes(node?.diagramClass))
+        .sort((left, right) => (
+          (left.depth ?? Number.MAX_SAFE_INTEGER) - (right.depth ?? Number.MAX_SAFE_INTEGER)
+            || compareNodes(left, right)
+        ))[0]
+      if (!junction) return null
+      return {
+        id: `backbone-gap:${anchor.id}:${junction.id}`,
+        sourceId: anchor.id,
+        targetId: junction.id,
+        componentId: component.componentId,
+        areaKey: component.areaKey,
+        status: 'expected',
+        relationStatus: 'unconfirmed',
+        verificationStatus: 'unconfirmed',
+        reason: 'component_without_confirmed_rack_path',
+      }
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.targetId.localeCompare(right.targetId, 'id'))
 }
 
 function matchesScope(record, { branchId, datasetVersionId }) {

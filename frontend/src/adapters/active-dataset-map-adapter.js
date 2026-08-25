@@ -133,6 +133,22 @@ export function adaptActiveDatasetForMap(payload) {
       ?? assetById[option.targetAssetId]?.name
       ?? option.targetAssetId,
   }))
+  const mountingExpectations = normalizeMountingExpectations(
+    payload.mountingExpectations,
+    resolver,
+  )
+  const mountingReviewItems = normalizeMountingReviewItems(
+    payload.mountingReviewItems,
+    resolver,
+  )
+  const expectationByAssetId = new Map(mountingExpectations.map((item) => [
+    item.assetId,
+    item,
+  ]))
+  const mountingReviewByAssetId = new Map(mountingReviewItems.map((item) => [
+    item.assetId,
+    item,
+  ]))
   const poleGroups = buildPoleGroups({ assets, mountingRelations })
   const poleGroupByAssetId = new Map()
   poleGroups.forEach((group) => group.assetIds.forEach((assetId) => {
@@ -173,6 +189,8 @@ export function adaptActiveDatasetForMap(payload) {
     asset.mountedAssetIds = mountingRelations
       .filter((relation) => relation.targetAssetId === asset.id)
       .map((relation) => relation.sourceAssetId)
+    asset.mountingExpectation = expectationByAssetId.get(asset.id)?.expectation ?? 'unknown'
+    asset.mountingReview = mountingReviewByAssetId.get(asset.id) ?? null
   })
   exportAssets.forEach((asset) => {
     asset.networkIds = networkIdsByAssetId.get(asset.id) ?? []
@@ -233,6 +251,8 @@ export function adaptActiveDatasetForMap(payload) {
     mountingCandidates: normalizeMountingCandidates(payload.mountingCandidates, resolver),
     mountingOptions,
     mountingOverrides: structuredClone(payload.mountingOverrides ?? []),
+    mountingExpectations,
+    mountingReviewItems,
     mountingSummary: structuredClone(payload.mountingSummary ?? null),
     poleGroups,
     topologySummary: structuredClone(payload.topologySummary ?? {}),
@@ -307,6 +327,26 @@ export function adaptActiveDatasetForTopology(payload) {
     payload.mountingRelations ?? [],
     resolver,
   ).filter((relation) => assetById[relation.sourceAssetId] && assetById[relation.targetAssetId])
+  const mountingExpectations = normalizeMountingExpectations(
+    payload.mountingExpectations,
+    resolver,
+  )
+  const mountingReviewItems = normalizeMountingReviewItems(
+    payload.mountingReviewItems,
+    resolver,
+  )
+  const expectationByAssetId = new Map(mountingExpectations.map((item) => [
+    item.assetId,
+    item,
+  ]))
+  const mountingReviewByAssetId = new Map(mountingReviewItems.map((item) => [
+    item.assetId,
+    item,
+  ]))
+  assets.forEach((asset) => {
+    asset.mountingExpectation = expectationByAssetId.get(asset.id)?.expectation ?? 'unknown'
+    asset.mountingReview = mountingReviewByAssetId.get(asset.id) ?? null
+  })
   const poleGroups = buildPoleGroups({ assets, mountingRelations })
   const groups = new Map()
   assets.forEach((asset) => {
@@ -362,6 +402,8 @@ export function adaptActiveDatasetForTopology(payload) {
     mountingCandidates: structuredClone(payload.mountingCandidates ?? []),
     mountingOptions: structuredClone(payload.mountingOptions ?? []),
     mountingOverrides: structuredClone(payload.mountingOverrides ?? []),
+    mountingExpectations,
+    mountingReviewItems,
     mountingSummary: structuredClone(payload.mountingSummary ?? null),
     poleGroups,
     topologySummary: structuredClone(payload.topologySummary ?? {}),
@@ -588,6 +630,35 @@ function normalizeMountingOptions(options = [], resolver = null) {
   })
 }
 
+function normalizeMountingExpectations(expectations = [], resolver = null) {
+  return (Array.isArray(expectations) ? expectations : []).flatMap((item) => {
+    const assetId = resolver?.resolve(item?.assetId ?? item?.sourceAssetId)
+      ?? item?.assetId
+      ?? item?.sourceAssetId
+    const expectation = String(item?.expectation ?? '').toLowerCase()
+    if (!assetId || !['pole', 'indoor', 'standalone', 'unknown'].includes(expectation)) return []
+    return [{ ...structuredClone(item), assetId, expectation }]
+  })
+}
+
+function normalizeMountingReviewItems(items = [], resolver = null) {
+  return (Array.isArray(items) ? items : []).flatMap((item) => {
+    const assetId = resolver?.resolve(item?.assetId) ?? item?.assetId
+    if (!assetId) return []
+    return [{
+      ...structuredClone(item),
+      assetId,
+      targetAssetId: resolver?.resolve(item?.targetAssetId) ?? item?.targetAssetId ?? null,
+      options: (item?.options ?? []).map((option) => ({
+        ...structuredClone(option),
+        targetAssetId: resolver?.resolve(option?.targetAssetId)
+          ?? option?.targetAssetId
+          ?? null,
+      })),
+    }]
+  })
+}
+
 function createDetailReferenceResolver(payload, mapAsset) {
   const expectedId = mapAsset?.canonicalAssetId ?? mapAsset?.id
   const aliases = new Set([
@@ -628,6 +699,14 @@ export function adaptActiveAssetDetail(payload, mapAsset) {
     payload.mountingRelations ?? mapAsset.mountingRelations ?? [],
     detailReferenceResolver,
   )
+  const mountingExpectations = normalizeMountingExpectations(
+    payload.mountingExpectations ?? mapAsset.mountingExpectations ?? [],
+    detailReferenceResolver,
+  )
+  const mountingReviewItems = normalizeMountingReviewItems(
+    payload.mountingReviewItems ?? mapAsset.mountingReviewItems ?? [],
+    detailReferenceResolver,
+  )
   const mountingOptions = normalizeMountingOptions(
     payload.mountingOptions ?? mapAsset.mountingOptions ?? payload.mountingCandidates ?? [],
     detailReferenceResolver,
@@ -660,6 +739,14 @@ export function adaptActiveAssetDetail(payload, mapAsset) {
       detailReferenceResolver,
     ),
     mountingOptions,
+    mountingExpectation: mountingExpectations.find(({ assetId }) => (
+      assetId === expectedId
+    ))?.expectation ?? mapAsset.mountingExpectation ?? 'unknown',
+    mountingReview: mountingReviewItems.find(({ assetId }) => (
+      assetId === expectedId
+    )) ?? mapAsset.mountingReview ?? null,
+    mountingExpectations,
+    mountingReviewItems,
     mountingSummary: structuredClone(payload.mountingSummary ?? mapAsset.mountingSummary ?? null),
   }
 }

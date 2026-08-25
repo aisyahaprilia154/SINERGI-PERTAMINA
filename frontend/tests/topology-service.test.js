@@ -10,9 +10,68 @@ import {
   loadAllTopologyCandidates,
   loadTopologyProjection,
   loadTopologyRoots,
+  loadMountingReview,
+  previewMountingRegeneration,
+  queueMountingRegeneration,
+  reviewMountingBulk,
+  setMountingExpectation,
   reviewTopologyBulk,
   reviewTopologyCandidate,
 } from '../src/services/active-dataset-service.js'
+
+test('mounting review API forwards filters, revision, bulk decisions, and idempotency', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options })
+    return new Response(JSON.stringify({ items: [], recordRevision: 7 }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    await loadMountingReview({ datasetVersionId: 'dv-1', area: 'pengapon', status: 'ambiguous' })
+    await previewMountingRegeneration({ datasetVersionId: 'dv-1' })
+    await queueMountingRegeneration({
+      datasetVersionId: 'dv-1',
+      expectedRecordRevision: 7,
+      reason: 'Preview disetujui.',
+      idempotencyKey: 'regenerate-1',
+    })
+    await setMountingExpectation({
+      datasetVersionId: 'dv-1',
+      assetId: 'cam-1',
+      expectation: 'indoor',
+      reason: 'Indoor terverifikasi.',
+      expectedRecordRevision: 7,
+      idempotencyKey: 'expectation-1',
+    })
+    await reviewMountingBulk({
+      datasetVersionId: 'dv-1',
+      decisions: [{ action: 'set_expectation', assetId: 'cam-2', expectation: 'standalone' }],
+      reason: 'Bulk terverifikasi.',
+      expectedRecordRevision: 8,
+      idempotencyKey: 'bulk-1',
+    })
+    assert.deepEqual(requests.map(({ url }) => url), [
+      '/api/dataset-versions/dv-1/topology/mounting-review?area=pengapon&status=ambiguous&limit=1000',
+      '/api/dataset-versions/dv-1/topology/mounting-regeneration/preview',
+      '/api/dataset-versions/dv-1/topology/mounting-regeneration',
+      '/api/dataset-versions/dv-1/topology/mounting-expectations',
+      '/api/dataset-versions/dv-1/topology/mounting-review/bulk',
+    ])
+    assert.equal(requests[2].options.headers['Idempotency-Key'], 'regenerate-1')
+    assert.equal(requests[3].options.headers['Idempotency-Key'], 'expectation-1')
+    assert.equal(requests[4].options.headers['Idempotency-Key'], 'bulk-1')
+    assert.deepEqual(JSON.parse(requests[4].options.body), {
+      decisions: [{ action: 'set_expectation', assetId: 'cam-2', expectation: 'standalone' }],
+      reason: 'Bulk terverifikasi.',
+      expectedRecordRevision: 8,
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
 
 test('topology projection uses the versioned backend endpoint', async () => {
   const originalFetch = globalThis.fetch

@@ -90,21 +90,89 @@ test('mounting inference consistently includes nearby CCTV and junction boxes on
     ['camera-18', 'pole-18'],
     ['jb-18', 'pole-18'],
   ].sort())
-  assert.equal(result.summary.searchRadiusMeters, 15)
+  assert.equal(result.summary.searchRadiusMeters, 25)
 })
 
-test('matching asset number bridges a bounded KMZ offset without capturing an unrelated pole', () => {
+test('unique nearest pole within 25m mounts every eligible asset regardless of number', () => {
   const result = generateMountingArtifacts(topologyBundle([
     { id: 'pole-13', type: 'Tiang', sourceName: 'T-013', coordinate: [110, -7] },
     { id: 'jb-13', type: 'Junction Box', sourceName: 'JB-013', coordinate: [110.00008, -7] },
-    { id: 'camera-unrelated', type: 'CCTV', sourceName: 'C-099', coordinate: [110.0002, -7] },
+    { id: 'camera-unrelated', type: 'CCTV', sourceName: 'C-099', coordinate: [110.00008, -7] },
+  ]))
+
+  assert.equal(result.relations.length, 2)
+  assert.deepEqual(result.relations.map(({ sourceAssetId, targetAssetId }) => (
+    [sourceAssetId, targetAssetId]
+  )).sort(), [
+    ['camera-unrelated', 'pole-13'],
+    ['jb-13', 'pole-13'],
+  ].sort())
+  assert.equal(result.summary.identityRadiusMeters, 10)
+})
+
+test('coordinates beat matching numbers and preserve the mismatch as a warning', () => {
+  const result = generateMountingArtifacts(topologyBundle([
+    { id: 'pole-13', type: 'Tiang', sourceName: 'T-013', coordinate: [110.00008, -7] },
+    { id: 'pole-99', type: 'Tiang', sourceName: 'T-099', coordinate: [110.000005, -7] },
+    { id: 'jb-13', type: 'Junction Box', sourceName: 'JB-013', coordinate: [110, -7] },
   ]))
 
   assert.equal(result.relations.length, 1)
-  assert.equal(result.relations[0].sourceAssetId, 'jb-13')
-  assert.equal(result.relations[0].targetAssetId, 'pole-13')
-  assert.equal(result.relations[0].evidence[0].ruleId, 'mounting.matching-asset-number')
-  assert.equal(result.summary.identityRadiusMeters, 10)
+  assert.equal(result.relations[0].targetAssetId, 'pole-99')
+  assert.equal(result.relations[0].evidence[0].ruleId, 'mounting.unique-nearest-pole')
+  assert.deepEqual(result.reviewItems[0].warnings, ['number_coordinate_mismatch'])
+})
+
+test('number-coordinate mismatch warning is limited to comparable JB identities', () => {
+  const result = generateMountingArtifacts(topologyBundle([
+    { id: 'pole-13', type: 'Tiang', sourceName: 'T-013', coordinate: [110.00008, -7] },
+    { id: 'pole-99', type: 'Tiang', sourceName: 'T-099', coordinate: [110.000005, -7] },
+    { id: 'camera-13', type: 'CCTV', sourceName: 'C-013', coordinate: [110, -7] },
+  ]))
+
+  assert.equal(result.relations[0].targetAssetId, 'pole-99')
+  assert.deepEqual(result.reviewItems[0].warnings, [])
+})
+
+test('explicit indoor metadata and standalone expectation are excluded from auto-mounting', () => {
+  const result = generateMountingArtifacts(topologyBundle([
+    { id: 'pole-1', type: 'Tiang', coordinate: [110, -7] },
+    {
+      id: 'camera-indoor',
+      type: 'CCTV Indoor',
+      coordinate: [110.000002, -7],
+      sourceFolderPath: '/RJBT/Pengapon/Indoor',
+    },
+    { id: 'camera-standalone', type: 'CCTV', coordinate: [110.000003, -7] },
+  ]), {
+    previousExpectations: [{
+      assetId: 'camera-standalone',
+      expectation: 'standalone',
+      provenance: 'manual_admin',
+      actorId: 'admin-1',
+    }],
+  })
+
+  assert.equal(result.relations.length, 0)
+  assert.deepEqual(result.summary.expectationCounts, { indoor: 1, standalone: 1 })
+  assert.deepEqual(result.reviewItems.map(({ assetId, reviewStatus }) => (
+    [assetId, reviewStatus]
+  )).sort(), [
+    ['camera-indoor', 'indoor'],
+    ['camera-standalone', 'standalone'],
+  ].sort())
+})
+
+test('invalid coordinates stay visible as a data-quality mounting review item', () => {
+  const result = generateMountingArtifacts(topologyBundle([
+    { id: 'pole-1', type: 'Tiang', coordinate: [110, -7] },
+    { id: 'camera-invalid', type: 'CCTV', coordinate: null },
+  ]))
+
+  assert.equal(result.relations.length, 0)
+  assert.equal(result.reviewItems.length, 1)
+  assert.equal(result.reviewItems[0].reviewStatus, 'no-nearby-pole')
+  assert.deepEqual(result.reviewItems[0].warnings, ['invalid_coordinate'])
 })
 
 test('mounting inference uses distance ratio when coordinate uncertainty exceeds the absolute delta', () => {

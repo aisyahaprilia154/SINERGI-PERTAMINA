@@ -63,7 +63,8 @@ export const DEFAULT_RELATION_ENGINE_CONFIG = Object.freeze({
   deviceRelationRadiusMeters: 30,
   deviceRelationUniquenessMarginMeters: 5,
   deviceRelationUniquenessRatio: 1.25,
-  mountingSearchRadiusMeters: 5,
+  maxAutoDistanceMeters: 25,
+  mountingSearchRadiusMeters: 25,
   mountingIdentityRadiusMeters: 10,
   mountingAmbiguityRatio: 1.5,
   autoConfirmExplicitMetadata: true,
@@ -100,6 +101,7 @@ export function generateRelationArtifacts(topologyInputBundle, {
   previousInterfaceRegistry = [],
   previousMountingRelations = [],
   previousMountingOverrides = [],
+  previousMountingExpectations = [],
   generatedAt = new Date().toISOString(),
 } = {}) {
   const settings = normalizeConfig(config)
@@ -272,6 +274,7 @@ export function generateRelationArtifacts(topologyInputBundle, {
     config,
     previousRelations: previousMountingRelations,
     previousOverrides: previousMountingOverrides,
+    previousExpectations: previousMountingExpectations,
     generatedAt,
   })
 
@@ -304,6 +307,8 @@ export function generateRelationArtifacts(topologyInputBundle, {
     mountingCandidates: mounting.candidates,
     mountingOptions: mounting.options,
     mountingOverrides: mounting.overrides,
+    mountingExpectations: mounting.expectations,
+    mountingReviewItems: mounting.reviewItems,
     mountingSummary: mounting.summary,
   }
 }
@@ -321,6 +326,7 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
   previousInterfaceRegistry = [],
   previousMountingRelations = [],
   previousMountingOverrides = [],
+  previousMountingExpectations = [],
   affectedAssetIds = [],
   eligibilityIssues = [],
   lineworkIssues = [],
@@ -415,6 +421,7 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
     config,
     previousRelations: previousMountingRelations,
     previousOverrides: previousMountingOverrides,
+    previousExpectations: previousMountingExpectations,
     generatedAt,
   })
 
@@ -446,6 +453,8 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
     mountingCandidates: mounting.candidates,
     mountingOptions: mounting.options,
     mountingOverrides: mounting.overrides,
+    mountingExpectations: mounting.expectations,
+    mountingReviewItems: mounting.reviewItems,
     mountingSummary: mounting.summary,
   }
 }

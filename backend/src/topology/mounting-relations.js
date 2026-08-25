@@ -6,13 +6,17 @@ export const MOUNTING_RELATION_TYPE = 'mounted_on'
 // traversable service/network graph.
 export const MOUNTING_RELATION_KIND = 'installation_attachment'
 
+export const MOUNTING_EXPECTATIONS = Object.freeze([
+  'pole',
+  'indoor',
+  'standalone',
+  'unknown',
+])
+
 export const DEFAULT_MOUNTING_CONFIG = Object.freeze({
   // KMZ points for a pole, camera, and junction box are commonly drawn a few
   // metres apart even though they describe one physical installation.
-  // The source KMZ commonly offsets pole, JB, and camera points by up to
-  // roughly 10 metres. Keep the radius wide enough to recover the physical
-  // group while the ambiguity policy prevents cross-pole assignments.
-  mountingSearchRadiusMeters: 15,
+  mountingSearchRadiusMeters: 25,
   // A matching asset number is stronger evidence than coordinates alone, but
   // remains bounded so similarly named assets in another location are ignored.
   mountingIdentityRadiusMeters: 10,
@@ -33,6 +37,7 @@ export function generateMountingArtifacts(topologyInputBundle, {
   config = {},
   previousRelations = [],
   previousOverrides = [],
+  previousExpectations = [],
   generatedAt = new Date().toISOString(),
 } = {}) {
   const bundle = topologyInputBundle ?? {}
@@ -46,18 +51,29 @@ export function generateMountingArtifacts(topologyInputBundle, {
     previousRelations,
     resolver,
   })
+  const expectations = normalizeExpectations({
+    nodes: mountableNodes,
+    previousExpectations,
+    previousRelations,
+    resolver,
+    generatedAt,
+  })
   const relations = []
   const candidates = []
   const options = []
 
   mountableNodes.forEach((asset) => {
+    let expectation = expectations.byAsset.get(asset.id)
     const nearbyOptions = poles
       .filter((pole) => sameFacilityScope(asset, pole, bundle))
       .map((pole) => ({
         pole,
         distanceMeters: geographicDistanceMeters(asset.coordinate, pole.coordinate),
       }))
-      .filter(({ distanceMeters }) => distanceMeters <= settings.mountingOptionRadiusMeters)
+      .filter(({ distanceMeters }) => (
+        Number.isFinite(distanceMeters)
+          && distanceMeters <= settings.mountingOptionRadiusMeters
+      ))
       .sort((left, right) => (
         left.distanceMeters - right.distanceMeters
         || left.pole.id.localeCompare(right.pole.id)
@@ -85,8 +101,19 @@ export function generateMountingArtifacts(topologyInputBundle, {
         ? resolver.resolve(override.targetAssetId)
         : null
       if (pole && isPoleNode(pole) && sameFacilityScope(asset, pole, bundle)) {
+        expectation = createMountingExpectation({
+          assetId: asset.id,
+          expectation: 'pole',
+          provenance: 'manual_admin',
+          actorId: override.actorId,
+          updatedAt: override.updatedAt ?? generatedAt,
+          reason: override.reason,
+          auditEventId: override.auditEventId,
+        })
+        expectations.byAsset.set(asset.id, expectation)
         const distanceMeters = geographicDistanceMeters(asset.coordinate, pole.coordinate)
-        if (!options.some((option) => option.assetId === asset.id
+        if (Number.isFinite(distanceMeters)
+          && !options.some((option) => option.assetId === asset.id
           && option.targetAssetId === pole.id)) {
           options.push(createMountingOption({
             bundle,
@@ -112,29 +139,7 @@ export function generateMountingArtifacts(topologyInputBundle, {
       return
     }
 
-    const identityMatch = matchingIdentityOptions.length === 1
-      ? matchingIdentityOptions[0]
-      : null
-    // The number match may bridge a small KMZ coordinate offset. It must not
-    // overrule a different pole that is already inside the normal search
-    // radius, unless the matching pole is inside that radius as well.
-    if (identityMatch && (
-      identityMatch.distanceMeters <= settings.mountingSearchRadiusMeters
-        || nearby.length === 0
-    )) {
-      relations.push(createMountingRelation({
-        bundle,
-        asset,
-        pole: identityMatch.pole,
-        distanceMeters: identityMatch.distanceMeters,
-        provenance: 'spatial_inference',
-        inferenceRule: 'matching_asset_number',
-        verifiedBy: 'mounting-identity-spatial-policy',
-        verifiedAt: generatedAt,
-        generatedAt,
-      }))
-      return
-    }
+    if (['indoor', 'standalone'].includes(expectation?.expectation)) return
 
     if (!nearby.length) return
     const nearestDistanceMeters = nearby[0].distanceMeters
@@ -164,32 +169,69 @@ export function generateMountingArtifacts(topologyInputBundle, {
     }
 
     const nearest = nearby[0]
+    const identityMatch = matchingIdentityOptions.length === 1
+      && matchingIdentityOptions[0].pole.id === nearest.pole.id
     relations.push(createMountingRelation({
       bundle,
       asset,
       pole: nearest.pole,
       distanceMeters: nearest.distanceMeters,
       provenance: 'spatial_inference',
+      inferenceRule: identityMatch ? 'matching_asset_number' : 'unique_nearest_pole',
       verifiedBy: 'mounting-spatial-policy',
       verifiedAt: generatedAt,
       generatedAt,
     }))
+    if (expectation?.expectation === 'unknown') {
+      expectations.byAsset.set(asset.id, createMountingExpectation({
+        assetId: asset.id,
+        expectation: 'pole',
+        provenance: 'spatial_inference',
+        updatedAt: generatedAt,
+      }))
+    }
+  })
+
+  const normalizedRelations = deduplicateRelations(relations)
+  const normalizedCandidates = candidates.sort(compareMountingCandidates)
+  const normalizedOptions = options.sort(compareMountingOptions)
+  const normalizedExpectations = mountableNodes.map(({ id }) => (
+    expectations.byAsset.get(id) ?? createMountingExpectation({
+      assetId: id,
+      expectation: 'unknown',
+      provenance: 'default_unknown',
+      updatedAt: generatedAt,
+    })
+  )).sort((left, right) => left.assetId.localeCompare(right.assetId))
+  const reviewItems = createMountingReviewItems({
+    assets: mountableNodes,
+    poles,
+    relations: normalizedRelations,
+    candidates: normalizedCandidates,
+    options: normalizedOptions,
+    overrides,
+    expectations: normalizedExpectations,
   })
 
   return {
-    relations: deduplicateRelations(relations),
-    candidates: candidates.sort(compareMountingCandidates),
-    options: options.sort(compareMountingOptions),
+    relations: normalizedRelations,
+    candidates: normalizedCandidates,
+    options: normalizedOptions,
     overrides: overrides.items,
+    expectations: normalizedExpectations,
+    reviewItems,
     summary: {
-      relationCount: relations.length,
-      automaticRelationCount: relations.filter(({ provenance }) => provenance === 'spatial_inference').length,
-      manualRelationCount: relations.filter(({ provenance }) => provenance === 'manual_admin').length,
-      candidateCount: candidates.length,
-      optionCount: options.length,
-      ambiguousAssetCount: new Set(candidates.map(({ assetId }) => assetId)).size,
+      relationCount: normalizedRelations.length,
+      automaticRelationCount: normalizedRelations.filter(({ provenance }) => provenance === 'spatial_inference').length,
+      manualRelationCount: normalizedRelations.filter(({ provenance }) => provenance === 'manual_admin').length,
+      candidateCount: normalizedCandidates.length,
+      optionCount: normalizedOptions.length,
+      ambiguousAssetCount: new Set(normalizedCandidates.map(({ assetId }) => assetId)).size,
       poleCount: poles.length,
       mountableAssetCount: mountableNodes.length,
+      expectationCounts: countBy(normalizedExpectations, 'expectation'),
+      reviewStatusCounts: countBy(reviewItems, 'reviewStatus'),
+      warningCounts: countWarnings(reviewItems),
       searchRadiusMeters: settings.mountingSearchRadiusMeters,
       identityRadiusMeters: settings.mountingIdentityRadiusMeters,
       optionRadiusMeters: settings.mountingOptionRadiusMeters,
@@ -255,7 +297,7 @@ function prepareNodes(bundle) {
         && validCoordinate(geometry.coordinates)
       ))
     const id = objectIdentity(object)
-    if (!point || !id) return []
+    if (!id) return []
     return [{
       ...structuredClone(object),
       id,
@@ -263,7 +305,7 @@ function prepareNodes(bundle) {
       locationGroupKey: object.locationGroupKey
         ?? facilityScopeKey(object.sourceFolderPath)
         ?? null,
-      coordinate: cloneCoordinate(point.coordinates),
+      coordinate: point ? cloneCoordinate(point.coordinates) : null,
     }]
   }).sort((left, right) => left.id.localeCompare(right.id))
 }
@@ -316,6 +358,222 @@ function normalizeOverrides({ previousOverrides, previousRelations, resolver }) 
   }
 }
 
+function normalizeExpectations({
+  nodes,
+  previousExpectations,
+  previousRelations,
+  resolver,
+  generatedAt,
+}) {
+  const byAsset = new Map()
+  asArray(previousExpectations).forEach((value) => {
+    const assetId = resolvedReferenceId(resolver, value?.assetId ?? value?.sourceAssetId)
+    const expectation = normalizeMountingExpectation(value?.expectation)
+    if (!assetId || !expectation || byAsset.has(assetId)) return
+    byAsset.set(assetId, createMountingExpectation({
+      ...value,
+      assetId,
+      expectation,
+      provenance: value.provenance ?? 'manual_admin',
+      updatedAt: value.updatedAt ?? generatedAt,
+    }))
+  })
+
+  const relatedAssetIds = new Set(asArray(previousRelations)
+    .filter((relation) => relation?.relationType === MOUNTING_RELATION_TYPE)
+    .map((relation) => resolvedReferenceId(resolver, relation?.sourceAssetId))
+    .filter(Boolean))
+
+  nodes.forEach((node) => {
+    if (byAsset.has(node.id)) return
+    if (isExplicitIndoorNode(node)) {
+      byAsset.set(node.id, createMountingExpectation({
+        assetId: node.id,
+        expectation: 'indoor',
+        provenance: 'source_metadata',
+        updatedAt: generatedAt,
+        reason: 'Metadata sumber secara eksplisit menyatakan indoor.',
+      }))
+      return
+    }
+    if (relatedAssetIds.has(node.id)) {
+      byAsset.set(node.id, createMountingExpectation({
+        assetId: node.id,
+        expectation: 'pole',
+        provenance: 'existing_relation',
+        updatedAt: generatedAt,
+      }))
+      return
+    }
+    byAsset.set(node.id, createMountingExpectation({
+      assetId: node.id,
+      expectation: 'unknown',
+      provenance: 'default_unknown',
+      updatedAt: generatedAt,
+    }))
+  })
+  return { byAsset }
+}
+
+function createMountingExpectation({
+  assetId,
+  expectation,
+  provenance,
+  actorId = null,
+  updatedAt = null,
+  reason = null,
+  auditEventId = null,
+}) {
+  return {
+    assetId,
+    expectation,
+    provenance,
+    actorId,
+    updatedAt,
+    reason,
+    auditEventId,
+  }
+}
+
+function normalizeMountingExpectation(value) {
+  const normalized = normalizeText(value)
+  return MOUNTING_EXPECTATIONS.includes(normalized) ? normalized : null
+}
+
+function isExplicitIndoorNode(node) {
+  const text = normalizeText([
+    node?.mountingExpectation,
+    node?.canonicalAssetType,
+    node?.canonicalCategory,
+    node?.assetType,
+    node?.category,
+    node?.sourceName,
+    node?.sourceFolderPath,
+  ].filter(Boolean).join(' '))
+  return /\bindoor\b|dalam ruangan|non tiang|non pole/.test(text)
+}
+
+function createMountingReviewItems({
+  assets,
+  poles,
+  relations,
+  candidates,
+  options,
+  overrides,
+  expectations,
+}) {
+  const relationByAsset = new Map(relations.map((relation) => [relation.sourceAssetId, relation]))
+  const candidatesByAsset = groupBy(candidates, 'assetId')
+  const optionsByAsset = groupBy(options, 'assetId')
+  const expectationByAsset = new Map(expectations.map((item) => [item.assetId, item]))
+  const poleById = new Map(poles.map((pole) => [pole.id, pole]))
+  return assets.map((asset) => {
+    const expectation = expectationByAsset.get(asset.id)
+    const relation = relationByAsset.get(asset.id) ?? null
+    const assetCandidates = candidatesByAsset.get(asset.id) ?? []
+    const assetOptions = optionsByAsset.get(asset.id) ?? []
+    const override = overrides.byAsset.get(asset.id) ?? null
+    const targetPole = relation ? poleById.get(relation.targetAssetId) : null
+    const warnings = []
+    if (!validCoordinate(asset.coordinate)) warnings.push('invalid_coordinate')
+    if (relation && targetPole && hasDifferentMountingIdentity(asset, targetPole)) {
+      warnings.push('number_coordinate_mismatch')
+    }
+    if (override?.action === 'detach') warnings.push('manual_detach')
+    const reviewStatus = mountingReviewStatus({
+      expectation: expectation?.expectation,
+      relation,
+      candidates: assetCandidates,
+      options: assetOptions,
+      override,
+    })
+    return {
+      assetId: asset.id,
+      assetName: asset.sourceName ?? asset.name ?? asset.id,
+      areaKey: asset.locationGroupKey ?? null,
+      mountingExpectation: expectation?.expectation ?? 'unknown',
+      expectationProvenance: expectation?.provenance ?? 'default_unknown',
+      reviewStatus,
+      workflowStatus: mountingWorkflowStatus({
+        expectation: expectation?.expectation,
+        relation,
+        candidates: assetCandidates,
+        options: assetOptions,
+        override,
+      }),
+      relationId: relation?.relationId ?? null,
+      targetAssetId: relation?.targetAssetId ?? null,
+      provenance: relation?.provenance ?? null,
+      distanceMeters: relation?.distanceMeters ?? assetOptions[0]?.distanceMeters ?? null,
+      candidateCount: assetCandidates.length,
+      optionCount: assetOptions.length,
+      options: assetOptions.map((option) => ({
+        optionId: option.optionId,
+        targetAssetId: option.targetAssetId,
+        distanceMeters: option.distanceMeters,
+      })),
+      warnings,
+    }
+  }).sort((left, right) => (
+    String(left.areaKey ?? '').localeCompare(String(right.areaKey ?? ''), 'id')
+    || left.reviewStatus.localeCompare(right.reviewStatus, 'id')
+    || left.assetName.localeCompare(right.assetName, 'id')
+    || left.assetId.localeCompare(right.assetId, 'id')
+  ))
+}
+
+function mountingReviewStatus({ expectation, relation, candidates, options, override }) {
+  if (expectation === 'indoor') return 'indoor'
+  if (expectation === 'standalone') return 'standalone'
+  if (relation) return 'mounted'
+  if (candidates.length || options.length) return 'ambiguous'
+  return 'no-nearby-pole'
+}
+
+function mountingWorkflowStatus({ expectation, relation, candidates, options, override }) {
+  if (expectation === 'indoor') return 'excluded_indoor'
+  if (expectation === 'standalone') return 'excluded_standalone'
+  if (relation?.provenance === 'manual_admin') return 'mounted_manual'
+  if (relation) return 'mounted_automatic'
+  if (override?.action === 'detach') return 'detached_manual'
+  if (candidates.length || options.length) return 'needs_choice'
+  return 'no_nearby_pole'
+}
+
+function hasDifferentMountingIdentity(asset, pole) {
+  const assetName = normalizeText(asset?.sourceName ?? asset?.name)
+  if (!/^(?:jb|junction box)\b/.test(assetName)) return false
+  const assetNumber = mountingAssetNumber(asset, 'asset')
+  const poleNumber = mountingAssetNumber(pole, 'pole')
+  return Boolean(assetNumber && poleNumber && assetNumber !== poleNumber)
+}
+
+function groupBy(items, field) {
+  const grouped = new Map()
+  items.forEach((item) => {
+    const key = item?.[field]
+    if (!key) return
+    grouped.set(key, [...(grouped.get(key) ?? []), item])
+  })
+  return grouped
+}
+
+function countBy(items, field) {
+  return Object.fromEntries([...items.reduce((counts, item) => {
+    const key = String(item?.[field] ?? 'unknown')
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+    return counts
+  }, new Map()).entries()].sort(([left], [right]) => left.localeCompare(right)))
+}
+
+function countWarnings(items) {
+  const warnings = items.flatMap((item) => item.warnings ?? [])
+  return Object.fromEntries([...warnings.reduce((counts, warning) => {
+    counts.set(warning, (counts.get(warning) ?? 0) + 1)
+    return counts
+  }, new Map()).entries()].sort(([left], [right]) => left.localeCompare(right)))
+}
+
 function createMountingRelation({
   bundle,
   asset,
@@ -343,7 +601,7 @@ function createMountingRelation({
     relationType: MOUNTING_RELATION_TYPE,
     relationKind: MOUNTING_RELATION_KIND,
     direction: 'source_to_target',
-    distanceMeters: round(distanceMeters),
+    distanceMeters: roundNullable(distanceMeters),
     provenance,
     verificationStatus: 'confirmed',
     verifiedBy,
@@ -361,8 +619,8 @@ function createMountingRelation({
         : inferenceRule === 'matching_asset_number'
           ? 'mounting.matching-asset-number'
           : 'mounting.unique-nearest-pole',
-      observedValue: round(distanceMeters),
-      normalizedValue: `${round(distanceMeters)}m`,
+      observedValue: roundNullable(distanceMeters),
+      normalizedValue: Number.isFinite(distanceMeters) ? `${round(distanceMeters)}m` : 'unknown',
       explanation: provenance === 'manual_admin'
         ? 'Penempatan aset pada tiang ditetapkan administrator.'
         : inferenceRule === 'matching_asset_number'
@@ -538,6 +796,7 @@ function objectIdentity(object) {
 }
 
 function geographicDistanceMeters(left, right) {
+  if (!validCoordinate(left) || !validCoordinate(right)) return null
   const latitude1 = Number(left[1]) * Math.PI / 180
   const latitude2 = Number(right[1]) * Math.PI / 180
   const deltaLatitude = (Number(right[1]) - Number(left[1])) * Math.PI / 180
@@ -572,7 +831,7 @@ function compareMountingOptions(left, right) {
 function normalizeConfig(config) {
   return {
     mountingSearchRadiusMeters: positiveNumber(
-      config.mountingSearchRadiusMeters,
+      config.maxAutoDistanceMeters ?? config.mountingSearchRadiusMeters,
       DEFAULT_MOUNTING_CONFIG.mountingSearchRadiusMeters,
     ),
     mountingIdentityRadiusMeters: positiveNumber(
@@ -630,6 +889,14 @@ function nonNegativeNumber(value, fallback) {
 
 function round(value) {
   return Math.round(Number(value) * 1000) / 1000
+}
+
+export function mountingFacilityScopeKey(value) {
+  return facilityScopeKey(value)
+}
+
+function roundNullable(value) {
+  return Number.isFinite(value) ? round(value) : null
 }
 
 function deterministicId(prefix, ...parts) {

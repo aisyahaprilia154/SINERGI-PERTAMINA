@@ -493,6 +493,20 @@ export async function renderMapPage(container) {
     const assetMountingOptions = [
       ...(mountingOptions ?? []).filter((option) => option.assetId === asset.id),
       ...(asset.mountingOptions ?? []).filter((option) => option.assetId === asset.id),
+      ...assets.filter((candidate) => (
+        isPoleLikeAsset(candidate)
+          && candidate.id !== asset.id
+          && (!asset.locationGroupKey
+            || !candidate.locationGroupKey
+            || candidate.locationGroupKey === asset.locationGroupKey)
+      )).map((pole) => ({
+        optionId: `facility-pole:${asset.id}:${pole.id}`,
+        assetId: asset.id,
+        targetAssetId: pole.id,
+        targetAssetName: pole.name || pole.id,
+        distanceMeters: null,
+        optionSource: 'facility_catalog',
+      })),
     ].filter((option, index, all) => {
       const key = option.optionId
         ?? option.candidateId
@@ -1217,6 +1231,12 @@ export async function renderMapPage(container) {
   syncMap()
 }
 
+function isPoleLikeAsset(asset) {
+  return /\b(tiang|pole|pylon)\b/i.test(
+    `${asset?.type ?? ''} ${asset?.category ?? ''} ${asset?.name ?? ''}`,
+  )
+}
+
 function readRequestedDatasetContext() {
   const query = new URLSearchParams(window.location.search)
   return {
@@ -1666,6 +1686,7 @@ function networkMatchesPreset(network, preset) {
 }
 
 export function renderTopNavigation(activeView = 'map', context = null) {
+  const topologyNavigation = activeView === 'topology'
   const contextParams = context?.datasetId
     ? new URLSearchParams({
       datasetId: context.datasetId,
@@ -1675,9 +1696,11 @@ export function renderTopNavigation(activeView = 'map', context = null) {
   if (contextParams && context.area) contextParams.set('area', context.area)
   const contextQuery = contextParams ? `?${contextParams}` : ''
   return `
-    <header class="top-navigation">
+    <header class="top-navigation${topologyNavigation ? ' topology-top-navigation' : ''}">
       <a class="brand-lockup nav-brand" href="/" aria-label="SINERGI">
-        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        ${topologyNavigation
+          ? '<span class="material-symbols-outlined topology-nav-brand-icon" aria-hidden="true">hub</span>'
+          : '<span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>'}
         <span><strong>SINERGI</strong><small>Asset Network</small></span>
       </a>
       <nav aria-label="Navigasi utama">
@@ -1689,8 +1712,8 @@ export function renderTopNavigation(activeView = 'map', context = null) {
         </a>
       </nav>
       <div class="nav-actions">
-        <button class="icon-button" type="button" aria-label="Bantuan">
-          <span class="material-symbols-outlined" aria-hidden="true">help</span>
+        <button class="icon-button" type="button" aria-label="${topologyNavigation ? 'Cari' : 'Bantuan'}">
+          <span class="material-symbols-outlined" aria-hidden="true">${topologyNavigation ? 'search' : 'help'}</span>
         </button>
         <button class="icon-button notification-button" type="button" aria-label="Notifikasi">
           <span class="material-symbols-outlined" aria-hidden="true">notifications</span><i></i>

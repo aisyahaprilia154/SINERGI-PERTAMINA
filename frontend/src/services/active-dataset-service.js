@@ -612,6 +612,7 @@ export async function setMountingRelation({
   action = poleAssetId ? 'assign' : 'detach',
   reason,
   expectedRecordRevision,
+  idempotencyKey = null,
   token = getDefaultMapToken(),
   signal,
   apiBase = '',
@@ -631,10 +632,138 @@ export async function setMountingRelation({
       token,
       signal,
       method: 'POST',
+      idempotencyKey,
       body: {
         assetId,
         action,
         ...(action === 'assign' ? { poleAssetId } : {}),
+        reason: String(reason ?? '').trim() || undefined,
+        ...(expectedRecordRevision !== undefined ? { expectedRecordRevision } : {}),
+      },
+    },
+  )
+}
+
+export async function loadMountingReview({
+  datasetVersionId,
+  area = null,
+  status = null,
+  q = null,
+  limit = 1000,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
+  const query = new URLSearchParams()
+  setTopologyQueryValue(query, 'area', area)
+  setTopologyQueryValue(query, 'status', status)
+  setTopologyQueryValue(query, 'q', q)
+  setTopologyQueryValue(query, 'limit', limit)
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + `/topology/mounting-review?${query.toString()}`,
+    { token, signal },
+  )
+}
+
+export async function previewMountingRegeneration({
+  datasetVersionId,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + '/topology/mounting-regeneration/preview',
+    { token, signal, method: 'POST', body: {} },
+  )
+}
+
+export async function queueMountingRegeneration({
+  datasetVersionId,
+  expectedRecordRevision,
+  reason,
+  idempotencyKey = null,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + '/topology/mounting-regeneration',
+    {
+      token,
+      signal,
+      method: 'POST',
+      idempotencyKey,
+      body: {
+        reason: String(reason ?? '').trim() || 'Penerapan kebijakan mounting fisik 25 meter.',
+        ...(expectedRecordRevision !== undefined ? { expectedRecordRevision } : {}),
+      },
+    },
+  )
+}
+
+export async function setMountingExpectation({
+  datasetVersionId,
+  assetId,
+  expectation,
+  reason,
+  expectedRecordRevision,
+  idempotencyKey = null,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId || !assetId) throw new TypeError('Dataset dan Asset ID wajib tersedia.')
+  if (!['pole', 'indoor', 'standalone', 'unknown'].includes(expectation)) {
+    throw new TypeError('Mounting expectation tidak valid.')
+  }
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + '/topology/mounting-expectations',
+    {
+      token,
+      signal,
+      method: 'POST',
+      idempotencyKey,
+      body: {
+        assetId,
+        expectation,
+        reason: String(reason ?? '').trim() || undefined,
+        ...(expectedRecordRevision !== undefined ? { expectedRecordRevision } : {}),
+      },
+    },
+  )
+}
+
+export async function reviewMountingBulk({
+  datasetVersionId,
+  decisions,
+  reason,
+  expectedRecordRevision,
+  idempotencyKey = null,
+  token = getDefaultMapToken(),
+  signal,
+  apiBase = '',
+} = {}) {
+  if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
+  if (!Array.isArray(decisions) || decisions.length < 1 || decisions.length > 200) {
+    throw new TypeError('Keputusan mounting harus berisi 1 sampai 200 item.')
+  }
+  return topologyRequest(
+    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}`
+      + '/topology/mounting-review/bulk',
+    {
+      token,
+      signal,
+      method: 'POST',
+      idempotencyKey,
+      body: {
+        decisions,
         reason: String(reason ?? '').trim() || undefined,
         ...(expectedRecordRevision !== undefined ? { expectedRecordRevision } : {}),
       },
@@ -672,12 +801,14 @@ async function topologyRequest(url, {
   signal,
   method = 'GET',
   body,
+  idempotencyKey = null,
 }) {
   const response = await fetch(url, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
       ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
     signal,

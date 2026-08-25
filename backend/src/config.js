@@ -248,10 +248,19 @@ export function createConfig(env = process.env, overrides = {}) {
         // source-first map. Keep the environment override so deployments can
         // temporarily opt out without bringing back the review UI.
         ?? booleanFrom(env.SINERGI_AUTOMATIC_RELATIONS, true),
+      maxAutoDistanceMeters: overrides.topology?.maxAutoDistanceMeters
+        ?? numberFrom(
+          env.SINERGI_MAX_AUTO_DISTANCE_METERS,
+          DEFAULT_RELATION_ENGINE_CONFIG.maxAutoDistanceMeters,
+        ),
       mountingSearchRadiusMeters: overrides.topology?.mountingSearchRadiusMeters
+        ?? overrides.topology?.maxAutoDistanceMeters
         ?? numberFrom(
           env.SINERGI_MOUNTING_SEARCH_RADIUS_METERS,
-          DEFAULT_RELATION_ENGINE_CONFIG.mountingSearchRadiusMeters,
+          numberFrom(
+            env.SINERGI_MAX_AUTO_DISTANCE_METERS,
+            DEFAULT_RELATION_ENGINE_CONFIG.mountingSearchRadiusMeters,
+          ),
         ),
       mountingIdentityRadiusMeters: overrides.topology?.mountingIdentityRadiusMeters
         ?? numberFrom(

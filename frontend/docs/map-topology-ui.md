@@ -66,8 +66,15 @@ Fitur yang tersedia:
   dataset/version/branch/area/graph revision;
 - section **Aset tanpa relasi** tanpa edge sintetis, plus panel unresolved
   terpisah untuk administrator.
-- relasi mounting fisik divisualisasikan sebagai bubble berwarna lembut yang
-  membungkus perangkat pada tiang yang sama, bukan sebagai koneksi jaringan.
+- relasi mounting fisik divisualisasikan sebagai kotak berlabel nama tiang yang
+  membungkus perangkat pada tiang yang sama, bukan sebagai koneksi jaringan;
+- satu JB masuk per kotak sejajar pada backbone horizontal, sedangkan JB
+  lanjutan/extension dan endpoint disusun bertingkat di dalam kotak;
+- bila JB extension terkonfirmasi berada pada tiang berbeda, kotak tiangnya
+  ditempatkan tepat di bawah kotak JB induk dan tetap dihubungkan oleh edge
+  jaringan confirmed (contoh T-001 → T-019 dan T-011 → T-021 di FT Pengapon);
+- aset terhubung tanpa mounting terkonfirmasi ditempatkan pada satu kotak
+  putus-putus **Tiang belum diketahui** per area.
 
 ## Candidate review
 

@@ -14,7 +14,9 @@ export function renderAssetDetailDrawer({
   mountingActionError = null,
   mountingControlsAvailable = false,
   activeContext,
+  trace = {},
   showAdditionalMetadata = false,
+  traceAvailable = true,
   diagramAvailable = true,
   topologySummary = {},
   relationOptions = [],
@@ -32,6 +34,7 @@ export function renderAssetDetailDrawer({
   const hasIpAddress = asset.ip && !['—', 'â€”', '-'].includes(asset.ip)
   const poleAsset = isPoleAsset(asset)
   const hasDirectRelations = connectedAssets.length > 0
+  const canTraceAsset = !poleAsset && traceAvailable && hasDirectRelations
   const operationalStatus = resolveOperationalStatus(asset)
   const assetName = displayAssetName(asset)
 
@@ -67,6 +70,8 @@ export function renderAssetDetailDrawer({
         <h2>${escapeHtml(assetName)}</h2>
         <p>${escapeHtml(asset.type || 'Jenis aset belum tersedia')}</p>
       </section>
+
+      ${poleAsset ? '' : renderTraceSection(trace)}
 
       ${poleAsset ? '' : `<section class="drawer-section drawer-topology-summary" aria-labelledby="asset-topology-title">
         <div class="drawer-section-heading">
@@ -221,6 +226,18 @@ export function renderAssetDetailDrawer({
     </div>
 
     <footer class="drawer-actions">
+      ${trace.status && trace.status !== 'idle' ? `
+        <button class="button secondary stop-tracing" type="button">
+          <span class="material-symbols-outlined" aria-hidden="true">stop_circle</span>
+          Hentikan tracing
+        </button>
+      ` : canTraceAsset ? `
+        <button class="button primary trace-from" type="button"
+          title="Telusuri koneksi terkonfirmasi dari aset ini">
+          <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>
+          Telusuri koneksi
+        </button>
+      ` : ''}
       <div class="drawer-secondary-actions">
         <button class="button secondary open-asset-detail" type="button"
           aria-expanded="${String(showAdditionalMetadata)}">
@@ -299,6 +316,8 @@ function renderMountingSection({
   const assignedLabel = mountedOnAsset
     ? displayAssetName(mountedOnAsset)
     : 'Belum ditentukan'
+  const expectation = asset.mountingExpectation ?? 'unknown'
+  const reviewWarnings = asset.mountingReview?.warnings ?? []
   const normalizedSearch = String(mountingSearch ?? '').trim().toLocaleLowerCase('id')
   const filteredMountingOptions = availableMountingOptions.filter((candidate) => {
     if (!normalizedSearch) return true
@@ -320,7 +339,6 @@ function renderMountingSection({
       </button>
     </li>
   `).join('')
-  const orderedMountedAssets = [...mountedAssets].sort(compareMountedAssets)
 
   return `
     <section class="drawer-section mounting-section" aria-labelledby="asset-mounting-title">
@@ -328,6 +346,20 @@ function renderMountingSection({
         <h3 id="asset-mounting-title">Pemasangan fisik</h3>
         <span class="count-badge">${pole ? mountedAssets.length : mountedOnAsset ? 1 : 0}</span>
       </div>
+      ${mountable ? `
+        <div class="mounting-expectation-row">
+          <span class="mounting-label">Ekspektasi pemasangan</span>
+          <span class="category-badge mounting-expectation-${escapeAttribute(expectation)}">
+            ${escapeHtml(mountingExpectationLabel(expectation))}
+          </span>
+        </div>
+        ${reviewWarnings.includes('number_coordinate_mismatch') ? `
+          <p class="mounting-action-status warning">
+            <span class="material-symbols-outlined" aria-hidden="true">warning</span>
+            Nomor aset berbeda dari tiang terdekat; koordinat dipakai sebagai sumber kebenaran.
+          </p>
+        ` : ''}
+      ` : ''}
       ${mountable ? `
         <div class="mounting-assignment">
           <span class="mounting-label">Dipasang pada</span>
@@ -343,9 +375,9 @@ function renderMountingSection({
       ${pole ? `
         <div class="mounting-assignment">
           <span class="mounting-label">Aset terpasang</span>
-          ${orderedMountedAssets.length ? `
+          ${mountedAssets.length ? `
             <ul class="relation-list mounting-asset-list">
-              ${orderedMountedAssets.map((mountedAsset) => `
+              ${mountedAssets.map((mountedAsset) => `
                 <li>
                   <button type="button" data-connected-asset="${escapeAttribute(mountedAsset.id)}">
                     <span class="relation-icon material-symbols-outlined" aria-hidden="true">${assetIcon(mountedAsset.type)}</span>
@@ -391,6 +423,125 @@ function renderMountingSection({
       ${mountingActionError ? `<p class="mounting-action-status error" role="alert"><span class="material-symbols-outlined" aria-hidden="true">error</span>${escapeHtml(mountingActionError)}</p>` : ''}
       </section>
   `
+}
+
+function renderTraceSection(trace) {
+  if (!trace.status || trace.status === 'idle') return ''
+
+  if (trace.status === 'loading') {
+    return `
+      <section class="drawer-section trace-panel" aria-live="polite" aria-busy="true">
+        <div class="trace-panel-heading">
+          <span class="material-symbols-outlined" aria-hidden="true">conversion_path</span>
+          <h3>Menyusun jalur</h3>
+        </div>
+        <div class="drawer-skeleton trace-skeleton"><i></i><i></i><i></i></div>
+      </section>
+    `
+  }
+
+  if (trace.status === 'choosing') {
+    return `
+      <section class="drawer-section trace-panel" aria-labelledby="trace-destination-title">
+        <div class="trace-panel-heading">
+          <span class="material-symbols-outlined" aria-hidden="true">flag</span>
+          <div>
+            <h3 id="trace-destination-title">Pilih aset tujuan</h3>
+            <p>Tujuan berikut dapat dicapai melalui graph topologi terkonfirmasi.</p>
+          </div>
+        </div>
+        <div class="trace-destinations">
+          ${(trace.candidates || []).map(({ asset, distance }) => `
+            <button type="button" data-trace-target="${escapeAttribute(asset.id)}">
+              <span>
+                <strong>${escapeHtml(displayAssetName(asset))}</strong>
+                <small>${escapeHtml(asset.id)} · ${distance} hubungan</small>
+              </span>
+              <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
+            </button>
+          `).join('')}
+        </div>
+      </section>
+    `
+  }
+
+  if (trace.status === 'error') {
+    return `
+      <section class="drawer-section trace-panel trace-error" role="alert">
+        <div class="trace-panel-heading">
+          <span class="material-symbols-outlined" aria-hidden="true">error</span>
+          <div>
+            <h3>Tracing tidak dapat diselesaikan</h3>
+            <p>${escapeHtml(trace.error || 'Relasi atau tujuan tidak tersedia pada dataset aktif.')}</p>
+          </div>
+        </div>
+      </section>
+    `
+  }
+
+  if (trace.status === 'active') {
+    const sourceLabel = trace.pathAssets?.[0]?.name
+      || trace.sourceAssetId
+      || trace.pathAssets?.[0]?.id
+      || 'Belum tersedia'
+    const targetLabel = trace.pathAssets?.at(-1)?.name
+      || trace.targetAssetId
+      || trace.pathAssets?.at(-1)?.id
+      || 'Belum tersedia'
+    const hopLabel = Number.isFinite(Number(trace.hopCount))
+      ? String(trace.hopCount)
+      : 'Belum tersedia'
+    const lengthLabel = Number.isFinite(Number(trace.totalLengthMeters))
+      ? `${Number(trace.totalLengthMeters).toLocaleString('id-ID')} m`
+      : 'Belum tersedia'
+    const verifiedLabel = formatDateTime(trace.verifiedAt)
+    return `
+      <section class="drawer-section trace-panel" aria-labelledby="trace-path-title">
+        <div class="trace-panel-heading success">
+          <span class="material-symbols-outlined" aria-hidden="true">check_circle</span>
+          <div>
+            <h3 id="trace-path-title">Jalur koneksi</h3>
+            <p>${escapeHtml(trace.explanation || 'Urutan berdasarkan graph topologi terkonfirmasi.')}</p>
+          </div>
+        </div>
+        <dl class="asset-properties compact trace-metadata">
+          <div><dt>Dari</dt><dd>${escapeHtml(sourceLabel)}</dd></div>
+          <div><dt>Ke</dt><dd>${escapeHtml(targetLabel)}</dd></div>
+          <div><dt>Hop</dt><dd>${escapeHtml(hopLabel)}</dd></div>
+          <div><dt>Total panjang</dt><dd>${escapeHtml(lengthLabel)}</dd></div>
+          <div><dt>Network family</dt><dd>${escapeHtml(String(trace.networkFamily || 'Belum tersedia').toUpperCase())}</dd></div>
+          <div><dt>Status</dt><dd>Terkonfirmasi</dd></div>
+          <div><dt>Graph revision</dt><dd>${escapeHtml(trace.graphRevision || 'Belum tersedia')}</dd></div>
+          <div><dt>Verified at</dt><dd>${escapeHtml(verifiedLabel)}</dd></div>
+        </dl>
+        <ol class="trace-sequence">
+          ${(trace.pathAssets || []).map((pathAsset, index) => {
+            const relation = trace.relations?.[index]
+            const pathEvidence = relation?.pathAssetIds?.length
+              ? `Path: ${relation.pathAssetIds.join(', ')}`
+              : ''
+            const geometryEvidence = relation?.sourceGeometryIds?.length
+              ? `Geometry: ${relation.sourceGeometryIds.join(', ')}`
+              : ''
+            return `
+              <li>
+                <span class="trace-order">${index + 1}</span>
+                <span>
+                  <strong>${escapeHtml(displayAssetName(pathAsset))}</strong>
+                  <small>${escapeHtml(pathAsset.id)}</small>
+                  ${relation?.networkName ? `<em>${escapeHtml(relation.networkName)}</em>` : ''}
+                  ${pathEvidence ? `<small>${escapeHtml(pathEvidence)}</small>` : ''}
+                  ${geometryEvidence ? `<small>${escapeHtml(geometryEvidence)}</small>` : ''}
+                </span>
+              </li>
+            `
+          }).join('')}
+        </ol>
+      </section>
+    `
+  }
+
+  return ''
 }
 
 function renderLoadingState() {
@@ -534,25 +685,32 @@ function isMountableAsset(asset) {
 function isPoleAsset(asset) {
   return /\b(tiang|pole|pylon)\b/i.test(
     `${asset?.type || ''} ${asset?.category || ''} ${asset?.name || ''}`,
-  ) || /^T-(?:\d+|TOWER)\b/i.test(String(asset?.name || ''))
-}
-
-function compareMountedAssets(left, right) {
-  const assetRank = (asset) => {
-    const source = `${asset?.type || ''} ${asset?.category || ''} ${asset?.name || ''}`
-    if (/junction|\bjb\b/i.test(source)) return 0
-    if (/cctv|camera|kamera/i.test(source)) return 1
-    return 2
-  }
-
-  return assetRank(left) - assetRank(right)
-    || displayAssetName(left).localeCompare(displayAssetName(right), 'id', { numeric: true })
-    || String(left?.id || '').localeCompare(String(right?.id || ''), 'id', { numeric: true })
+  )
 }
 
 function formatDistance(value) {
+  if (value === null || value === undefined || value === '') return 'jarak tidak tersedia'
   const distance = Number(value)
   return Number.isFinite(distance) ? `${distance.toLocaleString('id-ID', { maximumFractionDigits: 2 })} m` : 'jarak tidak tersedia'
+}
+
+function mountingExpectationLabel(value) {
+  return ({
+    pole: 'Tiang',
+    indoor: 'Indoor',
+    standalone: 'Standalone',
+    unknown: 'Perlu klasifikasi',
+  })[value] ?? 'Perlu klasifikasi'
+}
+
+function formatDateTime(value) {
+  if (!value) return 'Belum tersedia'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return new Intl.DateTimeFormat('id-ID', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
 }
 
 function renderAssetId(value) {

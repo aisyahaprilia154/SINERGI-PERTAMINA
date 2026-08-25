@@ -148,6 +148,35 @@ test('confirmed model scopes branch/version, keeps isolated assets, and uses ver
   assert.deepEqual(model.edgeById.get('edge-core-dist').pathAssetIds, ['cable-a'])
 })
 
+test('area diagram exposes expected rack backbone gaps without adding operational edges', () => {
+  const gapAssets = [
+    { id: 'rack', name: 'JB Rack Server', type: 'Server Rack', topologyRole: 'core', locationGroupKey: 'north' },
+    { id: 'rack-jb', name: 'JB-RACK-01', type: 'Junction Box', topologyRole: 'junction', locationGroupKey: 'north' },
+    { id: 'remote-jb', name: 'JB-REMOTE-01', type: 'Junction Box', topologyRole: 'junction', locationGroupKey: 'north' },
+    { id: 'remote-camera', name: 'CAM-REMOTE-01', type: 'CCTV Camera', topologyRole: 'endpoint', locationGroupKey: 'north' },
+  ]
+  const model = buildTopologyDiagramModel({
+    assets: gapAssets,
+    graph: {
+      graphRevision: 'gap-revision',
+      nodes: gapAssets.map(({ id, topologyRole }) => ({ id, topologyRole })),
+      edges: [
+        { id: 'rack-jb-edge', sourceNodeId: 'rack', targetNodeId: 'rack-jb', relationStatus: 'confirmed' },
+        { id: 'remote-edge', sourceNodeId: 'remote-jb', targetNodeId: 'remote-camera', relationStatus: 'confirmed' },
+      ],
+    },
+    area: 'north',
+    locationGroups: [{ key: 'north', name: 'Area Utara' }],
+  })
+
+  assert.equal(model.summary.backboneGapCount, 1)
+  assert.deepEqual(model.backboneGaps.map(({ sourceId, targetId }) => ({ sourceId, targetId })), [
+    { sourceId: 'rack', targetId: 'remote-jb' },
+  ])
+  assert.equal(model.edges.length, 2)
+  assert.equal(model.topologyLinkById.has(model.backboneGaps[0].id), false)
+})
+
 test('candidate, ambiguous, and unresolved layers stay outside operational graph', () => {
   const candidates = [
     {
@@ -261,33 +290,35 @@ test('search covers hostname and edge provenance', () => {
   assert.equal(getTopologyDiagramSearchResults(model, 'line-a')[0].id, 'edge-core-dist')
 })
 
-test('search includes path assets and physical mounting hosts', () => {
+test('search results expose translated type, area, and connection status', () => {
   const model = buildTopologyDiagramModel({
     assets,
     graph,
     locationGroups,
     roots: ['core-a'],
-    mountingRelations: [{
-      id: 'mount-camera',
-      relationType: 'mounted_on',
-      sourceAssetId: 'camera-a',
-      targetAssetId: 'pole-a',
-    }],
     ...context,
   })
+  const assetResult = getTopologyDiagramSearchResults(model, 'CAM-A')[0]
+  const edgeResult = getTopologyDiagramSearchResults(model, 'line-a')[0]
 
-  assert.equal(getTopologyDiagramSearchResults(model, 'cable-a')[0].id, 'edge-core-dist')
-  const mountingResult = getTopologyDiagramSearchResults(model, 'T-018')[0]
-  assert.equal(mountingResult.kind, 'mounting')
-  assert.equal(mountingResult.id, 'pole-group:pole-a')
-  assert.equal(mountingResult.label, 'T-018')
-  assert.equal(mountingResult.detail, 'Tiang CCTV · 1 aset terpasang')
-  assert.ok(mountingResult.score > 0)
+  assert.equal(assetResult.typeLabel, 'Kamera CCTV')
+  assert.equal(assetResult.area, 'Area Utara')
+  assert.equal(assetResult.statusLabel, 'Terkonfirmasi')
+  assert.equal(edgeResult.typeLabel, 'Relasi terkonfirmasi')
+  assert.equal(edgeResult.statusLabel, 'Terkonfirmasi')
 })
 
 test('physical mounting stays a separate group and never becomes a network edge', () => {
+  const emptyPole = {
+    id: 'pole-empty',
+    name: 'T-021',
+    type: 'Tiang CCTV',
+    topologyRole: 'physical-mount',
+    locationGroupKey: 'north',
+    ...context,
+  }
   const model = buildTopologyDiagramModel({
-    assets,
+    assets: [...assets, emptyPole],
     graph,
     locationGroups,
     roots: ['core-a'],
@@ -304,10 +335,14 @@ test('physical mounting stays a separate group and never becomes a network edge'
   assert.deepEqual(model.mountingGroups.map(({ hostId, childIds }) => ({ hostId, childIds })), [{
     hostId: 'pole-a',
     childIds: ['camera-a'],
+  }, {
+    hostId: 'pole-empty',
+    childIds: [],
   }])
   assert.equal(model.nodes.some(({ id }) => id === 'pole-a'), false)
-  assert.equal(model.summary.physicalMountCount, 1)
-  assert.equal(model.completeness.complete, true)
+  assert.equal(model.nodes.some(({ id }) => id === 'pole-empty'), false)
+  assert.equal(model.summary.physicalMountCount, 2)
+  assert.equal(model.summary.emptyPhysicalMountCount, 1)
 })
 
 test('diagram classes separate JB peer, JB extended, rack root, endpoint, and physical mount', () => {

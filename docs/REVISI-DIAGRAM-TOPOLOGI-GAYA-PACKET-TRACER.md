@@ -207,13 +207,17 @@ Warna link membedakan media, tetapi warna harus selalu didampingi pola atau labe
 
 Tiang bukan hop jaringan kecuali confirmed graph secara eksplisit menyatakannya sebagai perangkat jaringan. Secara default:
 
-- tiang menjadi grouping bubble fisik;
+- tiang menjadi grouping box fisik;
 - CCTV dan JB yang terpasang pada tiang tetap menjadi node jaringan;
 - mounting relation tidak digambar sebagai kabel jaringan.
 
-Pada kanvas, satu tiang direpresentasikan sebagai bubble bulat/oval berwarna
-lembut di belakang perangkat yang terpasang. Label tiang berada di dalam bubble.
-Warna bubble hanya membedakan grouping fisik dan tidak menyatakan status.
+Pada kanvas, satu tiang direpresentasikan sebagai kotak rounded berwarna lembut
+di belakang perangkat yang terpasang. Label tiang berada di header kotak. Satu
+JB masuk per tiang menjadi anchor pada backbone horizontal; JB lanjutan,
+JB extension, dan endpoint disusun ke bawah di dalam kotak. Warna kotak hanya
+membedakan grouping fisik dan tidak menyatakan status. Aset terhubung tanpa
+mounting terkonfirmasi ditempatkan pada kotak putus-putus **Tiang belum
+diketahui** dan tidak menghasilkan relasi baru.
 
 ## 7. Model data UI
 

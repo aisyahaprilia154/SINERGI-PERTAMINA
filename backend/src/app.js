@@ -480,6 +480,7 @@ export function createApp({
         const datasetVersionId = regenerateTopologyMatch[1]
         const current = await repository.get(datasetVersionId)
         const reason = normalizeTopologyRegenerationReason(body.reason)
+        const expectedRecordRevision = normalizeExpectedRecordRevision(body)
         const fingerprintInput = JSON.stringify({
           datasetVersionId,
           recordRevision: Number.isInteger(current.recordRevision)
@@ -511,6 +512,7 @@ export function createApp({
             actorId: user.id,
             reason,
             correlationId,
+            ...(expectedRecordRevision !== undefined ? { expectedRecordRevision } : {}),
           },
           handler: createFullTopologyRegenerationJobHandler(topologyService),
         })
@@ -588,6 +590,112 @@ export function createApp({
             manualTopologyRelationMatch[1],
             user.id,
             mutationInput,
+          ),
+        )
+      }
+      const mountingReviewMatch = request.method === 'GET'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/mounting-review$/,
+        )
+        : null
+      if (mountingReviewMatch) {
+        requireAdministrator(request, authenticator)
+        assertTopologyService(topologyService)
+        return sendJson(
+          response,
+          200,
+          await topologyService.getMountingReview(
+            mountingReviewMatch[1],
+            Object.fromEntries(url.searchParams.entries()),
+          ),
+        )
+      }
+      const mountingPreviewMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/mounting-regeneration\/preview$/,
+        )
+        : null
+      if (mountingPreviewMatch) {
+        requireAdministrator(request, authenticator)
+        assertTopologyService(topologyService)
+        return sendJson(
+          response,
+          200,
+          await topologyService.previewMountingRegeneration(mountingPreviewMatch[1]),
+        )
+      }
+      const mountingRegenerationMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/mounting-regeneration$/,
+        )
+        : null
+      if (mountingRegenerationMatch) {
+        const user = requireAdministrator(request, authenticator)
+        assertTopologyService(topologyService)
+        const body = await readJsonBody(request)
+        return sendJson(
+          response,
+          200,
+          await topologyService.regenerateMounting(
+            mountingRegenerationMatch[1],
+            user.id,
+            {
+              ...body,
+              correlationId,
+              ...(request.headers['idempotency-key'] !== undefined
+                ? { idempotencyKey: request.headers['idempotency-key'] }
+                : {}),
+            },
+          ),
+        )
+      }
+      const mountingExpectationMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/mounting-expectations$/,
+        )
+        : null
+      if (mountingExpectationMatch) {
+        const user = requireAdministrator(request, authenticator)
+        assertTopologyService(topologyService)
+        const body = await readJsonBody(request)
+        return sendJson(
+          response,
+          200,
+          await topologyService.setMountingExpectation(
+            mountingExpectationMatch[1],
+            user.id,
+            {
+              ...body,
+              correlationId,
+              ...(request.headers['idempotency-key'] !== undefined
+                ? { idempotencyKey: request.headers['idempotency-key'] }
+                : {}),
+            },
+          ),
+        )
+      }
+      const mountingBulkMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/mounting-review\/bulk$/,
+        )
+        : null
+      if (mountingBulkMatch) {
+        const user = requireAdministrator(request, authenticator)
+        assertTopologyService(topologyService)
+        const body = await readJsonBody(request)
+        return sendJson(
+          response,
+          200,
+          await topologyService.reviewMountingBulk(
+            mountingBulkMatch[1],
+            user.id,
+            {
+              ...body,
+              correlationId,
+              ...(request.headers['idempotency-key'] !== undefined
+                ? { idempotencyKey: request.headers['idempotency-key'] }
+                : {}),
+            },
           ),
         )
       }
