@@ -768,16 +768,24 @@ function edgeVisualRoleFor(source, target) {
 }
 
 export function classifyTopologyNode(value = {}) {
+  const sourceClassification = value.properties?.classification
+    ?? value.classification
+    ?? {}
   const canonicalClass = normalizeTopologyDiagramClass(
     value.diagramClass
       ?? value.canonicalDiagramClass
-      ?? value.topology?.diagramClass,
+      ?? value.topology?.diagramClass
+      ?? sourceClassification.diagramClass,
   )
   if (canonicalClass) return canonicalClass
 
-  const canonicalType = String(value.canonicalAssetType ?? '').trim().toLowerCase()
+  const canonicalType = String(
+    value.canonicalAssetType ?? sourceClassification.canonicalAssetType ?? '',
+  ).trim().toLowerCase()
     .replaceAll('_', '-').replaceAll(' ', '-')
-  const canonicalProfile = String(value.jbProfileId ?? '').trim().toLowerCase()
+  const canonicalProfile = String(
+    value.jbProfileId ?? sourceClassification.jbProfileId ?? '',
+  ).trim().toLowerCase()
     .replaceAll('_', '-')
   if (canonicalProfile.includes('server-rack') || canonicalProfile.includes('rack-server')) {
     return 'rack-root'
@@ -803,6 +811,8 @@ export function classifyTopologyNode(value = {}) {
     value.objectRole,
     value.topologyRole,
     value.role,
+    sourceClassification.assetType,
+    sourceClassification.category,
   ].filter(Boolean).join(' ').toLowerCase()
   const role = normalizeTopologyRole(value.topologyRole ?? value.role)
   const normalizedRole = String(value.topologyRole ?? value.role ?? '')

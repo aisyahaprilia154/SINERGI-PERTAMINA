@@ -434,6 +434,65 @@ test('tiang is never a cable inline anchor and remains only a mounting host', ()
     candidateType === 'cable_termination' && targetAssetId === 'T-021'
   )), false)
   assert.ok(result.topologyDiagnostics.some(({ issueCode }) => issueCode === 'cable_terminated_at_pole'))
+  assert.deepEqual(result.graph.nodes, [])
+  assert.deepEqual(result.graph.isolatedNodeIds, [])
+  assert.ok(result.graph.installationGraph.nodes.some(({ id }) => id === 'T-021'))
+})
+
+test('numbered JB extensions connect to their unique parent within the same facility', () => {
+  const main = node('MAIN-19', 'cctv', 'Junction Box', [110, -7])
+  const first = node('CHILD-19-1', 'cctv', 'Junction Box', [110.001, -7])
+  const second = node('CHILD-19-2', 'cctv', 'Junction Box', [110.002, -7])
+  const orphan = node('CHILD-20-1', 'cctv', 'Junction Box', [110.003, -7])
+  const foreignMain = node('FOREIGN-MAIN-19', 'cctv', 'Junction Box', [111, -7])
+  main.object.sourceName = 'JB-019'
+  first.object.sourceName = 'JB-19.1-WP'
+  second.object.sourceName = 'JB-19.2-WP'
+  orphan.object.sourceName = 'JB-20.1-WP'
+  foreignMain.object.sourceName = 'JB-019'
+  ;[main, first, second, orphan].forEach(({ object }) => {
+    object.sourceFolderPath = '/RJBT/FT PENGAPON - SEMARANG/JUNCTION BOX'
+  })
+  foreignMain.object.sourceFolderPath = '/RJBT/FT LOMANIS/JUNCTION BOX'
+
+  const config = { automaticRelationConfirmation: true }
+  const initial = generateRelationArtifacts(topologyBundle({
+    nodes: [main, first, foreignMain],
+  }), {
+    config,
+  })
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [main, first, second, orphan, foreignMain],
+  }), {
+    config,
+    previousCandidates: initial.candidates,
+    previousRelations: initial.confirmedRelations,
+    previousInterfaceRegistry: initial.interfaceRegistry,
+  })
+  const familyCandidates = result.candidates.filter(({ candidateType }) => (
+    candidateType === 'named_junction_family'
+  ))
+  const familyEdges = result.graph.edges.filter((edge) => (
+    [edge.sourceNodeId, edge.targetNodeId].includes('MAIN-19')
+  ))
+
+  assert.deepEqual(
+    familyCandidates.map(({ sourceAssetId, targetAssetId, candidateStatus }) => (
+      [sourceAssetId, targetAssetId, candidateStatus]
+    )).sort((left, right) => left[0].localeCompare(right[0])),
+    [
+      ['CHILD-19-1', 'MAIN-19', 'confirmed'],
+      ['CHILD-19-2', 'MAIN-19', 'confirmed'],
+    ],
+  )
+  assert.equal(familyEdges.length, 2)
+  assert.ok(familyEdges.every(({ relationStatus }) => relationStatus === 'confirmed'))
+  assert.equal(familyEdges.some((edge) => (
+    [edge.sourceNodeId, edge.targetNodeId].includes('FOREIGN-MAIN-19')
+  )), false)
+  assert.equal(familyCandidates.some(({ sourceAssetId }) => (
+    sourceAssetId === 'CHILD-20-1'
+  )), false)
 })
 
 test('nearly equal endpoint-device scores become ambiguous', () => {
