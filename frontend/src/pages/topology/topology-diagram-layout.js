@@ -78,6 +78,7 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
 
   const settings = { ...DEFAULT_OPTIONS, ...options }
   if (settings.overview) return calculateAreaOverviewLayout(model, settings)
+  const usesPoleBoxes = ['central-backbone', 'compound-poles'].includes(settings.layoutStyle)
   const nodeById = new Map(model.nodes.map((node) => [node.id, node]))
   const componentById = new Map(model.components.map((component) => [component.componentId, component]))
   const layoutNodes = new Map()
@@ -92,7 +93,7 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
       .filter(Boolean)
       .sort((left, right) => compareComponentPriority(left, right, nodeById)
         || left.componentId.localeCompare(right.componentId, 'id'))
-    const laneSpecs = settings.layoutStyle === 'central-backbone' && areaComponents.length
+    const laneSpecs = usesPoleBoxes && areaComponents.length
       ? [buildPoleBackboneAreaLaneSpec({
         area,
         components: areaComponents,
@@ -221,9 +222,14 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
   allEdges.forEach((edge) => {
     const source = layoutNodes.get(edge.sourceId)
     const target = layoutNodes.get(edge.targetId)
+    const staysInsideCompoundGroup = settings.layoutStyle === 'compound-poles'
+      && source.mountingBoxId
+      && source.mountingBoxId === target.mountingBoxId
     layoutEdges.push({
       ...edge,
-      routePoints: routeEdge(source, target, mountingBoxById),
+      routePoints: staysInsideCompoundGroup
+        ? straightLinkPoints(source, target)
+        : routeEdge(source, target, mountingBoxById),
       linePoints: straightLinkPoints(source, target),
     })
   })
@@ -244,11 +250,21 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
     })
     .filter(Boolean)
 
+  const mountingGroupBounds = mountingBoxes.map((box) => ({
+    ...box,
+    childIds: [...box.nodeIds],
+    left: box.x,
+    right: box.x + box.width,
+    top: box.y,
+    bottom: box.y + box.height,
+  }))
   const layout = {
     status: 'ready',
-    strategy: settings.layoutStyle === 'central-backbone'
-      ? 'central-backbone-network'
-      : 'top-down-area-semantic-tier',
+    strategy: settings.layoutStyle === 'compound-poles'
+      ? 'compound-pole-network'
+      : settings.layoutStyle === 'central-backbone'
+        ? 'central-backbone-network'
+        : 'top-down-area-semantic-tier',
     networkAtlasStrategy: 'backbone-first-component-islands',
     width: finalWidth,
     height: finalHeight,
@@ -256,6 +272,7 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
     nodes: [...layoutNodes.values()].sort(compareLayoutNodes),
     edges: layoutEdges.sort((left, right) => left.id.localeCompare(right.id, 'id')),
     mountingBoxes,
+    mountingGroupBounds,
     backboneGaps,
     sections,
     unresolvedMarkers,
@@ -507,7 +524,11 @@ export function refreshTopologyDiagramLinks(layout) {
     if (!source || !target) return edge
     return {
       ...edge,
-      routePoints: routeEdge(source, target, mountingBoxById),
+      routePoints: settings.layoutStyle === 'compound-poles'
+        && source.mountingBoxId
+        && source.mountingBoxId === target.mountingBoxId
+        ? straightLinkPoints(source, target)
+        : routeEdge(source, target, mountingBoxById),
       linePoints: straightLinkPoints(source, target),
     }
   })
@@ -541,7 +562,7 @@ export function createTopologyLayoutWorkerModel(model) {
 }
 
 function buildLaneSpec(args) {
-  if (args.settings.layoutStyle === 'central-backbone') {
+  if (['central-backbone', 'compound-poles'].includes(args.settings.layoutStyle)) {
     return buildCentralBackboneLaneSpec(args)
   }
   return buildSemanticLaneSpec(args)
@@ -1611,6 +1632,7 @@ function toLayoutNode(node, {
     rowIndex,
     traversalIndex,
     mountingBoxId,
+    compoundGroupId: mountingBoxId,
     mountingRole,
     position: { x, y },
     diagram: {
