@@ -344,14 +344,18 @@
   min-height: 0;
   flex: 1;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
   cursor: grab;
   background-color: var(--topology-warm);
   background-image: radial-gradient(circle, rgba(3, 7, 29, .045) 1px, transparent 1px);
   background-size: 20px 20px;
 }
 
-.topology-stitch-viewport:active {
+.topology-stitch-viewport:active,
+.topology-stitch-viewport.is-panning {
   cursor: grabbing;
+  user-select: none;
 }
 
 .topology-stitch-viewport:focus-visible {
@@ -361,19 +365,16 @@
 .topology-stitch-canvas {
   min-width: 100%;
   min-height: 100%;
-  padding: 84px 30px 30px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
+  position: relative;
 }
 
 .topology-stitch-graph-frame {
   min-width: 300px;
   min-height: 240px;
-  position: relative;
-  flex: 0 0 auto;
-  transform-origin: top center;
-  transition: transform .16s ease;
+  position: absolute;
+  transform-origin: top left;
+  will-change: transform;
+  transition: transform .24s cubic-bezier(.22, 1, .36, 1);
 }
 
 .topology-stitch-graph-frame svg {
@@ -1293,11 +1294,6 @@
     left: 14px;
   }
 
-  .topology-stitch-canvas {
-    padding-right: 16px;
-    padding-left: 16px;
-  }
-
   .topology-stitch-floating-panel {
     left: 64px;
   }
@@ -1358,10 +1354,6 @@
   .topology-stitch-zoom-control button,
   .topology-stitch-toolbar-button {
     width: 28px;
-  }
-
-  .topology-stitch-canvas {
-    padding-top: 72px;
   }
 
   .topology-stitch-tray {

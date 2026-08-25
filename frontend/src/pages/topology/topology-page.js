@@ -15,12 +15,21 @@ import { downloadSchematicPng, downloadSchematicSvg } from '../map/schematic-exp
 import { bindUserAccountMenu, renderTopNavigation } from '../map/map-page.js'
 import { calculateTopologyDiagramLayout } from './topology-diagram-layout.js'
 import { renderTopologyDiagramSvg } from './topology-diagram-svg.js'
+import {
+  anchoredZoomScrollPosition,
+  computeFitZoom,
+  computeReadableZoom,
+  zoomSurfaceMetrics,
+} from './topology-viewport.js'
 
 const DEFAULT_DATASET_ID = 'dataset-semarang'
 const DEFAULT_BRANCH_ID = 'semarang'
-const DEFAULT_ZOOM = 0.85
+const DEFAULT_ZOOM = 1
 const MIN_ZOOM = 0.35
 const MAX_ZOOM = 1.35
+const CANVAS_HORIZONTAL_PADDING = 30
+const CANVAS_TOP_PADDING = 84
+const CANVAS_BOTTOM_PADDING = 30
 
 function topologyAreaStorageKey(activeContext) {
   return `sinergi.topology.last-area:${activeContext.datasetId}:${activeContext.branchId}`
@@ -130,6 +139,8 @@ function mountTopologyWorkspace(container, {
   let model = null
   let layout = null
   let searchTimer = null
+  let panState = null
+  let suppressViewportClick = false
 
   const buildModel = () => buildTopologyDiagramModel({
     assets: mapData.assets,
@@ -168,7 +179,7 @@ function mountTopologyWorkspace(container, {
     renderFilterPanel()
     updateToolbar()
     updatePanelState()
-    if (fit) requestAnimationFrame(() => fitGraph())
+    if (fit) requestAnimationFrame(() => resetGraphViewport())
     syncUrl()
   }
 
@@ -192,7 +203,7 @@ function mountTopologyWorkspace(container, {
   renderFilterPanel()
   updateToolbar()
   updatePanelState()
-  requestAnimationFrame(() => fitGraph())
+  requestAnimationFrame(() => resetGraphViewport())
 
   function bindWorkspaceEvents() {
     container.addEventListener('click', handleClick)
@@ -205,13 +216,28 @@ function mountTopologyWorkspace(container, {
       if (!event.ctrlKey && !event.metaKey) return
       event.preventDefault()
       const direction = event.deltaY > 0 ? -1 : 1
-      setZoom(state.zoom + direction * 0.08)
-      renderGraph()
-      updateToolbar()
+      zoomGraphTo(state.zoom + direction * 0.08, {
+        clientX: event.clientX,
+        clientY: event.clientY,
+      })
     }, { passive: false })
+
+    viewport?.addEventListener('pointerdown', beginPan)
+    viewport?.addEventListener('pointermove', movePan)
+    viewport?.addEventListener('pointerup', endPan)
+    viewport?.addEventListener('pointercancel', endPan)
+
+    if (viewport && typeof ResizeObserver === 'function') {
+      const resizeObserver = new ResizeObserver(() => syncGraphSurface({ preserveCenter: true }))
+      resizeObserver.observe(viewport)
+    }
   }
 
   function handleClick(event) {
+    if (suppressViewportClick) {
+      suppressViewportClick = false
+      return
+    }
     const target = event.target?.closest?.('[data-node-id], [data-edge-id], [data-mounting-group-id]')
     if (target?.dataset.nodeId) {
       selectAsset(target.dataset.nodeId)
@@ -414,9 +440,7 @@ function mountTopologyWorkspace(container, {
   }
 
   function changeZoom(delta) {
-    setZoom(state.zoom + delta)
-    renderGraph()
-    updateToolbar()
+    zoomGraphTo(state.zoom + delta)
   }
 
   function setZoom(value) {
@@ -427,12 +451,39 @@ function mountTopologyWorkspace(container, {
     if (!layout?.width || !layout?.height) return
     const viewport = container.querySelector('[data-topology-viewport]')
     if (!viewport) return
-    const availableWidth = Math.max(320, viewport.clientWidth - 72)
-    const availableHeight = Math.max(280, viewport.clientHeight - 72)
-    const fitted = Math.min(availableWidth / layout.width, availableHeight / layout.height)
-    setZoom(Math.min(1.12, Math.max(MIN_ZOOM, fitted)))
+    setZoom(computeFitZoom({
+      viewportWidth: viewport.clientWidth,
+      viewportHeight: viewport.clientHeight,
+      layoutWidth: layout.width,
+      layoutHeight: layout.height,
+      minZoom: MIN_ZOOM,
+      maxZoom: 1.12,
+      horizontalPadding: CANVAS_HORIZONTAL_PADDING * 2,
+      verticalPadding: CANVAS_TOP_PADDING + CANVAS_BOTTOM_PADDING,
+    }))
     renderGraph()
     updateToolbar()
+    requestAnimationFrame(() => centerGraph({ smooth: true }))
+  }
+
+  function resetGraphViewport() {
+    if (!layout?.width || !layout?.height) return
+    const viewport = container.querySelector('[data-topology-viewport]')
+    if (!viewport) return
+    const readableFloor = viewport.clientWidth < 620 ? 0.75 : 0.85
+    setZoom(computeReadableZoom({
+      viewportWidth: viewport.clientWidth,
+      viewportHeight: viewport.clientHeight,
+      layoutWidth: layout.width,
+      layoutHeight: layout.height,
+      minZoom: readableFloor,
+      maxZoom: DEFAULT_ZOOM,
+      horizontalPadding: CANVAS_HORIZONTAL_PADDING * 2,
+      verticalPadding: CANVAS_TOP_PADDING + CANVAS_BOTTOM_PADDING,
+    }))
+    renderGraph()
+    updateToolbar()
+    requestAnimationFrame(() => centerGraph())
   }
 
   function renderGraph() {
@@ -447,6 +498,7 @@ function mountTopologyWorkspace(container, {
       frame.style.width = '100%'
       frame.style.height = '100%'
       frame.style.transform = 'none'
+      syncGraphSurface()
       return
     }
     const svg = renderTopologyDiagramSvg({
@@ -470,6 +522,126 @@ function mountTopologyWorkspace(container, {
     frame.style.width = `${layout.width}px`
     frame.style.height = `${layout.height}px`
     frame.style.transform = `scale(${state.zoom})`
+    syncGraphSurface()
+  }
+
+  function zoomGraphTo(value, pointer = null) {
+    const viewport = container.querySelector('[data-topology-viewport]')
+    const frame = container.querySelector('[data-topology-frame]')
+    if (!viewport || !frame || !layout?.width || !layout?.height) return
+    const previousZoom = state.zoom
+    const rect = viewport.getBoundingClientRect()
+    const anchorX = pointer ? pointer.clientX - rect.left : viewport.clientWidth / 2
+    const anchorY = pointer ? pointer.clientY - rect.top : viewport.clientHeight / 2
+    const oldScrollLeft = viewport.scrollLeft
+    const oldScrollTop = viewport.scrollTop
+    const oldFrameLeft = numericStyle(frame.style.left, frame.offsetLeft)
+    const oldFrameTop = numericStyle(frame.style.top, frame.offsetTop)
+
+    setZoom(value)
+    if (state.zoom === previousZoom) return
+    renderGraph()
+
+    const position = anchoredZoomScrollPosition({
+      scrollLeft: oldScrollLeft,
+      scrollTop: oldScrollTop,
+      anchorX,
+      anchorY,
+      oldZoom: previousZoom,
+      newZoom: state.zoom,
+      oldFrameLeft,
+      oldFrameTop,
+      newFrameLeft: numericStyle(frame.style.left, frame.offsetLeft),
+      newFrameTop: numericStyle(frame.style.top, frame.offsetTop),
+    })
+    viewport.scrollTo({ ...position, behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
+    updateToolbar()
+  }
+
+  function syncGraphSurface({ preserveCenter = false } = {}) {
+    const viewport = container.querySelector('[data-topology-viewport]')
+    const canvas = container.querySelector('.topology-stitch-canvas')
+    const frame = container.querySelector('[data-topology-frame]')
+    if (!viewport || !canvas || !frame || !layout?.width || !layout?.height) return
+    const snapshot = preserveCenter ? viewportCenterSnapshot(viewport, frame) : null
+    const metrics = zoomSurfaceMetrics({
+      layoutWidth: layout.width,
+      layoutHeight: layout.height,
+      zoom: state.zoom,
+      viewportWidth: viewport.clientWidth,
+      viewportHeight: viewport.clientHeight,
+      horizontalPadding: viewport.clientWidth < 820 ? 16 : CANVAS_HORIZONTAL_PADDING,
+      topPadding: viewport.clientWidth < 620 ? 72 : CANVAS_TOP_PADDING,
+      bottomPadding: CANVAS_BOTTOM_PADDING,
+    })
+    canvas.style.width = `${metrics.width}px`
+    canvas.style.height = `${metrics.height}px`
+    frame.style.left = `${metrics.frameLeft}px`
+    frame.style.top = `${metrics.frameTop}px`
+    if (snapshot) restoreViewportCenter(viewport, frame, snapshot)
+  }
+
+  function centerGraph({ smooth = false } = {}) {
+    const viewport = container.querySelector('[data-topology-viewport]')
+    const frame = container.querySelector('[data-topology-frame]')
+    if (!viewport || !frame) return
+    const left = Math.max(0, numericStyle(frame.style.left, frame.offsetLeft)
+      + layout.width * state.zoom / 2 - viewport.clientWidth / 2)
+    viewport.scrollTo({
+      left,
+      top: 0,
+      behavior: smooth && !prefersReducedMotion() ? 'smooth' : 'auto',
+    })
+  }
+
+  function viewportCenterSnapshot(viewport, frame) {
+    return {
+      x: (viewport.scrollLeft + viewport.clientWidth / 2
+        - numericStyle(frame.style.left, frame.offsetLeft)) / state.zoom,
+      y: (viewport.scrollTop + viewport.clientHeight / 2
+        - numericStyle(frame.style.top, frame.offsetTop)) / state.zoom,
+    }
+  }
+
+  function restoreViewportCenter(viewport, frame, snapshot) {
+    viewport.scrollLeft = Math.max(0, numericStyle(frame.style.left, frame.offsetLeft)
+      + snapshot.x * state.zoom - viewport.clientWidth / 2)
+    viewport.scrollTop = Math.max(0, numericStyle(frame.style.top, frame.offsetTop)
+      + snapshot.y * state.zoom - viewport.clientHeight / 2)
+  }
+
+  function beginPan(event) {
+    if (event.button !== 0 || event.pointerType === 'touch') return
+    if (event.target.closest('[data-node-id], [data-edge-id], [data-mounting-group-id], button, a, input, select')) return
+    const viewport = event.currentTarget
+    panState = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      left: viewport.scrollLeft,
+      top: viewport.scrollTop,
+      distance: 0,
+    }
+    viewport.setPointerCapture(event.pointerId)
+    viewport.classList.add('is-panning')
+  }
+
+  function movePan(event) {
+    if (!panState || event.pointerId !== panState.pointerId) return
+    const viewport = event.currentTarget
+    const deltaX = event.clientX - panState.x
+    const deltaY = event.clientY - panState.y
+    panState.distance = Math.max(panState.distance, Math.hypot(deltaX, deltaY))
+    viewport.scrollLeft = panState.left - deltaX
+    viewport.scrollTop = panState.top - deltaY
+  }
+
+  function endPan(event) {
+    if (!panState || event.pointerId !== panState.pointerId) return
+    suppressViewportClick = panState.distance >= 4
+    panState = null
+    event.currentTarget.classList.remove('is-panning')
+    window.setTimeout(() => { suppressViewportClick = false }, 0)
   }
 
   function renderInspector() {
@@ -713,6 +885,15 @@ function mountTopologyWorkspace(container, {
     else params.delete('selectedAssetId')
     window.history.replaceState(null, '', `/topology?${params.toString()}`)
   }
+}
+
+function numericStyle(value, fallback = 0) {
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) ? parsed : Number(fallback) || 0
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 }
 
 function renderWorkspaceShell({ activeContext, state, model }) {

@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  anchoredZoomScrollPosition,
   centeredScrollPosition,
   computeFitZoom,
   computeReadableZoom,
   effectiveViewportFor,
+  zoomSurfaceMetrics,
 } from '../src/pages/topology/topology-viewport.js'
 
 test('readable fit never shrinks a detail diagram below 60 percent', () => {
@@ -66,4 +68,37 @@ test('centering uses the visible viewport rather than resetting the diagram orig
     viewportCenterX: 420,
     viewportCenterY: 260,
   }), { left: 180, top: 115 })
+})
+
+test('zoom surface grows with the scaled diagram so no edge is clipped', () => {
+  assert.deepEqual(zoomSurfaceMetrics({
+    layoutWidth: 2000,
+    layoutHeight: 1200,
+    zoom: 1.35,
+    viewportWidth: 1280,
+    viewportHeight: 720,
+  }), {
+    width: 2760,
+    height: 1734,
+    frameLeft: 30,
+    frameTop: 84,
+  })
+})
+
+test('zoom keeps the same graph coordinate below the pointer', () => {
+  assert.deepEqual(anchoredZoomScrollPosition({
+    scrollLeft: 400,
+    scrollTop: 160,
+    anchorX: 300,
+    anchorY: 200,
+    oldZoom: 0.8,
+    newZoom: 1.2,
+    oldFrameLeft: 30,
+    oldFrameTop: 84,
+    newFrameLeft: 30,
+    newFrameTop: 84,
+  }), {
+    left: 735,
+    top: 298,
+  })
 })

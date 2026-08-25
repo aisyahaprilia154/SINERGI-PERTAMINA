@@ -114,6 +114,55 @@ export function centeredScrollPosition({
   }
 }
 
+export function zoomSurfaceMetrics({
+  layoutWidth = 0,
+  layoutHeight = 0,
+  zoom = 1,
+  viewportWidth = 0,
+  viewportHeight = 0,
+  horizontalPadding = 30,
+  topPadding = 84,
+  bottomPadding = 30,
+} = {}) {
+  const scale = Math.max(Number(zoom) || 1, 0.01)
+  const scaledWidth = Math.max(1, Number(layoutWidth) || 0) * scale
+  const scaledHeight = Math.max(1, Number(layoutHeight) || 0) * scale
+  const side = Math.max(0, Number(horizontalPadding) || 0)
+  const top = Math.max(0, Number(topPadding) || 0)
+  const bottom = Math.max(0, Number(bottomPadding) || 0)
+  const width = Math.max(Number(viewportWidth) || 0, scaledWidth + side * 2)
+
+  return {
+    width: Math.ceil(width),
+    height: Math.ceil(Math.max(Number(viewportHeight) || 0, scaledHeight + top + bottom)),
+    frameLeft: Math.max(side, (width - scaledWidth) / 2),
+    frameTop: top,
+  }
+}
+
+export function anchoredZoomScrollPosition({
+  scrollLeft = 0,
+  scrollTop = 0,
+  anchorX = 0,
+  anchorY = 0,
+  oldZoom = 1,
+  newZoom = 1,
+  oldFrameLeft = 0,
+  oldFrameTop = 0,
+  newFrameLeft = 0,
+  newFrameTop = 0,
+} = {}) {
+  const previousScale = Math.max(Number(oldZoom) || 1, 0.01)
+  const nextScale = Math.max(Number(newZoom) || 1, 0.01)
+  const sourceX = (Number(scrollLeft) + Number(anchorX) - Number(oldFrameLeft)) / previousScale
+  const sourceY = (Number(scrollTop) + Number(anchorY) - Number(oldFrameTop)) / previousScale
+
+  return {
+    left: Math.max(0, Number(newFrameLeft) + sourceX * nextScale - Number(anchorX)),
+    top: Math.max(0, Number(newFrameTop) + sourceY * nextScale - Number(anchorY)),
+  }
+}
+
 function clamp(value, min, max) {
   return Math.max(Number(min), Math.min(Number(max), Number(value)))
 }
