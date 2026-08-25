@@ -379,6 +379,18 @@ test('canonical diagram class wins over display-name heuristics', () => {
       type: 'Unknown',
       canonicalAssetType: 'pole',
       locationGroupKey: 'north',
+    }, {
+      id: 'nested-canonical-pole',
+      name: 'T-019',
+      type: 'Rekomendasi',
+      properties: {
+        classification: {
+          assetType: 'tiang',
+          canonicalAssetType: 'pole',
+          category: 'supporting_infrastructure',
+        },
+      },
+      locationGroupKey: 'north',
     }],
     graph: {
       nodes: [{ id: 'canonical-extended', diagramClass: 'junction-extended' }],
@@ -388,7 +400,8 @@ test('canonical diagram class wins over display-name heuristics', () => {
   })
   assert.equal(model.nodeById.get('canonical-extended').diagramClass, 'junction-extended')
   assert.equal(model.nodes.some(({ id }) => id === 'canonical-pole'), false)
-  assert.equal(model.summary.physicalMountCount, 1)
+  assert.equal(model.nodes.some(({ id }) => id === 'nested-canonical-pole'), false)
+  assert.equal(model.summary.physicalMountCount, 2)
 })
 
 test('cross-area confirmed edges become explicit continuation metadata', () => {

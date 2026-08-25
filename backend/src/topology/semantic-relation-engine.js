@@ -149,6 +149,7 @@ export function generateRelationArtifacts(topologyInputBundle, {
       candidateBudget,
     ),
     ...generateMountingCandidates(nodes, spatialIndexes, settings, interfaceContext, candidateBudget),
+    ...generateNamedJunctionFamilyCandidates(nodes, candidateBudget),
     ...(settings.automaticRelationConfirmation
       ? generateNearestJunctionDeviceCandidates(
         nodes,
@@ -2052,6 +2053,82 @@ function generateNearestJunctionDeviceCandidates(
   return candidates
 }
 
+function generateNamedJunctionFamilyCandidates(nodes, candidateBudget) {
+  const junctions = nodes.filter(isJunctionBoxNode)
+  const parents = junctions.filter((node) => {
+    const identity = junctionFamilyIdentity(node)
+    return identity && identity.childIndex === null && !isExtendedJunctionBoxNode(node)
+  })
+  const candidates = []
+
+  junctions.forEach((child) => {
+    const identity = junctionFamilyIdentity(child)
+    if (!identity || identity.childIndex === null || !isExtendedJunctionBoxNode(child)) return
+    const matchingParents = parents.filter((parent) => {
+      const parentIdentity = junctionFamilyIdentity(parent)
+      return parentIdentity?.baseNumber === identity.baseNumber
+        && sameFacilityScope(child, parent)
+    })
+    if (matchingParents.length !== 1) return
+
+    assertGenerationBudget(candidateBudget, 'named_junction_family')
+    const parent = matchingParents[0]
+    const distanceMeters = geographicDistanceMeters(child.coordinate, parent.coordinate)
+    const candidate = baseCandidate({
+      candidateType: 'named_junction_family',
+      sourceEndpointId: `named-junction-family:${child.id}`,
+      sourcePath: child,
+      targetAssetId: parent.id,
+      targetNode: parent,
+      distanceMeters,
+      sourceCoordinate: child.coordinate,
+      targetCoordinate: parent.coordinate,
+      measureMeters: null,
+      semanticCompatibility: 1,
+      endpointRole: 1,
+      sourceContext: 1,
+      styleConsistency: styleConsistencyScore(child, parent),
+      angleScore: 1,
+      graphConsistency: 1,
+      evidence: [{
+        source: 'semantic',
+        ruleId: 'junction.numbered-extension-parent',
+        observedValue: `${child.sourceName} -> ${parent.sourceName}`,
+        normalizedValue: `${identity.baseNumber}.${identity.childIndex} -> ${identity.baseNumber}`,
+        weight: SCORE_WEIGHTS.explicitEvidence,
+        explanation: 'Nomor JB turunan dan JB induk sama serta keduanya berada pada fasilitas yang sama.',
+      }, {
+        source: 'scope',
+        ruleId: 'junction.same-facility-parent',
+        observedValue: facilityScope(child.sourceFolderPath),
+        normalizedValue: true,
+        weight: SCORE_WEIGHTS.siteContext,
+        explanation: 'Relasi keluarga JB tidak boleh menyeberang fasilitas.',
+      }],
+      serviceDomain: 'unknown',
+      mediaType: 'unknown',
+      cableRole: 'distribution',
+      relationType: 'connected-to',
+      relationKind: 'device_edge',
+      direction: 'undirected',
+      provenance: 'named_junction_inference',
+    })
+    candidate.components = {
+      ...candidate.components,
+      interfaceCompatibility: 1,
+      explicitEvidence: 1,
+      distance: 1,
+      labelCorrespondence: 1,
+      siteContext: 1,
+      endpointRoleConsistency: 1,
+      capacityAvailability: 1,
+    }
+    pushCandidate(candidates, candidate, candidateBudget, 'named_junction_family')
+  })
+
+  return candidates
+}
+
 function generateInternalConnectionCandidates(interfaceContext, candidateBudget) {
   const candidates = []
   internalConnectionDefinitions(interfaceContext).forEach((definition) => {
@@ -3792,7 +3869,8 @@ function applyCapacityConstraints(
     ))
     .sort((left, right) => right.score - left.score || compareCandidate(left, right))
   recommended.forEach((candidate) => {
-    if (['mounting_attachment', 'device_nearest_junction'].includes(candidate.candidateType)) return
+    if (['mounting_attachment', 'device_nearest_junction', 'named_junction_family']
+      .includes(candidate.candidateType)) return
     const interfaceId = candidate.targetInterfaceId
     const item = interfaceId ? interfaceById.get(interfaceId) : null
     if (!item) {
@@ -4105,6 +4183,7 @@ function confirmedRelationPreference(left, right) {
     explicit_kml_metadata: 3,
     automatic_device_relation: 2,
     line_label_inference: 2,
+    named_junction_inference: 1,
     spatial_inference: 1,
   }
   const leftScore = Number(left.evidence?.find(({ source }) => source === 'scoring')?.observedValue)
@@ -4125,7 +4204,7 @@ export function buildConfirmedGraph({
   confirmedRelations,
   interfaceRegistry = { interfaces: [], components: [] },
 }) {
-  const graphNodes = nodes.map((node) => ({
+  const graphNodes = nodes.filter((node) => !isPoleNode(node)).map((node) => ({
       id: node.id,
       canonicalAssetId: node.id,
       assetId: node.id,
@@ -4187,7 +4266,12 @@ export function buildConfirmedGraph({
             current.relations,
           )
           const existing = edgeByPair.get(pair)
-          if (!existing || edge.sourceGeometryIds.length < existing.sourceGeometryIds.length) {
+          const edgeIsNamedFallback = edge.provenance === 'named_junction_inference'
+          const existingIsNamedFallback = existing?.provenance === 'named_junction_inference'
+          if (!existing
+            || (existingIsNamedFallback && !edgeIsNamedFallback)
+            || (edgeIsNamedFallback === existingIsNamedFallback
+              && edge.sourceGeometryIds.length < existing.sourceGeometryIds.length)) {
             edgeByPair.set(pair, edge)
           }
         }
@@ -4527,6 +4611,9 @@ function collapseConfirmedPath(bundle, sourceAssetId, targetAssetId, relations) 
   const allLineLabel = relations.every(({ provenance }) => (
     provenance === 'line_label_inference'
   ))
+  const allNamedJunction = relations.every(({ provenance }) => (
+    provenance === 'named_junction_inference'
+  ))
   return {
     id: deterministicId(
       'topology-edge',
@@ -4564,14 +4651,18 @@ function collapseConfirmedPath(bundle, sourceAssetId, targetAssetId, relations) 
       ? 'manual_admin'
       : allExplicit
         ? 'explicit_kml_metadata'
-        : allLineLabel ? 'line_label_inference' : 'spatial_inference',
+        : allLineLabel
+          ? 'line_label_inference'
+          : allNamedJunction ? 'named_junction_inference' : 'spatial_inference',
     verificationStatus: 'confirmed',
     relationStatus: 'confirmed',
     relationSource: allManual
       ? 'manual_admin'
       : allExplicit
         ? 'explicit_kml_metadata'
-        : allLineLabel ? 'line_label_inference' : 'spatial_inference',
+        : allLineLabel
+          ? 'line_label_inference'
+          : allNamedJunction ? 'named_junction_inference' : 'spatial_inference',
     relationKind: relations.length === 1
       ? relations[0].relationKind ?? 'device_edge'
       : 'device_edge',
@@ -4672,7 +4763,12 @@ export function validateConfirmedGraph({
     if (!['installation_attachment', 'path_termination', 'internal_connection']
       .includes(relation.relationKind)
       && !familiesCompatibleForRelation(source, target)
-      && !['manual_admin', 'line_label_inference', 'automatic_device_relation']
+      && ![
+        'manual_admin',
+        'line_label_inference',
+        'automatic_device_relation',
+        'named_junction_inference',
+      ]
         .includes(relation.provenance)) {
       issues.push(graphIssue(bundle, relation, 'incompatible_family_edge', 'error'))
     }
@@ -5857,6 +5953,17 @@ function matchingNumericIdentity(left, right) {
   const leftIdentity = identity(left)
   const rightIdentity = identity(right)
   return Boolean(leftIdentity && rightIdentity && leftIdentity === rightIdentity)
+}
+
+function junctionFamilyIdentity(node) {
+  const match = String(node?.sourceName ?? node?.id ?? '').match(
+    /\bJB[\s_-]*0*(\d+)(?:\s*\.\s*(\d+))?(?=$|[\s_-])/i,
+  )
+  if (!match) return null
+  return {
+    baseNumber: String(Number(match[1])),
+    childIndex: match[2] === undefined ? null : Number(match[2]),
+  }
 }
 
 function isExtendedJunctionBoxNode(node) {
