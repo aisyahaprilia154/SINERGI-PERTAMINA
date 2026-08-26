@@ -1,0 +1,10 @@
+﻿area_key,area,poles,occupied_poles,empty_poles,mountable_assets,mounted_assets,unmounted_assets,explicit_indoor_assets,explicit_indoor_mounted,explicit_indoor_unmounted,mount_rate,adjusted_mount_rate_excluding_explicit_indoor,unmounted_with_option_25m,unmounted_without_option_25m,nearest_option_median_m
+ft-lomanis,FT LOMANIS,28,28,0,112,42,70,20,0,20,0.375,0.4565,48,22,10.707
+itc-lpg-cilacap,ITC LPG CILACAP,16,16,0,77,29,48,6,0,6,0.3766,0.4085,32,16,17.912
+dppu-yia,DPPU YIA,20,19,1,72,27,45,12,0,12,0.375,0.45,36,9,7.361
+ft-maos,FT MAOS,12,12,0,71,27,44,8,0,8,0.3803,0.4286,11,33,15.367
+ft-tegal-baru,FT Tegal Baru,18,18,0,76,37,39,16,0,16,0.4868,0.6167,9,30,21.275
+ft-rewulu,FT REWULU,20,20,0,76,39,37,10,0,10,0.5132,0.5909,23,14,9.747
+ft-cilacap,FT CILACAP,15,14,1,64,30,34,4,0,4,0.4688,0.5,20,14,7.439
+ft-pengapon-semarang,FT PENGAPON - SEMARANG,22,21,1,76,43,33,9,0,9,0.5658,0.6418,20,13,10.059
+booster-kutawinangun,Booster Kutawinangun,10,10,0,36,23,13,6,0,6,0.6389,0.7667,9,4,15.238

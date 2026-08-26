@@ -1,0 +1,1466 @@
+{
+  "surface": "report",
+  "sources": [
+    {
+      "id": "sinergi-active-topology",
+      "label": "Verified SINERGI mounting audit — dataset-semarang active topology projection",
+      "path": "audit/mounting_audit_results.json",
+      "query": {
+        "engine": "DuckDB over verified JSON audit output",
+        "language": "SQL",
+        "sql": "WITH audit AS (SELECT * FROM read_json_auto('audit/mounting_audit_results.json')) SELECT overall, per_area, actionable_unmounted_reason_buckets, empty_poles, jb_pole_number_mismatches FROM audit;",
+        "description": "Reads the verified audit snapshot used by every report metric, chart, and table. The JSON was produced from the active SINERGI topology API by audit/mounting_audit.py.",
+        "executed_at": "2026-08-24T07:56:19.529572+00:00",
+        "tables_used": [
+          "audit/mounting_audit_results.json"
+        ],
+        "filters": [
+          "branchId=semarang",
+          "view=topology",
+          "datasetVersionId=dv-6b012fa0-ec62-495d-9e84-ef7e4d3dd093",
+          "actionable excludes assets explicitly classified as indoor/non-pole"
+        ],
+        "metric_definitions": [
+          "Raw mount rate = confirmed mounting relations / all mountable CCTV and junction-box assets.",
+          "Adjusted mount rate = confirmed relations / mountable assets excluding explicit indoor/non-pole assets.",
+          "Occupied pole = pole targeted by at least one confirmed mounting relation.",
+          "Mount option = backend-generated pole option within the configured 25 m review radius."
+        ]
+      }
+    }
+  ],
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "Audit Total Mounting Tiang SINERGI",
+    "description": "Audit menyeluruh inventori tiang, tingkat mounting, aturan radius, dan konflik JB–tiang pada dataset aktif Semarang.",
+    "generatedAt": "2026-08-24T07:56:19.529572+00:00",
+    "cards": [
+      {
+        "id": "pole-card",
+        "description": "Inventory and actual utilization of poles across all nine areas.",
+        "dataset": "summary",
+        "sourceId": "sinergi-active-topology",
+        "metrics": [
+          {
+            "label": "Tiang",
+            "field": "poles",
+            "format": "number"
+          },
+          {
+            "label": "Terisi",
+            "field": "occupied_poles",
+            "format": "number"
+          },
+          {
+            "label": "Kosong",
+            "field": "empty_poles",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "mount-card",
+        "description": "Raw and adjusted mounting completion.",
+        "dataset": "summary",
+        "sourceId": "sinergi-active-topology",
+        "metrics": [
+          {
+            "label": "Mount rate mentah",
+            "field": "raw_mount_rate",
+            "format": "percent"
+          },
+          {
+            "label": "Tanpa indoor",
+            "field": "adjusted_mount_rate",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "gap-card",
+        "description": "Devices that still need a mounting decision after indoor assets are excluded.",
+        "dataset": "summary",
+        "sourceId": "sinergi-active-topology",
+        "metrics": [
+          {
+            "label": "Perlu review",
+            "field": "actionable_unmounted",
+            "format": "number"
+          },
+          {
+            "label": "Ada opsi ≤25 m",
+            "field": "with_option",
+            "format": "number"
+          },
+          {
+            "label": "Tanpa opsi",
+            "field": "without_option",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "quality-card",
+        "description": "Manual decisions and JB-to-pole numbering conflicts.",
+        "dataset": "summary",
+        "sourceId": "sinergi-active-topology",
+        "metrics": [
+          {
+            "label": "Mount manual",
+            "field": "manual_relations",
+            "format": "number"
+          },
+          {
+            "label": "Flag nomor JB",
+            "field": "jb_mismatches",
+            "format": "number"
+          }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "area-rate-chart",
+        "title": "Mount rate setelah aset indoor dikeluarkan",
+        "subtitle": "Persentase per area; makin tinggi makin lengkap",
+        "type": "bar",
+        "dataset": "per_area",
+        "sourceId": "sinergi-active-topology",
+        "intent": "comparison",
+        "question": "Area mana yang memiliki gap mounting terbesar secara proporsional?",
+        "rationale": "Adjusted rate avoids penalizing areas for devices explicitly marked indoor/non-pole.",
+        "encodings": {
+          "x": {
+            "field": "area",
+            "type": "nominal",
+            "title": "Area"
+          },
+          "y": {
+            "field": "adjusted_mount_rate_excluding_explicit_indoor",
+            "type": "quantitative",
+            "title": "Mount rate"
+          }
+        },
+        "valueFormat": "percent",
+        "layout": {
+          "width": "full",
+          "height": 390
+        },
+        "labels": {
+          "show": true
+        },
+        "settings": {
+          "orientation": "horizontal",
+          "sort": "ascending"
+        }
+      },
+      {
+        "id": "reason-chart",
+        "title": "Penyebab 272 perangkat lapangan belum dimount",
+        "subtitle": "Aset indoor/non-pole eksplisit sudah dikeluarkan",
+        "type": "bar",
+        "dataset": "actionable_reasons",
+        "sourceId": "sinergi-active-topology",
+        "intent": "composition",
+        "question": "Berapa gap yang bisa masuk antrean review radius dan berapa yang membutuhkan perbaikan data?",
+        "rationale": "Separates policy-radius backlog from assets with no nearby pole option.",
+        "encodings": {
+          "x": {
+            "field": "reason",
+            "type": "nominal",
+            "title": "Status opsi"
+          },
+          "y": {
+            "field": "assets",
+            "type": "quantitative",
+            "title": "Perangkat"
+          }
+        },
+        "valueFormat": "number",
+        "layout": {
+          "width": "full",
+          "height": 280
+        },
+        "labels": {
+          "show": true
+        },
+        "settings": {
+          "orientation": "horizontal",
+          "sort": "descending"
+        }
+      }
+    ],
+    "tables": [
+      {
+        "id": "area-table",
+        "title": "Audit lengkap per area",
+        "subtitle": "Urut dari jumlah perangkat belum dimount terbanyak",
+        "dataset": "per_area",
+        "sourceId": "sinergi-active-topology",
+        "density": "compact",
+        "layout": {
+          "width": "full"
+        },
+        "defaultSort": {
+          "field": "unmounted_assets",
+          "direction": "desc"
+        },
+        "columns": [
+          {
+            "field": "area",
+            "label": "Area",
+            "type": "string"
+          },
+          {
+            "field": "poles",
+            "label": "Tiang",
+            "type": "number"
+          },
+          {
+            "field": "occupied_poles",
+            "label": "Terisi",
+            "type": "number"
+          },
+          {
+            "field": "empty_poles",
+            "label": "Kosong",
+            "type": "number"
+          },
+          {
+            "field": "mountable_assets",
+            "label": "Perangkat",
+            "type": "number"
+          },
+          {
+            "field": "mounted_assets",
+            "label": "Mounted",
+            "type": "number"
+          },
+          {
+            "field": "unmounted_assets",
+            "label": "Unmounted",
+            "type": "number"
+          },
+          {
+            "field": "explicit_indoor_assets",
+            "label": "Indoor",
+            "type": "number"
+          },
+          {
+            "field": "adjusted_mount_rate_excluding_explicit_indoor",
+            "label": "Rate adjusted",
+            "type": "number",
+            "format": "percent"
+          },
+          {
+            "field": "unmounted_with_option_25m",
+            "label": "Ada opsi",
+            "type": "number"
+          },
+          {
+            "field": "unmounted_without_option_25m",
+            "label": "Tanpa opsi",
+            "type": "number"
+          }
+        ]
+      },
+      {
+        "id": "empty-poles-table",
+        "title": "Tiga tiang yang benar-benar belum memiliki perangkat",
+        "dataset": "empty_poles",
+        "sourceId": "sinergi-active-topology",
+        "density": "compact",
+        "layout": {
+          "width": "half"
+        },
+        "defaultSort": {
+          "field": "area",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "area",
+            "label": "Area",
+            "type": "string"
+          },
+          {
+            "field": "pole",
+            "label": "Tiang",
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "id": "mismatch-table",
+        "title": "86 JB terpasang pada nomor tiang yang berbeda",
+        "subtitle": "Flag audit—belum otomatis berarti salah karena mesin saat ini mengutamakan jarak terdekat",
+        "dataset": "jb_mismatches",
+        "sourceId": "sinergi-active-topology",
+        "density": "compact",
+        "layout": {
+          "width": "full"
+        },
+        "defaultSort": {
+          "field": "area",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "area",
+            "label": "Area",
+            "type": "string"
+          },
+          {
+            "field": "asset",
+            "label": "Junction box",
+            "type": "string"
+          },
+          {
+            "field": "mounted_on",
+            "label": "Tiang saat ini",
+            "type": "string"
+          },
+          {
+            "field": "source_number",
+            "label": "No. JB",
+            "type": "number"
+          },
+          {
+            "field": "pole_number",
+            "label": "No. tiang",
+            "type": "number"
+          },
+          {
+            "field": "distance_m",
+            "label": "Jarak (m)",
+            "type": "number",
+            "format": "decimal"
+          },
+          {
+            "field": "rule",
+            "label": "Rule",
+            "type": "string"
+          }
+        ]
+      }
+    ],
+    "sources": [
+      {
+        "id": "sinergi-active-topology",
+        "label": "Verified SINERGI mounting audit — dataset-semarang active topology projection",
+        "path": "audit/mounting_audit_results.json",
+        "query": {
+          "engine": "DuckDB over verified JSON audit output",
+          "language": "SQL",
+          "sql": "WITH audit AS (SELECT * FROM read_json_auto('audit/mounting_audit_results.json')) SELECT overall, per_area, actionable_unmounted_reason_buckets, empty_poles, jb_pole_number_mismatches FROM audit;",
+          "description": "Reads the verified audit snapshot used by every report metric, chart, and table. The JSON was produced from the active SINERGI topology API by audit/mounting_audit.py.",
+          "executed_at": "2026-08-24T07:56:19.529572+00:00",
+          "tables_used": [
+            "audit/mounting_audit_results.json"
+          ],
+          "filters": [
+            "branchId=semarang",
+            "view=topology",
+            "datasetVersionId=dv-6b012fa0-ec62-495d-9e84-ef7e4d3dd093",
+            "actionable excludes assets explicitly classified as indoor/non-pole"
+          ],
+          "metric_definitions": [
+            "Raw mount rate = confirmed mounting relations / all mountable CCTV and junction-box assets.",
+            "Adjusted mount rate = confirmed relations / mountable assets excluding explicit indoor/non-pole assets.",
+            "Occupied pole = pole targeted by at least one confirmed mounting relation.",
+            "Mount option = backend-generated pole option within the configured 25 m review radius."
+          ]
+        }
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# Audit Total Mounting Tiang SINERGI\nDataset aktif Semarang · versi `dv-6b012fa0-ec62-495d-9e84-ef7e4d3dd093`"
+      },
+      {
+        "id": "executive-summary",
+        "type": "markdown",
+        "body": "## Executive Summary\n- **Tiangnya sebenarnya sudah masuk:** 161 tiang terdeteksi dan 158 (98,1%) sudah memiliki sedikitnya satu perangkat. Hanya tiga tiang benar-benar kosong.\n- **Gap utama ada pada perangkat:** dari 660 CCTV/JB, baru 297 dimount. Setelah 91 aset indoor/non-pole dikeluarkan, masih ada **272 perangkat lapangan** yang perlu keputusan mounting.\n- **Backlog manual tidak pernah diselesaikan:** 160 perangkat punya opsi tiang dalam 25 m, tetapi seluruh 297 relasi yang ada bersifat otomatis dan keputusan manual masih nol.\n- **Nomor dan geometri bertentangan:** 86 JB terpasang ke nomor tiang berbeda; ini perlu review bisnis sebelum koreksi massal."
+      },
+      {
+        "id": "metrics",
+        "type": "metric-strip",
+        "cardIds": [
+          "pole-card",
+          "mount-card",
+          "gap-card",
+          "quality-card"
+        ]
+      },
+      {
+        "id": "pole-finding",
+        "type": "markdown",
+        "body": "## Masalah utamanya perangkat, bukan tiang\nDiagram per area memang hanya menampilkan tiang pada area yang sedang dipilih—misalnya Pengapon berisi 22 dari total 161 tiang cabang. Secara data, 98,1% tiang sudah terpakai. Karena itu audit berikut memusatkan perhatian pada perangkat yang belum memiliki relasi mounting."
+      },
+      {
+        "id": "area-rate",
+        "type": "chart",
+        "chartId": "area-rate-chart"
+      },
+      {
+        "id": "area-commentary",
+        "type": "markdown",
+        "body": "FT Lomanis memiliki volume gap terbesar (70 aset belum dimount), sedangkan ITC LPG Cilacap memiliki mount rate adjusted terendah (40,9%). Pengapon relatif lebih lengkap pada 64,2%, tetapi tetap memiliki 33 aset mentah belum dimount—sembilan di antaranya indoor."
+      },
+      {
+        "id": "area-detail",
+        "type": "table",
+        "tableId": "area-table"
+      },
+      {
+        "id": "policy-heading",
+        "type": "markdown",
+        "body": "## Radius otomatis dan antrean manual menciptakan gap\nMesin hanya auto-mount pada radius normal 5 m; kecocokan nomor dapat menjangkau 10 m; opsi review disediakan sampai 25 m. Namun kandidat formal hanya muncul untuk ambiguitas di dalam 5 m. Akibatnya aset pada jarak 5–25 m tersedia sebagai opsi tetapi tidak otomatis masuk keputusan mounting—dan dataset ini mencatat nol relasi manual maupun override."
+      },
+      {
+        "id": "reason-chart-block",
+        "type": "chart",
+        "chartId": "reason-chart"
+      },
+      {
+        "id": "reason-commentary",
+        "type": "markdown",
+        "body": "Dari 272 perangkat lapangan yang belum dimount, **160 masih punya opsi tiang ≤25 m** dan cocok dijadikan antrean review manual. Sisanya **112 tidak memiliki opsi dalam 25 m**: kasus ini perlu pemeriksaan koordinat, klasifikasi indoor, atau asosiasi area/tiang—bukan sekadar memperlebar radius otomatis."
+      },
+      {
+        "id": "empty-heading",
+        "type": "markdown",
+        "body": "## Tiang yang benar-benar kosong"
+      },
+      {
+        "id": "empty-poles",
+        "type": "table",
+        "tableId": "empty-poles-table"
+      },
+      {
+        "id": "mismatch-heading",
+        "type": "markdown",
+        "body": "## Konflik nomor JB dan posisi perlu review\nSebanyak 86 dari 150 JB yang sudah mounted memiliki nomor berbeda dari tiang target. Rule `unique-nearest-pole` menjelaskan mayoritas kasus: geometri terdekat menang, bahkan ketika konvensi pengguna mengharapkan JB-11.x berada di bawah T-011. Flag ini harus ditelaah dengan peta/as-built sebelum mengubah relasi."
+      },
+      {
+        "id": "mismatches",
+        "type": "table",
+        "tableId": "mismatch-table"
+      },
+      {
+        "id": "recommendations",
+        "type": "markdown",
+        "body": "## Rekomendasi tindakan\n1. Tambahkan status eksplisit `expectedMounting = pole | indoor | standalone`; jangan menyimpulkan semuanya dari nama aset.\n2. Buat antrean review untuk 160 perangkat yang sudah punya opsi ≤25 m, lengkap dengan jarak, nomor, dan preview peta.\n3. Audit koordinat serta klasifikasi 112 perangkat tanpa opsi ≤25 m; prioritaskan area FT Maos dan FT Tegal Baru yang paling banyak tanpa opsi.\n4. Review 86 konflik nomor JB–tiang dengan pemilik data sebelum koreksi; tetapkan apakah nomor atau koordinat yang menjadi sumber kebenaran.\n5. Tambahkan pemeriksaan publikasi: semua tiang terhitung, indoor tidak dimount, relasi tidak orphan/cross-area, dan setiap perangkat lapangan punya relasi atau alasan pengecualian."
+      },
+      {
+        "id": "further-questions",
+        "type": "markdown",
+        "body": "## Further Questions\n- Apakah nomor JB selalu wajib mengikuti nomor tiang, termasuk suffix seperti `.1`, `.2`, dan `-EXP`?\n- Siapa yang berwenang mengonfirmasi 160 opsi manual: admin cabang atau tim pusat?\n- Apakah 112 aset tanpa opsi memang indoor/standalone, atau koordinatnya belum akurat?"
+      },
+      {
+        "id": "caveats",
+        "type": "markdown",
+        "body": "## Caveats and Assumptions\nAudit memakai snapshot dataset aktif pada 20 Agustus 2026 dan aturan mounting backend saat ini. Label indoor/non-pole berasal dari klasifikasi eksplisit pada data; aset yang belum diberi label bisa masih tercampur dalam 272 kasus actionable. Ketidaksamaan nomor JB–tiang adalah flag kualitas, bukan bukti final bahwa relasi salah. Seluruh hitungan resmi cocok dengan rekonsiliasi independen dan tidak ditemukan relasi orphan, cross-area, duplikat sumber, atau target non-tiang.",
+        "sourceId": "sinergi-active-topology"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-08-24T07:56:19.529572+00:00",
+    "status": "ready",
+    "datasets": {
+      "summary": [
+        {
+          "poles": 161,
+          "occupied_poles": 158,
+          "empty_poles": 3,
+          "raw_mount_rate": 0.45,
+          "adjusted_mount_rate": 0.522,
+          "actionable_unmounted": 272,
+          "with_option": 160,
+          "without_option": 112,
+          "manual_relations": 0,
+          "jb_mismatches": 86
+        }
+      ],
+      "per_area": [
+        {
+          "area_key": "ft-lomanis",
+          "area": "FT LOMANIS",
+          "poles": 28,
+          "occupied_poles": 28,
+          "empty_poles": 0,
+          "mountable_assets": 112,
+          "mounted_assets": 42,
+          "unmounted_assets": 70,
+          "explicit_indoor_assets": 20,
+          "explicit_indoor_mounted": 0,
+          "explicit_indoor_unmounted": 20,
+          "mount_rate": 0.375,
+          "adjusted_mount_rate_excluding_explicit_indoor": 0.4565,
+          "unmounted_with_option_25m": 48,
+          "unmounted_without_option_25m": 22,
+          "nearest_option_median_m": 10.707
+        },
+        {
+          "area_key": "itc-lpg-cilacap",
+          "area": "ITC LPG CILACAP",
+          "poles": 16,
+          "occupied_poles": 16,
+          "empty_poles": 0,
+          "mountable_assets": 77,
+          "mounted_assets": 29,
+          "unmounted_assets": 48,
+          "explicit_indoor_assets": 6,
+          "explicit_indoor_mounted": 0,
+          "explicit_indoor_unmounted": 6,
+          "mount_rate": 0.3766,
+          "adjusted_mount_rate_excluding_explicit_indoor": 0.4085,
+          "unmounted_with_option_25m": 32,
+          "unmounted_without_option_25m": 16,
+          "nearest_option_median_m": 17.912
+        },
+        {
+          "area_key": "dppu-yia",
+          "area": "DPPU YIA",
+          "poles": 20,
+          "occupied_poles": 19,
+          "empty_poles": 1,
+          "mountable_assets": 72,
+          "mounted_assets": 27,
+          "unmounted_assets": 45,
+          "explicit_indoor_assets": 12,
+          "explicit_indoor_mounted": 0,
+          "explicit_indoor_unmounted": 12,
+          "mount_rate": 0.375,
+          "adjusted_mount_rate_excluding_explicit_indoor": 0.45,
+          "unmounted_with_option_25m": 36,
+          "unmounted_without_option_25m": 9,
+          "nearest_option_median_m": 7.361
+        },
+        {
+          "area_key": "ft-maos",
+          "area": "FT MAOS",
+          "poles": 12,
+          "occupied_poles": 12,
+          "empty_poles": 0,
+          "mountable_assets": 71,
+          "mounted_assets": 27,
+          "unmounted_assets": 44,
+          "explicit_indoor_assets": 8,
+          "explicit_indoor_mounted": 0,
+          "explicit_indoor_unmounted": 8,
+          "mount_rate": 0.3803,
+          "adjusted_mount_rate_excluding_explicit_indoor": 0.4286,
+          "unmounted_with_option_25m": 11,
+          "unmounted_without_option_25m": 33,
+          "nearest_option_median_m": 15.367
+        },
+        {
+          "area_key": "ft-tegal-baru",
+          "area": "FT Tegal Baru",
+          "poles": 18,
+          "occupied_poles": 18,
+          "empty_poles": 0,
+          "mountable_assets": 76,
+          "mounted_assets": 37,
+          "unmounted_assets": 39,
+          "explicit_indoor_assets": 16,
+          "explicit_indoor_mounted": 0,
+          "explicit_indoor_unmounted": 16,
+          "mount_rate": 0.4868,
+          "adjusted_mount_rate_excluding_explicit_indoor": 0.6167,
+          "unmounted_with_option_25m": 9,
+          "unmounted_without_option_25m": 30,
+          "nearest_option_median_m": 21.275
+        },
+        {
+          "area_key": "ft-rewulu",
+          "area": "FT REWULU",
+          "poles": 20,
+          "occupied_poles": 20,
+          "empty_poles": 0,
+          "mountable_assets": 76,
+          "mounted_assets": 39,
+          "unmounted_assets": 37,
+          "explicit_indoor_assets": 10,
+          "explicit_indoor_mounted": 0,
+          "explicit_indoor_unmounted": 10,
+          "mount_rate": 0.5132,
+          "adjusted_mount_rate_excluding_explicit_indoor": 0.5909,
+          "unmounted_with_option_25m": 23,
+          "unmounted_without_option_25m": 14,
+          "nearest_option_median_m": 9.747
+        },
+        {
+          "area_key": "ft-cilacap",
+          "area": "FT CILACAP",
+          "poles": 15,
+          "occupied_poles": 14,
+          "empty_poles": 1,
+          "mountable_assets": 64,
+          "mounted_assets": 30,
+          "unmounted_assets": 34,
+          "explicit_indoor_assets": 4,
+          "explicit_indoor_mounted": 0,
+          "explicit_indoor_unmounted": 4,
+          "mount_rate": 0.4688,
+          "adjusted_mount_rate_excluding_explicit_indoor": 0.5,
+          "unmounted_with_option_25m": 20,
+          "unmounted_without_option_25m": 14,
+          "nearest_option_median_m": 7.439
+        },
+        {
+          "area_key": "ft-pengapon-semarang",
+          "area": "FT PENGAPON - SEMARANG",
+          "poles": 22,
+          "occupied_poles": 21,
+          "empty_poles": 1,
+          "mountable_assets": 76,
+          "mounted_assets": 43,
+          "unmounted_assets": 33,
+          "explicit_indoor_assets": 9,
+          "explicit_indoor_mounted": 0,
+          "explicit_indoor_unmounted": 9,
+          "mount_rate": 0.5658,
+          "adjusted_mount_rate_excluding_explicit_indoor": 0.6418,
+          "unmounted_with_option_25m": 20,
+          "unmounted_without_option_25m": 13,
+          "nearest_option_median_m": 10.059
+        },
+        {
+          "area_key": "booster-kutawinangun",
+          "area": "Booster Kutawinangun",
+          "poles": 10,
+          "occupied_poles": 10,
+          "empty_poles": 0,
+          "mountable_assets": 36,
+          "mounted_assets": 23,
+          "unmounted_assets": 13,
+          "explicit_indoor_assets": 6,
+          "explicit_indoor_mounted": 0,
+          "explicit_indoor_unmounted": 6,
+          "mount_rate": 0.6389,
+          "adjusted_mount_rate_excluding_explicit_indoor": 0.7667,
+          "unmounted_with_option_25m": 9,
+          "unmounted_without_option_25m": 4,
+          "nearest_option_median_m": 15.238
+        }
+      ],
+      "actionable_reasons": [
+        {
+          "reason": "Tidak ada opsi ≤25 m",
+          "assets": 112,
+          "share_of_actionable_unmounted": 0.4118
+        },
+        {
+          "reason": "Opsi >5–10 m",
+          "assets": 97,
+          "share_of_actionable_unmounted": 0.3566
+        },
+        {
+          "reason": "Opsi >10–25 m",
+          "assets": 63,
+          "share_of_actionable_unmounted": 0.2316
+        }
+      ],
+      "empty_poles": [
+        {
+          "pole_id": "AUTO-F548406CB9C5FC8C520468B6",
+          "pole": "T-016",
+          "area": "DPPU YIA"
+        },
+        {
+          "pole_id": "AUTO-BE7287D9D92296697C39C8FE",
+          "pole": "T-009",
+          "area": "FT CILACAP"
+        },
+        {
+          "pole_id": "AUTO-EDDDD46C9FAB36F9038D6A1C",
+          "pole": "T-021",
+          "area": "FT PENGAPON - SEMARANG"
+        }
+      ],
+      "jb_mismatches": [
+        {
+          "area": "Booster Kutawinangun",
+          "asset": "JB-01",
+          "mounted_on": "T-04",
+          "distance_m": 1.151,
+          "source_number": 1,
+          "pole_number": 4,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "Booster Kutawinangun",
+          "asset": "JB-03",
+          "mounted_on": "T-09",
+          "distance_m": 0.918,
+          "source_number": 3,
+          "pole_number": 9,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "Booster Kutawinangun",
+          "asset": "JB-04",
+          "mounted_on": "T-02",
+          "distance_m": 1.867,
+          "source_number": 4,
+          "pole_number": 2,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "Booster Kutawinangun",
+          "asset": "JB-05",
+          "mounted_on": "T-06",
+          "distance_m": 0.333,
+          "source_number": 5,
+          "pole_number": 6,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "Booster Kutawinangun",
+          "asset": "JB-06",
+          "mounted_on": "T-08",
+          "distance_m": 0.243,
+          "source_number": 6,
+          "pole_number": 8,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "Booster Kutawinangun",
+          "asset": "JB-08",
+          "mounted_on": "T-10",
+          "distance_m": 2.077,
+          "source_number": 8,
+          "pole_number": 10,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "Booster Kutawinangun",
+          "asset": "JB-09",
+          "mounted_on": "T-05",
+          "distance_m": 1.229,
+          "source_number": 9,
+          "pole_number": 5,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "Booster Kutawinangun",
+          "asset": "JB-10",
+          "mounted_on": "T-03",
+          "distance_m": 1.349,
+          "source_number": 10,
+          "pole_number": 3,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "Booster Kutawinangun",
+          "asset": "JB-11",
+          "mounted_on": "T-01",
+          "distance_m": 0.078,
+          "source_number": 11,
+          "pole_number": 1,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT CILACAP",
+          "asset": "JB-010",
+          "mounted_on": "T-013",
+          "distance_m": 0.173,
+          "source_number": 10,
+          "pole_number": 13,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT CILACAP",
+          "asset": "JB-012-EXP",
+          "mounted_on": "T-014",
+          "distance_m": 2.774,
+          "source_number": 12,
+          "pole_number": 14,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT CILACAP",
+          "asset": "JB-10.2",
+          "mounted_on": "T-007",
+          "distance_m": 1.906,
+          "source_number": 10,
+          "pole_number": 7,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT CILACAP",
+          "asset": "JB-2.2",
+          "mounted_on": "T-012",
+          "distance_m": 0.299,
+          "source_number": 2,
+          "pole_number": 12,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT CILACAP",
+          "asset": "JB-3.3",
+          "mounted_on": "T-004",
+          "distance_m": 0.464,
+          "source_number": 3,
+          "pole_number": 4,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT CILACAP",
+          "asset": "JB-7.1",
+          "mounted_on": "T-015",
+          "distance_m": 0.369,
+          "source_number": 7,
+          "pole_number": 15,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT CILACAP",
+          "asset": "JB_004",
+          "mounted_on": "T-005",
+          "distance_m": 0.123,
+          "source_number": 4,
+          "pole_number": 5,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT CILACAP",
+          "asset": "JB_005",
+          "mounted_on": "T-006",
+          "distance_m": 0.27,
+          "source_number": 5,
+          "pole_number": 6,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT CILACAP",
+          "asset": "JB_006",
+          "mounted_on": "T-008",
+          "distance_m": 0.787,
+          "source_number": 6,
+          "pole_number": 8,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT CILACAP",
+          "asset": "JB_008",
+          "mounted_on": "T-010",
+          "distance_m": 1.684,
+          "source_number": 8,
+          "pole_number": 10,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-003",
+          "mounted_on": "T-005",
+          "distance_m": 0.429,
+          "source_number": 3,
+          "pole_number": 5,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-004",
+          "mounted_on": "T-006",
+          "distance_m": 0.247,
+          "source_number": 4,
+          "pole_number": 6,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-005",
+          "mounted_on": "T-007",
+          "distance_m": 0.172,
+          "source_number": 5,
+          "pole_number": 7,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-006",
+          "mounted_on": "T-008",
+          "distance_m": 0.49,
+          "source_number": 6,
+          "pole_number": 8,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-007-exp",
+          "mounted_on": "T-009",
+          "distance_m": 0.329,
+          "source_number": 7,
+          "pole_number": 9,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-008",
+          "mounted_on": "T-011",
+          "distance_m": 0.154,
+          "source_number": 8,
+          "pole_number": 11,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-009",
+          "mounted_on": "T-012",
+          "distance_m": 0.548,
+          "source_number": 9,
+          "pole_number": 12,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-010-exp",
+          "mounted_on": "T-013",
+          "distance_m": 0.743,
+          "source_number": 10,
+          "pole_number": 13,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-011",
+          "mounted_on": "T-014",
+          "distance_m": 0.418,
+          "source_number": 11,
+          "pole_number": 14,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-012",
+          "mounted_on": "T-015",
+          "distance_m": 0.349,
+          "source_number": 12,
+          "pole_number": 15,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-013",
+          "mounted_on": "T-016",
+          "distance_m": 0.1,
+          "source_number": 13,
+          "pole_number": 16,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-014",
+          "mounted_on": "T-018",
+          "distance_m": 0.249,
+          "source_number": 14,
+          "pole_number": 18,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-015-exp",
+          "mounted_on": "T-019",
+          "distance_m": 0.221,
+          "source_number": 15,
+          "pole_number": 19,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-016",
+          "mounted_on": "T-020",
+          "distance_m": 0.782,
+          "source_number": 16,
+          "pole_number": 20,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-017",
+          "mounted_on": "T-021",
+          "distance_m": 0.199,
+          "source_number": 17,
+          "pole_number": 21,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-018-exp",
+          "mounted_on": "T-023",
+          "distance_m": 0.555,
+          "source_number": 18,
+          "pole_number": 23,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-019",
+          "mounted_on": "T-028",
+          "distance_m": 0.388,
+          "source_number": 19,
+          "pole_number": 28,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB-020",
+          "mounted_on": "T-017",
+          "distance_m": 0.915,
+          "source_number": 20,
+          "pole_number": 17,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB.18.1",
+          "mounted_on": "T-027",
+          "distance_m": 3.551,
+          "source_number": 18,
+          "pole_number": 27,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB00.1",
+          "mounted_on": "T-003",
+          "distance_m": 0.14,
+          "source_number": 0,
+          "pole_number": 3,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB00.2",
+          "mounted_on": "T-025",
+          "distance_m": 0.463,
+          "source_number": 0,
+          "pole_number": 25,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT LOMANIS",
+          "asset": "JB12.1",
+          "mounted_on": "T-026",
+          "distance_m": 0.7,
+          "source_number": 12,
+          "pole_number": 26,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT MAOS",
+          "asset": "JB-009",
+          "mounted_on": "T-003",
+          "distance_m": 0.176,
+          "source_number": 9,
+          "pole_number": 3,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT MAOS",
+          "asset": "JB-010",
+          "mounted_on": "T-012",
+          "distance_m": 2.939,
+          "source_number": 10,
+          "pole_number": 12,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT MAOS",
+          "asset": "JB08.2",
+          "mounted_on": "T-010",
+          "distance_m": 0.491,
+          "source_number": 8,
+          "pole_number": 10,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT MAOS",
+          "asset": "JB09.1",
+          "mounted_on": "T-004",
+          "distance_m": 0.736,
+          "source_number": 9,
+          "pole_number": 4,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT PENGAPON - SEMARANG",
+          "asset": "JB-01.1-WP",
+          "mounted_on": "T-019",
+          "distance_m": 1.167,
+          "source_number": 1,
+          "pole_number": 19,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT PENGAPON - SEMARANG",
+          "asset": "JB-19.1-WP",
+          "mounted_on": "T-020",
+          "distance_m": 2.93,
+          "source_number": 19,
+          "pole_number": 20,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT REWULU",
+          "asset": "JB-009_exp",
+          "mounted_on": "T-010",
+          "distance_m": 0.123,
+          "source_number": 9,
+          "pole_number": 10,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT REWULU",
+          "asset": "JB-010-exp",
+          "mounted_on": "T-017",
+          "distance_m": 0.351,
+          "source_number": 10,
+          "pole_number": 17,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT REWULU",
+          "asset": "JB-011-EXP",
+          "mounted_on": "T-012",
+          "distance_m": 0.472,
+          "source_number": 11,
+          "pole_number": 12,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT REWULU",
+          "asset": "JB-012-EXP",
+          "mounted_on": "T-013",
+          "distance_m": 0.984,
+          "source_number": 12,
+          "pole_number": 13,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT REWULU",
+          "asset": "JB-013-EXP",
+          "mounted_on": "T-020",
+          "distance_m": 3.738,
+          "source_number": 13,
+          "pole_number": 20,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT REWULU",
+          "asset": "JB-015",
+          "mounted_on": "T-016",
+          "distance_m": 0.53,
+          "source_number": 15,
+          "pole_number": 16,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT REWULU",
+          "asset": "JB-016",
+          "mounted_on": "T-019",
+          "distance_m": 2.314,
+          "source_number": 16,
+          "pole_number": 19,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT REWULU",
+          "asset": "JB00.3",
+          "mounted_on": "T-015",
+          "distance_m": 0.423,
+          "source_number": 0,
+          "pole_number": 15,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT REWULU",
+          "asset": "JB00.4",
+          "mounted_on": "T-014",
+          "distance_m": 2.267,
+          "source_number": 0,
+          "pole_number": 14,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT REWULU",
+          "asset": "JB08.2",
+          "mounted_on": "T-009",
+          "distance_m": 2.481,
+          "source_number": 8,
+          "pole_number": 9,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT REWULU",
+          "asset": "JB13.1-WTP",
+          "mounted_on": "T-018",
+          "distance_m": 0.697,
+          "source_number": 13,
+          "pole_number": 18,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT Tegal Baru",
+          "asset": "JB-01.1",
+          "mounted_on": "T-03",
+          "distance_m": 0.3,
+          "source_number": 1,
+          "pole_number": 3,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT Tegal Baru",
+          "asset": "JB-01.2",
+          "mounted_on": "T-02",
+          "distance_m": 0.177,
+          "source_number": 1,
+          "pole_number": 2,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT Tegal Baru",
+          "asset": "JB-02.1",
+          "mounted_on": "T-04",
+          "distance_m": 0.137,
+          "source_number": 2,
+          "pole_number": 4,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT Tegal Baru",
+          "asset": "JB-04",
+          "mounted_on": "T-05",
+          "distance_m": 0.811,
+          "source_number": 4,
+          "pole_number": 5,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT Tegal Baru",
+          "asset": "JB-05",
+          "mounted_on": "T-06",
+          "distance_m": 0.537,
+          "source_number": 5,
+          "pole_number": 6,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT Tegal Baru",
+          "asset": "JB-06",
+          "mounted_on": "T-07",
+          "distance_m": 1.526,
+          "source_number": 6,
+          "pole_number": 7,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT Tegal Baru",
+          "asset": "JB-07",
+          "mounted_on": "T-08",
+          "distance_m": 4.852,
+          "source_number": 7,
+          "pole_number": 8,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT Tegal Baru",
+          "asset": "JB-08.1",
+          "mounted_on": "T-10",
+          "distance_m": 1.058,
+          "source_number": 8,
+          "pole_number": 10,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT Tegal Baru",
+          "asset": "JB-08.2",
+          "mounted_on": "T-09",
+          "distance_m": 0.149,
+          "source_number": 8,
+          "pole_number": 9,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT Tegal Baru",
+          "asset": "JB-09",
+          "mounted_on": "T-11",
+          "distance_m": 1.346,
+          "source_number": 9,
+          "pole_number": 11,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT Tegal Baru",
+          "asset": "JB-10-EXP",
+          "mounted_on": "T-12",
+          "distance_m": 1.822,
+          "source_number": 10,
+          "pole_number": 12,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT Tegal Baru",
+          "asset": "JB-11",
+          "mounted_on": "T-13",
+          "distance_m": 1.124,
+          "source_number": 11,
+          "pole_number": 13,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT Tegal Baru",
+          "asset": "JB-12",
+          "mounted_on": "T-14",
+          "distance_m": 1.116,
+          "source_number": 12,
+          "pole_number": 14,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT Tegal Baru",
+          "asset": "JB-13.1",
+          "mounted_on": "T-15",
+          "distance_m": 0.774,
+          "source_number": 13,
+          "pole_number": 15,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT Tegal Baru",
+          "asset": "JB-14.1",
+          "mounted_on": "T-16",
+          "distance_m": 0.402,
+          "source_number": 14,
+          "pole_number": 16,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT Tegal Baru",
+          "asset": "JB-15",
+          "mounted_on": "T-17",
+          "distance_m": 3.423,
+          "source_number": 15,
+          "pole_number": 17,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "FT Tegal Baru",
+          "asset": "JB-16",
+          "mounted_on": "T-18",
+          "distance_m": 1.5,
+          "source_number": 16,
+          "pole_number": 18,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "ITC LPG CILACAP",
+          "asset": "JB-005",
+          "mounted_on": "T-004",
+          "distance_m": 1.016,
+          "source_number": 5,
+          "pole_number": 4,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "ITC LPG CILACAP",
+          "asset": "JB-01.1",
+          "mounted_on": "T-014",
+          "distance_m": 0.209,
+          "source_number": 1,
+          "pole_number": 14,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "ITC LPG CILACAP",
+          "asset": "JB-01.2",
+          "mounted_on": "T-016",
+          "distance_m": 0.393,
+          "source_number": 1,
+          "pole_number": 16,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "ITC LPG CILACAP",
+          "asset": "JB-011",
+          "mounted_on": "T-006",
+          "distance_m": 1.317,
+          "source_number": 11,
+          "pole_number": 6,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "ITC LPG CILACAP",
+          "asset": "JB-012",
+          "mounted_on": "T-007",
+          "distance_m": 0.718,
+          "source_number": 12,
+          "pole_number": 7,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "ITC LPG CILACAP",
+          "asset": "JB-013",
+          "mounted_on": "T-008",
+          "distance_m": 0.158,
+          "source_number": 13,
+          "pole_number": 8,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "ITC LPG CILACAP",
+          "asset": "JB-014",
+          "mounted_on": "T-009",
+          "distance_m": 1.232,
+          "source_number": 14,
+          "pole_number": 9,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "ITC LPG CILACAP",
+          "asset": "JB-015",
+          "mounted_on": "T-011",
+          "distance_m": 0.474,
+          "source_number": 15,
+          "pole_number": 11,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "ITC LPG CILACAP",
+          "asset": "JB-03.1",
+          "mounted_on": "T-012",
+          "distance_m": 0.482,
+          "source_number": 3,
+          "pole_number": 12,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "ITC LPG CILACAP",
+          "asset": "JB-06.1",
+          "mounted_on": "T-010",
+          "distance_m": 0.622,
+          "source_number": 6,
+          "pole_number": 10,
+          "rule": "mounting.unique-nearest-pole"
+        },
+        {
+          "area": "ITC LPG CILACAP",
+          "asset": "JB-12.1",
+          "mounted_on": "T-015",
+          "distance_m": 1.356,
+          "source_number": 12,
+          "pole_number": 15,
+          "rule": "mounting.unique-nearest-pole"
+        }
+      ]
+    }
+  }
+}

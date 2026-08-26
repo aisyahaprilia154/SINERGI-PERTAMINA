@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+
+<html lang="id"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>SINERGI Asset Network - Diagram Topologi</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary": "#03071d", /* Dark navy primary */
+                        "on-primary": "#ffffff",
+                        "primary-container": "#dde1ff",
+                        "on-primary-container": "#001452",
+                        "secondary": "#006c4b", /* Dark teal backbone */
+                        "on-secondary": "#ffffff",
+                        "secondary-container": "#63fcc0",
+                        "on-secondary-container": "#002114",
+                        "tertiary": "#f97316", /* Amber suggested */
+                        "error": "#ba1a1a",
+                        "on-error": "#ffffff",
+                        "error-container": "#ffdad6",
+                        "on-error-container": "#93000a",
+                        "background": "#fdfcfb", /* Warm white */
+                        "on-background": "#03071d", /* Dark navy text */
+                        "surface": "#ffffff",
+                        "on-surface": "#03071d",
+                        "surface-variant": "#e1e3e4",
+                        "on-surface-variant": "#46464d",
+                        "outline": "#77767e",
+                        "outline-variant": "#c7c5ce",
+                        "surface-container-low": "#f3f4f5",
+                        "surface-container": "#edeeef",
+                        "surface-container-high": "#e7e8e9",
+                        "surface-container-highest": "#e1e3e4",
+                        "traced-path": "#5b7eff", /* Strong blue highlight */
+                    },
+                    "spacing": {
+                        "nav-rail": "56px",
+                        "inspector": "340px",
+                        "element-spacing": "8px"
+                    },
+                    "fontFamily": {
+                        "sans": ["Inter", "sans-serif"]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .topology-grid {
+            background-color: #fdfcfb;
+            background-image: radial-gradient(circle, rgba(3, 7, 29, 0.04) 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        
+        /* Orthogonal routing classes */
+        .ortho-path {
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        /* Keep labels out of the node's sizing box so connector X coordinates
+           always resolve to the visible icon center, not the text width. */
+        .topology-node-layer > .absolute > :last-child,
+        .topology-anchored-node > :last-child {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 50%;
+            width: max-content;
+            transform: translateX(-50%);
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-sans h-screen w-full overflow-hidden flex flex-col antialiased">
+<!-- Header (56px) -->
+<header class="h-[56px] w-full bg-surface border-b border-outline-variant flex items-center justify-between px-4 shrink-0 z-50">
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[24px]" data-icon="hub">hub</span>
+<span class="font-bold text-primary text-sm tracking-wide">SINERGI</span>
+</div>
+<div class="h-6 w-px bg-outline-variant"></div>
+<nav class="flex items-center gap-1">
+<a class="px-3 py-1.5 rounded-md text-sm font-medium text-on-surface-variant hover:bg-surface-container-low transition-colors" href="#">Peta Aset</a>
+<a class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary-container text-primary transition-colors" href="#">Diagram Topologi</a>
+</nav>
+</div>
+<div class="flex items-center gap-3">
+<button class="w-8 h-8 rounded-full hover:bg-surface-container-low flex items-center justify-center text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[20px]" data-icon="search">search</span>
+</button>
+<button class="w-8 h-8 rounded-full hover:bg-surface-container-low flex items-center justify-center text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[20px]" data-icon="notifications">notifications</span>
+</button>
+<div class="w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold text-xs cursor-pointer shadow-sm">
+            SI
+        </div>
+</div>
+</header>
+<!-- Main Layout -->
+<div class="flex flex-1 h-full overflow-hidden relative">
+<!-- Left Navigation Rail (56px) -->
+<nav class="w-nav-rail bg-surface border-r border-outline-variant flex flex-col items-center py-4 shrink-0 z-50">
+<div class="flex flex-col gap-4 w-full px-2">
+<button class="flex flex-col items-center gap-1 p-2 rounded-lg bg-surface-container-high text-on-surface transition-colors group relative border border-outline-variant" title="View Options">
+<span class="material-symbols-outlined text-[20px]" data-icon="visibility">visibility</span>
+<span class="absolute left-14 bg-surface-container-high text-on-surface text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">View Options</span>
+</button>
+<button class="flex flex-col items-center gap-1 p-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low transition-colors group relative mt-2 border border-transparent" title="Filters">
+<span class="material-symbols-outlined text-[20px]" data-icon="filter_list">filter_list</span>
+<span class="absolute left-14 bg-surface-container-high text-on-surface text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">Filters</span>
+</button>
+<button class="flex flex-col items-center gap-1 p-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low transition-colors group relative mt-2 border border-transparent" title="Export">
+<span class="material-symbols-outlined text-[20px]" data-icon="download">download</span>
+<span class="absolute left-14 bg-surface-container-high text-on-surface text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">Export</span>
+</button>
+</div>
+<div class="mt-auto flex flex-col gap-4 w-full px-2 items-center">
+<button class="p-2 rounded-full hover:bg-surface-container-low transition-colors text-on-surface-variant" title="Help">
+<span class="material-symbols-outlined text-[20px]" data-icon="help">help</span>
+</button>
+</div>
+</nav>
+<!-- Main Topology Canvas -->
+<main class="flex-1 topology-grid relative overflow-hidden flex flex-col">
+<!-- Single Floating Toolbar (52px high) -->
+<div class="absolute top-4 left-6 right-6 flex justify-between items-center z-40 bg-surface border border-outline-variant rounded-lg shadow-sm h-[52px] px-4">
+<!-- Breadcrumb / Context -->
+<div class="flex items-center gap-3">
+<span class="text-sm font-bold text-primary">FT PENGAPON</span>
+<span class="material-symbols-outlined text-outline text-[16px]" data-icon="chevron_right">chevron_right</span>
+<span class="text-sm font-medium text-on-surface">Topologi Jaringan</span>
+<div class="h-4 w-px bg-outline-variant mx-2"></div>
+<div class="flex items-center gap-2 text-xs text-on-surface-variant"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-secondary"></span> Aktif</span><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-error"></span> Offline</span></div>
+</div>
+<!-- Controls -->
+<div class="flex items-center gap-2">
+<div class="flex items-center bg-surface-container-low rounded border border-outline-variant">
+<button class="p-1.5 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors rounded-l" title="Zoom Out">
+<span class="material-symbols-outlined text-[18px]" data-icon="remove">remove</span>
+</button>
+<span class="text-xs font-medium px-2 text-on-surface min-w-[48px] text-center">85%</span>
+<button class="p-1.5 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors rounded-r" title="Zoom In">
+<span class="material-symbols-outlined text-[18px]" data-icon="add">add</span>
+</button>
+</div>
+<button class="p-1.5 bg-surface-container-low text-on-surface hover:bg-surface-container-high border border-outline-variant rounded transition-colors" title="Fit All">
+<span class="material-symbols-outlined text-[18px]" data-icon="fit_screen">fit_screen</span>
+</button>
+<div class="w-px h-6 bg-outline-variant mx-1"></div>
+<button class="p-1.5 text-on-surface-variant hover:bg-surface-container-low rounded transition-colors" title="More Actions">
+<span class="material-symbols-outlined text-[20px]" data-icon="more_vert">more_vert</span>
+</button>
+</div>
+</div>
+<div class="flex-1 overflow-auto relative cursor-grab active:cursor-grabbing">
+<div class="min-w-[1900px] min-h-[900px] relative px-[24px]">
+<!-- Network Islands Backgrounds -->
+<!-- Island 1: Cabang A -->
+<div class="absolute top-[380px] left-[60px] w-[360px] h-[340px] border border-outline-variant/30 bg-surface-container-low/20 rounded-xl pointer-events-none z-0">
+<div class="absolute top-2 left-3 flex justify-between w-[calc(100%-24px)]">
+<span class="text-[11px] font-semibold text-outline tracking-wide">Tiang A — Gerbang &amp; Parkir</span>
+<span class="text-[11px] text-outline flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">flag</span> 2 Tiang</span>
+</div>
+</div>
+<!-- Island 2: Cabang B -->
+<div class="absolute top-[380px] left-[460px] w-[380px] h-[340px] border border-outline-variant/30 bg-surface-container-low/20 rounded-xl pointer-events-none z-0">
+<div class="absolute top-2 left-3 flex justify-between w-[calc(100%-24px)]">
+<span class="text-[11px] font-semibold text-outline tracking-wide">Tiang B — Area Loading</span>
+<span class="text-[11px] text-outline flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">flag</span> 2 Tiang</span>
+</div>
+</div>
+<!-- Island 3: Cabang C -->
+<div class="absolute top-[380px] left-[880px] w-[340px] h-[340px] border border-outline-variant/30 bg-surface-container-low/20 rounded-xl pointer-events-none z-0">
+<div class="absolute top-2 left-3 flex justify-between w-[calc(100%-24px)]">
+<span class="text-[11px] font-semibold text-outline tracking-wide">Tiang C — Gudang</span>
+<span class="text-[11px] text-outline flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">flag</span> 2 Tiang</span>
+</div>
+</div><div class="absolute top-[380px] left-[1240px] w-[340px] h-[340px] border border-outline-variant/30 bg-surface-container-low/20 rounded-xl pointer-events-none z-0"><div class="absolute top-2 left-3 flex justify-between w-[calc(100%-24px)]"><span class="text-[11px] font-semibold text-outline tracking-wide">Tiang D — Perbatasan</span><span class="text-[11px] text-outline flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">flag</span> 3 JB</span></div></div>
+<!-- Area non-tiang: perangkat indoor/tanpa mounting tiang -->
+<div class="absolute top-[380px] left-[1620px] w-[280px] h-[250px] border border-tertiary/50 bg-tertiary/5 rounded-xl pointer-events-none z-0">
+<div class="absolute top-2 left-3 flex justify-between w-[calc(100%-24px)]">
+<span class="text-[11px] font-semibold text-tertiary tracking-wide">Area non-tiang / indoor</span>
+<span class="text-[11px] text-tertiary flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">home</span> 3 CCTV</span>
+</div>
+</div>
+<!-- SVG Canvas for Lines (Orthogonal Routing) -->
+<svg class="absolute inset-0 w-full h-full pointer-events-none" style="z-index: 10;">
+<!-- Server to Branch A -->
+<path class="ortho-path stroke-secondary" d="M 640 172 L 640 280 L 240 280 L 240 460" stroke-width="2.5"></path>
+<!-- Server to Branch B -->
+<path class="ortho-path stroke-secondary" d="M 640 172 L 640 460" stroke-width="2.5"></path>
+<!-- Server to Branch C -->
+<path class="ortho-path stroke-secondary" d="M 640 172 L 640 280 L 1050 280 L 1050 460" stroke-width="2.5"></path>
+<!-- Branch A Internal (Traced) -->
+<path class="ortho-path stroke-traced-path" d="M 240 498 L 240 560 L 170 560 L 170 590" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 240 498 L 240 560 L 310 560 L 310 590" stroke-width="1.5"></path>
+<!-- JB Ext A to endpoints -->
+<path class="ortho-path stroke-traced-path" d="M 170 628 L 170 660 L 110 660 L 110 690" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 170 628 L 170 660 L 150 660 L 150 690" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 170 628 L 170 660 L 190 660 L 190 690" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 170 628 L 170 660 L 230 660 L 230 690" stroke-width="1.5"></path>
+<!-- JB A-2 to endpoints -->
+<path class="ortho-path stroke-outline-variant" d="M 310 628 L 310 660 L 290 660 L 290 690" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 310 628 L 310 660 L 330 660 L 330 690" stroke-width="1.5"></path>
+<!-- Branch B Internal -->
+<path class="ortho-path stroke-outline-variant" d="M 640 498 L 640 560 L 570 560 L 570 590" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 640 498 L 640 560 L 710 560 L 710 590" stroke-width="1.5"></path>
+<!-- JB Ext B to endpoints -->
+<path class="ortho-path stroke-outline-variant" d="M 570 628 L 570 660 L 510 660 L 510 690" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 570 628 L 570 660 L 550 660 L 550 690" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 570 628 L 570 660 L 590 660 L 590 690" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 570 628 L 570 660 L 630 660 L 630 690" stroke-width="1.5"></path>
+<!-- JB B-2 to endpoints -->
+<path class="ortho-path stroke-outline-variant" d="M 710 628 L 710 660 L 690 660 L 690 690" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 710 628 L 710 660 L 730 660 L 730 690" stroke-width="1.5"></path>
+<!-- Branch C Internal -->
+<path class="ortho-path stroke-outline-variant" d="M 1050 498 L 1050 560 L 980 560 L 980 590" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 1050 498 L 1050 560 L 1120 560 L 1120 590" stroke-width="1.5"></path>
+<!-- JB Ext C to endpoints -->
+<path class="ortho-path stroke-outline-variant" d="M 980 628 L 980 660 L 940 660 L 940 690" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 980 628 L 980 660 L 980 690" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 980 628 L 980 660 L 1020 660 L 1020 690" stroke-width="1.5"></path>
+<!-- JB C-2 to endpoints -->
+<path class="ortho-path stroke-outline-variant" d="M 1120 628 L 1120 660 L 1120 690" stroke-width="1.5"></path>
+<!-- Physical Grouping Line (Dashed Gray) -->
+<path class="ortho-path stroke-outline-variant" d="M 170 730 L 170 760 L 220 760 L 220 730" stroke-dasharray="4 4" stroke-width="1.5"></path>
+<!-- Server to Tiang D -->
+<path class="ortho-path stroke-secondary" d="M 640 172 L 640 280 L 1410 280 L 1410 460" stroke-width="2.5"></path>
+<!-- JB-D-01 to child JBs; every segment lands on the visible JB center -->
+<path class="ortho-path stroke-outline-variant" d="M 1410 498 L 1410 544 L 1410 590" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 1410 498 L 1410 544 L 1480 544 L 1480 590" stroke-width="1.5"></path>
+<!-- JB-D-02 to endpoints -->
+<path class="ortho-path stroke-outline-variant" d="M 1410 628 L 1410 660 L 1350 660 L 1350 690" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 1410 628 L 1410 660 L 1380 660 L 1380 690" stroke-width="1.5"></path>
+<!-- JB-D-03 to endpoints -->
+<path class="ortho-path stroke-outline-variant" d="M 1480 628 L 1480 660 L 1410 660 L 1410 690" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 1480 628 L 1480 660 L 1440 660 L 1440 690" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 1480 628 L 1480 660 L 1470 660 L 1470 690" stroke-width="1.5"></path>
+<!-- Area non-tiang / indoor -->
+<path class="ortho-path stroke-secondary" d="M 640 172 L 640 280 L 1760 280 L 1760 460" stroke-width="2.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 1760 498 L 1760 544 L 1710 544 L 1710 590" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 1760 498 L 1760 590" stroke-width="1.5"></path>
+<path class="ortho-path stroke-outline-variant" d="M 1760 498 L 1760 544 L 1810 544 L 1810 590" stroke-width="1.5"></path>
+</svg>
+<!-- NODES Container -->
+<div class="topology-node-layer relative w-full h-[900px]" style="z-index: 20;">
+<!-- CORE SERVER -->
+<div class="absolute top-[120px] left-[610px] flex flex-col items-center gap-1.5 group cursor-pointer">
+<div class="relative w-[60px] h-[52px] bg-surface border border-outline-variant rounded-md shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[28px] text-primary" data-icon="dns">dns</span>
+<span class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-secondary rounded-full border-2 border-surface"></span>
+</div>
+<div class="text-[11px] font-bold text-primary tracking-tight">JB SERVER FT PENGAPON</div>
+</div>
+<!-- BRANCH A JBs -->
+<!-- Cabang A JB Utama 1 -->
+<div class="absolute top-[460px] left-[218px] flex flex-col items-center gap-1 group cursor-pointer z-30">
+<div class="absolute -inset-1.5 bg-traced-path/10 rounded-lg blur-sm -z-10"></div>
+<div class="relative w-[44px] h-[38px] bg-surface border-2 border-traced-path rounded-md shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px] text-traced-path" data-icon="device_hub">device_hub</span>
+<span class="absolute -top-1 -right-1 w-2 h-2 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-bold text-on-surface">JB-A-01</div>
+</div>
+<!-- Cabang A JB Ext 1 (Selected/Traced) -->
+<div class="absolute top-[590px] left-[148px] flex flex-col items-center gap-1 group cursor-pointer z-30">
+<div class="absolute -inset-1.5 bg-traced-path/10 rounded-lg blur-sm -z-10"></div>
+<div class="relative w-[44px] h-[38px] bg-surface border-2 border-traced-path rounded-md shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px] text-traced-path" data-icon="router">router</span>
+<span class="absolute -top-1 -right-1 w-2 h-2 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-bold text-on-surface">JB-EXT-A1</div>
+</div>
+<!-- Cabang A JB Utama 2 -->
+<div class="absolute top-[590px] left-[288px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[44px] h-[38px] bg-surface border border-outline-variant rounded-md shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px] text-on-surface" data-icon="device_hub">device_hub</span>
+<span class="absolute -top-1 -right-1 w-2 h-2 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-semibold text-on-surface">JB-A-02</div>
+</div>
+<!-- CABANG A ENDPOINTS -->
+<!-- JB-EXT-A1 Endpoints (4 CCTV) -->
+<div class="absolute top-[690px] left-[98px] flex flex-col items-center gap-1 group cursor-pointer z-20">
+<div class="relative w-[24px] h-[24px] bg-surface border border-traced-path rounded shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[16px] text-traced-path" data-icon="videocam">videocam</span>
+<span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">CAM-A01</div>
+</div>
+<div class="absolute top-[690px] left-[138px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="videocam">videocam</span>
+<span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">CAM-A02</div>
+</div>
+<div class="absolute top-[690px] left-[178px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="videocam">videocam</span>
+<span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">CAM-A03</div>
+</div>
+<div class="absolute top-[690px] left-[218px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="videocam">videocam</span>
+<span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">CAM-A04</div>
+</div>
+<!-- JB-A-02 Endpoints (1 Akses/Sensor) -->
+<div class="absolute top-[690px] left-[278px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="sensors">sensors</span>
+<span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">SENS-A1</div>
+</div>
+<div class="absolute top-[690px] left-[318px] flex flex-col items-center gap-1 group cursor-pointer">
+<!-- Placeholder for alignment if needed, omitting since branch A has 5 endpoints total -->
+</div>
+<!-- BRANCH B JBs -->
+<!-- Cabang B JB Utama 1 -->
+<div class="absolute top-[460px] left-[618px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[44px] h-[38px] bg-surface border border-outline-variant rounded-md shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px] text-on-surface" data-icon="device_hub">device_hub</span>
+<span class="absolute -top-1 -right-1 w-2 h-2 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-semibold text-on-surface">JB-B-01</div>
+</div>
+<!-- Cabang B JB Ext 1 -->
+<div class="absolute top-[590px] left-[548px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[44px] h-[38px] bg-surface border border-outline-variant rounded-md shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px] text-on-surface" data-icon="router">router</span>
+<span class="absolute -top-1 -right-1 w-2 h-2 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-semibold text-on-surface">JB-EXT-B1</div>
+</div>
+<!-- Cabang B JB Utama 2 -->
+<div class="absolute top-[590px] left-[688px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[44px] h-[38px] bg-surface border border-outline-variant rounded-md shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px] text-on-surface" data-icon="device_hub">device_hub</span>
+<span class="absolute -top-1 -right-1 w-2 h-2 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-semibold text-on-surface">JB-B-02</div>
+</div>
+<!-- CABANG B ENDPOINTS -->
+<!-- JB-EXT-B1 Endpoints (4 CCTV) -->
+<div class="absolute top-[690px] left-[498px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="videocam">videocam</span>
+<span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">CAM-B01</div>
+</div>
+<div class="absolute top-[690px] left-[538px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="videocam">videocam</span>
+<span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">CAM-B02</div>
+</div>
+<div class="absolute top-[690px] left-[578px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="videocam">videocam</span>
+<span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">CAM-B03</div>
+</div>
+<div class="absolute top-[690px] left-[618px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="videocam">videocam</span>
+<span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">CAM-B04</div>
+</div>
+<!-- JB-B-02 Endpoints (1 CCTV, 1 Sensor) -->
+<div class="absolute top-[690px] left-[678px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="videocam">videocam</span>
+<span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">CAM-B05</div>
+</div>
+<div class="absolute top-[690px] left-[718px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="sensors">sensors</span>
+<span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">SENS-B1</div>
+</div>
+<!-- BRANCH C JBs -->
+<!-- Cabang C JB Utama 1 -->
+<div class="absolute top-[460px] left-[1028px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[44px] h-[38px] bg-surface border border-outline-variant rounded-md shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px] text-on-surface" data-icon="device_hub">device_hub</span>
+<span class="absolute -top-1 -right-1 w-2 h-2 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-semibold text-on-surface">JB-C-01</div>
+</div>
+<!-- Cabang C JB Ext 1 -->
+<div class="absolute top-[590px] left-[958px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[44px] h-[38px] bg-surface border border-outline-variant rounded-md shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px] text-on-surface" data-icon="router">router</span>
+<span class="absolute -top-1 -right-1 w-2 h-2 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-semibold text-on-surface">JB-EXT-C1</div>
+</div>
+<!-- Cabang C JB Utama 2 -->
+<div class="absolute top-[590px] left-[1098px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[44px] h-[38px] bg-surface border border-outline-variant rounded-md shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px] text-on-surface" data-icon="device_hub">device_hub</span>
+<span class="absolute -top-1 -right-1 w-2 h-2 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-semibold text-on-surface">JB-C-02</div>
+</div>
+<!-- CABANG C ENDPOINTS -->
+<!-- JB-EXT-C1 Endpoints (3 CCTV) -->
+<div class="absolute top-[690px] left-[928px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="videocam">videocam</span>
+<span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">CAM-C01</div>
+</div>
+<div class="absolute top-[690px] left-[968px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="videocam">videocam</span>
+<span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">CAM-C02</div>
+</div>
+<div class="absolute top-[690px] left-[1008px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="videocam">videocam</span>
+<span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">CAM-C03</div>
+</div>
+<!-- JB-C-02 Endpoints (1 Support Device) -->
+<div class="absolute top-[690px] left-[1108px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="developer_board">developer_board</span>
+<span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">SUPP-C1</div>
+</div>
+<!-- Tiang D JB 01 --><div class="absolute top-[460px] left-[1388px] flex flex-col items-center gap-1 group cursor-pointer z-30"><div class="relative w-[44px] h-[38px] bg-surface border border-outline-variant rounded-md shadow-sm flex items-center justify-center"><span class="material-symbols-outlined text-[20px] text-on-surface" data-icon="device_hub">device_hub</span><span class="absolute -top-1 -right-1 w-2 h-2 bg-secondary rounded-full border border-surface"></span></div><div class="text-[11px] font-semibold text-on-surface">JB-D-01</div></div><!-- Tiang D JB 02 --><div class="absolute top-[590px] left-[1388px] flex flex-col items-center gap-1 group cursor-pointer"><div class="relative w-[44px] h-[38px] bg-surface border border-outline-variant rounded-md shadow-sm flex items-center justify-center"><span class="material-symbols-outlined text-[20px] text-on-surface" data-icon="device_hub">device_hub</span><span class="absolute -top-1 -right-1 w-2 h-2 bg-secondary rounded-full border border-surface"></span></div><div class="text-[11px] font-semibold text-on-surface">JB-D-02</div></div><!-- Tiang D JB 03 --><div class="absolute top-[590px] left-[1458px] flex flex-col items-center gap-1 group cursor-pointer"><div class="relative w-[44px] h-[38px] bg-surface border border-outline-variant rounded-md shadow-sm flex items-center justify-center"><span class="material-symbols-outlined text-[20px] text-on-surface" data-icon="device_hub">device_hub</span><span class="absolute -top-1 -right-1 w-2 h-2 bg-secondary rounded-full border border-surface"></span></div><div class="text-[11px] font-semibold text-on-surface">JB-D-03</div></div><!-- Tiang D Endpoints --><div class="absolute top-[690px] left-[1338px] flex flex-col items-center gap-1 group cursor-pointer"><div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center"><span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="videocam">videocam</span><span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span></div><div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">CAM-D01</div></div><div class="absolute top-[690px] left-[1368px] flex flex-col items-center gap-1 group cursor-pointer"><div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center"><span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="videocam">videocam</span><span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span></div><div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">CAM-D02</div></div><div class="absolute top-[690px] left-[1398px] flex flex-col items-center gap-1 group cursor-pointer"><div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center"><span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="videocam">videocam</span><span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span></div><div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">CAM-D03</div></div><div class="absolute top-[690px] left-[1428px] flex flex-col items-center gap-1 group cursor-pointer"><div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center"><span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="videocam">videocam</span><span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span></div><div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">CAM-D04</div></div><div class="absolute top-[690px] left-[1458px] flex flex-col items-center gap-1 group cursor-pointer"><div class="relative w-[24px] h-[24px] bg-surface border border-outline-variant rounded shadow-sm flex items-center justify-center"><span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="videocam">videocam</span><span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-secondary rounded-full border border-surface"></span></div><div class="text-[11px] font-medium text-on-surface opacity-0 group-hover:opacity-100 transition-opacity">CAM-D05</div></div></div>
+<!-- Area non-tiang / indoor -->
+<div class="topology-anchored-node absolute top-[460px] left-[1738px] flex flex-col items-center gap-1 group cursor-pointer z-30">
+<div class="relative w-[44px] h-[38px] bg-surface border border-tertiary rounded-md shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px] text-tertiary" data-icon="device_hub">device_hub</span>
+<span class="absolute -top-1 -right-1 w-2 h-2 bg-secondary rounded-full border border-surface"></span>
+</div>
+<div class="text-[11px] font-semibold text-tertiary">JB-IND-01</div>
+</div>
+<div class="topology-anchored-node absolute top-[590px] left-[1698px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[24px] h-[24px] bg-surface border border-tertiary/60 rounded shadow-sm flex items-center justify-center"><span class="material-symbols-outlined text-[16px] text-tertiary" data-icon="videocam">videocam</span></div>
+<div class="text-[11px] font-medium text-tertiary opacity-0 group-hover:opacity-100 transition-opacity">CAM-IND-01</div>
+</div>
+<div class="topology-anchored-node absolute top-[590px] left-[1748px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[24px] h-[24px] bg-surface border border-tertiary/60 rounded shadow-sm flex items-center justify-center"><span class="material-symbols-outlined text-[16px] text-tertiary" data-icon="videocam">videocam</span></div>
+<div class="text-[11px] font-medium text-tertiary opacity-0 group-hover:opacity-100 transition-opacity">CAM-IND-02</div>
+</div>
+<div class="topology-anchored-node absolute top-[590px] left-[1798px] flex flex-col items-center gap-1 group cursor-pointer">
+<div class="relative w-[24px] h-[24px] bg-surface border border-tertiary/60 rounded shadow-sm flex items-center justify-center"><span class="material-symbols-outlined text-[16px] text-tertiary" data-icon="videocam">videocam</span></div>
+<div class="text-[11px] font-medium text-tertiary opacity-0 group-hover:opacity-100 transition-opacity">CAM-IND-03</div>
+</div>
+</div>
+</div>
+<!-- Disconnected Devices Tray (Bottom) -->
+<div class="mt-auto bg-surface border-t border-outline-variant shadow-[0_-2px_12px_rgba(3,7,29,0.03)] p-2.5 flex items-center gap-4 z-30 shrink-0">
+<div class="flex items-center gap-2 text-[13px] font-semibold text-on-surface border-r border-outline-variant pr-4 pl-2">
+<span class="material-symbols-outlined text-outline text-[18px]" data-icon="link_off">link_off</span>
+                Perangkat Belum Terhubung (2)
+            </div>
+<div class="flex gap-4 overflow-x-auto hide-scrollbar">
+<div class="flex flex-col items-center gap-1 opacity-60 cursor-not-allowed">
+<div class="w-6 h-6 border border-dashed border-outline rounded flex items-center justify-center">
+<span class="material-symbols-outlined text-[14px] text-outline" data-icon="videocam">videocam</span>
+</div>
+<span class="text-[11px] text-on-surface-variant">CAM-NEW-01</span>
+</div>
+<div class="flex flex-col items-center gap-1 opacity-60 cursor-not-allowed">
+<div class="w-6 h-6 border border-dashed border-outline rounded flex items-center justify-center">
+<span class="material-symbols-outlined text-[14px] text-outline" data-icon="videocam">videocam</span>
+</div>
+<span class="text-[11px] text-on-surface-variant">CAM-NEW-02</span>
+</div>
+</div>
+</div>
+</main>
+<!-- Right Inspector Panel (340px) -->
+<aside class="w-inspector bg-surface border-l border-outline-variant flex flex-col h-full shrink-0 z-40 shadow-[-2px_0_12px_rgba(3,7,29,0.03)] text-[12px]">
+<div class="px-4 py-3 border-b border-outline-variant flex justify-between items-center bg-surface-container-lowest">
+<h3 class="font-bold text-on-surface text-sm">Detail Perangkat</h3>
+<button class="p-1 rounded-md hover:bg-surface-container-low text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[18px]" data-icon="close">close</span>
+</button>
+</div>
+<div class="p-4 flex-1 overflow-y-auto">
+<!-- Header -->
+<div class="flex items-start gap-3 mb-6">
+<div class="w-10 h-10 bg-primary-container/50 border border-primary-container rounded-md flex items-center justify-center text-primary shrink-0">
+<span class="material-symbols-outlined text-[20px]" data-icon="router">router</span>
+</div>
+<div class="flex-1">
+<div class="flex items-center justify-between mb-0.5">
+<h4 class="font-bold text-on-surface text-base leading-tight">JB-EXT-A1</h4>
+<span class="bg-secondary/10 text-secondary text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide inline-flex items-center gap-1 border border-secondary/20">
+<span class="w-1.5 h-1.5 bg-secondary rounded-full"></span> Online
+                    </span>
+</div>
+<span class="text-xs text-on-surface-variant font-medium">Distribution Extension Box</span>
+</div>
+</div>
+<!-- Physical Mounting -->
+<div class="mb-6 bg-surface-container-lowest border border-outline-variant rounded-md p-3">
+<div class="flex items-center gap-2 mb-2">
+<span class="material-symbols-outlined text-[16px] text-outline" data-icon="location_on">location_on</span>
+<span class="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Lokasi Fisik</span>
+</div>
+<div class="text-[12px] text-on-surface">Cabang A — Gerbang &amp; Parkir. Mounting Tiang 1.</div>
+</div>
+<!-- Network Path -->
+<div class="mb-6">
+<label class="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider block mb-2">Jalur Jaringan</label>
+<div class="text-[12px] text-on-surface bg-surface-container-low/50 p-2.5 rounded-md border border-outline-variant flex flex-wrap items-center gap-2">
+<span class="text-on-surface-variant font-medium">SRV-PENGAPON</span>
+<span class="material-symbols-outlined text-[14px] text-outline-variant" data-icon="arrow_forward">arrow_forward</span>
+<span class="text-on-surface-variant font-medium">JB-A-01</span>
+<span class="material-symbols-outlined text-[14px] text-outline-variant" data-icon="arrow_forward">arrow_forward</span>
+<span class="font-bold text-traced-path bg-traced-path/10 px-1.5 py-0.5 rounded">JB-EXT-A1</span>
+</div>
+</div>
+<!-- Connections List -->
+<div>
+<label class="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider block mb-2">Endpoint Terhubung (4)</label>
+<div class="flex flex-col gap-1.5">
+<!-- Row 1: Selected/Traced -->
+<div class="border border-traced-path bg-traced-path/5 p-2 rounded-md flex justify-between items-center text-[12px] cursor-pointer hover:bg-traced-path/10 transition-colors">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-[16px] text-traced-path" data-icon="videocam">videocam</span>
+<span class="font-semibold text-primary">CAM-A01</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-[10px] text-on-surface-variant">PoE+</span>
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+</div>
+</div>
+<!-- Row 2: Normal -->
+<div class="border border-outline-variant bg-surface p-2 rounded-md flex justify-between items-center text-[12px] cursor-pointer hover:bg-surface-container-low transition-colors shadow-sm">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-[16px] text-outline" data-icon="videocam">videocam</span>
+<span class="font-medium text-on-surface">CAM-A02</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-[10px] text-outline">PoE</span>
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+</div>
+</div>
+<!-- Row 3: Normal -->
+<div class="border border-outline-variant bg-surface p-2 rounded-md flex justify-between items-center text-[12px] cursor-pointer hover:bg-surface-container-low transition-colors shadow-sm">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-[16px] text-outline" data-icon="videocam">videocam</span>
+<span class="font-medium text-on-surface">CAM-A03</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-[10px] text-outline">PoE</span>
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+</div>
+</div>
+<!-- Row 4: Normal -->
+<div class="border border-outline-variant bg-surface p-2 rounded-md flex justify-between items-center text-[12px] cursor-pointer hover:bg-surface-container-low transition-colors shadow-sm">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-[16px] text-outline" data-icon="videocam">videocam</span>
+<span class="font-medium text-on-surface">CAM-A04</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-[10px] text-outline">PoE</span>
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="p-4 border-t border-outline-variant bg-surface-container-lowest flex flex-col gap-2">
+<button class="w-full bg-traced-path text-white font-semibold py-2 rounded-md hover:bg-traced-path/90 transition-colors text-sm shadow-sm flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]" data-icon="route">route</span>
+                Mulai tracing
+            </button>
+<button class="w-full bg-surface border border-outline-variant text-on-surface font-semibold py-2 rounded-md hover:bg-surface-container-low transition-colors text-sm shadow-sm flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]" data-icon="map">map</span>
+                Buka di Peta Aset
+            </button>
+<button class="w-full text-traced-path font-medium py-1.5 rounded-md hover:bg-traced-path/10 transition-colors text-sm flex items-center justify-center gap-2">
+                Lihat detail aset
+            </button>
+</div>
+</aside>
+</div>
+
+<div id="stitch-agent-cursor" data-stitch-injected style="left:-40px;top:-40px;">
+  <svg class="cursor-pointer" width="20" height="20" viewBox="0 0 34 34" fill="none">
+    <path d="M15.0624 32.3549L5.16251 5.48544L32.0324 15.3848L19.3046 19.6276L15.0624 32.3549Z" fill="#7168f6"/>
+    <path d="M4.80877 5.13207C4.94657 4.99427 5.15206 4.94886 5.33496 5.01606L32.205 14.9156C32.4041 14.9889 32.5354 15.1799 32.5323 15.392C32.529 15.6043 32.392 15.7924 32.1905 15.8595L19.6994 20.0227L15.5369 32.5131C15.4697 32.7145 15.2824 32.8509 15.0701 32.8542C14.8578 32.8575 14.6664 32.7268 14.5929 32.5276L4.69276 5.65826L4.67343 5.5892C4.63863 5.42535 4.68814 5.25283 4.80877 5.13207Z" stroke="rgba(255,255,255,0.15)" stroke-linejoin="round"/>
+  </svg>
+  <svg class="cursor-text" width="20" height="28" viewBox="0 0 20 28" fill="none">
+    <path d="M6 2h8M6 26h8M10 2v24" stroke="#7168f6" stroke-width="2.5" stroke-linecap="round"/>
+  </svg>
+  <svg class="cursor-paint" width="24" height="24" viewBox="0 0 24 24" fill="none">
+    <path d="M18.5 1.5c.8-.8 2.1-.8 2.8 0 .8.8.8 2.1 0 2.8L11 14.5l-3.5 1 1-3.5L18.5 1.5z" fill="#7168f6" stroke="#4f44e1" stroke-width="1" stroke-linejoin="round"/>
+    <path d="M7 14.5c-2 2-3.5 4-3.5 5.5 0 1.5 1 2.5 2.5 2.5 1.5 0 3.5-1.5 5.5-3.5" stroke="#7168f6" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M4 20c-.5.5-1.2 1-2 1.2" stroke="#6056f0" stroke-width="1" stroke-linecap="round"/>
+  </svg>
+  <svg id="stitch-cursor-label" width="28" height="14" viewBox="0 0 28 14" fill="none">
+    <rect width="28" height="14" rx="7" fill="#7168f6"/>
+    <circle cx="10.5" cy="7" r="1.8" fill="white"/>
+    <circle cx="17.5" cy="7" r="1.8" fill="white"/>
+  </svg>
+</div>
+</body></html>
