@@ -1,0 +1,87 @@
+﻿area,asset,mounted_on,distance_m,source_number,pole_number,rule
+Booster Kutawinangun,JB-01,T-04,1.151,1,4,mounting.unique-nearest-pole
+Booster Kutawinangun,JB-03,T-09,0.918,3,9,mounting.unique-nearest-pole
+Booster Kutawinangun,JB-04,T-02,1.867,4,2,mounting.unique-nearest-pole
+Booster Kutawinangun,JB-05,T-06,0.333,5,6,mounting.unique-nearest-pole
+Booster Kutawinangun,JB-06,T-08,0.243,6,8,mounting.unique-nearest-pole
+Booster Kutawinangun,JB-08,T-10,2.077,8,10,mounting.unique-nearest-pole
+Booster Kutawinangun,JB-09,T-05,1.229,9,5,mounting.unique-nearest-pole
+Booster Kutawinangun,JB-10,T-03,1.349,10,3,mounting.unique-nearest-pole
+Booster Kutawinangun,JB-11,T-01,0.078,11,1,mounting.unique-nearest-pole
+FT CILACAP,JB-010,T-013,0.173,10,13,mounting.unique-nearest-pole
+FT CILACAP,JB-012-EXP,T-014,2.774,12,14,mounting.unique-nearest-pole
+FT CILACAP,JB-10.2,T-007,1.906,10,7,mounting.unique-nearest-pole
+FT CILACAP,JB-2.2,T-012,0.299,2,12,mounting.unique-nearest-pole
+FT CILACAP,JB-3.3,T-004,0.464,3,4,mounting.unique-nearest-pole
+FT CILACAP,JB-7.1,T-015,0.369,7,15,mounting.unique-nearest-pole
+FT CILACAP,JB_004,T-005,0.123,4,5,mounting.unique-nearest-pole
+FT CILACAP,JB_005,T-006,0.27,5,6,mounting.unique-nearest-pole
+FT CILACAP,JB_006,T-008,0.787,6,8,mounting.unique-nearest-pole
+FT CILACAP,JB_008,T-010,1.684,8,10,mounting.unique-nearest-pole
+FT LOMANIS,JB-003,T-005,0.429,3,5,mounting.unique-nearest-pole
+FT LOMANIS,JB-004,T-006,0.247,4,6,mounting.unique-nearest-pole
+FT LOMANIS,JB-005,T-007,0.172,5,7,mounting.unique-nearest-pole
+FT LOMANIS,JB-006,T-008,0.49,6,8,mounting.unique-nearest-pole
+FT LOMANIS,JB-007-exp,T-009,0.329,7,9,mounting.unique-nearest-pole
+FT LOMANIS,JB-008,T-011,0.154,8,11,mounting.unique-nearest-pole
+FT LOMANIS,JB-009,T-012,0.548,9,12,mounting.unique-nearest-pole
+FT LOMANIS,JB-010-exp,T-013,0.743,10,13,mounting.unique-nearest-pole
+FT LOMANIS,JB-011,T-014,0.418,11,14,mounting.unique-nearest-pole
+FT LOMANIS,JB-012,T-015,0.349,12,15,mounting.unique-nearest-pole
+FT LOMANIS,JB-013,T-016,0.1,13,16,mounting.unique-nearest-pole
+FT LOMANIS,JB-014,T-018,0.249,14,18,mounting.unique-nearest-pole
+FT LOMANIS,JB-015-exp,T-019,0.221,15,19,mounting.unique-nearest-pole
+FT LOMANIS,JB-016,T-020,0.782,16,20,mounting.unique-nearest-pole
+FT LOMANIS,JB-017,T-021,0.199,17,21,mounting.unique-nearest-pole
+FT LOMANIS,JB-018-exp,T-023,0.555,18,23,mounting.unique-nearest-pole
+FT LOMANIS,JB-019,T-028,0.388,19,28,mounting.unique-nearest-pole
+FT LOMANIS,JB-020,T-017,0.915,20,17,mounting.unique-nearest-pole
+FT LOMANIS,JB.18.1,T-027,3.551,18,27,mounting.unique-nearest-pole
+FT LOMANIS,JB00.1,T-003,0.14,0,3,mounting.unique-nearest-pole
+FT LOMANIS,JB00.2,T-025,0.463,0,25,mounting.unique-nearest-pole
+FT LOMANIS,JB12.1,T-026,0.7,12,26,mounting.unique-nearest-pole
+FT MAOS,JB-009,T-003,0.176,9,3,mounting.unique-nearest-pole
+FT MAOS,JB-010,T-012,2.939,10,12,mounting.unique-nearest-pole
+FT MAOS,JB08.2,T-010,0.491,8,10,mounting.unique-nearest-pole
+FT MAOS,JB09.1,T-004,0.736,9,4,mounting.unique-nearest-pole
+FT PENGAPON - SEMARANG,JB-01.1-WP,T-019,1.167,1,19,mounting.unique-nearest-pole
+FT PENGAPON - SEMARANG,JB-19.1-WP,T-020,2.93,19,20,mounting.unique-nearest-pole
+FT REWULU,JB-009_exp,T-010,0.123,9,10,mounting.unique-nearest-pole
+FT REWULU,JB-010-exp,T-017,0.351,10,17,mounting.unique-nearest-pole
+FT REWULU,JB-011-EXP,T-012,0.472,11,12,mounting.unique-nearest-pole
+FT REWULU,JB-012-EXP,T-013,0.984,12,13,mounting.unique-nearest-pole
+FT REWULU,JB-013-EXP,T-020,3.738,13,20,mounting.unique-nearest-pole
+FT REWULU,JB-015,T-016,0.53,15,16,mounting.unique-nearest-pole
+FT REWULU,JB-016,T-019,2.314,16,19,mounting.unique-nearest-pole
+FT REWULU,JB00.3,T-015,0.423,0,15,mounting.unique-nearest-pole
+FT REWULU,JB00.4,T-014,2.267,0,14,mounting.unique-nearest-pole
+FT REWULU,JB08.2,T-009,2.481,8,9,mounting.unique-nearest-pole
+FT REWULU,JB13.1-WTP,T-018,0.697,13,18,mounting.unique-nearest-pole
+FT Tegal Baru,JB-01.1,T-03,0.3,1,3,mounting.unique-nearest-pole
+FT Tegal Baru,JB-01.2,T-02,0.177,1,2,mounting.unique-nearest-pole
+FT Tegal Baru,JB-02.1,T-04,0.137,2,4,mounting.unique-nearest-pole
+FT Tegal Baru,JB-04,T-05,0.811,4,5,mounting.unique-nearest-pole
+FT Tegal Baru,JB-05,T-06,0.537,5,6,mounting.unique-nearest-pole
+FT Tegal Baru,JB-06,T-07,1.526,6,7,mounting.unique-nearest-pole
+FT Tegal Baru,JB-07,T-08,4.852,7,8,mounting.unique-nearest-pole
+FT Tegal Baru,JB-08.1,T-10,1.058,8,10,mounting.unique-nearest-pole
+FT Tegal Baru,JB-08.2,T-09,0.149,8,9,mounting.unique-nearest-pole
+FT Tegal Baru,JB-09,T-11,1.346,9,11,mounting.unique-nearest-pole
+FT Tegal Baru,JB-10-EXP,T-12,1.822,10,12,mounting.unique-nearest-pole
+FT Tegal Baru,JB-11,T-13,1.124,11,13,mounting.unique-nearest-pole
+FT Tegal Baru,JB-12,T-14,1.116,12,14,mounting.unique-nearest-pole
+FT Tegal Baru,JB-13.1,T-15,0.774,13,15,mounting.unique-nearest-pole
+FT Tegal Baru,JB-14.1,T-16,0.402,14,16,mounting.unique-nearest-pole
+FT Tegal Baru,JB-15,T-17,3.423,15,17,mounting.unique-nearest-pole
+FT Tegal Baru,JB-16,T-18,1.5,16,18,mounting.unique-nearest-pole
+ITC LPG CILACAP,JB-005,T-004,1.016,5,4,mounting.unique-nearest-pole
+ITC LPG CILACAP,JB-01.1,T-014,0.209,1,14,mounting.unique-nearest-pole
+ITC LPG CILACAP,JB-01.2,T-016,0.393,1,16,mounting.unique-nearest-pole
+ITC LPG CILACAP,JB-011,T-006,1.317,11,6,mounting.unique-nearest-pole
+ITC LPG CILACAP,JB-012,T-007,0.718,12,7,mounting.unique-nearest-pole
+ITC LPG CILACAP,JB-013,T-008,0.158,13,8,mounting.unique-nearest-pole
+ITC LPG CILACAP,JB-014,T-009,1.232,14,9,mounting.unique-nearest-pole
+ITC LPG CILACAP,JB-015,T-011,0.474,15,11,mounting.unique-nearest-pole
+ITC LPG CILACAP,JB-03.1,T-012,0.482,3,12,mounting.unique-nearest-pole
+ITC LPG CILACAP,JB-06.1,T-010,0.622,6,10,mounting.unique-nearest-pole
+ITC LPG CILACAP,JB-12.1,T-015,1.356,12,15,mounting.unique-nearest-pole
