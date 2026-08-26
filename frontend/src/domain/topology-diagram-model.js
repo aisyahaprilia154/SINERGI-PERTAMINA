@@ -153,7 +153,12 @@ export function buildTopologyDiagramModel({
       semanticTier: DIAGRAM_CLASS_TIERS[diagramClass] ?? diagramClass,
       visualTier: visualTierFor(diagramClass),
       labelPriority: labelPriorityFor(diagramClass),
-      layoutParentId: null,
+      layoutRootId: graphNode.layoutRootId ?? asset.layoutRootId ?? null,
+      layoutParentId: graphNode.layoutParentId ?? asset.layoutParentId ?? null,
+      layoutRelationStatus: graphNode.layoutRelationStatus
+        ?? asset.layoutRelationStatus
+        ?? null,
+      layoutReasonCode: graphNode.layoutReasonCode ?? asset.layoutReasonCode ?? null,
       isCore: diagramClass === 'rack-root'
         || isCoreRole(topologyRole, asset.type ?? graphNode.assetType ?? graphNode.type),
       isEndpoint: diagramClass === 'endpoint'
@@ -299,7 +304,8 @@ export function buildTopologyDiagramModel({
   const components = connectedComponents(nodes, adjacency)
   const verifiedRootIds = normalizeRootIds(roots, scopedIds)
   const componentModels = components
-    .filter((componentNodeIds) => componentNodeIds.length > 1)
+    .filter((componentNodeIds) => componentNodeIds.length > 1
+      || componentNodeIds.some((id) => nodeById.get(id)?.layoutRootId))
     .map((componentNodeIds, index) => {
     const componentNodes = componentNodeIds.map((id) => nodeById.get(id)).filter(Boolean)
     const componentEdges = edges.filter((edge) => (
@@ -1238,13 +1244,10 @@ function buildBackboneGaps({ components = [], nodeById, componentByNodeId, area 
         || (right.confirmedDegree ?? 0) - (left.confirmedDegree ?? 0)
         || compareNodes(left, right)
     ))
-  const anchor = rackRoots[0]
-  if (!anchor) return []
-  const anchorComponentId = componentByNodeId.get(anchor.id)?.componentId ?? null
-
   return components
-    .filter((component) => component.componentId !== anchorComponentId)
     .map((component) => {
+      const componentNodes = component.nodeIds.map((id) => nodeById.get(id)).filter(Boolean)
+      if (componentNodes.some((node) => node.diagramClass === 'rack-root')) return null
       const junction = component.nodeIds
         .map((id) => nodeById.get(id))
         .filter((node) => ['junction-peer', 'junction-extended'].includes(node?.diagramClass))
@@ -1253,16 +1256,21 @@ function buildBackboneGaps({ components = [], nodeById, componentByNodeId, area 
             || compareNodes(left, right)
         ))[0]
       if (!junction) return null
+      const requestedRootId = componentNodes
+        .map((node) => node.layoutRootId)
+        .find((id) => rackRoots.some((root) => root.id === id))
+      const anchor = rackRoots.find(({ id }) => id === requestedRootId) ?? rackRoots[0]
+      if (!anchor) return null
       return {
         id: `backbone-gap:${anchor.id}:${junction.id}`,
         sourceId: anchor.id,
         targetId: junction.id,
         componentId: component.componentId,
         areaKey: component.areaKey,
-        status: 'expected',
-        relationStatus: 'unconfirmed',
+        status: junction.layoutRelationStatus ?? 'expected',
+        relationStatus: junction.layoutRelationStatus ?? 'unconfirmed',
         verificationStatus: 'unconfirmed',
-        reason: 'component_without_confirmed_rack_path',
+        reason: junction.layoutReasonCode ?? 'component_without_confirmed_rack_path',
       }
     })
     .filter(Boolean)

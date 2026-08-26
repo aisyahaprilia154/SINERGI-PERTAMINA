@@ -117,6 +117,13 @@ export function buildActiveAssetCatalog({
       name: String(name),
       objectRole,
       topologyRole: classified.topologyRole ?? null,
+      connectivityExpectation: classified.connectivityExpectation
+        ?? (classified.topologyRequired === true ? 'required' : 'optional'),
+      classificationSource: classified.classificationSource ?? null,
+      classificationConfidence: classified.classificationConfidence
+        ?? classified.classificationScore
+        ?? 0,
+      junctionFamily: cloneValue(classified.junctionFamily ?? null),
       category: String(firstValue(
         classified.canonicalCategory,
         classified.category,
@@ -832,10 +839,10 @@ function canonicalDiagramClassFor({
 
   const type = normalizeSearchText([canonicalAssetType, assetType].filter(Boolean).join(' '))
   if (/(^|\s)(pole|tiang|mast|pylon)(\s|$)/.test(type)) return 'physical-mount'
-  if (/(^|\s)(junction box|junction|jb)(\s|$)/.test(type)) return 'junction-peer'
-  if (/(server rack|rack server|router|switch|core switch|nvr|otb|olt)/.test(type)) {
+  if (/(server rack|rack server|(^|\s)server(\s|$)|router|switch|core switch|nvr|otb|olt)/.test(type)) {
     return 'rack-root'
   }
+  if (/(^|\s)(junction box|junction|jb)(\s|$)/.test(type)) return 'junction-peer'
   if (/(cctv|camera|access point|endpoint|printer|peripheral)/.test(type)) return 'endpoint'
   if (objectRole === 'device_node' && normalizeSearchText(canonicalAssetType) !== 'unknown') {
     return 'endpoint'

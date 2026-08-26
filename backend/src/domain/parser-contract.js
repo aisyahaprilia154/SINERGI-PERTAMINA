@@ -16,7 +16,7 @@ export const PARSER_VERSION = 'evidence-parser/1.1.0'
 export const NORMALIZER_VERSION = 'canonical-normalizer/1.0.0'
 // Bumped to force stored imports through the current vocabulary. Historical
 // records exist whose classifier output changed while still carrying 1.1.x.
-export const CLASSIFICATION_RULE_SET_VERSION = 'semantic-classifier/1.3.0'
+export const CLASSIFICATION_RULE_SET_VERSION = 'semantic-classifier/2.0.0'
 export const METADATA_ALIAS_VERSION = 'metadata-aliases/1.1.0'
 export const FOLDER_MAPPING_VERSION = 'folder-mappings/1.0.0'
 export const STYLE_MAPPING_VERSION = 'style-mappings/1.0.0'
@@ -41,6 +41,14 @@ const DEFAULT_ALIASES = Object.freeze({
   service_domain: ['service_domain', 'service domain', 'serviceDomain', 'domain layanan'],
   media_type: ['media_type', 'media type', 'mediaType', 'jenis media'],
   cable_role: ['cable_role', 'cable role', 'cableRole', 'peran kabel'],
+  diagram_class: ['diagram_class', 'diagram class', 'diagramClass'],
+  topology_role: ['topology_role', 'topology role', 'topologyRole', 'peran topologi'],
+  connectivity_expectation: [
+    'connectivity_expectation',
+    'connectivity expectation',
+    'connectivityExpectation',
+    'ekspektasi konektivitas',
+  ],
   location: ['location', 'lokasi', 'asset_location'],
   connected_to: ['connected_to', 'connectedto', 'connected to'],
   parent_asset_id: ['parent_asset_id', 'parentassetid', 'parent asset id'],
@@ -791,6 +799,20 @@ function classifyFeature({ feature, placemark, metadata, geometries, datasetVers
     assetType: rawAssetType,
     jbProfileId,
   })
+  const topologySemantics = deriveCanonicalTopologySemantics({
+    explicitTopologyRole: metadata.semanticValues.topology_role,
+    explicitConnectivityExpectation: metadata.semanticValues.connectivity_expectation,
+    objectRole,
+    canonicalAssetType,
+    assetType: rawAssetType,
+    category: rawCategory,
+    sourceName: feature.sourceName,
+    sourceFolderPath: feature.sourceFolderPath,
+    diagramClass,
+    jbProfileId,
+    classificationSource: match?.evidenceSource,
+    classificationConfidence: match?.score,
+  })
   if (!match) {
     evidence.push({
       source: 'classifier',
@@ -827,6 +849,7 @@ function classifyFeature({ feature, placemark, metadata, geometries, datasetVers
     category: rawCategory,
     canonicalCategory,
     ...compact({ diagramClass }),
+    ...topologySemantics,
     classificationStatus: match ? 'classified' : 'review_required',
     classificationScore: match?.score ?? 0,
     classificationEvidence: [...evidence, ...dimensions.semanticDimensionEvidence],
@@ -973,7 +996,9 @@ function normalizeJbProfileId(value) {
 
 function isRackServerAlias(value) {
   const normalized = normalizeToken(value)
-  return /^(rs|cr)(?:\s|$)/.test(normalized)
+  return /^server(?:\s|$)/.test(normalized)
+    || /^(rack server|sr|rs|cr)(?:\s*[-_]?\s*\d+)?$/.test(normalized)
+    || /^(rs|cr|sr)(?:\s|$)/.test(normalized)
     || /^svr\s+office(?:\s|$)/.test(normalized)
 }
 
@@ -1019,14 +1044,16 @@ function inferredAssetType(match, geometries) {
     return 'infrastructure_path'
   }
   if (match.objectRole === 'coverage_area') return 'unknown'
+  if (match.tokens?.some((token) => /server.?rack|rack.?server|^server$|^rack$/i.test(token))) {
+    return 'server_rack'
+  }
   if (match.tokens?.some((token) => /junction|jb/i.test(token))) return 'junction_box'
   if (match.tokens?.some((token) => /patch/i.test(token))) return 'patch_panel'
   if (match.tokens?.some((token) => /^otb|optical/i.test(token))) return 'otb'
-  if (match.tokens?.some((token) => /server.?rack|rack.?server/i.test(token))) return 'server_rack'
   if (match.tokens?.some((token) => /nvr/i.test(token))) return 'nvr'
   if (match.tokens?.some((token) => /pln|power source|power panel/i.test(token))) return 'pln_source'
   if (match.tokens?.some((token) => /switch/i.test(token))) return 'switch'
-  if (match.tokens?.some((token) => /server/i.test(token))) return 'server'
+  if (match.tokens?.some((token) => /server/i.test(token))) return 'server_rack'
   if (match.tokens?.some((token) => /router/i.test(token))) return 'router'
   if (match.tokens?.some((token) => /rack/i.test(token))) return 'server_rack'
   if (match.tokens?.some((token) => /tiang|pole|pylon/i.test(token))) return 'pole'
@@ -1066,15 +1093,105 @@ function canonicalDiagramClassFor({
 
   const type = normalizeToken([canonicalAssetType, assetType].filter(Boolean).join(' '))
   if (/(^|\s)(pole|tiang|mast|pylon)(\s|$)/.test(type)) return 'physical-mount'
-  if (/(^|\s)(junction box|junction|jb)(\s|$)/.test(type)) return 'junction-peer'
-  if (/(server rack|rack server|router|switch|core switch|nvr|otb|olt)/.test(type)) {
+  if (/(server rack|rack server|(^|\s)server(\s|$)|router|switch|core switch|nvr|otb|olt)/.test(type)) {
     return 'rack-root'
   }
+  if (/(^|\s)(junction box|junction|jb)(\s|$)/.test(type)) return 'junction-peer'
   if (/(cctv|camera|access point|endpoint|printer|peripheral)/.test(type)) return 'endpoint'
   if (objectRole === 'device_node' && normalizeToken(canonicalAssetType) !== 'unknown') {
     return 'endpoint'
   }
   return null
+}
+
+export function deriveCanonicalTopologySemantics({
+  explicitTopologyRole,
+  explicitConnectivityExpectation,
+  objectRole,
+  canonicalAssetType,
+  assetType,
+  category,
+  sourceName,
+  sourceFolderPath,
+  diagramClass,
+  jbProfileId,
+  classificationSource,
+  classificationConfidence,
+} = {}) {
+  const explicitRole = normalizeTopologyRoleValue(explicitTopologyRole)
+  const normalizedClass = normalizeToken(diagramClass).replaceAll(' ', '-')
+  const identityText = normalizeToken([
+    canonicalAssetType,
+    assetType,
+    category,
+    sourceName,
+    sourceFolderPath,
+    jbProfileId,
+  ].filter(Boolean).join(' '))
+  const topologyRole = explicitRole
+    ?? (normalizedClass === 'rack-root' || isRackServerAlias(sourceName) ? 'root' : null)
+    ?? (normalizedClass.startsWith('junction') ? 'junction' : null)
+    ?? (normalizedClass === 'endpoint' ? 'endpoint' : null)
+    ?? (/switch|router|otb|distribution/.test(identityText) ? 'distribution' : null)
+    ?? (objectRole === 'device_node' ? 'endpoint' : null)
+    ?? 'distribution'
+  const explicitExpectation = normalizeConnectivityExpectation(
+    explicitConnectivityExpectation,
+  )
+  const connectivityExpectation = explicitExpectation
+    ?? (normalizedClass === 'physical-mount' ? 'standalone' : null)
+    ?? (objectRole === 'device_node' ? 'required' : null)
+    ?? 'optional'
+  const junctionFamily = parseJunctionFamilyIdentity(sourceName)
+  return {
+    topologyRole,
+    connectivityExpectation,
+    classificationSource: explicitRole || explicitExpectation
+      ? 'explicit_metadata'
+      : classificationSource ?? 'canonical_inference',
+    classificationConfidence: explicitRole || explicitExpectation
+      ? 1
+      : roundConfidence(classificationConfidence),
+    ...(junctionFamily ? { junctionFamily } : {}),
+  }
+}
+
+export function parseJunctionFamilyIdentity(value) {
+  const raw = String(value ?? '').normalize('NFKC').trim()
+  if (!raw) return null
+  const match = raw.match(
+    /\bJB(?:[\s_-]*([A-Za-z][A-Za-z0-9]*))?[\s_-]*0*(\d+)(?:\s*\.\s*0*(\d+))?/i,
+  )
+  if (!match) return null
+  const childIndex = match[3] === undefined ? null : Number(match[3])
+  const qualifierMatch = raw.match(/(?:^|[\s_+\-])(WP|EXP|EXTENDED)(?=$|[\s_+\-])/i)
+  return {
+    namespace: match[1] ? normalizeToken(match[1]).replaceAll(' ', '-') : null,
+    baseNumber: String(Number(match[2])),
+    childIndex,
+    expansion: childIndex !== null || /\b(?:EXP|EXTENDED)\b/i.test(raw),
+    qualifier: qualifierMatch?.[1]?.toLowerCase() ?? null,
+  }
+}
+
+function normalizeTopologyRoleValue(value) {
+  const normalized = normalizeToken(value).replaceAll(' ', '_')
+  return ['root', 'distribution', 'junction', 'endpoint'].includes(normalized)
+    ? normalized
+    : null
+}
+
+function normalizeConnectivityExpectation(value) {
+  const normalized = normalizeToken(value).replaceAll(' ', '_')
+  return ['required', 'optional', 'standalone'].includes(normalized)
+    ? normalized
+    : null
+}
+
+function roundConfidence(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return 0
+  return Math.max(0, Math.min(1, Math.round(numeric * 1_000_000) / 1_000_000))
 }
 
 function inferredCategory(match) {
@@ -1312,6 +1429,11 @@ export function buildTopologyInputBundle({
     sourceStatus: object.sourceStatus ?? 'unknown',
     topologyRequired: object.topologyRequired === true,
     topologyRole: object.topologyRole ?? 'unknown',
+    connectivityExpectation: object.connectivityExpectation
+      ?? (object.topologyRequired === true ? 'required' : 'optional'),
+    classificationSource: object.classificationSource ?? null,
+    classificationConfidence: object.classificationConfidence ?? object.classificationScore ?? 0,
+    junctionFamily: structuredClone(object.junctionFamily ?? null),
     locationGroupKey: object.locationGroupKey ?? null,
     objectRole: object.objectRole,
     networkFamily: object.networkFamily,
@@ -1467,6 +1589,11 @@ export function rebuildStoredTopologyInputBundle(record = {}) {
       category: classification.category,
       classificationStatus: classification.classificationStatus,
       classificationScore: classification.classificationScore,
+      topologyRole: classification.topologyRole,
+      connectivityExpectation: classification.connectivityExpectation,
+      classificationSource: classification.classificationSource,
+      classificationConfidence: classification.classificationConfidence,
+      junctionFamily: structuredClone(classification.junctionFamily ?? null),
       classificationEvidence: classification.classificationEvidence,
       semanticDimensionEvidence: classification.semanticDimensionEvidence,
       classificationRuleSetVersion: classification.classificationRuleSetVersion,

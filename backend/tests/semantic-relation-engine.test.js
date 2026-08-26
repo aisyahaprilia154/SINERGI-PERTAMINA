@@ -372,7 +372,9 @@ test('classified junction enables a reviewable intersection candidate', () => {
   ))
   assert.ok(intersection)
   assert.equal(intersection.targetAssetId, 'OTB-01')
-  assert.equal(intersection.candidateStatus, 'ambiguous')
+  // Interface alternatives no longer create false target ambiguity. The
+  // target asset is selected first and its port is allocated deterministically.
+  assert.equal(intersection.candidateStatus, 'candidate')
   assert.equal(intersection.relationKind, 'path_termination')
   assert.ok(intersection.targetInterfaceId.startsWith('OTB-01/interface/fiber/'))
   assert.ok(intersection.sourceGeometryIds.some((id) => (
@@ -493,6 +495,50 @@ test('numbered JB extensions connect to their unique parent within the same faci
   assert.equal(familyCandidates.some(({ sourceAssetId }) => (
     sourceAssetId === 'CHILD-20-1'
   )), false)
+})
+
+test('decorated JB child resolves to decorated parent and missing family stays presentation-only', () => {
+  const parent = node('PARENT-13', 'cctv', 'Junction Box', [110, -7], {
+    sourceName: 'JB-CCTV-13',
+    sourceFolderPath: '/RJBT/DPPU/Junction Box',
+    jbProfileId: 'builtin:main_jb',
+    diagramClass: 'junction-peer',
+    topologyRole: 'junction',
+  })
+  const child = node('CHILD-13-1', 'cctv', 'Junction Box', [110.00001, -7], {
+    sourceName: 'JB-CCTV-13.1-WP',
+    sourceFolderPath: '/RJBT/DPPU/Extended',
+    jbProfileId: 'builtin:extended_passive',
+    diagramClass: 'junction-extended',
+    topologyRole: 'junction',
+  })
+  const root = node('SERVER-DPPU', 'infrastructure', 'server_rack', [110.00002, -7], {
+    sourceName: 'Server',
+    sourceFolderPath: '/RJBT/DPPU/Junction Box',
+    jbProfileId: 'builtin:server_rack',
+    diagramClass: 'rack-root',
+    topologyRole: 'root',
+  })
+  const missing = node('CHILD-00-1', 'cctv', 'Junction Box', [110.00003, -7], {
+    sourceName: 'JB00.1',
+    sourceFolderPath: '/RJBT/DPPU/Extended',
+    jbProfileId: 'builtin:extended_passive',
+    diagramClass: 'junction-extended',
+    topologyRole: 'junction',
+  })
+  const result = generateRelationArtifacts(topologyBundle({
+    nodes: [parent, child, root, missing],
+  }), { config: { automaticRelationConfirmation: true } })
+
+  assert.ok(result.graph.edges.some((edge) => [edge.sourceAssetId, edge.targetAssetId]
+    .includes('PARENT-13') && [edge.sourceAssetId, edge.targetAssetId].includes('CHILD-13-1')))
+  const missingPresentation = result.graph.presentationHierarchy
+    .find(({ nodeId }) => nodeId === 'CHILD-00-1')
+  assert.equal(missingPresentation.layoutRootId, 'SERVER-DPPU')
+  assert.equal(missingPresentation.layoutParentId, 'SERVER-DPPU')
+  assert.equal(missingPresentation.layoutRelationStatus, 'expected_parent_missing')
+  assert.equal(result.graph.edges.some((edge) => [edge.sourceAssetId, edge.targetAssetId]
+    .includes('CHILD-00-1') && [edge.sourceAssetId, edge.targetAssetId].includes('SERVER-DPPU')), false)
 })
 
 test('nearly equal endpoint-device scores become ambiguous', () => {
@@ -1359,7 +1405,7 @@ function topologyBundle({
   }
 }
 
-function node(assetId, networkFamily, assetType, coordinates) {
+function node(assetId, networkFamily, assetType, coordinates, overrides = {}) {
   const sourceFeatureId = `feature:${assetId}`
   const geometryId = `geometry:${assetId}`
   return {
@@ -1374,6 +1420,7 @@ function node(assetId, networkFamily, assetType, coordinates) {
       classificationStatus: 'classified',
       classificationEvidence: evidence(assetType),
       geometryIds: [geometryId],
+      ...overrides,
     },
     geometry: {
       geometryId,

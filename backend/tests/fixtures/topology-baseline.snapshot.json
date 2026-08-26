@@ -2,7 +2,7 @@
   "fixtureVersion": "topology-baseline-fixture/1.0.0",
   "datasetVersionId": "dv-baseline-fixture",
   "siteId": "site-baseline",
-  "topologyRuleSetVersion": "semantic-relation-engine/2.1.0",
+  "topologyRuleSetVersion": "semantic-relation-engine/3.0.0",
   "semanticRuleSetVersion": "semantic-classifier/1.0.0",
   "summary": {
     "candidateCount": 2,
@@ -36,7 +36,7 @@
   },
   "candidates": [
     {
-      "candidateId": "candidate:04e6894d403273053b970d35",
+      "candidateId": "candidate:5785978cef6e5dcb60a7209a",
       "candidateType": "cable_termination",
       "sourceEndpointId": "endpoint:geometry:LAN-01:end",
       "targetAssetId": "SW-02",
@@ -54,7 +54,7 @@
       "relationKind": "device_edge"
     },
     {
-      "candidateId": "candidate:afe9f0b885a9b8fbb0099bef",
+      "candidateId": "candidate:b30b5a2273ed035a204b2e4e",
       "candidateType": "cable_termination",
       "sourceEndpointId": "endpoint:geometry:LAN-01:start",
       "targetAssetId": "SW-01",

@@ -4,14 +4,17 @@ import {
   evaluateAccuracyGate,
   MINIMUM_HELD_OUT_SAMPLE_SIZE,
 } from './topology-accuracy.js'
-import { deriveTopologyDimensions } from '../domain/parser-contract.js'
+import {
+  deriveTopologyDimensions,
+  parseJunctionFamilyIdentity,
+} from '../domain/parser-contract.js'
 import { topologyCandidateDecisionKey } from './topology-cardinality.js'
 import { generateMountingArtifacts } from './mounting-relations.js'
 import { demoteConflictingCameraCandidates } from './device-edge-policy.js'
 
 const EARTH_RADIUS_METERS = 6371008.8
 
-export const TOPOLOGY_RULE_SET_VERSION = 'semantic-relation-engine/2.1.0'
+export const TOPOLOGY_RULE_SET_VERSION = 'semantic-relation-engine/3.0.0'
 export const TOPOLOGY_POLICY_VERSION = 'topology-policy/1.0.0'
 
 export const DEFAULT_TOPOLOGY_POLICY = Object.freeze({
@@ -193,7 +196,7 @@ export function generateRelationArtifacts(topologyInputBundle, {
       pushCandidate(rawCandidates, unresolvedTerminationCandidate(endpoint), candidateBudget, 'unresolved_termination')
     })
   const candidates = scoreAndProposeCandidates(
-    rawCandidates,
+    collapseTargetInterfaceAlternatives(rawCandidates),
     settings,
     generatedAt,
     bundle.datasetVersion.id,
@@ -1038,6 +1041,8 @@ function prepareNodes(bundle, issues) {
       siteId: object.siteId,
       sourceStatus: object.sourceStatus ?? 'unknown',
       topologyRequired: object.topologyRequired === true,
+      connectivityExpectation: object.connectivityExpectation
+        ?? (object.topologyRequired === true ? 'required' : 'optional'),
       sourceName: object.sourceName ?? null,
       sourceFolderPath: object.sourceFolderPath ?? null,
       networkFamily: object.networkFamily,
@@ -1049,6 +1054,14 @@ function prepareNodes(bundle, issues) {
       cableRole: object.cableRole ?? deriveTopologyDimensions(object).cableRole,
       objectRole: 'device_node',
       topologyRole: object.topologyRole ?? 'unknown',
+      diagramClass: object.diagramClass ?? null,
+      classificationSource: object.classificationSource ?? null,
+      classificationConfidence: Number(object.classificationConfidence
+        ?? object.classificationScore
+        ?? 0),
+      junctionFamily: structuredClone(
+        object.junctionFamily ?? parseJunctionFamilyIdentity(object.sourceName),
+      ),
       assetType: object.assetType ?? 'unknown',
       category: object.category ?? 'unknown',
       coordinate: cloneCoordinate(point.coordinates),
@@ -2068,12 +2081,41 @@ function generateNamedJunctionFamilyCandidates(nodes, candidateBudget) {
       const parentIdentity = junctionFamilyIdentity(parent)
       return parentIdentity?.baseNumber === identity.baseNumber
         && sameFacilityScope(child, parent)
-    })
-    if (matchingParents.length !== 1) return
+        && (!identity.namespace || !parentIdentity.namespace
+          || identity.namespace === parentIdentity.namespace)
+    }).map((parent) => {
+      const parentIdentity = junctionFamilyIdentity(parent)
+      return {
+        parent,
+        namespaceExact: Boolean(identity.namespace
+          && parentIdentity?.namespace === identity.namespace),
+        distanceMeters: geographicDistanceMeters(child.coordinate, parent.coordinate),
+      }
+    }).sort((left, right) => (
+      Number(right.namespaceExact) - Number(left.namespaceExact)
+      || left.distanceMeters - right.distanceMeters
+      || compareId(left.parent, right.parent)
+    ))
+    if (!matchingParents.length) return
+
+    const selected = matchingParents[0]
+    const runnerUp = matchingParents[1]
+    const distanceMargin = runnerUp
+      ? runnerUp.distanceMeters - selected.distanceMeters
+      : Number.POSITIVE_INFINITY
+    const distanceRatio = runnerUp && selected.distanceMeters > 0
+      ? runnerUp.distanceMeters / selected.distanceMeters
+      : Number.POSITIVE_INFINITY
+    const namespaceDecides = Boolean(selected.namespaceExact && !runnerUp?.namespaceExact)
+    const unique = !runnerUp
+      || namespaceDecides
+      || distanceMargin >= DEFAULT_RELATION_ENGINE_CONFIG.deviceRelationUniquenessMarginMeters
+      || distanceRatio >= DEFAULT_RELATION_ENGINE_CONFIG.deviceRelationUniquenessRatio
+    if (!unique) return
 
     assertGenerationBudget(candidateBudget, 'named_junction_family')
-    const parent = matchingParents[0]
-    const distanceMeters = geographicDistanceMeters(child.coordinate, parent.coordinate)
+    const parent = selected.parent
+    const distanceMeters = selected.distanceMeters
     const candidate = baseCandidate({
       candidateType: 'named_junction_family',
       sourceEndpointId: `named-junction-family:${child.id}`,
@@ -2097,6 +2139,15 @@ function generateNamedJunctionFamilyCandidates(nodes, candidateBudget) {
         normalizedValue: `${identity.baseNumber}.${identity.childIndex} -> ${identity.baseNumber}`,
         weight: SCORE_WEIGHTS.explicitEvidence,
         explanation: 'Nomor JB turunan dan JB induk sama serta keduanya berada pada fasilitas yang sama.',
+      }, {
+        source: 'geometry',
+        ruleId: 'junction.unique-parent-geometry',
+        observedValue: distanceMeters,
+        normalizedValue: runnerUp
+          ? `${distanceMargin.toFixed(3)}m / ${distanceRatio.toFixed(3)}x`
+          : 'single-parent',
+        weight: SCORE_WEIGHTS.distance,
+        explanation: 'Parent dipilih deterministik dari namespace dan geometri terdekat yang unik.',
       }, {
         source: 'scope',
         ruleId: 'junction.same-facility-parent',
@@ -3533,6 +3584,61 @@ function assertGenerationBudget(budget, stage) {
   )
 }
 
+function collapseTargetInterfaceAlternatives(rawCandidates) {
+  const passthroughTypes = new Set([
+    'explicit_metadata',
+    'manual_relation',
+    'jb_internal_connection',
+  ])
+  const groups = new Map()
+  rawCandidates.forEach((candidate) => {
+    if (!candidate.targetInterface || passthroughTypes.has(candidate.candidateType)) {
+      groups.set(`passthrough:${groups.size}`, [candidate])
+      return
+    }
+    const key = stableStringify({
+      candidateType: candidate.candidateType,
+      sourceEndpointId: candidate.sourceEndpointId,
+      sourcePathAssetId: candidate.sourcePathAssetId,
+      sourceAssetId: candidate.sourceAssetId,
+      targetAssetId: candidate.targetAssetId,
+      targetPathAssetId: candidate.targetPathAssetId,
+      serviceDomain: candidate.serviceDomain,
+      mediaType: candidate.mediaType,
+      cableRole: candidate.cableRole,
+      provenance: candidate.provenance,
+    })
+    const group = groups.get(key) ?? []
+    group.push(candidate)
+    groups.set(key, group)
+  })
+  return [...groups.values()].map((group) => {
+    if (group.length === 1 && !group[0].targetInterface) return group[0]
+    const ordered = [...group].sort((left, right) => (
+      compareInterface(left.targetInterface, right.targetInterface)
+      || String(left.targetAssetId ?? '').localeCompare(String(right.targetAssetId ?? ''))
+    ))
+    const selected = ordered[0]
+    return {
+      ...selected,
+      targetInterfaceAlternatives: ordered.map(({ targetInterface }) => (
+        structuredClone(targetInterface)
+      )),
+      evidence: [
+        ...(selected.evidence ?? []),
+        {
+          source: 'interface_allocator',
+          ruleId: 'target-first.deterministic-interface-allocation',
+          observedValue: ordered.map(({ targetInterface }) => targetInterface.interfaceId),
+          normalizedValue: selected.targetInterface.interfaceId,
+          weight: SCORE_WEIGHTS.capacityAvailability,
+          explanation: 'Aset target dipilih sebelum interface; port dialokasikan deterministik setelah keputusan target.',
+        },
+      ],
+    }
+  })
+}
+
 function scoreAndProposeCandidates(
   rawCandidates,
   settings,
@@ -3582,7 +3688,10 @@ function scoreAndProposeCandidates(
       sourceAssetId: candidate.sourceAssetId,
       targetAssetId: candidate.targetAssetId,
       targetEndpointId: candidate.targetEndpointId,
-      targetInterfaceId: candidate.targetInterfaceId ?? candidate.targetInterface?.interfaceId,
+      targetInterfaceId: ['explicit_metadata', 'manual_relation', 'jb_internal_connection']
+        .includes(candidate.candidateType)
+        ? candidate.targetInterfaceId ?? candidate.targetInterface?.interfaceId
+        : null,
       sourceInterfaceId: candidate.sourceInterfaceId,
       sourceGeometryIds: candidate.sourceGeometryIds,
       provenance: candidate.provenance ?? null,
@@ -3638,6 +3747,9 @@ function scoreAndProposeCandidates(
       targetInterface: candidate.targetInterface
         ? structuredClone(candidate.targetInterface)
         : null,
+      targetInterfaceAlternatives: structuredClone(
+        candidate.targetInterfaceAlternatives ?? [],
+      ),
       targetInterfaceId: candidate.targetInterfaceId
         ?? candidate.targetInterface?.interfaceId
         ?? null,
@@ -3843,15 +3955,13 @@ function applyCapacityConstraints(
   previousRelations = [],
 ) {
   const interfaceById = interfaceContext.interfaceById
-  const occupied = new Map(
-    [...interfaceById.entries()].map(([interfaceId, item]) => [
-      interfaceId,
-      Math.max(0, Number(item.occupancy ?? 0)),
-    ]),
-  )
+  const occupied = new Map([...interfaceById.keys()].map((interfaceId) => [interfaceId, 0]))
+  const currentCandidateIds = new Set(candidates.map(({ candidateId }) => candidateId))
   const previousOccupancy = new Map()
   asArray(previousRelations)
-    .filter(({ verificationStatus }) => verificationStatus === 'confirmed')
+    .filter(({ verificationStatus, candidateId }) => (
+      verificationStatus === 'confirmed' && !currentCandidateIds.has(candidateId)
+    ))
     .map((relation) => relation.targetInterfaceId)
     .filter(Boolean)
     .forEach((interfaceId) => previousOccupancy.set(
@@ -3861,18 +3971,51 @@ function applyCapacityConstraints(
   previousOccupancy.forEach((count, interfaceId) => {
     occupied.set(interfaceId, Math.max(occupied.get(interfaceId) ?? 0, count))
   })
-  const recommended = candidates
-    .filter((candidate) => (
-      candidate.proposalStatus === 'recommended'
+  candidates.filter((candidate) => (
+    candidate.candidateStatus === 'confirmed'
+      && ['explicit_metadata', 'manual_relation', 'jb_internal_connection']
+        .includes(candidate.candidateType)
+      && candidate.targetInterfaceId
+  )).forEach((candidate) => {
+    occupied.set(
+      candidate.targetInterfaceId,
+      (occupied.get(candidate.targetInterfaceId) ?? 0) + 1,
+    )
+  })
+  const autoConfirmable = candidates.filter((candidate) => (
+    candidate.proposalStatus === 'recommended'
       && candidate.candidateStatus === 'candidate'
+      && !['explicit_metadata', 'manual_relation', 'jb_internal_connection']
+        .includes(candidate.candidateType)
+  ))
+  const capacityCandidates = candidates
+    .filter((candidate) => (
+      (candidate.proposalStatus === 'recommended'
+        || candidate.candidateStatus === 'confirmed')
+      && !['rejected', 'revoked', 'ambiguous'].includes(candidate.candidateStatus)
+      && Boolean(candidate.targetInterfaceId
+        || candidate.targetInterfaceAlternatives?.length)
       && !['explicit_metadata', 'manual_relation', 'jb_internal_connection'].includes(candidate.candidateType)
     ))
     .sort((left, right) => right.score - left.score || compareCandidate(left, right))
-  recommended.forEach((candidate) => {
+  capacityCandidates.forEach((candidate) => {
     if (['mounting_attachment', 'device_nearest_junction', 'named_junction_family']
       .includes(candidate.candidateType)) return
+    const alternatives = (candidate.targetInterfaceAlternatives ?? [])
+      .map((item) => interfaceById.get(item.interfaceId) ?? item)
+      .filter((item) => item?.status !== 'retired')
+      .sort(compareInterface)
+    const selected = alternatives.find((item) => (
+      (occupied.get(item.interfaceId) ?? 0) < Math.max(1, Number(item.capacity ?? 1))
+    )) ?? (candidate.targetInterfaceId
+      ? interfaceById.get(candidate.targetInterfaceId)
+      : null)
+    if (selected) {
+      candidate.targetInterface = structuredClone(selected)
+      candidate.targetInterfaceId = selected.interfaceId
+    }
     const interfaceId = candidate.targetInterfaceId
-    const item = interfaceId ? interfaceById.get(interfaceId) : null
+    const item = selected ?? (interfaceId ? interfaceById.get(interfaceId) : null)
     if (!item) {
       candidate.candidateStatus = 'ambiguous'
       candidate.proposalStatus = 'incompatible_interface'
@@ -3922,7 +4065,7 @@ function applyCapacityConstraints(
   const automaticConfirmationEnabled = settings.automaticRelationConfirmation === true
     || (settings.autoConfirmSpatialInference && accuracyGate.approved)
   if (automaticConfirmationEnabled) {
-    recommended.filter(({ proposalStatus }) => proposalStatus === 'recommended')
+    autoConfirmable.filter(({ proposalStatus }) => proposalStatus === 'recommended')
       .forEach((candidate) => {
         candidate.candidateStatus = 'confirmed'
         candidate.review = {
@@ -4082,6 +4225,22 @@ function buildConfirmedRelations({
       }),
       relationKind,
       provenance,
+      decisionSource: provenance === 'manual_admin'
+        ? 'manual_override'
+        : candidate.candidateType === 'device_nearest_junction'
+          || ['spatial_inference', 'automatic_device_relation'].includes(provenance)
+          ? 'geometry'
+          : provenance === 'line_label_inference'
+            ? 'label'
+            : provenance === 'explicit_kml_metadata' ? 'structured_metadata' : 'semantic',
+      confidence: Number(candidate.score ?? 0),
+      distanceMeters: Number.isFinite(Number(candidate.distanceMeters))
+        ? Number(candidate.distanceMeters)
+        : null,
+      supportingEvidence: structuredClone(candidate.evidence ?? []),
+      rejectedCandidateIds: structuredClone(
+        candidate.conflictResolution?.strongerCandidateIds ?? [],
+      ),
       verificationStatus: 'confirmed',
       candidateId: candidate.candidateId,
       verifiedBy,
@@ -4223,8 +4382,17 @@ export function buildConfirmedGraph({
       objectRole: 'device_node',
       topologyRole: node.topologyRole ?? 'unknown',
       topologyRequired: node.topologyRequired === true,
+      connectivityExpectation: node.connectivityExpectation
+        ?? (node.topologyRequired === true ? 'required' : 'optional'),
+      diagramClass: node.diagramClass ?? null,
+      classificationSource: node.classificationSource ?? null,
+      classificationConfidence: node.classificationConfidence ?? 0,
+      junctionFamily: structuredClone(node.junctionFamily ?? null),
       assetType: node.assetType,
       category: node.category,
+      sourceName: node.sourceName ?? null,
+      sourceFolderPath: node.sourceFolderPath ?? null,
+      coordinate: cloneCoordinate(node.coordinate),
       sourceStatus: node.sourceStatus ?? 'unknown',
     })).sort(compareId)
   const deviceIds = new Set(graphNodes.map(({ id }) => id))
@@ -4294,6 +4462,23 @@ export function buildConfirmedGraph({
   })
   const edges = [...edgeByPair.values()].sort((left, right) => left.id.localeCompare(right.id))
   const components = connectedComponents(graphNodes, edges)
+  const presentationHierarchy = buildPresentationHierarchy({
+    nodes,
+    graphNodes,
+    edges,
+    components,
+  })
+  const presentationByNodeId = new Map(
+    presentationHierarchy.map((item) => [item.nodeId, item]),
+  )
+  graphNodes.forEach((node) => {
+    const presentation = presentationByNodeId.get(node.id)
+    if (!presentation) return
+    node.layoutRootId = presentation.layoutRootId
+    node.layoutParentId = presentation.layoutParentId
+    node.layoutRelationStatus = presentation.layoutRelationStatus
+    node.layoutReasonCode = presentation.reasonCode
+  })
   const degreeByNode = Object.fromEntries(graphNodes.map((node) => [
     node.id,
     edges.filter((edge) => (
@@ -4311,6 +4496,7 @@ export function buildConfirmedGraph({
       .filter(([, degree]) => degree === 0)
       .map(([nodeId]) => nodeId)
       .sort(),
+    presentationHierarchy,
   }
   const projections = buildGraphProjections({
     bundle,
@@ -4327,6 +4513,123 @@ export function buildConfirmedGraph({
     interfaceRegistry: structuredClone(interfaceRegistry.interfaces ?? []),
     componentRegistry: structuredClone(interfaceRegistry.components ?? []),
   }
+}
+
+function buildPresentationHierarchy({ nodes, graphNodes, edges, components }) {
+  const sourceById = new Map(nodes.map((node) => [node.id, node]))
+  const graphById = new Map(graphNodes.map((node) => [node.id, node]))
+  const roots = nodes.filter((node) => (
+    node.topologyRole === 'root'
+      || node.diagramClass === 'rack-root'
+      || isRackNode(node)
+  )).sort(compareId)
+  const confirmedPairs = new Set(edges.map((edge) => (
+    undirectedKey(edge.sourceAssetId, edge.targetAssetId, 'connected')
+  )))
+  const componentByNodeId = new Map()
+  components.forEach((component) => {
+    component.nodeIds.forEach((nodeId) => componentByNodeId.set(nodeId, component))
+  })
+
+  const rootForNode = (node) => {
+    if (roots.some(({ id }) => id === node.id)) return node
+    const component = componentByNodeId.get(node.id)
+    const componentRoots = roots.filter((root) => component?.nodeIds.includes(root.id))
+    const candidates = componentRoots.length
+      ? componentRoots
+      : roots.filter((root) => sameFacilityScope(node, root))
+    return [...candidates].sort((left, right) => (
+      geographicDistanceMeters(node.coordinate, left.coordinate)
+        - geographicDistanceMeters(node.coordinate, right.coordinate)
+      || compareId(left, right)
+    ))[0] ?? null
+  }
+
+  return graphNodes.map((graphNode) => {
+    const node = sourceById.get(graphNode.id) ?? graphNode
+    const root = rootForNode(node)
+    const family = junctionFamilyIdentity(node)
+    if (root?.id === node.id) {
+      return {
+        nodeId: node.id,
+        layoutRootId: node.id,
+        layoutParentId: null,
+        layoutRelationStatus: 'confirmed_root',
+        reasonCode: 'semantic_root',
+      }
+    }
+
+    if (family && family.childIndex !== null && isJunctionBoxNode(node)) {
+      const parentCandidates = nodes.filter((parent) => {
+        const parentFamily = junctionFamilyIdentity(parent)
+        return parent.id !== node.id
+          && isJunctionBoxNode(parent)
+          && parentFamily
+          && parentFamily.childIndex === null
+          && parentFamily.baseNumber === family.baseNumber
+          && sameFacilityScope(node, parent)
+          && (!family.namespace || !parentFamily.namespace
+            || family.namespace === parentFamily.namespace)
+      }).map((parent) => ({
+        parent,
+        namespaceExact: Boolean(family.namespace
+          && junctionFamilyIdentity(parent)?.namespace === family.namespace),
+        distanceMeters: geographicDistanceMeters(node.coordinate, parent.coordinate),
+      })).sort((left, right) => (
+        Number(right.namespaceExact) - Number(left.namespaceExact)
+        || left.distanceMeters - right.distanceMeters
+        || compareId(left.parent, right.parent)
+      ))
+      const selected = parentCandidates[0]
+      const runnerUp = parentCandidates[1]
+      const unique = Boolean(selected) && (!runnerUp
+        || (selected.namespaceExact && !runnerUp.namespaceExact)
+        || runnerUp.distanceMeters - selected.distanceMeters
+          >= DEFAULT_RELATION_ENGINE_CONFIG.deviceRelationUniquenessMarginMeters
+        || (selected.distanceMeters > 0
+          && runnerUp.distanceMeters / selected.distanceMeters
+            >= DEFAULT_RELATION_ENGINE_CONFIG.deviceRelationUniquenessRatio))
+      if (unique) {
+        const pair = undirectedKey(node.id, selected.parent.id, 'connected')
+        const confirmed = confirmedPairs.has(pair)
+        return {
+          nodeId: node.id,
+          layoutRootId: root?.id ?? rootForNode(selected.parent)?.id ?? null,
+          layoutParentId: selected.parent.id,
+          layoutRelationStatus: confirmed ? 'confirmed' : 'expected',
+          reasonCode: confirmed
+            ? 'junction_family_confirmed'
+            : 'junction_family_unconfirmed',
+        }
+      }
+      return {
+        nodeId: node.id,
+        layoutRootId: root?.id ?? null,
+        layoutParentId: root?.id ?? null,
+        layoutRelationStatus: parentCandidates.length
+          ? 'ambiguous_parent'
+          : 'expected_parent_missing',
+        reasonCode: parentCandidates.length
+          ? 'junction_family_parent_ambiguous'
+          : 'junction_family_parent_missing',
+      }
+    }
+
+    const component = componentByNodeId.get(node.id)
+    const rootInComponent = root && component?.nodeIds.includes(root.id)
+    return {
+      nodeId: node.id,
+      layoutRootId: root?.id ?? null,
+      layoutParentId: null,
+      layoutRelationStatus: rootInComponent
+        ? 'confirmed_component'
+        : root ? 'backbone_missing' : 'root_missing',
+      reasonCode: rootInComponent
+        ? 'confirmed_root_path'
+        : root ? 'component_without_confirmed_root_path' : 'area_without_root',
+    }
+  }).filter(({ nodeId }) => graphById.has(nodeId))
+    .sort((left, right) => left.nodeId.localeCompare(right.nodeId))
 }
 
 function buildGraphProjections({
@@ -4614,6 +4917,9 @@ function collapseConfirmedPath(bundle, sourceAssetId, targetAssetId, relations) 
   const allNamedJunction = relations.every(({ provenance }) => (
     provenance === 'named_junction_inference'
   ))
+  const decisionRelation = [...relations].sort((left, right) => (
+    confirmedRelationPreference(right, left)
+  ))[0]
   return {
     id: deterministicId(
       'topology-edge',
@@ -4647,6 +4953,17 @@ function collapseConfirmedPath(bundle, sourceAssetId, targetAssetId, relations) 
     pathAssetIds,
     targetInterfaceIds: unique(relations.map(({ targetInterfaceId }) => targetInterfaceId).filter(Boolean)),
     sourceGeometryIds,
+    decisionSource: decisionRelation?.decisionSource ?? 'unknown',
+    confidence: Math.max(0, ...relations.map(({ confidence }) => Number(confidence) || 0)),
+    distanceMeters: relations.length === 1 ? relations[0].distanceMeters ?? null : null,
+    supportingEvidence: structuredClone(
+      uniqueEvidence(relations.flatMap(({ supportingEvidence, evidence }) => (
+        supportingEvidence ?? evidence ?? []
+      ))),
+    ),
+    rejectedCandidateIds: unique(relations.flatMap(({ rejectedCandidateIds }) => (
+      rejectedCandidateIds ?? []
+    ))),
     provenance: allManual
       ? 'manual_admin'
       : allExplicit
@@ -5956,14 +6273,8 @@ function matchingNumericIdentity(left, right) {
 }
 
 function junctionFamilyIdentity(node) {
-  const match = String(node?.sourceName ?? node?.id ?? '').match(
-    /\bJB[\s_-]*0*(\d+)(?:\s*\.\s*(\d+))?(?=$|[\s_-])/i,
-  )
-  if (!match) return null
-  return {
-    baseNumber: String(Number(match[1])),
-    childIndex: match[2] === undefined ? null : Number(match[2]),
-  }
+  return node?.junctionFamily
+    ?? parseJunctionFamilyIdentity(node?.sourceName ?? node?.id)
 }
 
 function isExtendedJunctionBoxNode(node) {
@@ -5974,10 +6285,11 @@ function isExtendedJunctionBoxNode(node) {
     node?.sourceName,
   ].filter(Boolean).join(' '))
   const rawName = String(node?.sourceName ?? '')
+  const family = parseJunctionFamilyIdentity(rawName)
   const profile = normalizeToken(node?.jbProfileId)
   return /\bextended\b/.test(type)
     || isExtendedFolderPath(node?.sourceFolderPath)
-    || /\bjb\s*[-_ ]*\d+\s*\.\s*\d+(?:\s|[-_]|$)/i.test(rawName)
+    || Boolean(family && family.childIndex !== null)
     || /\bextended(?:\s|_|-)?(?:passive|poe)?\b/.test(profile)
 }
 
@@ -6006,7 +6318,9 @@ function isRackNode(node) {
 
 function isRackServerAlias(value) {
   const normalized = normalizeToken(value)
-  return /^(rs|cr)(?:\s|$)/.test(normalized)
+  return /^server(?:\s|$)/.test(normalized)
+    || /^(rack server|sr|rs|cr)(?:\s*[-_]?\s*\d+)?$/.test(normalized)
+    || /^(rs|cr|sr)(?:\s|$)/.test(normalized)
     || /^svr\s+office(?:\s|$)/.test(normalized)
 }
 
@@ -6019,6 +6333,7 @@ function isExtendedFolderPath(value) {
 }
 
 function isCameraNode(node) {
+  if (isJunctionBoxNode(node) || isRackNode(node)) return false
   const type = normalizeToken([
     node?.assetType,
     node?.category,
@@ -6222,6 +6537,15 @@ function uniqueBy(records, field) {
 
 function unique(values) {
   return [...new Set(values)]
+}
+
+function uniqueEvidence(values) {
+  const byKey = new Map()
+  values.filter(Boolean).forEach((value) => {
+    const key = stableStringify(value)
+    if (!byKey.has(key)) byKey.set(key, value)
+  })
+  return [...byKey.values()]
 }
 
 function undirectedKey(source, target, type) {

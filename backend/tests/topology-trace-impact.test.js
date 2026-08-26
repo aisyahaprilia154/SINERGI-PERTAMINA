@@ -312,10 +312,10 @@ function directionalRecord() {
     node('isolated', 'endpoint', 'camera'),
     node('second-root', 'core', 'core'),
     node('different-component', 'endpoint', 'camera'),
-    node('equal-target', 'endpoint', 'camera'),
-    node('branch-a', 'endpoint', 'camera'),
-    node('branch-b', 'endpoint', 'camera'),
-    node('candidate-device', 'endpoint', 'camera'),
+    node('equal-target', 'endpoint', 'endpoint'),
+    node('branch-a', 'endpoint', 'endpoint'),
+    node('branch-b', 'endpoint', 'endpoint'),
+    node('candidate-device', 'endpoint', 'endpoint'),
   ]
   const edge = (id, sourceAssetId, targetAssetId, direction = 'source_to_target', extra = {}) => ({
     id,

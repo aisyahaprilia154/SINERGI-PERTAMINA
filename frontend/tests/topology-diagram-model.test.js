@@ -177,6 +177,48 @@ test('area diagram exposes expected rack backbone gaps without adding operationa
   assert.equal(model.topologyLinkById.has(model.backboneGaps[0].id), false)
 })
 
+test('presentation hierarchy assigns rootless JB islands to different roots without graph edges', () => {
+  const scoped = buildTopologyDiagramModel({
+    assets: [{
+      id: 'server-a', name: 'Server A', type: 'Server Rack', diagramClass: 'rack-root',
+      topologyRole: 'root', locationGroupKey: 'north', ...context,
+    }, {
+      id: 'server-b', name: 'Server B', type: 'Server Rack', diagramClass: 'rack-root',
+      topologyRole: 'root', locationGroupKey: 'north', ...context,
+    }, {
+      id: 'jb-a', name: 'JB00.1', type: 'Junction Box', diagramClass: 'junction-extended',
+      topologyRole: 'junction', locationGroupKey: 'north', ...context,
+    }, {
+      id: 'jb-b', name: 'JB00.2', type: 'Junction Box', diagramClass: 'junction-extended',
+      topologyRole: 'junction', locationGroupKey: 'north', ...context,
+    }],
+    graph: {
+      graphRevision: 'multi-root-presentation',
+      nodes: [{ id: 'server-a', layoutRootId: 'server-a' }, {
+        id: 'server-b', layoutRootId: 'server-b',
+      }, {
+        id: 'jb-a', layoutRootId: 'server-a', layoutParentId: 'server-a',
+        layoutRelationStatus: 'expected_parent_missing',
+        layoutReasonCode: 'junction_family_parent_missing',
+      }, {
+        id: 'jb-b', layoutRootId: 'server-b', layoutParentId: 'server-b',
+        layoutRelationStatus: 'expected_parent_missing',
+        layoutReasonCode: 'junction_family_parent_missing',
+      }],
+      edges: [],
+    },
+    locationGroups,
+    area: 'north',
+    ...context,
+  })
+
+  assert.equal(scoped.edges.length, 0)
+  assert.deepEqual(scoped.backboneGaps.map(({ sourceId, targetId }) => [sourceId, targetId]), [
+    ['server-a', 'jb-a'],
+    ['server-b', 'jb-b'],
+  ])
+})
+
 test('candidate, ambiguous, and unresolved layers stay outside operational graph', () => {
   const candidates = [
     {

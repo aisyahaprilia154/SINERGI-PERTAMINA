@@ -20,6 +20,8 @@ import {
   validateUploadedFile,
 } from './import/upload-validation.js'
 import { TOPOLOGY_RULE_SET_VERSION } from './topology/semantic-relation-engine.js'
+import { rebuildStoredTopologyInputBundle } from './domain/parser-contract.js'
+import { topologyInputFingerprint } from './topology/topology-publication-gate.js'
 import {
   createFullTopologyRegenerationJobHandler,
   normalizeTopologyRegenerationReason,
@@ -481,17 +483,14 @@ export function createApp({
         const current = await repository.get(datasetVersionId)
         const reason = normalizeTopologyRegenerationReason(body.reason)
         const expectedRecordRevision = normalizeExpectedRecordRevision(body)
-        const fingerprintInput = JSON.stringify({
-          datasetVersionId,
-          recordRevision: Number.isInteger(current.recordRevision)
-            ? current.recordRevision
-            : 0,
-          topologyGeneratedAt: current.topologyGeneratedAt ?? null,
-          reason,
-        })
-        const inputFingerprint = `sha256:${createHash('sha256')
-          .update(fingerprintInput)
-          .digest('hex')}`
+        const repaired = rebuildStoredTopologyInputBundle(current)
+        const inputFingerprint = topologyInputFingerprint(
+          repaired.topologyInputBundle ?? current.topologyInputBundle,
+          {
+            ruleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+            config: config.topology ?? {},
+          },
+        )
         const requestedIdempotencyKey = normalizeOptionalText(
           request.headers['idempotency-key'],
           256,
@@ -538,6 +537,73 @@ export function createApp({
             ? 'Permintaan regenerasi yang sama sudah ada di durable queue.'
             : 'Regenerasi topology diterima dan diproses di background.',
         })
+      }
+      const topologyRunMatch = request.method === 'GET'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/runs\/([^/]+)$/,
+        )
+        : null
+      if (topologyRunMatch) {
+        requireAdministrator(request, authenticator)
+        assertTopologyService(topologyService)
+        return sendJson(
+          response,
+          200,
+          await topologyService.getGenerationRun(
+            topologyRunMatch[1],
+            decodePathSegment(topologyRunMatch[2]),
+          ),
+        )
+      }
+      const publishTopologyRunMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/runs\/([^/]+)\/publish$/,
+        )
+        : null
+      if (publishTopologyRunMatch) {
+        const user = requireAdministrator(request, authenticator)
+        assertTopologyService(topologyService)
+        const body = await readJsonBody(request)
+        return sendJson(
+          response,
+          200,
+          await topologyService.publishGenerationRun(
+            publishTopologyRunMatch[1],
+            decodePathSegment(publishTopologyRunMatch[2]),
+            user.id,
+            {
+              expectedGraphRevision: body.expectedGraphRevision,
+              correlationId,
+            },
+          ),
+        )
+      }
+      const rollbackTopologyMatch = request.method === 'POST'
+        ? url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/rollback$/,
+        )
+        : null
+      if (rollbackTopologyMatch) {
+        const user = requireAdministrator(request, authenticator)
+        assertTopologyService(topologyService)
+        const body = await readJsonBody(request)
+        const graphRevision = String(body.graphRevision ?? '').trim()
+        if (!graphRevision) {
+          throw new AppError('Graph revision wajib untuk rollback topology.', {
+            code: 'topology_graph_revision_required',
+            statusCode: 400,
+          })
+        }
+        return sendJson(
+          response,
+          200,
+          await topologyService.rollbackTopology(
+            rollbackTopologyMatch[1],
+            graphRevision,
+            user.id,
+            correlationId,
+          ),
+        )
       }
       const bulkTopologyActionMatch = request.method === 'POST'
         ? url.pathname.match(
@@ -633,10 +699,7 @@ export function createApp({
         const user = requireAdministrator(request, authenticator)
         assertTopologyService(topologyService)
         const body = await readJsonBody(request)
-        return sendJson(
-          response,
-          200,
-          await topologyService.regenerateMounting(
+        const result = await topologyService.regenerateMounting(
             mountingRegenerationMatch[1],
             user.id,
             {
@@ -646,8 +709,19 @@ export function createApp({
                 ? { idempotencyKey: request.headers['idempotency-key'] }
                 : {}),
             },
-          ),
-        )
+          )
+        await queueAutonomousTopologyRegeneration({
+          datasetVersionId: mountingRegenerationMatch[1],
+          actorId: user.id,
+          reason: 'Mounting projection berubah; shadow topology diregenerasi otomatis.',
+          correlationId,
+          repository,
+          auditLog,
+          jobQueue,
+          topologyService,
+          config,
+        })
+        return sendJson(response, 200, result)
       }
       const mountingExpectationMatch = request.method === 'POST'
         ? url.pathname.match(
@@ -658,10 +732,7 @@ export function createApp({
         const user = requireAdministrator(request, authenticator)
         assertTopologyService(topologyService)
         const body = await readJsonBody(request)
-        return sendJson(
-          response,
-          200,
-          await topologyService.setMountingExpectation(
+        const result = await topologyService.setMountingExpectation(
             mountingExpectationMatch[1],
             user.id,
             {
@@ -671,8 +742,14 @@ export function createApp({
                 ? { idempotencyKey: request.headers['idempotency-key'] }
                 : {}),
             },
-          ),
-        )
+          )
+        await queueAutonomousTopologyRegeneration({
+          datasetVersionId: mountingExpectationMatch[1],
+          actorId: user.id,
+          reason: 'Ekspektasi mounting berubah; shadow topology diregenerasi otomatis.',
+          correlationId, repository, auditLog, jobQueue, topologyService, config,
+        })
+        return sendJson(response, 200, result)
       }
       const mountingBulkMatch = request.method === 'POST'
         ? url.pathname.match(
@@ -683,10 +760,7 @@ export function createApp({
         const user = requireAdministrator(request, authenticator)
         assertTopologyService(topologyService)
         const body = await readJsonBody(request)
-        return sendJson(
-          response,
-          200,
-          await topologyService.reviewMountingBulk(
+        const result = await topologyService.reviewMountingBulk(
             mountingBulkMatch[1],
             user.id,
             {
@@ -696,8 +770,14 @@ export function createApp({
                 ? { idempotencyKey: request.headers['idempotency-key'] }
                 : {}),
             },
-          ),
-        )
+          )
+        await queueAutonomousTopologyRegeneration({
+          datasetVersionId: mountingBulkMatch[1],
+          actorId: user.id,
+          reason: 'Review mounting berubah; shadow topology diregenerasi otomatis.',
+          correlationId, repository, auditLog, jobQueue, topologyService, config,
+        })
+        return sendJson(response, 200, result)
       }
       const mountingRelationMatch = request.method === 'POST'
         ? url.pathname.match(
@@ -708,10 +788,7 @@ export function createApp({
         const user = requireAdministrator(request, authenticator)
         assertTopologyService(topologyService)
         const body = await readJsonBody(request)
-        return sendJson(
-          response,
-          200,
-          await topologyService.setMountingRelation(
+        const result = await topologyService.setMountingRelation(
             mountingRelationMatch[1],
             user.id,
             {
@@ -721,8 +798,14 @@ export function createApp({
                 ? { idempotencyKey: request.headers['idempotency-key'] }
                 : {}),
             },
-          ),
-        )
+          )
+        await queueAutonomousTopologyRegeneration({
+          datasetVersionId: mountingRelationMatch[1],
+          actorId: user.id,
+          reason: 'Relasi mounting berubah; shadow topology diregenerasi otomatis.',
+          correlationId, repository, auditLog, jobQueue, topologyService, config,
+        })
+        return sendJson(response, 200, result)
       }
       const candidateActionMatch = request.method === 'POST'
         ? url.pathname.match(
@@ -911,18 +994,21 @@ export function createApp({
           })
         }
         const expectedActiveVersionId = normalizeExpectedActiveVersion(body)
-        return sendJson(
-          response,
-          200,
-          await lifecycleService.activate(activationMatch[1], user.id, {
+        const result = await lifecycleService.activate(activationMatch[1], user.id, {
             expectedActiveVersionId,
             expectedRecordRevision: normalizeExpectedRecordRevision(body),
             expectedActivePointerRevision: normalizeExpectedActivePointerRevision(body),
             publicationProfile: normalizePublicationProfileBody(body),
             confirmBreakingChanges: body.confirmBreakingChanges === true,
             correlationId,
-          }),
-        )
+          })
+        await queueAutonomousTopologyRegeneration({
+          datasetVersionId: activationMatch[1],
+          actorId: user.id,
+          reason: 'Dataset diaktifkan; shadow topology divalidasi otomatis.',
+          correlationId, repository, auditLog, jobQueue, topologyService, config,
+        })
+        return sendJson(response, 200, result)
       }
       const rollbackMatch = request.method === 'POST'
         ? url.pathname.match(
@@ -1078,6 +1164,56 @@ function assertDurableJobQueue(jobQueue) {
       statusCode: 503,
     })
   }
+}
+
+async function queueAutonomousTopologyRegeneration({
+  datasetVersionId,
+  actorId,
+  reason,
+  correlationId,
+  repository,
+  auditLog,
+  jobQueue,
+  topologyService,
+  config,
+}) {
+  if (!topologyService || !jobQueue
+    || typeof jobQueue.enqueue !== 'function'
+    || typeof jobQueue.getPublic !== 'function') return null
+  const current = await repository.get(datasetVersionId)
+  const repaired = rebuildStoredTopologyInputBundle(current)
+  const inputFingerprint = topologyInputFingerprint(
+    repaired.topologyInputBundle ?? current.topologyInputBundle,
+    { ruleSetVersion: TOPOLOGY_RULE_SET_VERSION, config: config.topology ?? {} },
+  )
+  const normalizedReason = normalizeTopologyRegenerationReason(reason)
+  const queued = await jobQueue.enqueue({
+    jobType: 'regenerate_full_topology',
+    datasetVersionId,
+    inputFingerprint,
+    ruleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+    idempotencyKey: `autonomous-topology:${inputFingerprint}`,
+    payload: {
+      actorId,
+      reason: normalizedReason,
+      correlationId,
+    },
+    handler: createFullTopologyRegenerationJobHandler(topologyService),
+  })
+  await auditLog.record('topology.regeneration_queued', {
+    actorId,
+    datasetVersionId,
+    branchId: current.datasetVersion?.branchId ?? null,
+    correlationId,
+    outcome: queued.deduplicated ? 'deduplicated' : 'queued',
+    details: {
+      trigger: 'autonomous_input_change',
+      reason: normalizedReason,
+      jobId: queued.jobId,
+      inputFingerprint,
+    },
+  })
+  return queued
 }
 
 async function queueIdentityDrivenTopologyRegeneration({

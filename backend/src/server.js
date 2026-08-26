@@ -18,6 +18,9 @@ import {
   createFullTopologyRegenerationJobHandler,
   TopologyService,
 } from './topology/topology-service.js'
+import { rebuildStoredTopologyInputBundle } from './domain/parser-contract.js'
+import { TOPOLOGY_RULE_SET_VERSION } from './topology/semantic-relation-engine.js'
+import { topologyInputFingerprint } from './topology/topology-publication-gate.js'
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url))
 const config = createConfig(process.env, {
@@ -78,7 +81,8 @@ jobQueue.registerHandler(
 jobQueue.registerHandler('parse_source', async (
   { sourceStorageKey, extension, actorId, correlationId },
   { job, updateProgress },
-) => summarizeImportJobResult(await importPipeline.process({
+) => {
+  const result = summarizeImportJobResult(await importPipeline.process({
     datasetVersionId: job.datasetVersionId,
     sourcePath: fileStore.resolveOriginalPath(sourceStorageKey),
     extension,
@@ -86,7 +90,14 @@ jobQueue.registerHandler('parse_source', async (
     correlationId,
     jobId: job.jobId,
     progressReporter: updateProgress,
-  })))
+  }))
+  await queueAutonomousTopologyJob(job.datasetVersionId, {
+    actorId,
+    correlationId,
+    reason: 'Import selesai; shadow topology dibuat otomatis.',
+  })
+  return result
+})
 
 await fileStore.initialize()
 const app = createApp({
@@ -120,7 +131,56 @@ process.once('SIGTERM', () => void shutdown())
 
 try {
   await jobQueue.start()
+  await queueStaleTopologyRuleSets()
 } catch (error) {
   await shutdown()
   throw error
+}
+
+async function queueAutonomousTopologyJob(datasetVersionId, {
+  actorId = 'topology-autonomous-worker',
+  correlationId = null,
+  reason,
+} = {}) {
+  const record = await repository.get(datasetVersionId)
+  if (!record.topologyInputBundle) return null
+  const repaired = rebuildStoredTopologyInputBundle(record)
+  const inputFingerprint = topologyInputFingerprint(
+    repaired.topologyInputBundle ?? record.topologyInputBundle,
+    { ruleSetVersion: TOPOLOGY_RULE_SET_VERSION, config: config.topology },
+  )
+  const queued = await jobQueue.enqueue({
+    jobType: 'regenerate_full_topology',
+    datasetVersionId,
+    inputFingerprint,
+    ruleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+    idempotencyKey: `autonomous-topology:${inputFingerprint}`,
+    payload: { actorId, correlationId, reason },
+    handler: createFullTopologyRegenerationJobHandler(topologyService),
+  })
+  await auditLog.record('topology.regeneration_queued', {
+    actorId,
+    datasetVersionId,
+    branchId: record.datasetVersion?.branchId ?? null,
+    correlationId,
+    outcome: queued.deduplicated ? 'deduplicated' : 'queued',
+    details: {
+      trigger: 'autonomous_rule_or_import_change',
+      jobId: queued.jobId,
+      inputFingerprint,
+      ruleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+    },
+  })
+  return queued
+}
+
+async function queueStaleTopologyRuleSets() {
+  const records = await repository.list()
+  for (const record of records) {
+    if (!record.topologyInputBundle
+      || record.topologyRuleSetVersion === TOPOLOGY_RULE_SET_VERSION) continue
+    await queueAutonomousTopologyJob(record.datasetVersion.id, {
+      reason: `Topology rules berubah ke ${TOPOLOGY_RULE_SET_VERSION}.`,
+    })
+  }
 }
