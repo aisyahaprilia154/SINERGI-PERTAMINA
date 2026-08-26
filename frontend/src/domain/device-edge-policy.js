@@ -1,11 +1,6 @@
 const CAMERA_PATTERN = /\bcctv\b|\bcamera\b|\bcam(?:era)?(?:[-_\s]?\d+)?\b/i
 
-const AUTHORITATIVE_SOURCES = new Set([
-  'manual_admin',
-  'explicit_kml_metadata',
-  'line_label_inference',
-  'explicit_metadata',
-])
+const MANUAL_SOURCES = new Set(['manual_admin', 'manual_locked'])
 
 const PROXIMITY_SOURCES = new Set([
   'spatial_inference',
@@ -37,12 +32,13 @@ export function filterConflictingCameraEdges(edges = [], nodes = []) {
   })
 
   const suppressed = new Set()
-  groups.forEach((group) => {
-    const authoritative = group.filter(isAuthoritativeEdge)
-    if (!authoritative.length) return
-    group.filter(isProximityOnlyEdge).forEach((weakEdge) => {
-      if (authoritative.some((strongEdge) => strongEdge !== weakEdge)) {
-        suppressed.add(weakEdge)
+  groups.forEach((group, cameraId) => {
+    if (group.length < 2) return
+    const ordered = [...group].sort(compareOperationalEvidence)
+    const winner = ordered[0]
+    ordered.slice(1).forEach((loser) => {
+      if (otherEndpoint(winner, cameraId) !== otherEndpoint(loser, cameraId)) {
+        suppressed.add(loser)
       }
     })
   })
@@ -58,25 +54,55 @@ function isDirectDeviceEdge(edge, nodeById) {
 
 function isCameraNode(node) {
   if (!node) return false
-  return CAMERA_PATTERN.test([
+  const identity = [
     node.assetType,
     node.category,
     node.sourceName,
     node.sourceFolderPath,
-  ].filter(Boolean).join(' '))
+  ].filter(Boolean).join(' ')
+  if (node.topologyRole === 'junction'
+    || String(node.diagramClass ?? '').startsWith('junction')
+    || /(^|\s)(junction|junction box|jb)(\s|[-_]|$)/i.test(identity)) return false
+  return CAMERA_PATTERN.test(identity)
 }
 
-function isAuthoritativeEdge(edge) {
-  const source = relationSource(edge)
-  if (AUTHORITATIVE_SOURCES.has(source)) return true
-  return pathAssetIds(edge).length > 0 && !PROXIMITY_SOURCES.has(source)
+function compareOperationalEvidence(left, right) {
+  return evidencePriority(right) - evidencePriority(left)
+    || normalizedDistance(left) - normalizedDistance(right)
+    || normalizedScore(right) - normalizedScore(left)
+    || String(edgeId(left)).localeCompare(String(edgeId(right)))
 }
 
-function isProximityOnlyEdge(edge) {
-  if (pathAssetIds(edge).length > 0) return false
+function evidencePriority(edge) {
   const source = relationSource(edge)
-  return PROXIMITY_SOURCES.has(source)
-    || PROXIMITY_CANDIDATE_TYPES.has(String(edge.candidateType ?? '').trim())
+  if (MANUAL_SOURCES.has(source)) return 400
+  if (isGeometryEdge(edge)) return 300
+  if (['explicit_kml_metadata', 'explicit_metadata'].includes(source)) return 250
+  if (source === 'line_label_inference'
+    || ['line_label_connection', 'line_label_attachment'].includes(edge?.candidateType)) return 200
+  return 100
+}
+
+function isGeometryEdge(edge) {
+  return PROXIMITY_SOURCES.has(relationSource(edge))
+    || PROXIMITY_CANDIDATE_TYPES.has(String(edge?.candidateType ?? '').trim())
+    || edge?.decisionSource === 'geometry'
+}
+
+function normalizedDistance(edge) {
+  const value = Number(edge?.distanceMeters)
+  return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY
+}
+
+function normalizedScore(edge) {
+  const value = Number(edge?.confidence ?? edge?.score)
+  return Number.isFinite(value) ? value : 0
+}
+
+function otherEndpoint(edge, cameraId) {
+  const source = edge?.sourceAssetId ?? edge?.sourceNodeId
+  const target = edge?.targetAssetId ?? edge?.targetNodeId
+  return source === cameraId ? target : source
 }
 
 function relationSource(edge) {
@@ -88,8 +114,8 @@ function relationSource(edge) {
   ).trim().toLowerCase()
 }
 
-function pathAssetIds(edge) {
-  return [edge?.pathAssetId, ...(edge?.pathAssetIds ?? [])].filter(Boolean)
+function edgeId(edge) {
+  return edge?.id ?? edge?.edgeId ?? edge?.relationId ?? edge?.candidateId ?? ''
 }
 
 function asArray(value) {

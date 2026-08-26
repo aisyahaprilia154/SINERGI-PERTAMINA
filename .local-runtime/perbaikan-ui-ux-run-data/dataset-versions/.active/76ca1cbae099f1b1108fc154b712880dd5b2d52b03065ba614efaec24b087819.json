@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "1.0.0",
+  "datasetId": "dataset-semarang",
+  "branchId": "semarang",
+  "datasetVersionId": "dv-3fd03fa9-f848-4612-938b-d4c413cb0261",
+  "previousVersionId": "dv-475afc04-0d7a-49aa-8212-2a7803ea0c72",
+  "activatedBy": "local-admin",
+  "activatedAt": "2026-08-13T03:40:30.151Z",
+  "publicationProfile": "map_only",
+  "revision": "b489418a-ebd3-452c-bfe7-63eddd861ffc"
+}

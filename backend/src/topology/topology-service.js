@@ -29,6 +29,10 @@ import {
   withTopologyGraphRevision,
 } from './topology-graph-revision.js'
 import {
+  evaluateTopologyPublicationGate,
+  topologyInputFingerprint,
+} from './topology-publication-gate.js'
+import {
   createCandidateCollectionRevision,
   normalizeCandidateQuery,
   paginateCandidates,
@@ -276,6 +280,339 @@ export class TopologyService {
     })
   }
 
+  async regenerateShadow(datasetVersionId, actorId, {
+    reason,
+    correlationId = null,
+    jobId = null,
+    expectedRecordRevision = undefined,
+    autoPublish = true,
+  } = {}) {
+    return this.#withMutationTransaction(async ({ repository, auditLog }) => {
+      const current = await repository.get(datasetVersionId)
+      assertTopologyBundle(current)
+      if (expectedRecordRevision !== undefined
+        && expectedRecordRevision !== recordRevision(current)) {
+        throw new AppError('Dataset berubah sebelum shadow topology dibuat.', {
+          code: 'dataset_version_stale_revision',
+          statusCode: 409,
+          details: {
+            datasetVersionId,
+            expectedRecordRevision,
+            currentRecordRevision: recordRevision(current),
+          },
+        })
+      }
+      const repaired = rebuildStoredTopologyInputBundle(current)
+      const topologyInputBundle = repaired.topologyInputBundle ?? current.topologyInputBundle
+      const inputFingerprint = topologyInputFingerprint(topologyInputBundle, {
+        ruleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+        config: this.config,
+      })
+      const existingRun = (current.topologyShadowRuns ?? []).find((run) => (
+        run.inputFingerprint === inputFingerprint
+          && run.ruleSetVersion === TOPOLOGY_RULE_SET_VERSION
+          && ['failed', 'passed', 'published'].includes(run.status)
+      ))
+      if (existingRun) return current
+
+      const generatedAt = this.clock().toISOString()
+      const artifacts = generateRelationArtifacts(topologyInputBundle, {
+        config: this.config,
+        previousCandidates: current.topologyCandidates,
+        previousRelations: current.confirmedRelations,
+        previousInterfaceRegistry: current.topologyInterfaceRegistry
+          ?? current.topologyGraph?.interfaceRegistry
+          ?? [],
+        previousMountingRelations: current.mountingRelations,
+        previousMountingOverrides: current.mountingOverrides,
+        previousMountingExpectations: current.mountingExpectations,
+        generatedAt,
+      })
+      const mountingIntegrity = validateMountingProjection(topologyInputBundle, {
+        relations: artifacts.mountingRelations ?? [],
+      })
+      const gate = evaluateTopologyPublicationGate({
+        artifacts,
+        activeRecord: current,
+        inputBundle: topologyInputBundle,
+        config: this.config,
+      })
+      if (!mountingIntegrity.valid) {
+        gate.passed = false
+        gate.blockingCodes = [...new Set([
+          ...gate.blockingCodes,
+          'mounting_integrity',
+        ])]
+        gate.checks.push({
+          code: 'mounting_integrity',
+          passed: false,
+          details: mountingIntegrity,
+        })
+      }
+      const runId = `topology-run:${createHash('sha256').update([
+        datasetVersionId,
+        inputFingerprint,
+        current.topologyGraph?.graphRevision ?? 'none',
+        TOPOLOGY_RULE_SET_VERSION,
+      ].join('|')).digest('hex')}`
+      const run = {
+        runId,
+        datasetVersionId,
+        status: gate.passed ? (autoPublish ? 'published' : 'passed') : 'failed',
+        actorId,
+        generatedAt,
+        reason: normalizeReason(reason, false),
+        ruleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+        inputFingerprint,
+        baseRecordRevision: recordRevision(current),
+        baseGraphRevision: current.topologyGraph?.graphRevision ?? null,
+        stagedGraphRevision: withTopologyGraphRevision(artifacts.graph).graphRevision,
+        gate,
+        diff: gate.diff,
+        summary: structuredClone(artifacts.summary),
+        ...(jobId ? { jobId } : {}),
+      }
+      const event = await auditLog.record('topology.shadow_generated', {
+        actorId,
+        datasetVersionId,
+        branchId: current.datasetVersion?.branchId ?? null,
+        correlationId,
+        outcome: run.status,
+        details: {
+          runId,
+          inputFingerprint,
+          baseGraphRevision: run.baseGraphRevision,
+          stagedGraphRevision: run.stagedGraphRevision,
+          blockingCodes: gate.blockingCodes,
+          autoPublish,
+          ...(jobId ? { jobId } : {}),
+        },
+      })
+      await auditLog.record('topology.candidates_regenerated', {
+        actorId,
+        datasetVersionId,
+        branchId: current.datasetVersion?.branchId ?? null,
+        correlationId,
+        outcome: 'shadowed',
+        details: {
+          runId,
+          ...(jobId ? { jobId } : {}),
+          graphRevision: run.stagedGraphRevision,
+          topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+          publicationStatus: run.status,
+          blockingCodes: gate.blockingCodes,
+        },
+      })
+      const shadowPayload = {
+        artifacts,
+        topologyInputBundle,
+        classifiedObjects: repaired.classifiedObjects,
+        repairedCount: repaired.repairedCount,
+      }
+      recordTopologyMetrics(this.metrics, artifacts, {
+        inputBundle: topologyInputBundle,
+        previousRecord: current,
+      })
+      return repository.update(datasetVersionId, (record) => {
+        const shadowRuns = pruneShadowRuns([...(record.topologyShadowRuns ?? []), run], generatedAt)
+        if (!gate.passed || !autoPublish) {
+          return {
+            ...record,
+            topologyShadowRuns: shadowRuns,
+            topologyShadowArtifacts: {
+              ...(record.topologyShadowArtifacts ?? {}),
+              [runId]: shadowPayload,
+            },
+            topologyPublication: {
+              ...(record.topologyPublication ?? {}),
+              activeGraphRevision: record.topologyGraph?.graphRevision ?? null,
+              lastShadowRunId: runId,
+              lastPassedRunId: gate.passed
+                ? runId
+                : record.topologyPublication?.lastPassedRunId ?? null,
+              inputFingerprint,
+              ruleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+            },
+          }
+        }
+        const repairedRecord = applyRepairedTopologyInput(record, shadowPayload)
+        const published = applyArtifacts(repairedRecord, artifacts, {
+          candidateHistory: reconcileCandidateHistory(record, artifacts, {
+            eventId: event.id,
+            generatedAt,
+          }),
+          topologyRun: {
+            runId,
+            actorId,
+            generatedAt,
+            reason: normalizeReason(reason, false),
+            topologyRuleSetVersion: artifacts.topologyRuleSetVersion,
+            summary: artifacts.summary,
+            publicationStatus: 'published',
+          },
+        })
+        return {
+          ...published,
+          topologyGraphHistory: appendTopologyHistory(
+            record.topologyGraphHistory,
+            snapshotActiveTopology(record, generatedAt),
+          ),
+          topologyShadowRuns: shadowRuns,
+          topologyShadowArtifacts: {
+            ...(record.topologyShadowArtifacts ?? {}),
+            [runId]: shadowPayload,
+          },
+          topologyPublication: {
+            activeGraphRevision: published.topologyGraph?.graphRevision ?? null,
+            lastShadowRunId: runId,
+            lastPassedRunId: runId,
+            inputFingerprint,
+            ruleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+            publishedAt: generatedAt,
+            publishedBy: actorId,
+          },
+        }
+      }, { expectedRevision: recordRevision(current) })
+    })
+  }
+
+  async getGenerationRun(datasetVersionId, runId) {
+    const record = await this.repository.get(datasetVersionId)
+    const run = (record.topologyShadowRuns ?? []).find(({ runId: id }) => id === runId)
+    if (!run) throw topologyRunNotFound(runId)
+    return {
+      datasetVersionId,
+      run: structuredClone(run),
+      activeGraphRevision: record.topologyGraph?.graphRevision ?? null,
+      recordRevision: recordRevision(record),
+    }
+  }
+
+  async publishGenerationRun(datasetVersionId, runId, actorId, {
+    expectedGraphRevision = undefined,
+    correlationId = null,
+  } = {}) {
+    return this.#withMutationTransaction(async ({ repository, auditLog }) => {
+      const current = await repository.get(datasetVersionId)
+      const run = (current.topologyShadowRuns ?? []).find(({ runId: id }) => id === runId)
+      const payload = current.topologyShadowArtifacts?.[runId]
+      if (!run || !payload) throw topologyRunNotFound(runId)
+      if (!run.gate?.passed) {
+        throw new AppError('Shadow topology belum lulus quality gate.', {
+          code: 'topology_shadow_gate_failed',
+          statusCode: 409,
+          details: { runId, blockingCodes: run.gate?.blockingCodes ?? [] },
+        })
+      }
+      const activeRevision = current.topologyGraph?.graphRevision ?? null
+      const expected = expectedGraphRevision ?? run.baseGraphRevision
+      if (activeRevision !== expected) {
+        throw new AppError('Graph aktif berubah setelah shadow topology dibuat.', {
+          code: 'topology_graph_stale_revision',
+          statusCode: 409,
+          details: { runId, expectedGraphRevision: expected, currentGraphRevision: activeRevision },
+        })
+      }
+      const latestFingerprint = topologyInputFingerprint(
+        rebuildStoredTopologyInputBundle(current).topologyInputBundle
+          ?? current.topologyInputBundle,
+        { ruleSetVersion: TOPOLOGY_RULE_SET_VERSION, config: this.config },
+      )
+      if (latestFingerprint !== run.inputFingerprint) {
+        throw new AppError('Input topology berubah setelah shadow dibuat.', {
+          code: 'topology_shadow_input_stale',
+          statusCode: 409,
+          details: { runId, expected: run.inputFingerprint, current: latestFingerprint },
+        })
+      }
+      const publishedAt = this.clock().toISOString()
+      const event = await auditLog.record('topology.shadow_published', {
+        actorId,
+        datasetVersionId,
+        branchId: current.datasetVersion?.branchId ?? null,
+        correlationId,
+        outcome: 'published',
+        details: { runId, previousGraphRevision: activeRevision, stagedGraphRevision: run.stagedGraphRevision },
+      })
+      return repository.update(datasetVersionId, (record) => {
+        const published = applyArtifacts(
+          applyRepairedTopologyInput(record, payload),
+          payload.artifacts,
+          {
+            candidateHistory: reconcileCandidateHistory(record, payload.artifacts, {
+              eventId: event.id,
+              generatedAt: publishedAt,
+            }),
+            topologyRun: {
+              runId,
+              actorId,
+              generatedAt: publishedAt,
+              reason: run.reason,
+              topologyRuleSetVersion: run.ruleSetVersion,
+              summary: run.summary,
+              publicationStatus: 'published',
+            },
+          },
+        )
+        return {
+          ...published,
+          topologyGraphHistory: appendTopologyHistory(
+            record.topologyGraphHistory,
+            snapshotActiveTopology(record, publishedAt),
+          ),
+          topologyShadowRuns: (record.topologyShadowRuns ?? []).map((item) => (
+            item.runId === runId ? { ...item, status: 'published', publishedAt, publishedBy: actorId } : item
+          )),
+          topologyPublication: {
+            activeGraphRevision: published.topologyGraph?.graphRevision ?? null,
+            lastShadowRunId: runId,
+            lastPassedRunId: runId,
+            inputFingerprint: run.inputFingerprint,
+            ruleSetVersion: run.ruleSetVersion,
+            publishedAt,
+            publishedBy: actorId,
+          },
+        }
+      }, { expectedRevision: recordRevision(current) })
+    })
+  }
+
+  async rollbackTopology(datasetVersionId, graphRevision, actorId, correlationId = null) {
+    return this.#withMutationTransaction(async ({ repository, auditLog }) => {
+      const current = await repository.get(datasetVersionId)
+      const target = (current.topologyGraphHistory ?? []).find((item) => (
+        item.graphRevision === graphRevision
+      ))
+      if (!target?.snapshot) throw topologyRevisionNotFound(graphRevision)
+      const rolledBackAt = this.clock().toISOString()
+      await auditLog.record('topology.graph_rolled_back', {
+        actorId,
+        datasetVersionId,
+        branchId: current.datasetVersion?.branchId ?? null,
+        correlationId,
+        outcome: 'rolled_back',
+        details: {
+          fromGraphRevision: current.topologyGraph?.graphRevision ?? null,
+          toGraphRevision: graphRevision,
+        },
+      })
+      return repository.update(datasetVersionId, (record) => ({
+        ...record,
+        ...structuredClone(target.snapshot),
+        topologyGraphHistory: appendTopologyHistory(
+          record.topologyGraphHistory,
+          snapshotActiveTopology(record, rolledBackAt),
+        ),
+        topologyPublication: {
+          ...(record.topologyPublication ?? {}),
+          activeGraphRevision: graphRevision,
+          rolledBackAt,
+          rolledBackBy: actorId,
+        },
+      }), { expectedRevision: recordRevision(current) })
+    })
+  }
+
   async getSummary(datasetVersionId) {
     const record = await this.repository.get(datasetVersionId)
     const graph = this.normalizedTraceGraph(record)
@@ -305,6 +642,12 @@ export class TopologyService {
         record.topologyInterfaceRegistry ?? graph.interfaceRegistry ?? [],
       ),
       graphRevision: graph.graphRevision,
+      publication: structuredClone(record.topologyPublication ?? {
+        activeGraphRevision: graph.graphRevision,
+        lastShadowRunId: null,
+        lastPassedRunId: null,
+      }),
+      latestShadowRun: structuredClone((record.topologyShadowRuns ?? []).at(-1) ?? null),
       reviewCapabilities: {
         contractVersion: '2.0.0',
         safePreview: true,
@@ -2983,7 +3326,12 @@ export class TopologyService {
 }
 
 export function createFullTopologyRegenerationJobHandler(topologyService) {
-  if (!topologyService || typeof topologyService.regenerate !== 'function') {
+  const regenerate = typeof topologyService?.regenerateShadow === 'function'
+    ? topologyService.regenerateShadow.bind(topologyService)
+    : typeof topologyService?.regenerate === 'function'
+      ? topologyService.regenerate.bind(topologyService)
+      : null
+  if (!regenerate) {
     throw new TypeError('Topology service untuk durable regeneration tidak valid.')
   }
   return async (
@@ -2995,7 +3343,7 @@ export function createFullTopologyRegenerationJobHandler(topologyService) {
       throw new Error('Durable regeneration tidak memiliki dataset version ID.')
     }
     await updateProgress?.(10, 'topology_loading')
-    const regenerated = await topologyService.regenerate(datasetVersionId, actorId, {
+    const regenerated = await regenerate(datasetVersionId, actorId, {
       reason: normalizeTopologyRegenerationReason(reason),
       correlationId,
       jobId: job?.jobId ?? null,
@@ -3008,14 +3356,17 @@ export function createFullTopologyRegenerationJobHandler(topologyService) {
 
 export function summarizeTopologyRegeneration(record) {
   const runs = record?.topologyRuns ?? []
+  const shadowRun = (record?.topologyShadowRuns ?? []).at(-1) ?? null
   return {
     datasetVersionId: record?.datasetVersion?.id ?? null,
     topologyRuleSetVersion: record?.topologyRuleSetVersion ?? null,
     graphRevision: record?.topologyGraph?.graphRevision ?? null,
-    topologyRunId: runs.at(-1)?.runId ?? null,
+    topologyRunId: shadowRun?.runId ?? runs.at(-1)?.runId ?? null,
     recordRevision: recordRevision(record),
     summary: structuredClone(record?.topologySummary ?? null),
     readiness: structuredClone(record?.topologyReadiness ?? null),
+    publicationStatus: shadowRun?.status ?? null,
+    qualityGate: structuredClone(shadowRun?.gate ?? null),
   }
 }
 
@@ -3109,6 +3460,100 @@ export function applyArtifacts(record, artifacts, {
       },
     },
   }
+}
+
+const ACTIVE_TOPOLOGY_SNAPSHOT_KEYS = Object.freeze([
+  'topologyRuleSetVersion',
+  'topologyPolicy',
+  'topologyInterfaceRegistry',
+  'topologyComponentRegistry',
+  'topologyDiagnostics',
+  'topologyGeneratedAt',
+  'topologyCandidates',
+  'confirmedRelations',
+  'topologyGraph',
+  'topologyValidation',
+  'topologyUnresolved',
+  'topologyEligibilityIssues',
+  'topologyLineworkIssues',
+  'topologySummary',
+  'topologyReadiness',
+  'mountingRelations',
+  'mountingCandidates',
+  'mountingOptions',
+  'mountingOverrides',
+  'mountingExpectations',
+  'mountingReviewItems',
+  'mountingSummary',
+  'relations',
+  'readiness',
+])
+
+function snapshotActiveTopology(record, archivedAt) {
+  const graphRevision = record?.topologyGraph?.graphRevision
+  if (!graphRevision) return null
+  return {
+    graphRevision,
+    archivedAt,
+    snapshot: Object.fromEntries(ACTIVE_TOPOLOGY_SNAPSHOT_KEYS
+      .filter((key) => record[key] !== undefined)
+      .map((key) => [key, structuredClone(record[key])])),
+  }
+}
+
+function appendTopologyHistory(history = [], snapshot) {
+  if (!snapshot) return history ?? []
+  const retained = (history ?? []).filter(({ graphRevision }) => (
+    graphRevision !== snapshot.graphRevision
+  ))
+  return [...retained, snapshot]
+}
+
+function applyRepairedTopologyInput(record, payload = {}) {
+  if (!payload.topologyInputBundle) return record
+  return {
+    ...record,
+    topologyInputBundle: structuredClone(payload.topologyInputBundle),
+    ...(payload.repairedCount > 0 ? {
+      classifiedObjects: structuredClone(payload.classifiedObjects ?? record.classifiedObjects),
+      canonicalParser: record.canonicalParser
+        ? {
+          ...record.canonicalParser,
+          classifiedObjects: structuredClone(payload.classifiedObjects ?? record.classifiedObjects),
+          topologyInputBundle: structuredClone(payload.topologyInputBundle),
+          classificationRuleSetVersion: payload.topologyInputBundle.semanticRuleSetVersion,
+        }
+        : record.canonicalParser,
+      parserVersions: record.parserVersions
+        ? {
+          ...record.parserVersions,
+          classificationRuleSetVersion: payload.topologyInputBundle.semanticRuleSetVersion,
+        }
+        : record.parserVersions,
+    } : {}),
+  }
+}
+
+function pruneShadowRuns(runs, now) {
+  const cutoff = new Date(now).getTime() - 30 * 24 * 60 * 60 * 1000
+  return runs.filter((run) => run.status === 'published'
+    || new Date(run.generatedAt).getTime() >= cutoff)
+}
+
+function topologyRunNotFound(runId) {
+  return new AppError('Shadow topology run tidak ditemukan.', {
+    code: 'topology_shadow_run_not_found',
+    statusCode: 404,
+    details: { runId },
+  })
+}
+
+function topologyRevisionNotFound(graphRevision) {
+  return new AppError('Revision topology untuk rollback tidak ditemukan.', {
+    code: 'topology_graph_revision_not_found',
+    statusCode: 404,
+    details: { graphRevision },
+  })
 }
 
 function recordTopologyMetrics(metrics, artifacts, {

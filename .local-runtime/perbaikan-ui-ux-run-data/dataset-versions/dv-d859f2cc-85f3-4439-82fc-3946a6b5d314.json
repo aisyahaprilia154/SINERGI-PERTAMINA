@@ -1,0 +1,73 @@
+{
+  "contractVersion": "1.0.0",
+  "datasetVersion": {
+    "id": "dv-d859f2cc-85f3-4439-82fc-3946a6b5d314",
+    "datasetId": "dataset-semarang",
+    "branchId": "semarang",
+    "versionName": "KMZ Area RJBT_12112024 · 13 Agu 2026",
+    "officialSourceConfirmed": true,
+    "sourceFilename": "KMZ Area RJBT_12112024.kmz",
+    "sourceMimeType": "application/vnd.google-earth.kmz",
+    "sourceSize": 268622,
+    "checksum": "sha256:abff067ef854991ff88f757af5b8337d7b42fc43ffac2498ae872c9779a9bb97",
+    "sourceStorageKey": "source-files/dv-d859f2cc-85f3-4439-82fc-3946a6b5d314/source-3870293e-dd99-4188-9e9c-7cc3d9b05750.kmz",
+    "importedBy": "local-admin",
+    "importedAt": "2026-08-13T02:18:55.099Z",
+    "validationStatus": "pending",
+    "publicationStatus": "unpublished",
+    "status": "processing",
+    "summary": {
+      "totalFolders": 0,
+      "totalPlacemarks": 0,
+      "totalAssets": 0,
+      "totalPoints": 0,
+      "totalLines": 0,
+      "totalPolygons": 0,
+      "totalRelations": 0,
+      "newAssets": 0,
+      "updatedAssets": 0,
+      "unchangedAssets": 0,
+      "removedAssets": 0,
+      "errors": 0,
+      "warnings": 0
+    },
+    "publicationProfile": null
+  },
+  "layers": [],
+  "assets": [],
+  "geometries": [],
+  "relations": [],
+  "issues": [],
+  "validation": {
+    "schemaVersion": "1.0.0",
+    "status": "pending",
+    "canActivate": false,
+    "summary": {
+      "total": 0,
+      "errors": 0,
+      "warnings": 0,
+      "information": 0,
+      "blocking": 0
+    },
+    "facets": {
+      "severity": {},
+      "scope": {},
+      "issueCode": {}
+    },
+    "integrity": {
+      "datasetVersionId": "dv-d859f2cc-85f3-4439-82fc-3946a6b5d314",
+      "branchId": "semarang",
+      "activeVersionUnchanged": true,
+      "userVisible": false,
+      "publicationStatus": "unpublished"
+    }
+  },
+  "processing": {
+    "progress": 10,
+    "stage": "queued",
+    "queuedAt": "2026-08-13T02:18:55.123Z",
+    "jobId": "job-c7e89bbb-08b8-498f-b748-07d106f13a0e",
+    "jobStatus": "queued"
+  },
+  "recordRevision": 1
+}

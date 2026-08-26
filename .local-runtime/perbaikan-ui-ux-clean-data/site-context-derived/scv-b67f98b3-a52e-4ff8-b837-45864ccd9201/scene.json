@@ -1,0 +1,200 @@
+{
+  "schemaVersion": "1.0.0",
+  "sceneVersionId": "scv-b67f98b3-a52e-4ff8-b837-45864ccd9201",
+  "branchId": "semarang",
+  "localBounds": [
+    -2.0809238776564598e-7,
+    -1.6763806343078613e-7,
+    338.45058087137295,
+    424.7977028582245
+  ],
+  "geographicBounds": [
+    110.4334625746184,
+    -6.9618048501569625,
+    110.43652549640254,
+    -6.957988844919563
+  ],
+  "alignment": {
+    "schemaVersion": "1.0.0",
+    "localCrs": "LOCAL_ENU_METERS",
+    "anchor": {
+      "local": [
+        0,
+        0,
+        0
+      ],
+      "longitude": 110.4334625746203,
+      "latitude": -6.961804850155456,
+      "altitude": 0
+    },
+    "rotationDegreesClockwiseFromNorth": 0,
+    "unitScaleMeters": 0.9999954257423124,
+    "controlPoints": [
+      {
+        "local": [
+          169.22529033164028,
+          212.39885134529322
+        ],
+        "geographic": [
+          110.43499402928396,
+          -6.959896847538262
+        ],
+        "source": "kml_area_center",
+        "errorMeters": 2.842170943040401e-14
+      },
+      {
+        "local": [
+          269.2252903316403,
+          212.39885134529322
+        ],
+        "geographic": [
+          110.43589900906603,
+          -6.959896847538262
+        ],
+        "source": "kml_area_east_axis",
+        "errorMeters": 1.4210854715202004e-14
+      }
+    ],
+    "residualErrorMeters": 2.2469334198890888e-14,
+    "alignedBy": "local-admin",
+    "alignedAt": "2026-07-31T04:32:56.907Z",
+    "targetAreaKey": "ft-pengapon-semarang"
+  },
+  "sources": {
+    "vector2d": {
+      "sourceEntry": "topoexport_2D_vectorial.dxf",
+      "checksum": "sha256:abd4f36d4660e81566076e1fa7baf1a9779ed29ddb781dc078a29338ed29e525"
+    },
+    "model3d": {
+      "sourceEntry": "topoexport_3D_modeling.dxf",
+      "checksum": "sha256:59acac00ca215b4feb94525f4456545e20e4e83394ca39677a46614d99a779c6"
+    },
+    "license": {
+      "sourceEntry": "LICENSE.txt",
+      "checksum": "sha256:8f0b581cfcdaa7ca895e160531ac2fc84da26f9d0b0b064ae934ef42efdc35cb"
+    }
+  },
+  "outputs": {
+    "vector2d": {
+      "format": "geojson",
+      "url": "/api/site-contexts/scv-b67f98b3-a52e-4ff8-b837-45864ccd9201/2d?v=2026-07-31T04%3A32%3A56.907Z"
+    },
+    "model3d": {
+      "format": "glb",
+      "coordinateFrame": "LOCAL_ENU_METERS",
+      "url": "/api/site-contexts/scv-b67f98b3-a52e-4ff8-b837-45864ccd9201/3d?v=2026-07-31T04%3A18%3A53.382Z"
+    }
+  },
+  "layers": [
+    {
+      "sourceLayer": "TPX_FRAME_PROJECT",
+      "contextKind": "other"
+    },
+    {
+      "sourceLayer": "TPX_WATERWAYS",
+      "contextKind": "waterway"
+    },
+    {
+      "sourceLayer": "TPX_WATERWAYS_HATCH",
+      "contextKind": "waterway"
+    },
+    {
+      "sourceLayer": "TPX_ROADS_CONTOURS",
+      "contextKind": "road_surface"
+    },
+    {
+      "sourceLayer": "TPX_ROADS_HATCH",
+      "contextKind": "road_surface"
+    },
+    {
+      "sourceLayer": "TPX_ROADS_AXES",
+      "contextKind": "road_axis"
+    },
+    {
+      "sourceLayer": "TPX_RAILWAYS_AXES",
+      "contextKind": "railway_axis"
+    },
+    {
+      "sourceLayer": "TPX_VEGETATION_TREES_INDIVIDUAL",
+      "contextKind": "tree"
+    },
+    {
+      "sourceLayer": "TPX_BUILDINGS_SHADOWS_OUTLINES",
+      "contextKind": "building_shadow"
+    },
+    {
+      "sourceLayer": "TPX_BUILDINGS_SHADOWS_HATCH",
+      "contextKind": "building_shadow"
+    },
+    {
+      "sourceLayer": "TPX_BUILDINGS",
+      "contextKind": "building"
+    },
+    {
+      "sourceLayer": "TPX_BUILDINGS_HATCH",
+      "contextKind": "building"
+    }
+  ],
+  "attribution": [
+    {
+      "text": "LICENSES AND COPYRIGHTS"
+    },
+    {
+      "text": "The following licenses and copyrights apply to the various elements on our website:"
+    },
+    {
+      "text": "Buildings 3D: Overture Maps Foundation - Buildings 2026 (ODbL)"
+    },
+    {
+      "text": "Roads: Overture Maps Foundation - Transportation 2026 (ODbL)"
+    },
+    {
+      "text": "Railways: Overture Maps Foundation - Transportation 2026 (ODbL)"
+    },
+    {
+      "text": "Waterways: Overture Maps Foundation - Base 2026 (ODbL)"
+    },
+    {
+      "text": "Trees: Overture Maps Foundation - Base 2026 (ODbL)"
+    },
+    {
+      "text": "Digital Surface Model: Meta and World Resources Institute - Global Canopy Height Maps v2 2026 (CC BY 4.0)"
+    },
+    {
+      "text": "Digital Terrain Model (8.25 m): Badan Informasi Geospasial - DEMNAS 2016 (CC BY 4.0)"
+    },
+    {
+      "text": "Green Areas: Overture Maps Foundation - Base 2026 (ODbL)"
+    },
+    {
+      "text": "Buildings 3D: Overture Maps Foundation - Buildings 2026 (ODbL)"
+    },
+    {
+      "text": "Roads: Overture Maps Foundation - Transportation 2026 (ODbL)"
+    },
+    {
+      "text": "Railways: Overture Maps Foundation - Transportation 2026 (ODbL)"
+    },
+    {
+      "text": "Waterways: Overture Maps Foundation - Base 2026 (ODbL)"
+    },
+    {
+      "text": "Trees: Overture Maps Foundation - Base 2026 (ODbL)"
+    },
+    {
+      "text": "Digital Surface Model: Meta and World Resources Institute - Global Canopy Height Maps v2 2026 (CC BY 4.0)"
+    },
+    {
+      "text": "Digital Terrain Model (8.25 m): Badan Informasi Geospasial - DEMNAS 2016 (CC BY 4.0)"
+    },
+    {
+      "text": "Green Areas: Overture Maps Foundation - Base 2026 (ODbL)"
+    }
+  ],
+  "disclaimer": "Data kontekstual TopoExport perlu diverifikasi untuk penggunaan yang membutuhkan ketelitian survei.",
+  "conversion": {
+    "converterVersion": "site-context-converter/1.0.0",
+    "convertedAt": "2026-07-31T04:18:53.382Z",
+    "durationMilliseconds": 376
+  }
+}

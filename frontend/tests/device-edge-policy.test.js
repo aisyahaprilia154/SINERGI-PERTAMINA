@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { filterConflictingCameraEdges } from '../src/domain/device-edge-policy.js'
 
-test('map projection removes proximity-only JB edge when camera has path evidence', () => {
+test('map projection keeps geometry-first camera termination over conflicting label', () => {
   const nodes = [
     { id: 'JB-03', objectRole: 'device_node', assetType: 'junction box' },
     { id: 'CAM-22', objectRole: 'device_node', assetType: 'cctv' },
@@ -26,5 +26,5 @@ test('map projection removes proximity-only JB edge when camera has path evidenc
     },
   ], nodes)
 
-  assert.deepEqual(edges.map(({ id }) => id), ['edge:jb03-cam22'])
+  assert.deepEqual(edges.map(({ id }) => id), ['edge:cam22-jb08'])
 })

@@ -11,7 +11,7 @@ const nodes = [
   { id: 'JB-08', objectRole: 'device_node', assetType: 'junction box', category: 'junction_box' },
 ]
 
-test('path-backed camera edge wins over nearest-junction edge', () => {
+test('strong geometry wins over conflicting line-label camera edge', () => {
   const result = filterConflictingCameraEdges([
     {
       id: 'edge:jb03-cam22',
@@ -31,11 +31,12 @@ test('path-backed camera edge wins over nearest-junction edge', () => {
     },
   ], nodes)
 
-  assert.deepEqual(result.edges.map(({ id }) => id), ['edge:jb03-cam22'])
+  assert.deepEqual(result.edges.map(({ id }) => id), ['edge:cam22-jb08'])
   assert.equal(result.suppressedEdges[0].cameraAssetId, 'CAM-22')
+  assert.equal(result.suppressedEdges[0].reason, 'label_geometry_conflict')
 })
 
-test('nearest-junction candidate is demoted before materialization', () => {
+test('line-label candidate is demoted before geometry materialization', () => {
   const result = demoteConflictingCameraCandidates([
     {
       candidateId: 'candidate:line-label',
@@ -59,8 +60,31 @@ test('nearest-junction candidate is demoted before materialization', () => {
     },
   ], nodes)
 
+  const label = result.find(({ candidateId }) => candidateId === 'candidate:line-label')
   const nearest = result.find(({ candidateId }) => candidateId === 'candidate:nearest-jb')
-  assert.equal(nearest.candidateStatus, 'ambiguous')
-  assert.equal(nearest.proposalStatus, 'superseded_by_stronger_evidence')
-  assert.deepEqual(nearest.conflictResolution.strongerCandidateIds, ['candidate:line-label'])
+  assert.equal(nearest.candidateStatus, 'confirmed')
+  assert.equal(label.candidateStatus, 'ambiguous')
+  assert.equal(label.proposalStatus, 'superseded_by_stronger_evidence')
+  assert.equal(label.conflictResolution.code, 'label_geometry_conflict')
+  assert.deepEqual(label.conflictResolution.strongerCandidateIds, ['candidate:nearest-jb'])
+})
+
+test('locked manual camera relation remains stronger than geometry', () => {
+  const result = filterConflictingCameraEdges([{
+    id: 'edge:manual',
+    sourceAssetId: 'CAM-22',
+    targetAssetId: 'JB-03',
+    relationKind: 'device_edge',
+    relationSource: 'manual_admin',
+  }, {
+    id: 'edge:geometry',
+    sourceAssetId: 'CAM-22',
+    targetAssetId: 'JB-08',
+    relationKind: 'device_edge',
+    relationSource: 'spatial_inference',
+    distanceMeters: 1,
+  }], nodes)
+
+  assert.deepEqual(result.edges.map(({ id }) => id), ['edge:manual'])
+  assert.equal(result.suppressedEdges[0].reason, 'single_operational_camera_termination')
 })
