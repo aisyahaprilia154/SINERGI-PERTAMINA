@@ -416,20 +416,27 @@ export class TopologyService {
       return repository.update(datasetVersionId, (record) => {
         const shadowRuns = pruneShadowRuns([...(record.topologyShadowRuns ?? []), run], generatedAt)
         if (!gate.passed || !autoPublish) {
+          // Keep the canonical parser/topology input in sync even when the
+          // candidate graph is held in shadow by the publication gate.  A
+          // stale parser bundle otherwise survives every failed regeneration
+          // (notably a bare "Server" classified from a generic Juction Box
+          // folder), which makes the next run and the UI repeat the same
+          // incorrect mounting/classification result.
+          const repairedRecord = applyRepairedTopologyInput(record, shadowPayload)
           return {
-            ...record,
+            ...repairedRecord,
             topologyShadowRuns: shadowRuns,
             topologyShadowArtifacts: {
-              ...(record.topologyShadowArtifacts ?? {}),
+              ...(repairedRecord.topologyShadowArtifacts ?? {}),
               [runId]: shadowPayload,
             },
             topologyPublication: {
-              ...(record.topologyPublication ?? {}),
-              activeGraphRevision: record.topologyGraph?.graphRevision ?? null,
+              ...(repairedRecord.topologyPublication ?? {}),
+              activeGraphRevision: repairedRecord.topologyGraph?.graphRevision ?? null,
               lastShadowRunId: runId,
               lastPassedRunId: gate.passed
                 ? runId
-                : record.topologyPublication?.lastPassedRunId ?? null,
+                : repairedRecord.topologyPublication?.lastPassedRunId ?? null,
               inputFingerprint,
               ruleSetVersion: TOPOLOGY_RULE_SET_VERSION,
             },
@@ -3813,9 +3820,21 @@ function rebuildFromReviewedCandidates(
   generatedAt,
   affectedAssetIds = [],
 ) {
+  // A review can arrive while the active graph still uses the previous rule
+  // set because a newer shadow run is held by the publication gate. The
+  // relation builder accepts only candidates tagged with its current rule
+  // set; passing the stored tags through would otherwise replace the complete
+  // active graph with an empty graph after one revoke/confirm action.
+  const reviewCandidates = (candidates ?? []).map((candidate) => (
+    candidate.topologyRuleSetVersion
+      && candidate.topologyRuleSetVersion === record.topologyRuleSetVersion
+      && candidate.topologyRuleSetVersion !== TOPOLOGY_RULE_SET_VERSION
+      ? { ...candidate, topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION }
+      : candidate
+  ))
   const artifacts = rebuildConfirmedRelationArtifacts(record.topologyInputBundle, {
     config,
-    candidates,
+    candidates: reviewCandidates,
     previousRelations: record.confirmedRelations,
     previousGraph: record.topologyGraph,
     previousInterfaceRegistry: record.topologyInterfaceRegistry

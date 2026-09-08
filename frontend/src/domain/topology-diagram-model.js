@@ -303,6 +303,7 @@ export function buildTopologyDiagramModel({
 
   const components = connectedComponents(nodes, adjacency)
   const verifiedRootIds = normalizeRootIds(roots, scopedIds)
+  const usedComponentIds = new Set()
   const componentModels = components
     .filter((componentNodeIds) => componentNodeIds.length > 1
       || componentNodeIds.some((id) => nodeById.get(id)?.layoutRootId))
@@ -317,7 +318,12 @@ export function buildTopologyDiagramModel({
       verifiedRootIds,
     })
     const depths = calculateDepths(root.id, componentNodes, adjacency)
-    const componentId = componentIdFor(graph, componentNodeIds, index)
+    const componentId = uniqueComponentId(
+      componentIdFor(graph, componentNodeIds, index),
+      componentNodeIds,
+      index,
+      usedComponentIds,
+    )
     componentNodes.forEach((node) => {
       node.componentId = componentId
       node.depth = depths.get(node.id) ?? 0
@@ -1231,6 +1237,29 @@ function componentIdFor(graph, nodeIds, index) {
     (component.nodeIds ?? []).some((id) => nodeIds.includes(id))
   ))
   return source?.componentId ?? source?.id ?? `component:${String(index + 1).padStart(4, '0')}`
+}
+
+function uniqueComponentId(baseId, nodeIds, index, usedIds) {
+  const normalized = String(baseId || `component:${String(index + 1).padStart(4, '0')}`)
+  if (!usedIds.has(normalized)) {
+    usedIds.add(normalized)
+    return normalized
+  }
+  // The persisted graph may reuse a component ID for multiple disconnected
+  // projections.  Layout maps are keyed by component ID, so retaining the
+  // duplicate silently drops whole lanes (including pole groups).  Add a
+  // deterministic suffix derived from the sorted node IDs instead.
+  const suffix = nodeIds.join(',')
+  let hash = 2166136261
+  for (let index = 0; index < suffix.length; index += 1) {
+    hash ^= suffix.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  let candidate = `${normalized}:part-${(hash >>> 0).toString(16)}`
+  let collision = 2
+  while (usedIds.has(candidate)) candidate = `${normalized}:part-${(hash >>> 0).toString(16)}-${collision++}`
+  usedIds.add(candidate)
+  return candidate
 }
 
 function buildBackboneGaps({ components = [], nodeById, componentByNodeId, area }) {

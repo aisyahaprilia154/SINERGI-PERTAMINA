@@ -165,10 +165,11 @@ export function renderTopologyDiagramSvg({
           .topology-band-title{font:800 8px Inter,ui-sans-serif,system-ui;fill:${THEME.muted};letter-spacing:.09em}
           .topology-band-divider{stroke:${THEME.laneBorder};stroke-width:1;stroke-dasharray:3 5}
           .topology-mounting-group{cursor:pointer;outline:none}
-          .topology-mounting-group.excluded,.topology-mounting-group.needs-mounting{cursor:default}
+          .topology-mounting-group.excluded,.topology-mounting-group.needs-mounting,.topology-mounting-group.unassigned{cursor:default}
           .topology-mounting-bubble{fill-opacity:.42;stroke-width:1.3;vector-effect:non-scaling-stroke;pointer-events:all}
           .topology-mounting-group.excluded .topology-mounting-bubble{fill:#fff4e8;stroke:#f97316}
           .topology-mounting-group.needs-mounting .topology-mounting-bubble{fill:#fff9db;stroke:#d89b00;stroke-dasharray:5 3}
+          .topology-mounting-group.unassigned .topology-mounting-bubble{fill:#f8fafc;stroke:#94a3b8}
           .topology-mounting-group.empty .topology-mounting-bubble{fill:#f8fafc;stroke:#94a3b8;stroke-dasharray:4 3}
           .topology-mounting-group:hover .topology-mounting-bubble,.topology-mounting-group.selected .topology-mounting-bubble{stroke:${THEME.selected};stroke-width:2.2}
           .topology-mounting-header-line{stroke:rgba(113,132,146,.28);stroke-width:1;vector-effect:non-scaling-stroke;pointer-events:none}
@@ -179,12 +180,17 @@ export function renderTopologyDiagramSvg({
           .topology-mounting-group.excluded .topology-mounting-meta{fill:#a44810}
           .topology-mounting-group.needs-mounting .topology-mounting-label{fill:#9a6700}
           .topology-mounting-group.needs-mounting .topology-mounting-meta{fill:#805600}
+          .topology-mounting-group.unassigned .topology-mounting-label{fill:#526474}
+          .topology-mounting-group.unassigned .topology-mounting-meta{fill:#718492}
           .topology-mounting-group.empty .topology-mounting-label{fill:#526474}
           .topology-mounting-group.empty .topology-mounting-meta{fill:#718492}
           .topology-cross-area-gateway{pointer-events:none}
           .topology-cross-area-line{stroke:#7294a7;stroke-width:1.4;stroke-dasharray:4 4}
           .topology-cross-area-marker{fill:#fff;stroke:#7294a7;stroke-width:1.3}
           .topology-cross-area-label{font:800 8px Inter,ui-sans-serif,system-ui;fill:#557486}
+          .topology-presentation-backbone-underlay{fill:none;stroke:#fff;stroke-width:7;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+          .topology-presentation-backbone-line{fill:none;stroke:${THEME.edge};stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round;opacity:.9;vector-effect:non-scaling-stroke;pointer-events:none}
+          .topology-presentation-backbone-junction{fill:#fff;stroke:${THEME.edge};stroke-width:1.5;vector-effect:non-scaling-stroke;pointer-events:none}
           .topology-isolated{fill:#fbfcfd;stroke:${THEME.sectionBorder};stroke-width:1.2}
           .topology-isolated-title{font:800 11px Inter,ui-sans-serif,system-ui;fill:${THEME.text}}
           .topology-unresolved-panel{fill:#fff7f7;stroke:#e9babe;stroke-width:1.2}
@@ -293,6 +299,9 @@ export function renderTopologyDiagramSvg({
         : `<g class="topology-sections" aria-label="Area fasilitas">
           ${layout.sections.map((section) => renderSection(section)).join('')}
         </g>`}
+      ${showMountingPhysical && layout.mode !== 'area-overview'
+        ? renderPresentationBackbones(layout, { minimap })
+        : ''}
       ${showMountingPhysical && layout.mode !== 'area-overview'
         ? renderMountingGroups(model, layout, {
           selectedAssetId,
@@ -465,13 +474,17 @@ function renderMountingGroups(model, layout, {
       ? { fill: '#fff4e8', stroke: '#f97316' }
       : box.kind === 'needs-mounting'
         ? { fill: '#fff9db', stroke: '#d89b00' }
+        : box.kind === 'unassigned'
+          ? { fill: '#f8fafc', stroke: '#94a3b8' }
       : box.kind === 'empty'
         ? { fill: '#f8fafc', stroke: '#94a3b8' }
         : mountingBubblePalette(box.hostId || box.id, index)
     const label = box.kind === 'excluded'
-      ? 'Area non-tiang / indoor'
+      ? 'Area non-tiang/indoor'
       : box.kind === 'needs-mounting'
         ? 'Perlu mounting'
+      : box.kind === 'unassigned'
+        ? 'Aset lainnya'
       : hostName
     const active = selectedMountingGroupId === box.id || box.nodeIds.includes(selectedAssetId)
     const classes = [
@@ -480,6 +493,7 @@ function renderMountingGroups(model, layout, {
         ? 'excluded'
         : box.kind === 'needs-mounting'
           ? 'needs-mounting'
+          : box.kind === 'unassigned' ? 'unassigned'
           : box.kind === 'empty' ? 'empty' : 'confirmed',
       active ? 'selected' : '',
     ].filter(Boolean).join(' ')
@@ -492,6 +506,8 @@ function renderMountingGroups(model, layout, {
       ? `${box.nodeIds.length} aset · indoor/standalone`
       : box.kind === 'needs-mounting'
         ? `${box.nodeIds.length} aset · perlu ditetapkan`
+      : box.kind === 'unassigned'
+        ? `${box.nodeIds.length} aset · tanpa penempatan tiang`
       : box.kind === 'empty'
         ? '0 aset · belum ada mounting'
       : inheritedCount
@@ -512,6 +528,60 @@ function renderMountingGroups(model, layout, {
       <title>${escapeXml(`${label} · ${meta}`)}</title>
     </g>`
   }).join('')
+}
+
+function renderPresentationBackbones(layout, { minimap = false } = {}) {
+  return (layout.sections ?? []).flatMap((section) => (
+    (section.lanes ?? [])
+      .filter((lane) => lane.presentation === 'pole-backbone')
+      .map((lane) => renderPresentationBackbone(lane, section, { minimap }))
+  )).join('')
+}
+
+function renderPresentationBackbone(lane, section, { minimap = false } = {}) {
+  const boxes = lane.mountingBoxes ?? []
+  const boxById = new Map(boxes.map((box) => [box.id, box]))
+  const rootBoxes = boxes.filter((box) => !boxById.has(box.layoutParentBoxId))
+  const core = (lane.nodes ?? [])
+    .filter((node) => node.diagramClass === 'rack-root' || node.isCore)
+    .sort((left, right) => left.diagram.topY - right.diagram.topY)[0]
+  if (!core || !rootBoxes.length) return ''
+
+  const firstBoxTop = Math.min(...rootBoxes.map((box) => box.y))
+  const coreBottom = core.diagram.bottomY
+  const railY = firstBoxTop - 18
+  const laneLeft = section.x + (lane.x ?? 0)
+  const laneRight = laneLeft + lane.width
+  const centers = rootBoxes.map((box) => box.x + box.width / 2)
+  const railStart = Number.isFinite(laneLeft) ? laneLeft + 2 : Math.min(...centers)
+  const railEnd = Number.isFinite(laneRight) ? laneRight - 2 : Math.max(...centers)
+  const segments = [
+    [
+      { x: core.diagram.centerX, y: coreBottom },
+      { x: core.diagram.centerX, y: railY },
+    ],
+    [
+      { x: Math.min(railStart, railEnd), y: railY },
+      { x: Math.max(railStart, railEnd), y: railY },
+    ],
+    ...rootBoxes.flatMap((box) => box.nodes
+      .filter((node) => (node.layoutParentId ?? node.parentId) === core.id)
+      .map((node) => ([
+        { x: node.diagram.centerX, y: railY },
+        { x: node.diagram.centerX, y: node.diagram.topY },
+      ]))),
+  ]
+  const path = segments.map((segment) => orthogonalPath(segment)).join(' ')
+  const label = `Server parent visual · ${rootBoxes.length} kelompok asset`
+  return `<g class="topology-presentation-backbone" data-parent-id="${escapeAttribute(core.id)}"
+    aria-label="${escapeAttribute(label)}">
+    <path class="topology-presentation-backbone-underlay" d="${path}"/>
+    <path class="topology-presentation-backbone-line" d="${path}">
+      ${minimap ? '' : `<title>${escapeXml(label)} · jalur penempatan visual</title>`}
+    </path>
+    ${rootBoxes.map((box) => `<circle class="topology-presentation-backbone-junction"
+      cx="${box.x + box.width / 2}" cy="${railY}" r="3"/>`).join('')}
+  </g>`
 }
 
 function renderLane(lane, section) {
@@ -727,18 +797,15 @@ function renderBackboneGaps(layout, { minimap = false } = {}) {
     const target = layoutNodeById.get(gap.targetId)
     if (!target || !(gap.routePoints ?? []).length) return ''
     const path = orthogonalPath(gap.routePoints)
-    const labelX = target.diagram.centerX
-    const labelY = target.diagram.topY - 27
     return `<g class="topology-backbone-gap" aria-label="Network island ${escapeAttribute(
       gap.targetId,
-    )} belum memiliki jalur terkonfirmasi ke rack">
+    )} belum memiliki jalur backbone terkonfirmasi">
       <path class="topology-backbone-gap-underlay" d="${path}"/>
       <path class="topology-backbone-gap-line" d="${path}">
-        ${minimap ? '' : `<title>Diagnostik island · jalur ke JB Rack Server belum terkonfirmasi</title>`}
+        ${minimap ? '' : '<title>Diagnostik island · jalur backbone belum terkonfirmasi</title>'}
       </path>
       <circle class="topology-backbone-gap-target" cx="${target.diagram.centerX}"
         cy="${target.diagram.topY}" r="5"/>
-      ${minimap ? '' : `<text class="topology-backbone-gap-label" x="${labelX}" y="${labelY}" text-anchor="middle">GAP KE RACK</text>`}
     </g>`
   }).join('')
 }

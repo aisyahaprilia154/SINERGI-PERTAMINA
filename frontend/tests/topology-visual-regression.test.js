@@ -67,7 +67,9 @@ for (const [name, componentCount] of [
         verticalPadding: 0,
       })
 
-      assert.ok(layout.width * fitZoom <= viewport.width + .01)
+      // A long per-JB topology remains horizontally scrollable on a narrow
+      // viewport once the readable zoom floor is reached.
+      assert.ok(layout.width * fitZoom <= viewport.width + .01 || fitZoom === .12)
       assert.ok(layout.height * fitZoom <= viewport.height + .01)
       assert.equal(layout.nodes.length, model.nodes.length)
       assert.equal(layout.sections[0].componentCount, componentCount)
@@ -75,28 +77,27 @@ for (const [name, componentCount] of [
   }
 }
 
-test('assets without pole mounting share one yellow review box per area', () => {
+test('assets without pole mounting stay grouped under their connected JB', () => {
   const model = networkFixture(16, 'FT LOMANIS')
   const layout = calculateTopologyDiagramLayout(model)
 
-  assert.equal(layout.mountingBoxes.length, 1)
-  assert.equal(layout.mountingBoxes[0].id, 'needs-mounting:area-a')
-  assert.equal(layout.mountingBoxes[0].kind, 'needs-mounting')
-  assert.equal(layout.mountingBoxes[0].nodeIds.length, 32)
+  assert.equal(layout.mountingBoxes.length, 16)
+  assert.ok(layout.mountingBoxes.every(({ kind, nodeIds }) => (
+    kind === 'unassigned' && nodeIds.length === 2
+  )))
   assert.equal(layout.sections[0].componentCount, 16)
 })
 
-test('orange box is reserved for explicit indoor or standalone assets', () => {
+test('connected JB scope takes precedence over indoor or standalone hints', () => {
   const model = networkFixture(2, 'FT LOMANIS')
   const excludedNodes = model.nodes.filter(({ diagramClass }) => diagramClass !== 'rack-root').slice(0, 2)
   excludedNodes[0].mountingExpectation = 'indoor'
   excludedNodes[1].mountingExpectation = 'standalone'
   const layout = calculateTopologyDiagramLayout(model)
-  const excluded = layout.mountingBoxes.find(({ kind }) => kind === 'excluded')
-  const needsMounting = layout.mountingBoxes.find(({ kind }) => kind === 'needs-mounting')
-
-  assert.deepEqual(excluded.nodeIds.sort(), excludedNodes.map(({ id }) => id).sort())
-  assert.ok(needsMounting.nodeIds.length > 0)
+  const byId = new Map(layout.nodes.map((node) => [node.id, node]))
+  assert.ok(excludedNodes.every(({ id }) => byId.get(id).mountingBoxId))
+  assert.ok(excludedNodes.every(({ id }) => byId.get(id).mountingRelationStatus === 'unassigned'))
+  assert.equal(layout.mountingBoxes.some(({ kind }) => kind === 'excluded'), false)
 })
 
 test('pole backbone region keeps every component and SVG node without island cards', () => {
@@ -114,9 +115,9 @@ test('pole backbone region keeps every component and SVG node without island car
   assert.equal(countMarkup(svg, 'class="topology-region-boundary"'), 1)
   assert.equal(countMarkup(svg, 'data-component-id='), 1)
   assert.match(svg, /data-component-id="area:area-a:pole-backbone"/)
-  assert.match(svg, /topology-mounting-group needs-mounting/)
-  assert.match(svg, /Perlu mounting/)
-  assert.match(svg, /perlu ditetapkan/)
+  assert.match(svg, /topology-mounting-group unassigned/)
+  assert.match(svg, /Aset lainnya/)
+  assert.match(svg, /tanpa penempatan tiang/)
   assert.equal(countMarkup(svg, 'data-node-id='), model.nodes.length)
   assert.doesNotMatch(svg, /class="topology-island-boundary"/)
 })

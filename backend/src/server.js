@@ -179,6 +179,13 @@ async function queueStaleTopologyRuleSets() {
   for (const record of records) {
     if (!record.topologyInputBundle
       || record.topologyRuleSetVersion === TOPOLOGY_RULE_SET_VERSION) continue
+    // A failed shadow run is already durable in topologyPublication. Do not
+    // enqueue the same stale dataset again on every dev-server restart; that
+    // creates a regeneration storm while the active graph correctly remains
+    // protected behind the publication gate. Operators can explicitly retry
+    // after resolving the recorded gate blockers.
+    if (record.topologyPublication?.ruleSetVersion === TOPOLOGY_RULE_SET_VERSION
+      && record.topologyPublication?.lastShadowRunId) continue
     await queueAutonomousTopologyJob(record.datasetVersion.id, {
       reason: `Topology rules berubah ke ${TOPOLOGY_RULE_SET_VERSION}.`,
     })
