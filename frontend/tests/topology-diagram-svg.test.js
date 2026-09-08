@@ -79,6 +79,7 @@ test('SVG is a light logical projection and hides admin evidence by default', ()
   assert.match(svg, /topology-mounting-group/)
   assert.match(svg, /topology-mounting-bubble/)
   assert.match(svg, /<rect class="topology-mounting-bubble"/)
+  assert.match(svg, /class="topology-presentation-backbone" data-parent-id="core"/)
   const withoutMountingBoxes = renderTopologyDiagramSvg({
     model,
     layout,
@@ -128,7 +129,8 @@ test('SVG renders rack backbone gaps separately from confirmed edges', () => {
     layout.backboneGaps[0].routePoints[1].y - layout.backboneGaps[0].routePoints[0].y,
   ) <= 24, 'gap diagnostic stays local to its island root')
   assert.match(svg, /class="topology-backbone-gap"/)
-  assert.match(svg, /GAP KE RACK/)
+  assert.match(svg, /class="topology-presentation-backbone" data-parent-id="rack"/)
+  assert.doesNotMatch(svg, /GAP KE RACK/)
   assert.doesNotMatch(svg, /data-edge-id="backbone-gap:/)
 })
 

@@ -617,6 +617,13 @@ function buildPoleBackboneAreaLaneSpec({
     connectedNodes,
     assignedNodeIds,
   })
+  const edgeAdjacency = buildLayoutEdgeAdjacency(connectedNodes, edges)
+  const junctionGroups = buildEndpointJunctionGroups({
+    confirmedGroups,
+    connectedNodes,
+    assignedNodeIds,
+    edgeAdjacency,
+  })
   const unmountedNodes = connectedNodes
     .filter((node) => node.diagramClass !== 'rack-root' && !assignedNodeIds.has(node.id))
   const excludedNodeIds = unmountedNodes
@@ -624,11 +631,16 @@ function buildPoleBackboneAreaLaneSpec({
     .map(({ id }) => id)
     .sort((left, right) => compareNodes(nodeById.get(left), nodeById.get(right)))
   const needsMountingNodeIds = unmountedNodes
-    .filter((node) => !['indoor', 'standalone'].includes(node.mountingExpectation))
+    .filter((node) => node.mountingExpectation === 'pole' || node.mountingExpectation == null)
+    .map(({ id }) => id)
+    .sort((left, right) => compareNodes(nodeById.get(left), nodeById.get(right)))
+  const unassignedNodeIds = unmountedNodes
+    .filter((node) => node.mountingExpectation === 'unknown')
     .map(({ id }) => id)
     .sort((left, right) => compareNodes(nodeById.get(left), nodeById.get(right)))
   const groupSpecs = [
     ...confirmedGroups,
+    ...junctionGroups,
     ...(needsMountingNodeIds.length ? [{
       id: `needs-mounting:${area.key}`,
       hostId: null,
@@ -638,17 +650,25 @@ function buildPoleBackboneAreaLaneSpec({
       nodeIds: needsMountingNodeIds,
       mountingConflict: false,
     }] : []),
+    ...(unassignedNodeIds.length ? [{
+      id: `unassigned-mounting:${area.key}`,
+      hostId: null,
+      hostName: 'Aset lainnya',
+      hostType: 'Belum ada penempatan tiang yang terkonfirmasi',
+      kind: 'unassigned',
+      nodeIds: unassignedNodeIds,
+      mountingConflict: false,
+    }] : []),
     ...(excludedNodeIds.length ? [{
       id: `excluded-mounting:${area.key}`,
       hostId: null,
-      hostName: 'Area non-tiang / indoor',
+      hostName: 'Area non-tiang/indoor',
       hostType: 'Aset indoor atau standalone',
       kind: 'excluded',
       nodeIds: excludedNodeIds,
       mountingConflict: false,
     }] : []),
   ]
-  const edgeAdjacency = buildLayoutEdgeAdjacency(connectedNodes, edges)
   const mountingBoxes = groupSpecs.map((group) => buildMountingBoxSpec({
     group,
     nodeById,
@@ -705,7 +725,9 @@ function buildPoleBackboneAreaLaneSpec({
   const coreSpecs = coreNodes.map((node) => {
     const size = hubNodeSize(node, settings)
     const centers = boxCentersByComponent.get(node.componentId) ?? []
-    const desiredCenter = centers.length
+    const desiredCenter = coreNodes.length === 1
+      ? laneWidth / 2
+      : centers.length
       ? centers.reduce((total, value) => total + value, 0) / centers.length
       : laneWidth / 2
     return { node, size, desiredCenter }
@@ -738,6 +760,21 @@ function buildPoleBackboneAreaLaneSpec({
       mountingRole: 'core',
     }))
   })
+  // The rack/server is the presentation parent for every top-level asset
+  // group in the area. This keeps disconnected JB islands and direct devices
+  // (such as an indoor camera connected to the server) visually below the
+  // server without inventing additional operational graph edges.
+  const presentationRootId = placedCoreNodes[0]?.id ?? null
+  if (presentationRootId) {
+    mountingBoxes.forEach((box) => {
+      box.nodes
+        .filter((node) => !node.parentId && !node.layoutParentId)
+        .forEach((node) => {
+          node.parentId = presentationRootId
+          node.layoutParentId = presentationRootId
+        })
+    })
+  }
   const boxNodes = mountingBoxes.flatMap((box) => box.nodes)
   const laneHeight = Math.max(
     coreY + coreHeight + settings.hubPadding,
@@ -768,8 +805,9 @@ function mountingBoxOrder(kind) {
   if (kind === 'confirmed') return 0
   if (kind === 'empty') return 1
   if (kind === 'needs-mounting') return 2
-  if (kind === 'excluded') return 3
-  return 4
+  if (kind === 'unassigned') return 3
+  if (kind === 'excluded') return 4
+  return 5
 }
 
 function buildMountingBoxSpec({
@@ -910,15 +948,19 @@ function buildMountingBoxSpec({
             ? 'downstream-junction'
             : 'endpoint',
       })
-      layoutNode.mountingRelationStatus = group.presentationInheritedNodeIds?.includes(node.id)
+      layoutNode.mountingRelationStatus = group.kind === 'unassigned'
+        ? 'unassigned'
+        : group.presentationInheritedNodeIds?.includes(node.id)
         ? ['indoor', 'standalone'].includes(node.mountingExpectation)
           ? 'excluded'
-          : 'needs-mounting'
+          : node.mountingExpectation === 'pole' || node.mountingExpectation == null
+            ? 'needs-mounting'
+            : 'unassigned'
         : group.kind === 'confirmed'
           ? 'confirmed'
           : group.kind === 'excluded'
             ? 'excluded'
-            : 'needs-mounting'
+            : group.kind === 'needs-mounting' ? 'needs-mounting' : 'unassigned'
       layoutNodes.push(layoutNode)
       rowX += size.width + settings.mountingBoxNodeGapX
     })
@@ -998,6 +1040,77 @@ function attachNamedJunctionFamiliesToMountingGroups({
       ...new Set([...(targetGroup.presentationInheritedNodeIds ?? []), ...inheritedIds]),
     ].sort((left, right) => left.localeCompare(right, 'id'))
   })
+}
+
+function buildEndpointJunctionGroups({
+  confirmedGroups,
+  connectedNodes,
+  assignedNodeIds,
+  edgeAdjacency,
+}) {
+  const connectedNodeById = new Map(connectedNodes.map((node) => [node.id, node]))
+  const junctions = connectedNodes.filter((node) => (
+    ['junction-peer', 'junction-extended'].includes(node.diagramClass)
+  ))
+  const junctionGroupById = new Map()
+  confirmedGroups.forEach((group) => {
+    group.nodeIds
+      .map((nodeId) => connectedNodeById.get(nodeId))
+      .filter((node) => node && ['junction-peer', 'junction-extended'].includes(node.diagramClass))
+      .forEach((node) => junctionGroupById.set(node.id, group))
+  })
+  const extraGroups = junctions
+    .filter((junction) => junction.diagramClass === 'junction-peer')
+    .filter((junction) => !junctionGroupById.has(junction.id) && !assignedNodeIds.has(junction.id))
+    .filter((junction) => (edgeAdjacency.get(junction.id) ?? [])
+      .some(({ id }) => connectedNodeById.get(id)?.diagramClass === 'endpoint'))
+    .sort(compareNodes)
+    .map((junction) => {
+      const group = {
+        id: `junction-endpoints:${junction.id}`,
+        hostId: null,
+        hostName: junction.name || junction.id,
+        hostType: 'JB endpoint group',
+        kind: 'unassigned',
+        nodeIds: [junction.id],
+        mountingConflict: false,
+        presentationInheritedNodeIds: [],
+      }
+      junctionGroupById.set(junction.id, group)
+      assignedNodeIds.add(junction.id)
+      return group
+    })
+  ;[...junctionGroupById.entries()].forEach(([junctionId, group]) => {
+    const endpointIds = (edgeAdjacency.get(junctionId) ?? [])
+      .map(({ id }) => connectedNodeById.get(id))
+      .filter((node) => node?.diagramClass === 'endpoint')
+      .map((node) => node.id)
+      .sort((left, right) => compareNodes(
+        connectedNodeById.get(left),
+        connectedNodeById.get(right),
+      ))
+    endpointIds.forEach((endpointId) => {
+      ;[...new Set(junctionGroupById.values())].forEach((candidate) => {
+        if (candidate === group) return
+        candidate.nodeIds = candidate.nodeIds.filter((id) => id !== endpointId)
+        candidate.presentationInheritedNodeIds = (candidate.presentationInheritedNodeIds ?? [])
+          .filter((id) => id !== endpointId)
+      })
+      if (!group.nodeIds.includes(endpointId)) group.nodeIds.push(endpointId)
+      if (!(group.presentationInheritedNodeIds ?? []).includes(endpointId)) {
+        group.presentationInheritedNodeIds = [
+          ...(group.presentationInheritedNodeIds ?? []),
+          endpointId,
+        ]
+      }
+      assignedNodeIds.add(endpointId)
+    })
+    group.nodeIds.sort((left, right) => compareNodes(
+      connectedNodeById.get(left),
+      connectedNodeById.get(right),
+    ))
+  })
+  return extraGroups
 }
 
 function buildNamedJunctionParents(junctions, adjacency) {

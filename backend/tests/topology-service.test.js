@@ -117,6 +117,48 @@ test('candidate review is audited, materializes confirmed graph, and can be revo
   )
 })
 
+test('reviewing a stale active rule set preserves the other confirmed relations', async () => {
+  const bundle = reviewBundle()
+  const initial = generateRelationArtifacts(bundle)
+  const repository = new MemoryRepository([applyArtifacts(baseRecord(bundle), initial)])
+  const service = new TopologyService({
+    repository,
+    auditLog: new MemoryAuditLog(),
+  })
+  const [startCandidate, endCandidate] = ['start', 'end'].map((side) => (
+    initial.candidates.find(({ sourceEndpointId }) => (
+      sourceEndpointId === `endpoint:geometry:CBL-01:${side}`
+    ))
+  ))
+  await service.confirmCandidate(startCandidate.candidateId, 'admin-1', {
+    reason: 'Endpoint awal diverifikasi.',
+  })
+  await service.confirmCandidate(endCandidate.candidateId, 'admin-1', {
+    reason: 'Endpoint akhir diverifikasi.',
+  })
+  await repository.update('dv-review', (record) => ({
+    ...record,
+    topologyRuleSetVersion: 'semantic-relation-engine/2.1.0',
+    topologyCandidates: record.topologyCandidates.map((candidate) => ({
+      ...candidate,
+      topologyRuleSetVersion: 'semantic-relation-engine/2.1.0',
+    })),
+    confirmedRelations: record.confirmedRelations.map((relation) => ({
+      ...relation,
+      topologyRuleSetVersion: 'semantic-relation-engine/2.1.0',
+    })),
+  }))
+  const stale = await repository.get('dv-review')
+  const relationId = stale.confirmedRelations.find(({ candidateId }) => (
+    candidateId === startCandidate.candidateId
+  )).relationId
+  const revoked = await service.revokeRelation(relationId, 'admin-2', {
+    reason: 'Koneksi awal dibatalkan berdasarkan koreksi lapangan.',
+  })
+  assert.equal(revoked.confirmedRelations.length, 1)
+  assert.equal(revoked.confirmedRelations[0].candidateId, endCandidate.candidateId)
+})
+
 test('mounting override updates only physical placement and survives detach', async () => {
   const bundle = mountingBundle()
   const initial = generateRelationArtifacts(bundle, {
