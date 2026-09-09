@@ -345,6 +345,7 @@ export function renderTopologyDiagramSvg({
           directNodes,
           selectionPathNodes,
           labelVisibility,
+          forceEndpointLabels: context.areaKey === 'ft-pengapon-semarang',
           semanticLevel: resolvedSemanticLevel,
           hoveredAssetId,
           minimap,
@@ -694,6 +695,7 @@ function renderNode(node, {
   directNodes,
   selectionPathNodes = new Set(),
   labelVisibility,
+  forceEndpointLabels = false,
   semanticLevel = 'overview',
   hoveredAssetId = null,
   minimap,
@@ -730,13 +732,14 @@ function renderNode(node, {
   const color = node.isCore
     ? THEME.text
     : isCoreOrJunction ? THEME.text : THEME.secondary
-  const showLabels = labelVisibility === 'all'
+  const persistentEndpointLabel = forceEndpointLabels && !isCoreOrJunction && labelVisibility !== 'off' && !minimap
+  const showLabels = persistentEndpointLabel || labelVisibility === 'all'
     || labelVisibility === 'detail'
     || (labelVisibility === 'core-peer' && isCoreOrJunction)
-  const endpointLabel = labelVisibility === 'all'
+  const endpointLabel = forceEndpointLabels || labelVisibility === 'all'
     || (labelVisibility === 'detail' && !isCoreOrJunction)
   const showType = labelVisibility === 'all' && node.presentation !== 'hub-spoke'
-  const detailLabel = labelVisibility === 'detail' && !isCoreOrJunction
+  const detailLabel = labelVisibility === 'detail' && !isCoreOrJunction && !persistentEndpointLabel
   const labelDetailAttribute = detailLabel
     ? ' data-label-detail="true"'
     : ''
