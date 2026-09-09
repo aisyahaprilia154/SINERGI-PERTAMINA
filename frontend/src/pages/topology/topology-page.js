@@ -53,7 +53,7 @@ function persistTopologyArea(key, area) {
 
 export async function renderTopologyPage(container) {
   document.title = 'Diagram Topologi — SINERGI'
-  document.body.className = 'topology-body'
+  document.body.className = 'map-body topology-body'
   const requested = readRequestedDatasetContext()
 
   container.innerHTML = renderLoadingState(requested)
@@ -946,7 +946,7 @@ function renderWorkspaceShell({ activeContext, state, model }) {
 }
 
 function renderLoadingState(context) {
-  return `<div class="topology-stitch-app topology-stitch-state-app">${renderTopNavigation('topology', context)}<main class="topology-stitch-state"><span class="material-symbols-outlined spin" aria-hidden="true">account_tree</span><h1>Memuat Diagram Topologi</h1><p>Relasi perangkat dan data aktual sedang disiapkan dari dataset aktif.</p></main></div>`
+  return `<div class="topology-stitch-app topology-stitch-state-app">${renderTopNavigation('topology', context)}<main class="map-data-state is-loading" aria-live="polite" aria-busy="true"><span class="material-symbols-outlined" aria-hidden="true">progress_activity</span><h1>Memuat dataset aktif</h1><p>Aset dan relasi sedang dibaca dari versi aktif yang sama.</p></main></div>`
 }
 
 function renderErrorState(context, error) {
