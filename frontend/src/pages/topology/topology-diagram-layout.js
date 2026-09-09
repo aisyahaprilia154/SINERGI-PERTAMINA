@@ -110,7 +110,11 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
         edges: model.edges,
         settings,
       }))
+    const mountedPresentationIds = new Set(model.mountingGroups
+      .filter((group) => group.areaKey === area.key)
+      .flatMap((group) => group.childIds ?? []))
     const disconnectedNodes = (area.isolatedNodeIds ?? [])
+      .filter((id) => !mountedPresentationIds.has(id))
       .map((id) => nodeById.get(id))
       .filter(Boolean)
       .sort(compareNodes)
@@ -582,7 +586,13 @@ function buildPoleBackboneAreaLaneSpec({
   components.forEach((component) => {
     component.nodeIds.forEach((nodeId) => componentByNodeId.set(nodeId, component))
   })
-  const connectedIds = new Set(componentByNodeId.keys())
+  // A mounted endpoint can be physically assigned even when it has no
+  // confirmed logical edge yet. Include those children in the pole lane so
+  // they do not fall into the unrelated-device tray (e.g. DPPU YIA BC-042).
+  const mountedPresentationIds = new Set(mountingGroups
+    .filter((group) => !area?.key || group.areaKey === area.key)
+    .flatMap((group) => group.childIds ?? []))
+  const connectedIds = new Set([...componentByNodeId.keys(), ...mountedPresentationIds])
   const connectedNodes = [...connectedIds].map((id) => nodeById.get(id)).filter(Boolean)
   const coreNodes = connectedNodes
     .filter((node) => node.diagramClass === 'rack-root')
@@ -670,6 +680,12 @@ function buildPoleBackboneAreaLaneSpec({
     .filter((node) => node.mountingExpectation === 'unknown')
     .map(({ id }) => id)
     .sort((left, right) => compareNodes(nodeById.get(left), nodeById.get(right)))
+  const excludedGroupSpecs = buildExcludedMountingGroupSpecs({
+    area,
+    nodeIds: excludedNodeIds,
+    connectedNodes,
+    edgeAdjacency,
+  })
   const groupSpecs = [
     ...confirmedGroups,
     ...emptyPhysicalGroups,
@@ -692,15 +708,7 @@ function buildPoleBackboneAreaLaneSpec({
       nodeIds: unassignedNodeIds,
       mountingConflict: false,
     }] : []),
-    ...(excludedNodeIds.length ? [{
-      id: `excluded-mounting:${area.key}`,
-      hostId: null,
-      hostName: 'Area non-tiang/indoor',
-      hostType: 'Aset indoor atau standalone',
-      kind: 'excluded',
-      nodeIds: excludedNodeIds,
-      mountingConflict: false,
-    }] : []),
+    ...excludedGroupSpecs,
   ]
   const mountingBoxes = groupSpecs.map((group) => buildMountingBoxSpec({
     group,
@@ -842,6 +850,63 @@ function mountingBoxOrder(kind) {
   if (kind === 'unassigned') return 2
   if (kind === 'excluded') return 3
   return 4
+}
+
+function buildExcludedMountingGroupSpecs({ area, nodeIds = [], connectedNodes = [], edgeAdjacency }) {
+  if (!nodeIds.length) return []
+  const base = {
+    hostId: null,
+    hostType: 'Aset indoor atau standalone',
+    kind: 'excluded',
+    mountingConflict: false,
+  }
+  if (area?.key !== 'dppu-yia') {
+    return [{
+      ...base,
+      id: `excluded-mounting:${area?.key ?? 'lainnya'}`,
+      hostName: 'Area non-tiang/indoor',
+      nodeIds,
+    }]
+  }
+  const nodeSet = new Set(nodeIds)
+  const nodeById = new Map(connectedNodes.map((node) => [node.id, node]))
+  const branchAnchors = nodeIds
+    .map((id) => nodeById.get(id))
+    .filter((node) => ['junction-peer', 'junction-extended'].includes(node?.diagramClass))
+    .sort(compareNodes)
+  const branchIds = new Set()
+  branchAnchors.forEach((anchor) => {
+    const queue = [anchor.id]
+    while (queue.length) {
+      const current = queue.shift()
+      if (branchIds.has(current) || !nodeSet.has(current)) continue
+      branchIds.add(current)
+      ;(edgeAdjacency.get(current) ?? []).forEach(({ id }) => {
+        if (nodeSet.has(id) && !branchIds.has(id)) queue.push(id)
+      })
+    }
+  })
+  const branchNodeIds = nodeIds.filter((id) => branchIds.has(id))
+  const serverNodeIds = nodeIds.filter((id) => !branchIds.has(id))
+  const specs = []
+  if (branchNodeIds.length) {
+    specs.push({
+      ...base,
+      id: `excluded-mounting:${area.key}:jb-branch`,
+      hostName: 'Area non-tiang/indoor',
+      nodeIds: branchNodeIds,
+    })
+  }
+  if (serverNodeIds.length) {
+    specs.push({
+      ...base,
+      id: `excluded-mounting:${area.key}:server-branch`,
+      hostName: 'Area non-tiang/indoor · server',
+      hostType: 'Aset langsung terhubung ke server',
+      nodeIds: serverNodeIds,
+    })
+  }
+  return specs
 }
 
 function buildMountingBoxSpec({

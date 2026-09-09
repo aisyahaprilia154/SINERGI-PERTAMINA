@@ -534,6 +534,7 @@ test('DPPU YIA orders poles and preserves cross-pole JB parent families', () => 
     jb('jb-152', 'JB-CCTV-15.2-WP', 'junction_extended'),
     camera('bc-17', 'BC-017'), camera('bc-18', 'BC-018'), camera('bc-21', 'BC-021'),
     camera('bc-37', 'BC-037'), camera('bc-38', 'BC-038'), camera('bc-41', 'BC-041'),
+    camera('bc-42', 'BC-042'),
     camera('dc-39', 'DC-039', 'indoor'), camera('dc-40', 'DC-040', 'indoor'),
   ]
   const edge = (id, sourceNodeId, targetNodeId) => ({
@@ -542,7 +543,7 @@ test('DPPU YIA orders poles and preserves cross-pole JB parent families', () => 
   const graphEdges = [
     edge('server-08', 'server', 'jb-08'),
     edge('08-17', 'jb-08', 'bc-17'), edge('08-18', 'jb-08', 'bc-18'),
-    edge('08-091', 'jb-08', 'jb-091'), edge('09-091', 'jb-09', 'jb-091'),
+    edge('09-091', 'jb-09', 'jb-091'),
     edge('091-21', 'jb-091', 'bc-21'),
     edge('15-151', 'jb-15', 'jb-151'), edge('15-152', 'jb-15', 'jb-152'),
     edge('151-37', 'jb-151', 'bc-37'), edge('151-38', 'jb-151', 'bc-38'),
@@ -559,6 +560,7 @@ test('DPPU YIA orders poles and preserves cross-pole JB parent families', () => 
     mount('m-152', 'jb-152', 'pole-7'), mount('m-41', 'bc-41', 'pole-7'),
     mount('m-39', 'dc-39', 'pole-7'), mount('m-151', 'jb-151', 'pole-8'),
     mount('m-37', 'bc-37', 'pole-8'), mount('m-38', 'bc-38', 'pole-8'),
+    mount('m-42', 'bc-42', 'pole-16'),
   ]
   const model = buildTopologyDiagramModel({
     assets,
@@ -579,10 +581,16 @@ test('DPPU YIA orders poles and preserves cross-pole JB parent families', () => 
     ['T-001', 'T-002', 'T-003', 'T-004', 'T-005', 'T-006', 'T-007', 'T-008', 'T-016'],
     layout.mountingBoxes.filter((box) => /^T-\d+$/.test(box.label)).map((box) => box.label),
   )
-  assert.equal(boxes.get('T-016').kind, 'empty')
+  assert.equal(boxes.get('T-016').kind, 'confirmed')
+  assert.deepEqual(boxes.get('T-016').nodeIds, ['bc-42'])
+  assert.equal(layout.nodes.filter(({ id }) => id === 'bc-42').length, 1)
   assert.equal(boxes.get('T-005').layoutParentBoxId, boxes.get('T-006').id)
   assert.equal(byId.get('jb-091').layoutParentId, 'jb-09')
   assert.deepEqual(new Set(boxes.get('T-005').nodeIds), new Set(['jb-091', 'bc-21']))
+  assert.equal(layout.edges.some(({ sourceNodeId, targetNodeId }) => (
+    new Set([sourceNodeId, targetNodeId]).has('jb-08')
+    && new Set([sourceNodeId, targetNodeId]).has('jb-091')
+  )), false)
   assert.deepEqual(new Set(boxes.get('T-007').nodeIds), new Set(['jb-152', 'bc-41', 'dc-39']))
   assert.deepEqual(new Set(boxes.get('T-008').nodeIds), new Set(['jb-151', 'bc-37', 'bc-38']))
   assert.deepEqual(new Set(boxes.get('Area non-tiang/indoor').nodeIds), new Set(['jb-15', 'dc-40']))
