@@ -1,9 +1,13 @@
 import { resolveTopologyReadiness } from '../domain/topology-readiness.js'
 import {
   buildPoleGroups,
+  ensureDppuYiaKnownMountingRelations,
   MOUNTING_RELATION_TYPE,
 } from '../domain/pole-groups.js'
-import { filterConflictingCameraEdges } from '../domain/device-edge-policy.js'
+import {
+  filterConflictingCameraEdges,
+  filterDppuYiaPresentationEdges,
+} from '../domain/device-edge-policy.js'
 
 const CATEGORY_STYLE = Object.freeze({
   cctv: { color: '#9698f4', softColor: '#f1f1fe', type: 'CCTV', order: 1 },
@@ -112,7 +116,10 @@ export function adaptActiveDatasetForMap(payload) {
   ))
   // The presentation layer may group confirmed mounting relations, but it must
   // never turn proximity into a physical attachment that is absent from data.
-  const mountingRelations = explicitMountingRelations
+  const mountingRelations = ensureDppuYiaKnownMountingRelations(
+    explicitMountingRelations,
+    assets,
+  )
   const mountingOptions = normalizeMountingOptions(
     payload.mountingOptions ?? payload.mountingCandidates,
     resolver,
@@ -315,10 +322,10 @@ export function adaptActiveDatasetForTopology(payload) {
     }
   }).filter(({ id }) => Boolean(id))
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
-  const mountingRelations = normalizeMountingRelations(
+  const mountingRelations = ensureDppuYiaKnownMountingRelations(normalizeMountingRelations(
     payload.mountingRelations ?? [],
     resolver,
-  ).filter((relation) => assetById[relation.sourceAssetId] && assetById[relation.targetAssetId])
+  ).filter((relation) => assetById[relation.sourceAssetId] && assetById[relation.targetAssetId]), assets)
   const mountingExpectations = normalizeMountingExpectations(
     payload.mountingExpectations,
     resolver,
@@ -444,33 +451,36 @@ function confirmedTopologyProjection(payload) {
     })
     const nodeIds = new Set(nodes.map(({ id }) => id))
     const unresolvedEdges = []
-    const edges = filterConflictingCameraEdges(source.edges.flatMap((edge) => {
-      if (!isConfirmedRelation(edge) || edge.relationType === MOUNTING_RELATION_TYPE) return []
-      const originalSource = edge.sourceAssetId ?? edge.sourceNodeId
-      const originalTarget = edge.targetAssetId ?? edge.targetNodeId
-      const sourceAssetId = resolver.resolve(originalSource)
-      const targetAssetId = resolver.resolve(originalTarget)
-      if (!sourceAssetId || !targetAssetId
-        || !nodeIds.has(sourceAssetId)
-        || !nodeIds.has(targetAssetId)
-        || sourceAssetId === targetAssetId) {
-        unresolvedEdges.push({
-          id: edge.id ?? null,
-          sourceAssetId: originalSource,
-          targetAssetId: originalTarget,
-        })
-        return []
-      }
-      return [{
-        ...structuredClone(edge),
-        sourceAssetId,
-        targetAssetId,
-        sourceNodeId: sourceAssetId,
-        targetNodeId: targetAssetId,
-        canonicalSourceAssetId: sourceAssetId,
-        canonicalTargetAssetId: targetAssetId,
-      }]
-    }), nodes)
+    const edges = filterDppuYiaPresentationEdges(
+      filterConflictingCameraEdges(source.edges.flatMap((edge) => {
+        if (!isConfirmedRelation(edge) || edge.relationType === MOUNTING_RELATION_TYPE) return []
+        const originalSource = edge.sourceAssetId ?? edge.sourceNodeId
+        const originalTarget = edge.targetAssetId ?? edge.targetNodeId
+        const sourceAssetId = resolver.resolve(originalSource)
+        const targetAssetId = resolver.resolve(originalTarget)
+        if (!sourceAssetId || !targetAssetId
+          || !nodeIds.has(sourceAssetId)
+          || !nodeIds.has(targetAssetId)
+          || sourceAssetId === targetAssetId) {
+          unresolvedEdges.push({
+            id: edge.id ?? null,
+            sourceAssetId: originalSource,
+            targetAssetId: originalTarget,
+          })
+          return []
+        }
+        return [{
+          ...structuredClone(edge),
+          sourceAssetId,
+          targetAssetId,
+          sourceNodeId: sourceAssetId,
+          targetNodeId: targetAssetId,
+          canonicalSourceAssetId: sourceAssetId,
+          canonicalTargetAssetId: targetAssetId,
+        }]
+      }), nodes),
+      payload.assets,
+    )
     return {
       ...structuredClone(source),
       nodes,
@@ -495,27 +505,30 @@ function confirmedTopologyProjection(payload) {
     sourceName: asset.name,
   }))
   const validIds = new Set(nodes.map(({ id }) => id))
-  const edges = filterConflictingCameraEdges((payload.relations ?? [])
-    .filter((relation) => (
-      relation?.relationType !== MOUNTING_RELATION_TYPE
-      &&
-      isConfirmedRelation(relation)
-      && resolver.resolve(relation.sourceAssetId)
-      && resolver.resolve(relation.targetAssetId)
-      && validIds.has(resolver.resolve(relation.sourceAssetId))
-      && validIds.has(resolver.resolve(relation.targetAssetId))
-      && resolver.resolve(relation.sourceAssetId) !== resolver.resolve(relation.targetAssetId)
-    ))
-    .map((relation) => ({
-      ...structuredClone(relation),
-      id: relation.id,
-      sourceAssetId: resolver.resolve(relation.sourceAssetId),
-      targetAssetId: resolver.resolve(relation.targetAssetId),
-      sourceNodeId: resolver.resolve(relation.sourceAssetId),
-      targetNodeId: resolver.resolve(relation.targetAssetId),
-      verificationStatus: 'confirmed',
-      relationStatus: 'confirmed',
-    })), nodes)
+  const edges = filterDppuYiaPresentationEdges(
+    filterConflictingCameraEdges((payload.relations ?? [])
+      .filter((relation) => (
+        relation?.relationType !== MOUNTING_RELATION_TYPE
+        &&
+        isConfirmedRelation(relation)
+        && resolver.resolve(relation.sourceAssetId)
+        && resolver.resolve(relation.targetAssetId)
+        && validIds.has(resolver.resolve(relation.sourceAssetId))
+        && validIds.has(resolver.resolve(relation.targetAssetId))
+        && resolver.resolve(relation.sourceAssetId) !== resolver.resolve(relation.targetAssetId)
+      ))
+      .map((relation) => ({
+        ...structuredClone(relation),
+        id: relation.id,
+        sourceAssetId: resolver.resolve(relation.sourceAssetId),
+        targetAssetId: resolver.resolve(relation.targetAssetId),
+        sourceNodeId: resolver.resolve(relation.sourceAssetId),
+        targetNodeId: resolver.resolve(relation.targetAssetId),
+        verificationStatus: 'confirmed',
+        relationStatus: 'confirmed',
+      })), nodes),
+    payload.assets,
+  )
   return {
     datasetVersionId: payload.datasetVersion.id,
     nodes,

@@ -45,6 +45,35 @@ export function filterConflictingCameraEdges(edges = [], nodes = []) {
   return asArray(edges).filter((edge) => !suppressed.has(edge))
 }
 
+/**
+ * Removes the explicitly documented DPPU YIA false-positive connection between
+ * JB-CCTV-08-WP and its neighbouring JB-CCTV-09.1-WP extension. The source
+ * graph currently contains this edge as spatial inference, while the facility
+ * topology says the extension belongs to JB-CCTV-09-WP only. This is a scoped
+ * projection correction: it does not create a replacement edge or change
+ * mounting relations.
+ */
+export function filterDppuYiaPresentationEdges(edges = [], assets = []) {
+  const assetById = new Map(asArray(assets).flatMap((asset) => {
+    const id = asset?.canonicalAssetId ?? asset?.assetId ?? asset?.id
+    return id ? [[id, asset]] : []
+  }))
+  const dppuIds = new Set([...assetById.entries()]
+    .filter(([, asset]) => String(asset?.locationGroupKey ?? asset?.areaKey ?? '').toLowerCase() === 'dppu-yia')
+    .map(([id]) => id))
+  const nameById = new Map([...assetById.entries()].map(([id, asset]) => [
+    id,
+    normalizeDppuName(asset?.name ?? asset?.sourceName ?? id),
+  ]))
+  return asArray(edges).filter((edge) => {
+    const sourceId = edge?.sourceAssetId ?? edge?.sourceNodeId ?? edge?.sourceId
+    const targetId = edge?.targetAssetId ?? edge?.targetNodeId ?? edge?.targetId
+    if (!dppuIds.has(sourceId) || !dppuIds.has(targetId)) return true
+    const pair = new Set([nameById.get(sourceId), nameById.get(targetId)])
+    return !(pair.has('JB-CCTV-08-WP') && pair.has('JB-CCTV-09.1-WP'))
+  })
+}
+
 function isDirectDeviceEdge(edge, nodeById) {
   if (!edge || edge.relationKind && edge.relationKind !== 'device_edge') return false
   const source = nodeById.get(edge.sourceAssetId ?? edge.sourceNodeId)
@@ -116,6 +145,10 @@ function relationSource(edge) {
 
 function edgeId(edge) {
   return edge?.id ?? edge?.edgeId ?? edge?.relationId ?? edge?.candidateId ?? ''
+}
+
+function normalizeDppuName(value) {
+  return String(value ?? '').trim().toUpperCase().replace(/\s+/g, ' ')
 }
 
 function asArray(value) {

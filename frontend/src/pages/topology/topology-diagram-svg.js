@@ -345,7 +345,7 @@ export function renderTopologyDiagramSvg({
           directNodes,
           selectionPathNodes,
           labelVisibility,
-          forceEndpointLabels: context.areaKey === 'ft-pengapon-semarang',
+          forceEndpointLabels: ['ft-pengapon-semarang', 'dppu-yia'].includes(context.areaKey),
           semanticLevel: resolvedSemanticLevel,
           hoveredAssetId,
           minimap,

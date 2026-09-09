@@ -166,6 +166,14 @@ function mountTopologyWorkspace(container, {
     componentMaxColumns: 4,
     componentPackingAspectRatio: 2.25,
     layoutStyle: 'central-backbone',
+    ...(state.area === 'dppu-yia'
+      ? {
+        mountingBoxGapX: 40,
+        mountingBoxGapY: 36,
+        mountingBoxNodeGapX: 24,
+        mountingBoxLevelGapY: 40,
+      }
+      : {}),
     overview: state.area === null,
   })
 

@@ -2,11 +2,26 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   createAssetReferenceIndex,
+  ensureDppuYiaKnownMountingRelations,
   inferSpatialMountingRelations,
   mergeMountingRelations,
   mountingRelationsFromAssetProjection,
   mountedChildrenForPole,
 } from '../src/domain/pole-groups.js'
+
+test('DPPU YIA keeps BC-042 visibly mounted on T-016 when the source record is absent', () => {
+  const assets = [
+    { id: 'bc-042', name: 'BC-042', locationGroupKey: 'dppu-yia' },
+    { id: 't-016', name: 'T-016', locationGroupKey: 'dppu-yia' },
+  ]
+  const relations = ensureDppuYiaKnownMountingRelations([], assets)
+  assert.equal(relations.length, 1)
+  assert.deepEqual(
+    [relations[0].sourceAssetId, relations[0].targetAssetId],
+    ['bc-042', 't-016'],
+  )
+  assert.equal(relations[0].relationType, 'mounted_on')
+})
 
 test('mounting projection merges map and detail relations into one complete pole list', () => {
   const assets = [

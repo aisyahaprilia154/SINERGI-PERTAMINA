@@ -162,6 +162,18 @@ test('auto label visibility keeps endpoint labels hidden until close zoom', () =
   assert.match(close, /<text class="topology-node-name"[^>]*>Camera<\/text>/)
 })
 
+test('DPPU YIA keeps camera asset labels visible at overview zoom', () => {
+  const { model, layout } = renderFixture()
+  const svg = renderTopologyDiagramSvg({
+    model,
+    layout,
+    context: { areaKey: 'dppu-yia' },
+    zoom: .35,
+    labelMode: 'auto',
+  })
+  assert.match(svg, /<text class="topology-node-name"[^>]*>Camera<\/text>/)
+})
+
 test('documentation render keeps every endpoint label visible regardless of screen zoom', () => {
   const { model, layout } = renderFixture()
   const documentation = renderTopologyDiagramSvg({

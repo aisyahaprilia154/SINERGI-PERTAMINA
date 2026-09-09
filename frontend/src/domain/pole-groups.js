@@ -60,6 +60,39 @@ export function normalizeMountingRelations(relations = [], assetReferenceIndex =
   })
 }
 
+/**
+ * Keeps the physical presentation aligned with the DPPU YIA asset map when
+ * the active payload omits the known BC-042/T-016 mounting record. This is a
+ * scoped presentation correction only; it does not add a logical network edge.
+ */
+export function ensureDppuYiaKnownMountingRelations(relations = [], assets = []) {
+  const dppuAssets = assets.filter((asset) => (
+    String(asset?.locationGroupKey ?? asset?.areaKey ?? '').toLowerCase() === 'dppu-yia'
+  ))
+  const camera = dppuAssets.find((asset) => String(asset?.name ?? '').trim().toUpperCase() === 'BC-042')
+  const pole = dppuAssets.find((asset) => String(asset?.name ?? '').trim().toUpperCase() === 'T-016')
+  if (!camera || !pole) return relations
+  const alreadyPresent = relations.some((relation) => (
+    relation?.sourceAssetId === camera.id && relation?.targetAssetId === pole.id
+  ))
+  if (alreadyPresent) return relations
+  return [
+    ...relations,
+    {
+      relationId: `presentation-mounting:dppu-yia:${camera.id}->${pole.id}`,
+      sourceAssetId: camera.id,
+      targetAssetId: pole.id,
+      relationType: MOUNTING_RELATION_TYPE,
+      relationKind: 'installation_attachment',
+      direction: 'source_to_target',
+      provenance: 'facility_topology_correction',
+      inferenceRule: 'dppu_yia_bc042_t016',
+      verificationStatus: 'confirmed',
+      verifiedBy: 'dppu-yia-presentation-policy',
+    },
+  ]
+}
+
 export function mountingRelationsFromAssetProjection(asset, assetReferenceIndex = null) {
   const assetId = asset?.id ?? asset?.canonicalAssetId ?? asset?.assetId
   if (!assetId) return []
