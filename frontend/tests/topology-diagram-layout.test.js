@@ -496,6 +496,100 @@ test('confirmed extension poles form child boxes below their numbered parent pol
   assert.equal(boxes.get('pole-group:pole-1').y, boxes.get('pole-group:pole-11').y)
 })
 
+test('DPPU YIA orders poles and preserves cross-pole JB parent families', () => {
+  const pole = (id, name) => ({
+    id,
+    name,
+    type: 'Pole',
+    topologyRole: 'physical_mount',
+    locationGroupKey: 'dppu-yia',
+  })
+  const jb = (id, name, topologyRole = 'junction') => ({
+    id,
+    name,
+    type: topologyRole === 'junction_extended' ? 'JB Extended' : 'Junction Box',
+    topologyRole,
+    locationGroupKey: 'dppu-yia',
+  })
+  const camera = (id, name, mountingExpectation = 'pole') => ({
+    id,
+    name,
+    type: 'CCTV',
+    topologyRole: 'endpoint',
+    mountingExpectation,
+    locationGroupKey: 'dppu-yia',
+  })
+  const assets = [
+    { id: 'server', name: 'SERVER', type: 'Server Rack', topologyRole: 'root', locationGroupKey: 'dppu-yia' },
+    ...[
+      ['pole-1', 'T-001'], ['pole-2', 'T-002'], ['pole-3', 'T-003'], ['pole-4', 'T-004'],
+      ['pole-5', 'T-005'], ['pole-6', 'T-006'], ['pole-7', 'T-007'],
+      ['pole-8', 'T-008'], ['pole-16', 'T-016'],
+    ].map(([id, name]) => pole(id, name)),
+    jb('jb-08', 'JB-CCTV-08-WP'),
+    jb('jb-09', 'JB-CCTV-09-WP'),
+    jb('jb-091', 'JB-CCTV-09.1-WP', 'junction_extended'),
+    jb('jb-15', 'JB-CCTV-15-WP'),
+    jb('jb-151', 'JB-CCTV-15.1-WP', 'junction_extended'),
+    jb('jb-152', 'JB-CCTV-15.2-WP', 'junction_extended'),
+    camera('bc-17', 'BC-017'), camera('bc-18', 'BC-018'), camera('bc-21', 'BC-021'),
+    camera('bc-37', 'BC-037'), camera('bc-38', 'BC-038'), camera('bc-41', 'BC-041'),
+    camera('dc-39', 'DC-039', 'indoor'), camera('dc-40', 'DC-040', 'indoor'),
+  ]
+  const edge = (id, sourceNodeId, targetNodeId) => ({
+    id, sourceNodeId, targetNodeId, relationStatus: 'confirmed',
+  })
+  const graphEdges = [
+    edge('server-08', 'server', 'jb-08'),
+    edge('08-17', 'jb-08', 'bc-17'), edge('08-18', 'jb-08', 'bc-18'),
+    edge('08-091', 'jb-08', 'jb-091'), edge('09-091', 'jb-09', 'jb-091'),
+    edge('091-21', 'jb-091', 'bc-21'),
+    edge('15-151', 'jb-15', 'jb-151'), edge('15-152', 'jb-15', 'jb-152'),
+    edge('151-37', 'jb-151', 'bc-37'), edge('151-38', 'jb-151', 'bc-38'),
+    edge('152-41', 'jb-152', 'bc-41'), edge('152-39', 'jb-152', 'dc-39'),
+    edge('15-40', 'jb-15', 'dc-40'),
+  ]
+  const mount = (id, sourceAssetId, targetAssetId) => ({
+    id, relationType: 'mounted_on', sourceAssetId, targetAssetId,
+  })
+  const mountingRelations = [
+    mount('m-08', 'jb-08', 'pole-4'), mount('m-17', 'bc-17', 'pole-4'),
+    mount('m-18', 'bc-18', 'pole-4'), mount('m-09', 'jb-09', 'pole-6'),
+    mount('m-091', 'jb-091', 'pole-5'), mount('m-21', 'bc-21', 'pole-5'),
+    mount('m-152', 'jb-152', 'pole-7'), mount('m-41', 'bc-41', 'pole-7'),
+    mount('m-39', 'dc-39', 'pole-7'), mount('m-151', 'jb-151', 'pole-8'),
+    mount('m-37', 'bc-37', 'pole-8'), mount('m-38', 'bc-38', 'pole-8'),
+  ]
+  const model = buildTopologyDiagramModel({
+    assets,
+    graph: {
+      graphRevision: 'dppu-yia-presentation',
+      nodes: assets.filter(({ topologyRole }) => topologyRole !== 'physical_mount'),
+      edges: graphEdges,
+    },
+    roots: ['server'],
+    mountingRelations,
+    locationGroups: [{ key: 'dppu-yia', name: 'DPPU YIA' }],
+    area: 'dppu-yia',
+  })
+  const layout = calculateTopologyDiagramLayout(model)
+  const byId = new Map(layout.nodes.map((node) => [node.id, node]))
+  const boxes = new Map(layout.mountingBoxes.map((box) => [box.label, box]))
+  assert.deepEqual(
+    ['T-001', 'T-002', 'T-003', 'T-004', 'T-005', 'T-006', 'T-007', 'T-008', 'T-016'],
+    layout.mountingBoxes.filter((box) => /^T-\d+$/.test(box.label)).map((box) => box.label),
+  )
+  assert.equal(boxes.get('T-016').kind, 'empty')
+  assert.equal(boxes.get('T-005').layoutParentBoxId, boxes.get('T-006').id)
+  assert.equal(byId.get('jb-091').layoutParentId, 'jb-09')
+  assert.deepEqual(new Set(boxes.get('T-005').nodeIds), new Set(['jb-091', 'bc-21']))
+  assert.deepEqual(new Set(boxes.get('T-007').nodeIds), new Set(['jb-152', 'bc-41', 'dc-39']))
+  assert.deepEqual(new Set(boxes.get('T-008').nodeIds), new Set(['jb-151', 'bc-37', 'bc-38']))
+  assert.deepEqual(new Set(boxes.get('Area non-tiang/indoor').nodeIds), new Set(['jb-15', 'dc-40']))
+  assert.equal(new Set(layout.nodes.map(({ id }) => id)).size, layout.nodes.length)
+  assert.equal(layout.edges.length, graphEdges.length)
+})
+
 test('overview layout summarizes areas without materializing asset nodes', () => {
   const model = fixture()
   const overview = calculateTopologyDiagramLayout(model, { overview: true })

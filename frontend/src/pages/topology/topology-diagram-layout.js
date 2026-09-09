@@ -100,6 +100,7 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
         nodeById,
         edges: model.edges,
         mountingGroups: model.mountingGroups,
+        physicalMounts: model.physicalMounts,
         settings,
       })]
       : areaComponents.map((component, index) => buildLaneSpec({
@@ -574,6 +575,7 @@ function buildPoleBackboneAreaLaneSpec({
   nodeById,
   edges,
   mountingGroups = [],
+  physicalMounts = [],
   settings,
 }) {
   const componentByNodeId = new Map()
@@ -586,6 +588,13 @@ function buildPoleBackboneAreaLaneSpec({
     .filter((node) => node.diagramClass === 'rack-root')
     .sort(compareNodes)
   const assignedNodeIds = new Set(coreNodes.map(({ id }) => id))
+  // Presentation-only exception: this DPPU parent JB is intentionally shown
+  // in the non-pole scope while its numbered extensions stay on their poles.
+  // It must not alter the confirmed network graph or mounting records.
+  const presentationExcludedNodeIds = new Set(connectedNodes
+    .filter((node) => presentationExcludedFromPole(node, area))
+    .map(({ id }) => id))
+  presentationExcludedNodeIds.forEach((id) => assignedNodeIds.add(id))
   const confirmedGroups = [...mountingGroups]
     .filter((group) => !(group.childIds ?? []).length
       || (group.childIds ?? []).some((id) => connectedIds.has(id)))
@@ -596,7 +605,9 @@ function buildPoleBackboneAreaLaneSpec({
     .flatMap((group) => {
       const emptyMount = !(group.childIds ?? []).length
       const nodeIds = (group.childIds ?? []).filter((id) => (
-        connectedIds.has(id) && !assignedNodeIds.has(id)
+        connectedIds.has(id)
+          && !assignedNodeIds.has(id)
+          && !presentationExcludedNodeIds.has(id)
       ))
       if (!nodeIds.length && !emptyMount) return []
       nodeIds.forEach((id) => assignedNodeIds.add(id))
@@ -612,10 +623,27 @@ function buildPoleBackboneAreaLaneSpec({
         )),
       }]
     })
+  const confirmedPoleIds = new Set(confirmedGroups
+    .map((group) => group.hostId)
+    .filter(Boolean))
+  const emptyPhysicalGroups = area.key === 'dppu-yia'
+    ? physicalMounts
+      .filter((pole) => pole.areaKey === area.key && !confirmedPoleIds.has(pole.id))
+      .map((pole) => ({
+        id: `pole-group:${pole.id}`,
+        hostId: pole.id,
+        hostName: pole.name,
+        hostType: 'Tiang',
+        kind: 'empty',
+        nodeIds: [],
+        mountingConflict: false,
+      }))
+    : []
   attachNamedJunctionFamiliesToMountingGroups({
     confirmedGroups,
     connectedNodes,
     assignedNodeIds,
+    area,
   })
   const edgeAdjacency = buildLayoutEdgeAdjacency(connectedNodes, edges)
   const junctionGroups = buildEndpointJunctionGroups({
@@ -626,9 +654,13 @@ function buildPoleBackboneAreaLaneSpec({
   })
   const unmountedNodes = connectedNodes
     .filter((node) => node.diagramClass !== 'rack-root' && !assignedNodeIds.has(node.id))
-  const excludedNodeIds = unmountedNodes
-    .filter((node) => ['indoor', 'standalone'].includes(node.mountingExpectation))
-    .map(({ id }) => id)
+  const excludedNodeIds = [
+    ...presentationExcludedNodeIds,
+    ...unmountedNodes
+      .filter((node) => ['indoor', 'standalone'].includes(node.mountingExpectation))
+      .map(({ id }) => id),
+  ]
+    .filter((id, index, all) => all.indexOf(id) === index)
     .sort((left, right) => compareNodes(nodeById.get(left), nodeById.get(right)))
   const needsMountingNodeIds = unmountedNodes
     .filter((node) => node.mountingExpectation === 'pole' || node.mountingExpectation == null)
@@ -640,6 +672,7 @@ function buildPoleBackboneAreaLaneSpec({
     .sort((left, right) => compareNodes(nodeById.get(left), nodeById.get(right)))
   const groupSpecs = [
     ...confirmedGroups,
+    ...emptyPhysicalGroups,
     ...junctionGroups,
     ...(needsMountingNodeIds.length ? [{
       id: `needs-mounting:${area.key}`,
@@ -677,6 +710,7 @@ function buildPoleBackboneAreaLaneSpec({
     settings,
   })).sort((left, right) => (
     mountingBoxOrder(left.kind) - mountingBoxOrder(right.kind)
+      || mountingBoxPoleNumber(left) - mountingBoxPoleNumber(right)
       || left.entryDepth - right.entryDepth
       || left.label.localeCompare(right.label, 'id')
       || left.id.localeCompare(right.id, 'id')
@@ -803,11 +837,11 @@ function buildPoleBackboneAreaLaneSpec({
 
 function mountingBoxOrder(kind) {
   if (kind === 'confirmed') return 0
-  if (kind === 'empty') return 1
-  if (kind === 'needs-mounting') return 2
-  if (kind === 'unassigned') return 3
-  if (kind === 'excluded') return 4
-  return 5
+  if (kind === 'empty') return 0
+  if (kind === 'needs-mounting') return 1
+  if (kind === 'unassigned') return 2
+  if (kind === 'excluded') return 3
+  return 4
 }
 
 function buildMountingBoxSpec({
@@ -992,6 +1026,7 @@ function attachNamedJunctionFamiliesToMountingGroups({
   confirmedGroups,
   connectedNodes,
   assignedNodeIds,
+  area = null,
 }) {
   const connectedNodeById = new Map(connectedNodes.map((node) => [node.id, node]))
   const junctions = connectedNodes.filter((node) => (
@@ -1017,6 +1052,10 @@ function attachNamedJunctionFamiliesToMountingGroups({
       .filter(Boolean))]
     if (!candidateGroups.length) return
     const baseGroup = base ? groupByNodeId.get(base.id) : null
+    // DPPU keeps unmounted base JBs in their own non-pole scope. Other
+    // facilities retain the legacy fallback that co-locates a family when
+    // only the extension has a confirmed mounting group.
+    if (area?.key === 'dppu-yia' && !baseGroup) return
     const targetGroup = baseGroup ?? candidateGroups.sort((left, right) => {
       const firstChildIndex = (group) => Math.min(
         ...members
@@ -1090,6 +1129,10 @@ function buildEndpointJunctionGroups({
         connectedNodeById.get(right),
       ))
     endpointIds.forEach((endpointId) => {
+      // Preserve an explicit physical pole placement when it already owns
+      // the endpoint. Only unassigned endpoints are inherited by a JB-only
+      // presentation group.
+      if (assignedNodeIds.has(endpointId)) return
       ;[...new Set(junctionGroupById.values())].forEach((candidate) => {
         if (candidate === group) return
         candidate.nodeIds = candidate.nodeIds.filter((id) => id !== endpointId)
@@ -1142,7 +1185,12 @@ function buildNamedJunctionParents(junctions, adjacency) {
 }
 
 function junctionNumberIdentity(value) {
-  const match = String(value ?? '').match(/\bjb[\s_-]*0*(\d+)(?:\.(\d+))?/i)
+  // Support both short JB-15.1-WP names and DPPU's JB-CCTV-15.1-WP names.
+  // This identity is presentation metadata only: it links an extension box
+  // back to its numbered parent without creating a network edge.
+  const match = String(value ?? '').match(
+    /\bjb(?:[\s_-]*[a-z]+)*[\s_-]*0*(\d+)(?:[._-]+0*(\d+))?/i,
+  )
   if (!match) return null
   return {
     baseNumber: String(Number(match[1])),
@@ -1273,9 +1321,21 @@ function placeMountingBoxTree(tree, x, y, settings) {
 
 function compareMountingBoxes(left, right) {
   return mountingBoxOrder(left.kind) - mountingBoxOrder(right.kind)
+    || mountingBoxPoleNumber(left) - mountingBoxPoleNumber(right)
     || left.entryDepth - right.entryDepth
     || left.label.localeCompare(right.label, 'id')
     || left.id.localeCompare(right.id, 'id')
+}
+
+function mountingBoxPoleNumber(box) {
+  const label = String(box.hostName ?? box.label ?? '')
+  const match = label.match(/\bt[\s_-]*0*(\d+)\b/i)
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER
+}
+
+function presentationExcludedFromPole(node, area) {
+  if (area?.key !== 'dppu-yia') return false
+  return String(node.name ?? '').trim().toUpperCase() === 'JB-CCTV-15-WP'
 }
 
 function buildLayoutEdgeAdjacency(nodes, edges) {
