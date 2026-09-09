@@ -1698,9 +1698,7 @@ export function renderTopNavigation(activeView = 'map', context = null) {
   return `
     <header class="top-navigation${topologyNavigation ? ' topology-top-navigation' : ''}">
       <a class="brand-lockup nav-brand" href="/" aria-label="SINERGI">
-        ${topologyNavigation
-          ? '<span class="material-symbols-outlined topology-nav-brand-icon" aria-hidden="true">hub</span>'
-          : '<span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>'}
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
         <span><strong>SINERGI</strong><small>Asset Network</small></span>
       </a>
       <nav aria-label="Navigasi utama">
@@ -1712,8 +1710,8 @@ export function renderTopNavigation(activeView = 'map', context = null) {
         </a>
       </nav>
       <div class="nav-actions">
-        <button class="icon-button" type="button" aria-label="${topologyNavigation ? 'Cari' : 'Bantuan'}">
-          <span class="material-symbols-outlined" aria-hidden="true">${topologyNavigation ? 'search' : 'help'}</span>
+        <button class="icon-button" type="button" aria-label="Bantuan">
+          <span class="material-symbols-outlined" aria-hidden="true">help</span>
         </button>
         <button class="icon-button notification-button" type="button" aria-label="Notifikasi">
           <span class="material-symbols-outlined" aria-hidden="true">notifications</span><i></i>

@@ -1,16 +1,16 @@
 /* Stitch-inspired topology workspace. The graph itself remains data-driven;
    this sheet owns only the surrounding UI and the responsive canvas. */
 :root {
-  --topology-navy: #03071d;
+  --topology-navy: var(--color-text-primary, #1b2b3d);
   --topology-teal: #006c4b;
   --topology-traced: #5b7eff;
-  --topology-warm: #fdfcfb;
+  --topology-warm: var(--color-page, #f4f7fa);
   --topology-surface: #fff;
-  --topology-low: #f3f4f5;
+  --topology-low: #f1f5f9;
   --topology-container: #edeeef;
-  --topology-border: #c7c5ce;
-  --topology-muted: #77767e;
-  --topology-text-muted: #46464d;
+  --topology-border: var(--color-border, #d8e2ed);
+  --topology-muted: var(--color-text-muted, #8996aa);
+  --topology-text-muted: var(--color-text-secondary, #647891);
   --topology-error: #ba1a1a;
   --topology-shadow: 0 2px 12px rgba(3, 7, 29, .06);
 }
@@ -22,7 +22,7 @@
   overflow: hidden;
   color: var(--topology-navy);
   background: var(--topology-warm);
-  font-family: Inter, var(--font-family-map, system-ui), sans-serif;
+  font-family: var(--font-family-map, Inter), sans-serif;
 }
 
 .topology-body :where(button, a, input, select, [tabindex]):focus-visible {
@@ -39,107 +39,6 @@
   background: var(--topology-warm);
 }
 
-.topology-stitch-app .top-navigation {
-  height: 56px;
-  min-height: 56px;
-  flex: 0 0 56px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--topology-border);
-  box-shadow: none;
-  font-family: Inter, sans-serif;
-}
-
-.topology-stitch-app .top-navigation .nav-brand {
-  width: auto;
-  min-width: 164px;
-  gap: 8px;
-}
-
-.topology-stitch-app .top-navigation .nav-brand > span:last-child {
-  display: block;
-}
-
-.topology-stitch-app .top-navigation .nav-brand strong {
-  color: var(--topology-navy);
-  font-size: 14px;
-  letter-spacing: .08em;
-}
-
-.topology-stitch-app .top-navigation .nav-brand small {
-  display: none;
-}
-
-.topology-stitch-app .top-navigation .topology-nav-brand-icon {
-  color: var(--topology-navy);
-  font-size: 24px;
-}
-
-.topology-stitch-app .top-navigation nav {
-  height: 100%;
-  gap: 4px;
-}
-
-.topology-stitch-app .top-navigation nav a {
-  height: 34px;
-  align-self: center;
-  padding: 0 12px;
-  color: var(--topology-text-muted);
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 550;
-}
-
-.topology-stitch-app .top-navigation nav a::after {
-  display: none;
-}
-
-.topology-stitch-app .top-navigation nav a.active {
-  color: var(--topology-navy);
-  background: #dde1ff;
-}
-
-.topology-stitch-app .top-navigation nav a:hover {
-  background: var(--topology-low);
-}
-
-.topology-stitch-app .top-navigation nav a span {
-  display: none;
-}
-
-.topology-stitch-app .top-navigation .nav-actions {
-  gap: 8px;
-}
-
-.topology-stitch-app .top-navigation .nav-actions .icon-button {
-  width: 32px;
-  height: 32px;
-  color: var(--topology-text-muted);
-  border: 0;
-  border-radius: 50%;
-}
-
-.topology-stitch-app .top-navigation .nav-actions .icon-button:hover {
-  background: var(--topology-low);
-}
-
-.topology-stitch-app .top-navigation .user-menu {
-  height: 34px;
-  padding-left: 8px;
-  border-left: 1px solid var(--topology-border);
-}
-
-.topology-stitch-app .top-navigation .user-menu > span:first-child {
-  width: 30px;
-  height: 30px;
-  background: var(--topology-navy);
-  border-radius: 50%;
-  font-size: 11px;
-}
-
-.topology-stitch-app .top-navigation .user-menu-identity,
-.topology-stitch-app .top-navigation .user-menu-chevron {
-  display: none;
-}
 
 .topology-stitch-shell {
   min-height: 0;
@@ -532,7 +431,7 @@
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--topology-border);
-  background: var(--topology-low);
+  background: var(--topology-surface);
 }
 
 .topology-stitch-inspector-head h3,
@@ -581,9 +480,9 @@
   display: grid;
   place-items: center;
   color: var(--topology-navy);
-  background: #eef0ff;
-  border: 1px solid #cdd3ff;
-  border-radius: 6px;
+  background: #ecf1f6;
+  border: 1px solid #ecf1f6;
+  border-radius: 12px;
 }
 
 .topology-stitch-asset-icon.offline {
@@ -654,7 +553,7 @@
   padding: 11px;
   background: #fbfbfb;
   border: 1px solid var(--topology-border);
-  border-radius: 6px;
+  border-radius: 12px;
 }
 
 .topology-stitch-section-label {
@@ -909,9 +808,9 @@
   z-index: 40;
   padding: 0 14px 16px;
   color: var(--topology-navy);
-  background: rgba(255, 255, 255, .98);
+  background: #fff;
   border: 1px solid var(--topology-border);
-  border-radius: 8px;
+  border-radius: 16px;
   box-shadow: 0 8px 24px rgba(3, 7, 29, .12);
 }
 
@@ -923,7 +822,8 @@
   min-height: 58px;
   margin: 0 -14px 14px;
   padding: 0 12px 0 14px;
-  background: var(--topology-low);
+  background: var(--topology-surface);
+  border-radius: 16px 16px 0 0;
 }
 
 .topology-stitch-eyebrow {
@@ -946,13 +846,13 @@
 .topology-stitch-select,
 .topology-stitch-search-field {
   width: 100%;
-  min-height: 36px;
+  min-height: 44px;
   box-sizing: border-box;
   color: var(--topology-navy);
   background: var(--topology-surface);
   border: 1px solid var(--topology-border);
-  border-radius: 5px;
-  font-size: 11px;
+  border-radius: 12px;
+  font-size: 13px;
 }
 
 .topology-stitch-select {
@@ -1262,18 +1162,8 @@
 }
 
 @media (max-width: 820px) {
-  .topology-stitch-app .top-navigation nav a {
-    padding: 0 8px;
-    font-size: 11px;
-  }
 
-  .topology-stitch-app .top-navigation .nav-brand {
-    min-width: 120px;
-  }
 
-  .topology-stitch-app .top-navigation .nav-actions .icon-button:first-child {
-    display: none;
-  }
 
   .topology-stitch-shell {
     position: relative;
@@ -1300,17 +1190,8 @@
 }
 
 @media (max-width: 620px) {
-  .topology-stitch-app .top-navigation {
-    padding: 0 10px;
-  }
 
-  .topology-stitch-app .top-navigation nav {
-    display: none;
-  }
 
-  .topology-stitch-app .top-navigation .nav-brand {
-    min-width: 0;
-  }
 
   .topology-stitch-rail {
     width: 48px;
