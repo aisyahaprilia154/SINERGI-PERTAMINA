@@ -509,6 +509,7 @@ function mountTopologyWorkspace(container, {
         branchName: activeContext.branchName,
         datasetId: activeContext.datasetId,
         datasetVersionId: activeContext.datasetVersionId,
+        areaKey: state.area,
       },
       selectedAssetId: state.selectedAssetId,
       selectedEdgeId: state.selectedEdgeId,
