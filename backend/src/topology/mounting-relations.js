@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { correctedMountingExpectation } from '../../../shared/facility-corrections.mjs'
 
 export const MOUNTING_RELATION_TYPE = 'mounted_on'
 // Keep the mounting edge compatible with the topology engine's existing
@@ -64,6 +65,15 @@ export function generateMountingArtifacts(topologyInputBundle, {
 
   mountableNodes.forEach((asset) => {
     let expectation = expectations.byAsset.get(asset.id)
+    const facilityExpectation = correctedMountingExpectation(asset)
+    if (facilityExpectation) {
+      expectations.byAsset.set(asset.id, createMountingExpectation({
+        assetId: asset.id, expectation: facilityExpectation,
+        provenance: 'facility_topology_correction', updatedAt: generatedAt,
+        reason: 'Koreksi pemasangan FT Tegal Baru dari pengguna.',
+      }))
+      return
+    }
     const nearbyOptions = poles
       .filter((pole) => sameFacilityScope(asset, pole, bundle))
       .map((pole) => ({

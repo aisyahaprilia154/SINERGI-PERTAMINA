@@ -8,6 +8,7 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --include=optional
 
 COPY frontend/ ./
+COPY shared/ /shared/
 ARG VITE_SINERGI_BASEMAP_TILES
 ARG VITE_SINERGI_VECTOR_TILES_URL
 ARG VITE_SINERGI_BASEMAP_ATTRIBUTION

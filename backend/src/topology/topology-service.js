@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { projectFacilityRecord } from './facility-record-projection.js'
 import { AppError } from '../errors.js'
 import {
   buildAssetIdentityMapFromRecord,
@@ -89,7 +90,7 @@ export class TopologyService {
     return normalizedTraceGraphFromCache(
       this.traceGraphCache,
       this.traceGraphObjectCache,
-      record,
+      projection === null ? projectFacilityRecord(record) : record,
       identityMap,
       projection,
     )
@@ -767,7 +768,7 @@ export class TopologyService {
   }
 
   async getGraph(datasetVersionId) {
-    const record = await this.repository.get(datasetVersionId)
+    const record = projectFacilityRecord(await this.repository.get(datasetVersionId))
     const graph = this.normalizedTraceGraph(record)
     const confirmedRelations = filterConflictingCameraEdges(
       record.confirmedRelations,

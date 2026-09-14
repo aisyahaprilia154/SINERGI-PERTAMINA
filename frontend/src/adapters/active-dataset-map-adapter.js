@@ -1,4 +1,5 @@
 import { resolveTopologyReadiness } from '../domain/topology-readiness.js'
+import { correctFacilityEdges, correctedMountingExpectation } from '../../../shared/facility-corrections.mjs'
 import {
   buildPoleGroups,
   ensureDppuYiaKnownMountingRelations,
@@ -86,6 +87,7 @@ export function adaptActiveDatasetForMap(payload) {
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
   const validNodeIds = new Set(assets.map(({ id }) => id))
   const topologyGraph = confirmedTopologyProjection(payload)
+  topologyGraph.edges = correctFacilityEdges(topologyGraph.edges, assets)
   const resolver = createFrontendIdentityResolver(payload)
   const topologyReadiness = resolveTopologyReadiness({
     topologyReadiness: payload.topologyReadiness,
@@ -117,7 +119,7 @@ export function adaptActiveDatasetForMap(payload) {
   // The presentation layer may group confirmed mounting relations, but it must
   // never turn proximity into a physical attachment that is absent from data.
   const mountingRelations = ensureDppuYiaKnownMountingRelations(
-    explicitMountingRelations,
+    explicitMountingRelations.filter(relation => !correctedMountingExpectation(assetById[relation.sourceAssetId])),
     assets,
   )
   const mountingOptions = normalizeMountingOptions(
@@ -188,7 +190,8 @@ export function adaptActiveDatasetForMap(payload) {
     asset.mountedAssetIds = mountingRelations
       .filter((relation) => relation.targetAssetId === asset.id)
       .map((relation) => relation.sourceAssetId)
-    asset.mountingExpectation = expectationByAssetId.get(asset.id)?.expectation ?? 'unknown'
+    asset.mountingExpectation = correctedMountingExpectation(asset)
+      ?? expectationByAssetId.get(asset.id)?.expectation ?? 'unknown'
     asset.mountingReview = mountingReviewByAssetId.get(asset.id) ?? null
   })
   exportAssets.forEach((asset) => {
@@ -321,11 +324,13 @@ export function adaptActiveDatasetForTopology(payload) {
       location: asset.location ?? asset.locationText ?? location.locationGroupName,
     }
   }).filter(({ id }) => Boolean(id))
+  topologyGraph.edges = correctFacilityEdges(topologyGraph.edges, assets)
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
   const mountingRelations = ensureDppuYiaKnownMountingRelations(normalizeMountingRelations(
     payload.mountingRelations ?? [],
     resolver,
-  ).filter((relation) => assetById[relation.sourceAssetId] && assetById[relation.targetAssetId]), assets)
+  ).filter((relation) => assetById[relation.sourceAssetId] && assetById[relation.targetAssetId]
+    && !correctedMountingExpectation(assetById[relation.sourceAssetId])), assets)
   const mountingExpectations = normalizeMountingExpectations(
     payload.mountingExpectations,
     resolver,
@@ -343,7 +348,8 @@ export function adaptActiveDatasetForTopology(payload) {
     item,
   ]))
   assets.forEach((asset) => {
-    asset.mountingExpectation = expectationByAssetId.get(asset.id)?.expectation ?? 'unknown'
+    asset.mountingExpectation = correctedMountingExpectation(asset)
+      ?? expectationByAssetId.get(asset.id)?.expectation ?? 'unknown'
     asset.mountingReview = mountingReviewByAssetId.get(asset.id) ?? null
   })
   const poleGroups = buildPoleGroups({ assets, mountingRelations })
@@ -703,7 +709,7 @@ export function adaptActiveAssetDetail(payload, mapAsset) {
   const mountingRelations = normalizeMountingRelations(
     payload.mountingRelations ?? mapAsset.mountingRelations ?? [],
     detailReferenceResolver,
-  )
+  ).filter(relation => relation.sourceAssetId !== expectedId || !correctedMountingExpectation(mapAsset))
   const mountingExpectations = normalizeMountingExpectations(
     payload.mountingExpectations ?? mapAsset.mountingExpectations ?? [],
     detailReferenceResolver,
@@ -744,7 +750,7 @@ export function adaptActiveAssetDetail(payload, mapAsset) {
       detailReferenceResolver,
     ),
     mountingOptions,
-    mountingExpectation: mountingExpectations.find(({ assetId }) => (
+    mountingExpectation: correctedMountingExpectation(mapAsset) ?? mountingExpectations.find(({ assetId }) => (
       assetId === expectedId
     ))?.expectation ?? mapAsset.mountingExpectation ?? 'unknown',
     mountingReview: mountingReviewItems.find(({ assetId }) => (

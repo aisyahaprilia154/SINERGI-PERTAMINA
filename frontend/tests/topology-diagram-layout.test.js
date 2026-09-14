@@ -314,7 +314,7 @@ test('endpoint cameras stay inside the connected JB or pole scope', () => {
 
   const indoorBox = [...boxes.values()].find((box) => box.kind === 'excluded')
   assert.ok(indoorBox)
-  assert.equal(indoorBox.label, 'Area non-tiang/indoor')
+  assert.equal(indoorBox.label, 'Indoor · Cam-05')
   assert.deepEqual(indoorBox.nodeIds, ['cam-5'])
   assert.equal(byId.get('cam-5').layoutParentId, 'server')
   assert.ok(layout.nodes

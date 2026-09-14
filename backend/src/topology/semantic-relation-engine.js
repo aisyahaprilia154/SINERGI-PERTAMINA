@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { correctFacilityBundle, facilityConflictPredicate } from '../../../shared/facility-corrections.mjs'
 import { AppError } from '../errors.js'
 import {
   evaluateAccuracyGate,
@@ -108,7 +109,7 @@ export function generateRelationArtifacts(topologyInputBundle, {
   generatedAt = new Date().toISOString(),
 } = {}) {
   const settings = normalizeConfig(config)
-  const bundle = normalizeAndValidateBundle(topologyInputBundle)
+  const bundle = normalizeAndValidateBundle(correctFacilityBundle(topologyInputBundle))
   const topologyPolicy = normalizeTopologyPolicy(
     bundle.topologyPolicy ?? settings.topologyPolicy,
   )
@@ -195,8 +196,10 @@ export function generateRelationArtifacts(topologyInputBundle, {
     .forEach((endpoint) => {
       pushCandidate(rawCandidates, unresolvedTerminationCandidate(endpoint), candidateBudget, 'unresolved_termination')
     })
+  const conflictsWithFacilityRelation = facilityConflictPredicate(nodes)
   const candidates = scoreAndProposeCandidates(
-    collapseTargetInterfaceAlternatives(rawCandidates),
+    collapseTargetInterfaceAlternatives(rawCandidates.filter(candidate =>
+      !conflictsWithFacilityRelation(candidate))),
     settings,
     generatedAt,
     bundle.datasetVersion.id,
@@ -337,7 +340,7 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
   generatedAt = new Date().toISOString(),
 } = {}) {
   const settings = normalizeConfig(config)
-  const bundle = normalizeAndValidateBundle(topologyInputBundle)
+  const bundle = normalizeAndValidateBundle(correctFacilityBundle(topologyInputBundle))
   const topologyPolicy = normalizeTopologyPolicy(
     bundle.topologyPolicy ?? settings.topologyPolicy,
   )
@@ -366,8 +369,10 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
     lineworkIssues,
     computedLineworkIssues,
   )
+  const conflictsWithFacilityRelation = facilityConflictPredicate(nodes)
   const normalizedCandidates = demoteConflictingCameraCandidates(
-    structuredClone(asArray(candidates)),
+    structuredClone(asArray(candidates).filter(candidate =>
+      !conflictsWithFacilityRelation(candidate))),
     nodes,
   )
   const confirmedRelations = buildConfirmedRelations({

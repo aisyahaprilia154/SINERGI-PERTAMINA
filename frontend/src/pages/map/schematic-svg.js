@@ -2,6 +2,7 @@ import {
   SCHEMATIC_CATEGORY_STYLES as CATEGORY_STYLES,
   SCHEMATIC_THEME as SVG_THEME,
 } from './schematic-theme.js'
+import { assetDescription } from '../../domain/asset-description.js'
 
 export function renderSchematicSvg({
   graph,
@@ -241,7 +242,7 @@ function renderNode(node, selectedAssetId, sourceIconDataByUrl) {
     node.isAnchor ? 'anchor' : '',
     node.id === selectedAssetId ? 'selected' : '',
   ].filter(Boolean).join(' ')
-  const detailLabel = shortenType(node.type)
+  const detailLabel = assetDescription(node)
   const displayName = shortenNodeLabel(node.name || 'Aset tanpa nama')
   const sourceIcon = sourceIconDataByUrl?.get?.(node.sourceIconUrl) ?? null
 
