@@ -3,6 +3,7 @@ import {
   normalizeTopologyRole,
 } from '../../domain/topology-diagram-model.js'
 import { semanticZoomLevelForZoom } from './topology-viewport.js'
+import { assetDescription } from '../../domain/asset-description.js'
 
 const THEME = Object.freeze({
   background: '#fdfcfb',
@@ -155,7 +156,6 @@ export function renderTopologyDiagramSvg({
           .topology-diagram-svg[data-semantic-level="overview"] .topology-island-label{font-size:16px;letter-spacing:.1em}
           .topology-diagram-svg[data-semantic-level="overview"] .topology-island-root{font-size:14px}
           .topology-diagram-svg[data-semantic-level="overview"] .topology-island-meta{font-size:12px}
-          .topology-diagram-svg[data-semantic-level="overview"] .topology-node.core .topology-node-name{display:none}
           .topology-lane{fill:none;stroke:none}
           .topology-lane-kicker{font:800 8px Inter,ui-sans-serif,system-ui;fill:#718492;letter-spacing:.09em}
           .topology-lane-meta{font:600 8px Inter,ui-sans-serif,system-ui;fill:#91a0ab}
@@ -481,7 +481,7 @@ function renderMountingGroups(model, layout, {
         ? { fill: '#f8fafc', stroke: '#94a3b8' }
         : mountingBubblePalette(box.hostId || box.id, index)
     const label = box.kind === 'excluded'
-      ? 'Area non-tiang/indoor'
+      ? hostName
       : box.kind === 'needs-mounting'
         ? 'Perlu mounting'
       : box.kind === 'unassigned'
@@ -519,11 +519,10 @@ function renderMountingGroups(model, layout, {
       <rect class="topology-mounting-bubble" x="${box.x}" y="${box.y}"
         width="${box.width}" height="${box.height}" rx="12"
         fill="${palette.fill}" stroke="${palette.stroke}"/>
-      <line class="topology-mounting-header-line" x1="${box.x}" y1="${box.y + 30}"
-        x2="${box.x + box.width}" y2="${box.y + 30}"/>
+      <line class="topology-mounting-header-line" x1="${box.x}" y1="${box.y + 44}"
+        x2="${box.x + box.width}" y2="${box.y + 44}"/>
       <text class="topology-mounting-label" x="${box.x + 12}" y="${box.y + 19}">${escapeXml(label)}</text>
-      <text class="topology-mounting-meta" x="${box.x + box.width - 12}" y="${box.y + 19}"
-        text-anchor="end">${escapeXml(meta)}</text>
+      <text class="topology-mounting-meta" x="${box.x + 12}" y="${box.y + 33}">${escapeXml(meta)}</text>
       ${box.mountingConflict && !minimap ? `<text class="topology-mounting-meta" x="${box.x + 12}"
         y="${box.y + box.height - 8}">Periksa konflik mounting</text>` : ''}
       <title>${escapeXml(`${label} · ${meta}`)}</title>
@@ -733,13 +732,13 @@ function renderNode(node, {
     ? THEME.text
     : isCoreOrJunction ? THEME.text : THEME.secondary
   const persistentEndpointLabel = forceEndpointLabels && !isCoreOrJunction && labelVisibility !== 'off' && !minimap
-  const showLabels = persistentEndpointLabel || labelVisibility === 'all'
+  const showLabels = (!minimap && labelVisibility !== 'off') || persistentEndpointLabel || labelVisibility === 'all'
     || labelVisibility === 'detail'
     || (labelVisibility === 'core-peer' && isCoreOrJunction)
   const endpointLabel = forceEndpointLabels || labelVisibility === 'all'
     || (labelVisibility === 'detail' && !isCoreOrJunction)
-  const showType = labelVisibility === 'all' && node.presentation !== 'hub-spoke'
-  const detailLabel = labelVisibility === 'detail' && !isCoreOrJunction && !persistentEndpointLabel
+  const showType = showLabels && !minimap
+  const detailLabel = false
   const labelDetailAttribute = detailLabel
     ? ' data-label-detail="true"'
     : ''
@@ -757,7 +756,7 @@ function renderNode(node, {
         cx="${visualBox.x + visualBox.width - 1}" cy="${visualBox.y + 1}" r="${node.isEndpoint ? 3 : 4}"/>
       ${showLabels && (isCoreOrJunction || endpointLabel) ? `
         <text class="topology-node-name"${labelDetailAttribute} x="${iconX}" y="${labelY}">${escapeXml(labelText)}</text>
-        ${showType ? `<text class="topology-node-type"${labelDetailAttribute} x="${iconX}" y="${typeY}">${escapeXml(shorten(node.type || 'Aset', 27))}</text>` : ''}
+        ${showType ? `<text class="topology-node-type"${labelDetailAttribute} x="${iconX}" y="${typeY}">${escapeXml(shorten(assetDescription(node), 36))}</text>` : ''}
       ` : ''}
     </g>
   `

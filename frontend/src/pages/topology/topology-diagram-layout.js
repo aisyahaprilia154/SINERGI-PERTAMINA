@@ -1,3 +1,5 @@
+import { assetDescription } from '../../domain/asset-description.js'
+
 const DEFAULT_OPTIONS = Object.freeze({
   margin: 28,
   sectionGap: 26,
@@ -43,7 +45,7 @@ const DEFAULT_OPTIONS = Object.freeze({
   hubEndpointHeight: 36,
   mountingBoxMinWidth: 196,
   mountingBoxPadding: 16,
-  mountingBoxHeaderHeight: 30,
+  mountingBoxHeaderHeight: 44,
   mountingBoxGapX: 24,
   mountingBoxGapY: 26,
   mountingBoxLevelGapY: 34,
@@ -93,7 +95,9 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
       .filter(Boolean)
       .sort((left, right) => compareComponentPriority(left, right, nodeById)
         || left.componentId.localeCompare(right.componentId, 'id'))
-    const laneSpecs = usesPoleBoxes && areaComponents.length
+    const nonPoleIds = (area.nodeIds ?? []).filter(id =>
+      ['indoor', 'standalone'].includes(nodeById.get(id)?.mountingExpectation))
+    const laneSpecs = usesPoleBoxes && (areaComponents.length || nonPoleIds.length)
       ? [buildPoleBackboneAreaLaneSpec({
         area,
         components: areaComponents,
@@ -115,10 +119,12 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
       .flatMap((group) => group.childIds ?? []))
     const disconnectedNodes = (area.isolatedNodeIds ?? [])
       .filter((id) => !mountedPresentationIds.has(id))
+      .filter(id => !usesPoleBoxes || !nonPoleIds.includes(id))
       .map((id) => nodeById.get(id))
       .filter(Boolean)
       .sort(compareNodes)
     const suggestedOnlyNodes = (area.suggestedOnlyNodeIds ?? [])
+      .filter(id => !usesPoleBoxes || !nonPoleIds.includes(id))
       .map((id) => nodeById.get(id))
       .filter(Boolean)
       .sort(compareNodes)
@@ -482,6 +488,7 @@ export function createTopologyDiagramLayoutCacheKey({
     (model?.unresolved ?? []).map(({ unresolvedId }) => unresolvedId).sort().join(','),
     (model?.candidates ?? []).map(({ candidateId }) => candidateId).sort().join(','),
     (model?.mountingGroups ?? []).map(({ id, childIds }) => `${id}:${childIds.join(',')}`).sort().join(','),
+    (model?.nodes ?? []).map(node => `${node.id}:${node.mountingExpectation ?? ''}`).sort().join(','),
     families,
     hideFiltered ? 'hide' : 'dim',
     overview ? 'overview' : 'detail',
@@ -592,7 +599,9 @@ function buildPoleBackboneAreaLaneSpec({
   const mountedPresentationIds = new Set(mountingGroups
     .filter((group) => !area?.key || group.areaKey === area.key)
     .flatMap((group) => group.childIds ?? []))
-  const connectedIds = new Set([...componentByNodeId.keys(), ...mountedPresentationIds])
+  const nonPoleIds = (area.nodeIds ?? []).filter(id =>
+    ['indoor', 'standalone'].includes(nodeById.get(id)?.mountingExpectation))
+  const connectedIds = new Set([...componentByNodeId.keys(), ...mountedPresentationIds, ...nonPoleIds])
   const connectedNodes = [...connectedIds].map((id) => nodeById.get(id)).filter(Boolean)
   const coreNodes = connectedNodes
     .filter((node) => node.diagramClass === 'rack-root')
@@ -861,12 +870,29 @@ function buildExcludedMountingGroupSpecs({ area, nodeIds = [], connectedNodes = 
     mountingConflict: false,
   }
   if (area?.key !== 'dppu-yia') {
-    return [{
-      ...base,
-      id: `excluded-mounting:${area?.key ?? 'lainnya'}`,
-      hostName: 'Area non-tiang/indoor',
-      nodeIds,
-    }]
+    // Non-pole devices get separate frames per connected installation. A
+    // network edge to a pole-mounted JB must never imply physical mounting.
+    const remaining = new Set(nodeIds)
+    const byId = new Map(connectedNodes.map(node => [node.id, node]))
+    const groups = []
+    while (remaining.size) {
+      const first = [...remaining].sort()[0]
+      const ids = [], queue = [first]
+      while (queue.length) {
+        const id = queue.shift()
+        if (!remaining.delete(id)) continue
+        ids.push(id)
+        for (const next of edgeAdjacency.get(id) ?? []) {
+          if (remaining.has(next.id)
+            && byId.get(next.id)?.mountingExpectation === byId.get(first)?.mountingExpectation) queue.push(next.id)
+        }
+      }
+      const kind = byId.get(first)?.mountingExpectation === 'indoor' ? 'Indoor' : 'Non-tiang'
+      groups.push({ ...base, id: `excluded-mounting:${area?.key}:${first}`,
+        hostName: `${kind} · ${ids.map(id => byId.get(id)?.name ?? id).join(', ')}`, nodeIds: ids })
+    }
+    if (groups.length === 1) groups[0].id = `excluded-mounting:${area?.key ?? 'lainnya'}`
+    return groups
   }
   const nodeSet = new Set(nodeIds)
   const nodeById = new Map(connectedNodes.map((node) => [node.id, node]))
@@ -1130,7 +1156,8 @@ function attachNamedJunctionFamiliesToMountingGroups({
       return firstChildIndex(left) - firstChildIndex(right)
         || String(left.id).localeCompare(String(right.id), 'id')
     })[0]
-    const inheritedIds = members
+  const inheritedIds = members
+      .filter(({ node }) => !['indoor', 'standalone'].includes(node.mountingExpectation))
       .map(({ node }) => node.id)
       .filter((nodeId) => !assignedNodeIds.has(nodeId))
     if (!inheritedIds.length) return
@@ -1164,6 +1191,7 @@ function buildEndpointJunctionGroups({
       .forEach((node) => junctionGroupById.set(node.id, group))
   })
   const extraGroups = junctions
+    .filter(node => !['indoor', 'standalone'].includes(node.mountingExpectation))
     .filter((junction) => junction.diagramClass === 'junction-peer')
     .filter((junction) => !junctionGroupById.has(junction.id) && !assignedNodeIds.has(junction.id))
     .filter((junction) => (edgeAdjacency.get(junction.id) ?? [])
@@ -1188,6 +1216,7 @@ function buildEndpointJunctionGroups({
     const endpointIds = (edgeAdjacency.get(junctionId) ?? [])
       .map(({ id }) => connectedNodeById.get(id))
       .filter((node) => node?.diagramClass === 'endpoint')
+      .filter(node => !['indoor', 'standalone'].includes(node.mountingExpectation))
       .map((node) => node.id)
       .sort((left, right) => compareNodes(
         connectedNodeById.get(left),
@@ -1901,6 +1930,19 @@ function translateNode(node, offsetX, offsetY) {
 }
 
 function nodeSize(node, settings) {
+  return reserveLabelSpace(node, baseNodeSize(node, settings))
+}
+
+function reserveLabelSpace(node, size) {
+  return {
+    width: Math.max(size.width, Math.min(36, assetDescription(node).length) * 4.8 + 16,
+      Math.min(32, String(node.name ?? node.id).length) * 6 + 16),
+    height: Math.max(size.height, node.diagramClass === 'rack-root' ? 112
+      : ['junction-peer', 'junction-extended'].includes(node.diagramClass) ? 100 : 84),
+  }
+}
+
+function baseNodeSize(node, settings) {
   if (node.diagramClass === 'rack-root') {
     return node.isCore
       ? { width: settings.coreWidth, height: settings.coreHeight }
@@ -1916,6 +1958,10 @@ function nodeSize(node, settings) {
 }
 
 function hubNodeSize(node, settings) {
+  return reserveLabelSpace(node, baseHubNodeSize(node, settings))
+}
+
+function baseHubNodeSize(node, settings) {
   if (node?.diagramClass === 'rack-root') {
     return node.isCore
       ? { width: settings.hubRootWidth, height: settings.hubRootHeight }

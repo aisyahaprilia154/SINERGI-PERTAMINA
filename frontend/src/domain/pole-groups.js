@@ -310,6 +310,7 @@ function isPoleRecord(asset) {
 }
 
 function isEligiblePhysicalMountAsset(asset) {
+  if (['indoor', 'standalone'].includes(asset?.mountingExpectation)) return false
   const source = `${asset?.type || ''} ${asset?.category || ''} ${asset?.name || ''} ${asset?.sourceFolderPath || ''}`
     .toLocaleLowerCase('id')
   if (!/junction\s*box|\bjb\b|cctv|camera|kamera/.test(source)) return false

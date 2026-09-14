@@ -159,6 +159,7 @@ export function buildTopologyDiagramModel({
         ?? asset.layoutRelationStatus
         ?? null,
       layoutReasonCode: graphNode.layoutReasonCode ?? asset.layoutReasonCode ?? null,
+      mountingExpectation: asset.mountingExpectation ?? graphNode.mountingExpectation,
       isCore: diagramClass === 'rack-root'
         || isCoreRole(topologyRole, asset.type ?? graphNode.assetType ?? graphNode.type),
       isEndpoint: diagramClass === 'endpoint'

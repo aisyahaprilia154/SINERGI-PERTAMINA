@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { projectFacilityRecord } from '../topology/facility-record-projection.js'
 import path from 'node:path'
 import { AppError } from '../errors.js'
 import {
@@ -645,7 +646,7 @@ export class DatasetVersionLifecycleService {
           statusCode: 404,
         })
       }
-      return resolved
+      return { ...resolved, record: projectFacilityRecord(resolved.record) }
     } catch (error) {
       if (['active_pointer_integrity_error', 'active_version_integrity_error']
         .includes(error?.code)) {
