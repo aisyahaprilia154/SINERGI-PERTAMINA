@@ -103,6 +103,13 @@
   background: var(--topology-warm);
 }
 
+.topology-document-key { flex: 0 0 auto; padding: 8px 16px; border-top: 1px solid #d9e1e8; background: #fff; color: #34465a; font: 12px/1.5 Inter, system-ui, sans-serif; max-height: 148px; overflow: auto; }
+.topology-document-key summary { cursor: pointer; font-weight: 700; }
+.topology-document-key-items { display: flex; flex-wrap: wrap; gap: 4px 16px; padding-top: 4px; }
+.topology-document-key-items span { display: inline-flex; align-items: center; gap: 5px; }
+.topology-document-key-items i { display: inline-block; width: 12px; height: 12px; border: 1px solid; border-radius: 2px; }
+.topology-document-version { color: #526477; padding-top: 5px; overflow-wrap: anywhere; }
+
 .topology-stitch-toolbar {
   height: 52px;
   position: absolute;

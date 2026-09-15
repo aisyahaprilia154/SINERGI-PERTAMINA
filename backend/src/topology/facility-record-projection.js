@@ -3,6 +3,7 @@ import {
   correctFacilityEdges,
   correctedMountingExpectation,
   facilityRelations,
+  correctAdditionalMounts,
 } from '../../../shared/facility-corrections.mjs'
 import { buildAssetIdentityMapFromRecord, createAssetIdentityResolver } from '../domain/canonical-asset-identity.js'
 import { withTopologyGraphRevision } from './topology-graph-revision.js'
@@ -37,7 +38,10 @@ export function projectFacilityRecord(record) {
     expectations.set(assetId, {assetId, expectation, provenance: 'facility_topology_correction',
       reason: 'Koreksi pemasangan FT Tegal Baru dari pengguna.', updatedAt: '2026-09-14T00:00:00.000Z'})
   }
-  const mountingRelations = (record.mountingRelations ?? []).filter(r => !exclusions.has(sourceId(r)))
+  const mountingRelations = correctAdditionalMounts((record.mountingRelations ?? [])
+    .map(r => ({...r, sourceAssetId: sourceId(r), targetAssetId: resolver.resolve(r.targetAssetId)}))
+    .filter(r => r.sourceAssetId && r.targetAssetId)
+    .filter(r => !exclusions.has(sourceId(r))), assets)
   const graph = record.topologyGraph ?? {nodes: [], edges: []}
   const nodeById = new Map((graph.nodes ?? []).map(node => {
     const id = resolver.resolve(node.canonicalAssetId ?? node.assetId ?? node.id)

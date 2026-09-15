@@ -15,6 +15,7 @@ import { downloadSchematicPng, downloadSchematicSvg } from '../map/schematic-exp
 import { bindUserAccountMenu, renderTopNavigation } from '../map/map-page.js'
 import { calculateTopologyDiagramLayout } from './topology-diagram-layout.js'
 import { renderTopologyDiagramSvg } from './topology-diagram-svg.js'
+import { topologyDocumentMeta } from './topology-document-meta.js'
 import {
   anchoredZoomScrollPosition,
   computeFitZoom,
@@ -25,7 +26,7 @@ import {
 const DEFAULT_DATASET_ID = 'dataset-semarang'
 const DEFAULT_BRANCH_ID = 'semarang'
 const DEFAULT_ZOOM = 1
-const MIN_ZOOM = 0.35
+const MIN_ZOOM = 0.1
 const MAX_ZOOM = 1.35
 const CANVAS_HORIZONTAL_PADDING = 30
 const CANVAS_TOP_PADDING = 84
@@ -160,21 +161,14 @@ function mountTopologyWorkspace(container, {
     readiness: mapData.topologyReadiness,
   })
 
-  const buildLayout = () => calculateTopologyDiagramLayout(model, {
+  const buildLayout = (overrides = {}) => calculateTopologyDiagramLayout(model, {
     minWidth: 1240,
     componentColumns: 3,
     componentMaxColumns: 4,
     componentPackingAspectRatio: 2.25,
-    layoutStyle: 'central-backbone',
-    ...(state.area === 'dppu-yia'
-      ? {
-        mountingBoxGapX: 40,
-        mountingBoxGapY: 36,
-        mountingBoxNodeGapX: 24,
-        mountingBoxLevelGapY: 40,
-      }
-      : {}),
+    layoutStyle: 'facility-schematic',
     overview: state.area === null,
+    ...overrides,
   })
 
   const rebuild = ({ fit = false } = {}) => {
@@ -211,7 +205,7 @@ function mountTopologyWorkspace(container, {
   renderFilterPanel()
   updateToolbar()
   updatePanelState()
-  requestAnimationFrame(() => resetGraphViewport())
+  requestAnimationFrame(() => state.selectedAssetId ? focusRelations() : resetGraphViewport())
 
   function bindWorkspaceEvents() {
     container.addEventListener('click', handleClick)
@@ -278,6 +272,7 @@ function mountTopologyWorkspace(container, {
     if (action === 'zoom-in') return changeZoom(0.1)
     if (action === 'zoom-out') return changeZoom(-0.1)
     if (action === 'fit') return fitGraph()
+    if (action === 'focus-relations') return focusRelations()
     if (action === 'toggle-filter') return togglePanel('filter')
     if (action === 'toggle-view') return togglePanel('view')
     if (action === 'toggle-export') return togglePanel('export')
@@ -474,10 +469,44 @@ function mountTopologyWorkspace(container, {
     requestAnimationFrame(() => centerGraph({ smooth: true }))
   }
 
+  function focusRelations() {
+    const selected = model.nodeById.get(state.selectedAssetId)
+    if (!selected) return showToast('Pilih JB atau kamera, lalu klik Fokus relasi.')
+    const ids = new Set([selected.id])
+    for (const edgeId of selected.directEdgeIds ?? []) {
+      const edge = model.edgeById.get(edgeId)
+      if (edge) { ids.add(edge.sourceId); ids.add(edge.targetId) }
+    }
+    const nodes = layout.nodes.filter(node => ids.has(node.id))
+    const bounds = nodes.map(node => node.diagram)
+    const left = Math.min(...bounds.map(box => box.x)) - 36
+    const right = Math.max(...bounds.map(box => box.x + box.width)) + 36
+    const top = Math.min(...bounds.map(box => box.y)) - 72
+    const bottom = Math.max(...bounds.map(box => box.y + box.height)) + 36
+    const viewport = container.querySelector('[data-topology-viewport]')
+    const frame = container.querySelector('[data-topology-frame]')
+    if (!viewport || !frame) return
+    setZoom(Math.min(1.12, (viewport.clientWidth - 60) / (right - left),
+      (viewport.clientHeight - 120) / (bottom - top)))
+    renderGraph()
+    updateToolbar()
+    requestAnimationFrame(() => restoreViewportCenter(viewport, frame, {
+      x: (left + right) / 2, y: (top + bottom) / 2,
+    }))
+  }
+
   function resetGraphViewport() {
     if (!layout?.width || !layout?.height) return
     const viewport = container.querySelector('[data-topology-viewport]')
     if (!viewport) return
+    if (layout.options?.layoutStyle === 'facility-schematic') {
+      setZoom(Math.max(viewport.clientWidth < 620 ? 0.7 : 0.8, Math.min(DEFAULT_ZOOM,
+        (viewport.clientWidth - CANVAS_HORIZONTAL_PADDING * 2) / layout.width)))
+      renderGraph()
+      updateToolbar()
+      requestAnimationFrame(() => centerGraph())
+      return
+    }
     const readableFloor = viewport.clientWidth < 620 ? 0.75 : 0.85
     setZoom(computeReadableZoom({
       viewportWidth: viewport.clientWidth,
@@ -513,6 +542,7 @@ function mountTopologyWorkspace(container, {
       model,
       layout,
       context: {
+        ...activeContext,
         branchId: activeContext.branchId,
         branchName: activeContext.branchName,
         datasetId: activeContext.datasetId,
@@ -816,8 +846,16 @@ function mountTopologyWorkspace(container, {
   }
 
   function exportDiagram(kind) {
-    const svg = container.querySelector('[data-topology-frame] svg')
-    if (!svg) return showToast('Diagram belum siap untuk diekspor.')
+    if (!layout || layout.status !== 'ready') return showToast('Diagram belum siap untuk diekspor.')
+    const exportLayout = state.area === null ? layout : buildLayout({
+      mountingRootColumns: 4,
+      mountingRootRowGapY: 96,
+      minWidth: 1600,
+    })
+    const svg = new DOMParser().parseFromString(renderTopologyDiagramSvg({
+      model, layout: exportLayout, context: {...activeContext, areaKey: state.area},
+      renderMode: 'export', showMountingPhysical: state.showMountingPhysical,
+    }), 'image/svg+xml').documentElement
     const slug = slugify(`${activeContext.branchName || activeContext.branchId}-${areaName(state.area, mapData.locationGroups)}`)
     const filename = `sinergi-topologi-${slug}.${kind}`
     state.exportOpen = false
@@ -907,6 +945,7 @@ function prefersReducedMotion() {
 
 function renderWorkspaceShell({ activeContext, state, model }) {
   const summary = model?.summary ?? {}
+  const metadata = topologyDocumentMeta(activeContext)
   return `
     <div class="topology-stitch-app" data-topology-app>
       ${renderTopNavigation('topology', activeContext)}
@@ -926,6 +965,7 @@ function renderWorkspaceShell({ activeContext, state, model }) {
             <div class="topology-stitch-toolbar-actions">
               <div class="topology-stitch-zoom-control"><button type="button" data-action="zoom-out" aria-label="Zoom out"><span class="material-symbols-outlined" aria-hidden="true">remove</span></button><span data-topology-zoom-label>${Math.round(state.zoom * 100)}%</span><button type="button" data-action="zoom-in" aria-label="Zoom in"><span class="material-symbols-outlined" aria-hidden="true">add</span></button></div>
               <button type="button" class="topology-stitch-toolbar-button" data-action="fit" title="Fit semua" aria-label="Fit semua"><span class="material-symbols-outlined" aria-hidden="true">fit_screen</span></button>
+              <button type="button" class="topology-stitch-toolbar-button" data-action="focus-relations" title="Fokus relasi aset terpilih" aria-label="Fokus relasi"><span class="material-symbols-outlined" aria-hidden="true">center_focus_strong</span></button>
               <span class="topology-stitch-toolbar-divider"></span>
               <button type="button" class="topology-stitch-toolbar-button" data-action="toggle-export" title="Aksi lain" aria-label="Aksi lain"><span class="material-symbols-outlined" aria-hidden="true">more_vert</span></button>
             </div>
@@ -934,6 +974,20 @@ function renderWorkspaceShell({ activeContext, state, model }) {
             <div class="topology-stitch-canvas"><div class="topology-stitch-graph-frame" data-topology-frame></div></div>
           </div>
           <div class="topology-stitch-tray" data-topology-tray></div>
+          <details class="topology-document-key" open>
+            <summary>Legenda & versi</summary>
+            <div class="topology-document-key-items">
+              <span><i style="background:#edf5fa;border-color:#92b6cf"></i>Frame tiang</span>
+              <span><i style="background:#f4f0fc;border-color:#9a86bb"></i>Indoor</span>
+              <span><i style="background:#fff4e8;border-color:#c98b50"></i>Non-tiang</span>
+              <span><i style="background:#f8fafc;border-color:#94a3b8"></i>Penempatan belum tercatat</span>
+              <span><b style="color:#315f4f">▰</b>Server</span><span><b style="color:#376d9d">▰</b>JB</span>
+              <span><b style="color:#9b6928">▰</b>Kamera (bukan warning)</span>
+              <span><b>━</b>Backbone</span><span><b>─</b>Cabang</span>
+              <span>▷ Hierarki tampilan, bukan arah data</span><span>⌒ Crossing tanpa koneksi</span>
+            </div>
+            <div class="topology-document-version" title="${escapeHtml(metadata.version)}">Diagram Topologi · ${escapeHtml(activeContext.branchName ?? activeContext.branchId)} · Versi ${escapeHtml(metadata.version)} · Publikasi versi: ${escapeHtml(metadata.updated)}</div>
+          </details>
         </main>
         <aside class="topology-stitch-inspector" data-topology-inspector aria-label="Detail perangkat"></aside>
       </div>
@@ -941,12 +995,12 @@ function renderWorkspaceShell({ activeContext, state, model }) {
       <aside class="topology-stitch-floating-panel topology-stitch-view-panel" data-topology-view-panel hidden>
         <div class="topology-stitch-panel-head"><div><span class="topology-stitch-eyebrow">PRESENTASI</span><h2>Opsi Tampilan</h2></div><button type="button" class="topology-stitch-icon-button" data-action="close-view" aria-label="Tutup opsi tampilan"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>
         <div class="topology-stitch-view-stats"><div><strong data-topology-asset-count>${summary.totalAssetCount ?? 0}</strong><span>aset</span></div><div><strong data-topology-edge-count>${summary.confirmedEdgeCount ?? 0}</strong><span>relasi aktif</span></div><div><strong>${summary.componentCount ?? 0}</strong><span>island</span></div></div>
-        <p class="topology-stitch-panel-note">Diagram memakai relasi terkonfirmasi dari dataset aktif. Kotak berwarna menunjukkan perangkat terikat tiang; kotak oranye menunjukkan perangkat non-tiang/indoor.</p>
+        <p class="topology-stitch-panel-note">Warna frame menunjukkan penempatan: biru untuk tiang, ungu untuk indoor, dan jingga untuk non-tiang. Warna kartu menunjukkan jenis perangkat, bukan status operasional. Lihat legenda di bawah kanvas.</p>
       </aside>
       <aside class="topology-stitch-floating-panel topology-stitch-export-panel" data-topology-export-panel hidden>
         <div class="topology-stitch-panel-head"><div><span class="topology-stitch-eyebrow">DOWNLOAD</span><h2>Export Diagram</h2></div><button type="button" class="topology-stitch-icon-button" data-action="close-export" aria-label="Tutup export"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>
-        <button type="button" class="topology-stitch-export-option" data-export="svg"><span class="material-symbols-outlined" aria-hidden="true">code</span><span><strong>SVG</strong><small>Vektor, cocok untuk dokumentasi.</small></span></button>
-        <button type="button" class="topology-stitch-export-option" data-export="png"><span class="material-symbols-outlined" aria-hidden="true">image</span><span><strong>PNG</strong><small>Gambar siap dibagikan.</small></span></button>
+        <button type="button" class="topology-stitch-export-option" data-export="svg"><span class="material-symbols-outlined" aria-hidden="true">code</span><span><strong>SVG readable</strong><small>Vektor lengkap dengan kelompok disusun beberapa baris.</small></span></button>
+        <button type="button" class="topology-stitch-export-option" data-export="png"><span class="material-symbols-outlined" aria-hidden="true">image</span><span><strong>PNG readable</strong><small>Resolusi 2× dengan kartu dan teks tetap terbaca.</small></span></button>
       </aside>
       <div class="topology-stitch-toast" data-topology-toast role="status" aria-live="polite"></div>
     </div>

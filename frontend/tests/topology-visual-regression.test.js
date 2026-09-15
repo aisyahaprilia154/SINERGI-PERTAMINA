@@ -88,7 +88,7 @@ test('assets without pole mounting stay grouped under their connected JB', () =>
   assert.equal(layout.sections[0].componentCount, 16)
 })
 
-test('connected JB scope takes precedence over indoor or standalone hints', () => {
+test('indoor and standalone placement prevents inheritance into a connected JB frame', () => {
   const model = networkFixture(2, 'FT LOMANIS')
   const excludedNodes = model.nodes.filter(({ diagramClass }) => diagramClass !== 'rack-root').slice(0, 2)
   excludedNodes[0].mountingExpectation = 'indoor'
@@ -96,8 +96,8 @@ test('connected JB scope takes precedence over indoor or standalone hints', () =
   const layout = calculateTopologyDiagramLayout(model)
   const byId = new Map(layout.nodes.map((node) => [node.id, node]))
   assert.ok(excludedNodes.every(({ id }) => byId.get(id).mountingBoxId))
-  assert.ok(excludedNodes.every(({ id }) => byId.get(id).mountingRelationStatus === 'unassigned'))
-  assert.equal(layout.mountingBoxes.some(({ kind }) => kind === 'excluded'), false)
+  assert.ok(excludedNodes.every(({ id }) => byId.get(id).mountingRelationStatus === 'excluded'))
+  assert.equal(layout.mountingBoxes.some(({ kind }) => kind === 'excluded'), true)
 })
 
 test('pole backbone region keeps every component and SVG node without island cards', () => {
@@ -116,7 +116,7 @@ test('pole backbone region keeps every component and SVG node without island car
   assert.equal(countMarkup(svg, 'data-component-id='), 1)
   assert.match(svg, /data-component-id="area:area-a:pole-backbone"/)
   assert.match(svg, /topology-mounting-group unassigned/)
-  assert.match(svg, /Aset lainnya/)
+  assert.match(svg, /Penempatan belum tercatat/)
   assert.match(svg, /tanpa penempatan tiang/)
   assert.equal(countMarkup(svg, 'data-node-id='), model.nodes.length)
   assert.doesNotMatch(svg, /class="topology-island-boundary"/)
