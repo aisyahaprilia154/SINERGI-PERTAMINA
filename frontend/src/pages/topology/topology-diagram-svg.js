@@ -4,6 +4,8 @@ import {
 } from '../../domain/topology-diagram-model.js'
 import { semanticZoomLevelForZoom } from './topology-viewport.js'
 import { assetDescription } from '../../domain/asset-description.js'
+import { lineJumpPaths } from './topology-line-jumps.js'
+import { topologyDocumentMeta } from './topology-document-meta.js'
 
 const THEME = Object.freeze({
   background: '#fdfcfb',
@@ -77,7 +79,10 @@ export function renderTopologyDiagramSvg({
 } = {}) {
   if (!model || model.status !== 'ready' || !layout || layout.status !== 'ready') return ''
   const nodes = layout.nodes
+  const nodesById = new Map(nodes.map(node => [node.id, node]))
+  const schematic = layout.options?.layoutStyle === 'facility-schematic'
   const edges = layout.edges
+  const jumpPaths = schematic && !minimap ? lineJumpPaths(edges) : new Map()
   const bottom = layout.height - layout.options.footerHeight
   const resolvedSemanticLevel = semanticLevel ?? semanticZoomLevelForZoom(zoom)
   const labelVisibility = getTopologyLabelVisibility({
@@ -106,7 +111,7 @@ export function renderTopologyDiagramSvg({
     : new Set()
   const selectionActive = Boolean(selectedAssetId || selectedEdgeId)
   return `
-    <svg class="topology-diagram-svg${minimap ? ' is-minimap' : ''}"
+    <svg class="topology-diagram-svg${schematic ? ' facility-schematic' : ''}${minimap ? ' is-minimap' : ''}"
       data-semantic-level="${escapeAttribute(resolvedSemanticLevel)}"
       data-render-mode="${escapeAttribute(renderMode)}"
       xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${layout.width} ${layout.height}"
@@ -120,6 +125,13 @@ export function renderTopologyDiagramSvg({
         datasetVersionId=${escapeXml(context.datasetVersionId ?? model.datasetVersionId ?? '')};
         area=${escapeXml(model.area ?? 'all')}</metadata>
       <defs>
+        <marker id="topology-arrow-hierarchy" viewBox="0 0 10 10" refX="9" refY="5"
+          markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <path d="M 1 1 L 9 5 L 1 9 Z" fill="#fff" stroke="#344d65" stroke-width="1.5"/>
+        </marker>
+        <filter id="topology-card-shadow" x="-15%" y="-20%" width="130%" height="150%">
+          <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#23374d" flood-opacity=".12"/>
+        </filter>
         <marker id="topology-arrow" viewBox="0 0 10 10" refX="9" refY="5"
           markerWidth="6" markerHeight="6" orient="auto-start-reverse">
           <path d="M 0 0 L 10 5 L 0 10 z" fill="${THEME.connected}"/>
@@ -127,6 +139,18 @@ export function renderTopologyDiagramSvg({
         <marker id="topology-arrow-selected" viewBox="0 0 10 10" refX="9" refY="5"
           markerWidth="6" markerHeight="6" orient="auto-start-reverse">
           <path d="M 0 0 L 10 5 L 0 10 z" fill="${THEME.selected}"/>
+        </marker>
+        <marker id="topology-arrow-backbone" viewBox="0 0 10 10" refX="9" refY="5"
+          markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#245b4a"/>
+        </marker>
+        <marker id="topology-arrow-access" viewBox="0 0 10 10" refX="9" refY="5"
+          markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#4a6378"/>
+        </marker>
+        <marker id="topology-arrow-peer" viewBox="0 0 10 10" refX="9" refY="5"
+          markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#82558f"/>
         </marker>
         <style>
           .topology-bg{fill:${renderMode === 'export' ? THEME.background : 'transparent'}}
@@ -291,6 +315,30 @@ export function renderTopologyDiagramSvg({
            .topology-disconnected-tray .topology-isolated-title{font:700 9px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary}}
            .topology-area-overview-card rect{fill:#fff;stroke:${THEME.sectionBorder};stroke-width:1}
            .topology-area-overview-card:hover rect,.topology-area-overview-card:focus rect{stroke:${THEME.selected};stroke-width:1.8}
+           .facility-schematic .topology-mounting-bubble{stroke-width:1.2;rx:4;fill-opacity:.92}
+           .facility-schematic .topology-mounting-group.excluded .topology-mounting-bubble{fill:#fafbfc;stroke:#b6c1cd;stroke-dasharray:6 4}
+           .facility-schematic .topology-mounting-label{font:700 11px Inter,ui-sans-serif,system-ui;fill:#344054}
+           .facility-schematic .topology-mounting-meta{font:400 10px Inter,ui-sans-serif,system-ui;fill:#667085}
+           .facility-schematic .topology-mounting-header-line{stroke:#dde2e8;stroke-width:1}
+           .facility-schematic .topology-hierarchy-divider{stroke:#aab7c2;stroke-width:1.4;stroke-dasharray:8 6;vector-effect:non-scaling-stroke}
+           .facility-schematic .topology-hierarchy-divider-label{font:800 10px Inter,ui-sans-serif,system-ui;fill:#526474;letter-spacing:.08em}
+           .facility-schematic .topology-hierarchy-divider-label-secondary{fill:#a44810}
+           .facility-schematic .topology-edge{stroke:#344054;stroke-width:1.8;opacity:1;stroke-linecap:round;stroke-linejoin:round}
+          .facility-schematic .topology-edge.edge-role-backbone{stroke:#245b4a;stroke-width:2.6}
+          .facility-schematic .topology-edge.edge-role-access{stroke:#52677b;stroke-width:1.5}
+          .facility-schematic .topology-edge.edge-role-peer{stroke:#82558f;stroke-width:2;stroke-dasharray:6 4}
+          .facility-schematic .topology-edge.dimmed{stroke:#aab7c2;opacity:.2}
+          .facility-schematic .topology-edge-junction{stroke:#fff;stroke-width:1.2;vector-effect:non-scaling-stroke}
+           .facility-schematic .topology-edge.selected,.facility-schematic .topology-edge.selected-path{stroke:#007a55;stroke-width:3}
+           .facility-schematic .topology-schematic-card{fill:#fff;stroke:#bcc6d0;stroke-width:1.3;filter:url(#topology-card-shadow)}
+           .facility-schematic .schematic-core .topology-schematic-card{fill:#d3eddf;stroke:#315f4f;stroke-width:2.4}
+           .facility-schematic .schematic-junction .topology-schematic-card{fill:#f0f6ff;stroke:#376d9d}
+           .facility-schematic .schematic-endpoint .topology-schematic-card{fill:#fff8ec;stroke:#9b6928}
+           .facility-schematic .core .topology-schematic-card{fill:#edf5f2;stroke:#54776a;stroke-width:1.5}
+           .facility-schematic .selected .topology-schematic-card,.facility-schematic .topology-node:hover .topology-schematic-card{stroke:#007a55;stroke-width:2}
+           .facility-schematic .topology-schematic-name{font:700 16px Inter,ui-sans-serif,system-ui;fill:#172b40;text-anchor:middle}
+           .facility-schematic .topology-schematic-type{font:400 12px Inter,ui-sans-serif,system-ui;fill:#43566a;text-anchor:middle}
+           .facility-schematic .topology-schematic-name,.facility-schematic .topology-schematic-type{text-anchor:start}
          </style>
       </defs>
       <rect class="topology-bg" width="${layout.width}" height="${layout.height}"/>
@@ -299,7 +347,7 @@ export function renderTopologyDiagramSvg({
         : `<g class="topology-sections" aria-label="Area fasilitas">
           ${layout.sections.map((section) => renderSection(section)).join('')}
         </g>`}
-      ${showMountingPhysical && layout.mode !== 'area-overview'
+      ${showMountingPhysical && layout.mode !== 'area-overview' && !schematic && !layout.options?.mountingRootColumns
         ? renderPresentationBackbones(layout, { minimap })
         : ''}
       ${showMountingPhysical && layout.mode !== 'area-overview'
@@ -314,6 +362,10 @@ export function renderTopologyDiagramSvg({
         ${edges.map((edge) => renderEdge({
           ...model.edgeById.get(edge.id),
           ...edge,
+          hierarchyDirection: schematic && edge.direction === 'undirected'
+            ? nodesById.get(edge.targetId)?.layoutParentId === edge.sourceId ? 'source_to_target'
+              : nodesById.get(edge.sourceId)?.layoutParentId === edge.targetId ? 'target_to_source' : null
+            : null,
           dimmed: edge.dimmed || (selectionActive && !edge.trace && (
             selectedEdgeId
               ? edge.id !== selectedEdgeId
@@ -324,6 +376,8 @@ export function renderTopologyDiagramSvg({
           directIds,
           selectionPathIds,
           minimap,
+          schematic,
+          jumpPath: jumpPaths.get(edge.id),
         })).join('')}
       </g>
       ${showAdminLayers ? renderAdminLayer(model, layout, {
@@ -337,7 +391,7 @@ export function renderTopologyDiagramSvg({
           ...node,
           dimmed: node.dimmed || (selectionActive && !node.trace && (
             selectedAssetId
-              ? !selectionPathNodes.has(node.id) && node.id !== selectedAssetId
+              ? !selectionPathNodes.has(node.id) && !directNodes.has(node.id) && node.id !== selectedAssetId
               : !selectedEdgeNodes.has(node.id)
           )),
         }, {
@@ -345,7 +399,8 @@ export function renderTopologyDiagramSvg({
           directNodes,
           selectionPathNodes,
           labelVisibility,
-          forceEndpointLabels: ['ft-pengapon-semarang', 'dppu-yia'].includes(context.areaKey),
+          forceEndpointLabels: schematic || ['ft-pengapon-semarang', 'dppu-yia'].includes(context.areaKey),
+          schematic,
           semanticLevel: resolvedSemanticLevel,
           hoveredAssetId,
           minimap,
@@ -354,7 +409,7 @@ export function renderTopologyDiagramSvg({
       </g>
       ${layout.mode === 'area-overview' ? '' : renderCrossAreaMarkers(layout)}
       ${renderMode === 'export' && !minimap
-        ? renderLegend(bottom, layout.width, showMountingPhysical)
+        ? renderLegend(bottom, layout.width, showMountingPhysical, context, schematic)
         : ''}
     </svg>
   `
@@ -470,22 +525,30 @@ function renderMountingGroups(model, layout, {
 } = {}) {
   const boxes = layout.mountingBoxes ?? []
   return boxes.map((box, index) => {
+    const singleAsset = layout.options?.layoutStyle === 'facility-schematic' && box.nodeIds.length === 1
+      && !String(box.label ?? box.hostName ?? '').startsWith('Indoor')
     const hostName = shorten(box.label || box.hostName || box.hostId, 26)
     const palette = box.kind === 'excluded'
-      ? { fill: '#fff4e8', stroke: '#f97316' }
+      ? box.label?.startsWith('Indoor')
+        ? { fill: '#f4f0fc', stroke: '#9a86bb' }
+        : { fill: '#fff4e8', stroke: '#c98b50' }
       : box.kind === 'needs-mounting'
         ? { fill: '#fff9db', stroke: '#d89b00' }
         : box.kind === 'unassigned'
           ? { fill: '#f8fafc', stroke: '#94a3b8' }
       : box.kind === 'empty'
         ? { fill: '#f8fafc', stroke: '#94a3b8' }
-        : mountingBubblePalette(box.hostId || box.id, index)
+        : layout.options?.layoutStyle === 'facility-schematic'
+          ? { fill: '#edf5fa', stroke: '#92b6cf' }
+          : mountingBubblePalette(box.hostId || box.id, index)
     const label = box.kind === 'excluded'
-      ? hostName
+      ? hostName.startsWith('Indoor') || hostName.startsWith('Non-tiang')
+        ? hostName
+        : `Non-tiang · ${hostName}`
       : box.kind === 'needs-mounting'
         ? 'Perlu mounting'
       : box.kind === 'unassigned'
-        ? 'Aset lainnya'
+        ? 'Penempatan belum tercatat'
       : hostName
     const active = selectedMountingGroupId === box.id || box.nodeIds.includes(selectedAssetId)
     const classes = [
@@ -504,7 +567,7 @@ function renderMountingGroups(model, layout, {
     const inheritedCount = box.presentationInheritedNodeIds?.length ?? 0
     const mountedCount = Math.max(0, box.nodeIds.length - inheritedCount)
     const meta = box.kind === 'excluded'
-      ? `${box.nodeIds.length} aset · indoor/standalone`
+      ? box.connectionLabel ? `${box.nodeIds.length} kamera · ${box.connectionLabel}` : `${box.nodeIds.length} aset · indoor/standalone`
       : box.kind === 'needs-mounting'
         ? `${box.nodeIds.length} aset · perlu ditetapkan`
       : box.kind === 'unassigned'
@@ -513,24 +576,28 @@ function renderMountingGroups(model, layout, {
         ? '0 aset · belum ada mounting'
       : inheritedCount
         ? `${mountedCount} terpasang · ${inheritedCount} non-tiang`
-        : `${box.nodeIds.length} aset terpasang`
+      : `${box.nodeIds.length} aset terpasang`
+    const displayLabel = box.kind === 'confirmed' && !/^Tiang\s·/i.test(label)
+      ? `Tiang · ${label}`
+      : label
     return `<g class="${classes}"${interaction}
-      aria-label="${escapeAttribute(`${label} · ${meta}`)}">
-      <rect class="topology-mounting-bubble" x="${box.x}" y="${box.y}"
+      aria-label="${escapeAttribute(`${displayLabel} · ${meta}`)}">
+      ${singleAsset ? '' : `<rect class="topology-mounting-bubble" x="${box.x}" y="${box.y}"
         width="${box.width}" height="${box.height}" rx="12"
-        fill="${palette.fill}" stroke="${palette.stroke}"/>
+        style="fill:${palette.fill};stroke:${palette.stroke}"/>
       <line class="topology-mounting-header-line" x1="${box.x}" y1="${box.y + 44}"
-        x2="${box.x + box.width}" y2="${box.y + 44}"/>
-      <text class="topology-mounting-label" x="${box.x + 12}" y="${box.y + 19}">${escapeXml(label)}</text>
+        x2="${box.x + box.width}" y2="${box.y + 44}"/>`}
+      <text class="topology-mounting-label" x="${box.x + 12}" y="${box.y + 19}">${escapeXml(displayLabel)}</text>
       <text class="topology-mounting-meta" x="${box.x + 12}" y="${box.y + 33}">${escapeXml(meta)}</text>
       ${box.mountingConflict && !minimap ? `<text class="topology-mounting-meta" x="${box.x + 12}"
         y="${box.y + box.height - 8}">Periksa konflik mounting</text>` : ''}
-      <title>${escapeXml(`${label} · ${meta}`)}</title>
+      <title>${escapeXml(`${displayLabel} · ${meta}`)}</title>
     </g>`
   }).join('')
 }
 
 function renderPresentationBackbones(layout, { minimap = false } = {}) {
+  if (layout.options?.layoutStyle === 'facility-schematic') return ''
   return (layout.sections ?? []).flatMap((section) => (
     (section.lanes ?? [])
       .filter((lane) => lane.presentation === 'pole-backbone')
@@ -589,8 +656,21 @@ function renderLane(lane, section) {
   const y = section.y + lane.y
   if (lane.presentation === 'pole-backbone') {
     const label = `Backbone tiang · ${lane.componentIds?.length ?? 0} komponen · ${lane.nodes.length} perangkat`
+    const bands = lane.mountingTreeBands ?? []
     return `<g class="topology-lane-group topology-lane-pole-backbone" data-component-id="${escapeAttribute(lane.componentId)}"
-      aria-label="${escapeAttribute(label)}"><title>${escapeXml(label)}</title></g>`
+      aria-label="${escapeAttribute(label)}"><title>${escapeXml(label)}</title>
+      ${bands.map((band, index) => {
+        const changed = index === 0 || band.label !== bands[index - 1]?.label
+        const tone = band.label?.includes('TERPISAH') || band.label?.includes('TANPA')
+          ? ' topology-hierarchy-divider-label-secondary' : ''
+        return `<rect x="${x}" y="${y + band.y - 36}" width="${lane.width}" height="${band.height + 52}"
+          rx="12" fill="${tone ? '#f5f2ed' : '#edf5f4'}" fill-opacity=".55" pointer-events="none"/>
+          ${index === 0 ? '' : `<line class="topology-hierarchy-divider" x1="${x + 10}" y1="${y + band.y - 28}"
+          x2="${x + lane.width - 10}" y2="${y + band.y - 28}"/>`}
+          ${changed ? `<text class="topology-hierarchy-divider-label${tone}"
+            x="${x + 14}" y="${y + band.y - 14}">${escapeXml(band.label ?? 'STRUKTUR FRAME')} · PANAH KOSONG: HIERARKI, BUKAN ARAH DATA</text>` : ''}`
+      }).join('')}
+    </g>`
   }
   if (lane.presentation === 'hub-spoke') {
     const islandLabel = `Network island ${String(lane.islandIndex ?? '').padStart(2, '0')}`.trim()
@@ -649,8 +729,8 @@ function renderUnresolvedPanel(panel, section) {
   `
 }
 
-function renderEdge(edge, { selectedEdgeId, directIds, selectionPathIds, minimap }) {
-  const path = orthogonalPath(edge.routePoints ?? edge.linePoints)
+function renderEdge(edge, { selectedEdgeId, directIds, selectionPathIds, minimap, schematic = false, jumpPath }) {
+  const path = jumpPath ?? orthogonalPath(edge.routePoints ?? edge.linePoints)
   const family = normalizeFamilyClass(edge.networkFamily)
   const selected = edge.id === selectedEdgeId
   const direct = directIds.has(edge.id)
@@ -668,22 +748,23 @@ function renderEdge(edge, { selectedEdgeId, directIds, selectionPathIds, minimap
   const color = edge.trace || selected || selectedPath
     ? THEME.selected
     : edge.dimmed ? THEME.dimmed : THEME.edge
-  const marker = edge.trace || selected || selectedPath
+  const marker = edge.hierarchyDirection ? 'topology-arrow-hierarchy' : edge.trace || selected || selectedPath
     ? 'topology-arrow-selected'
-    : 'topology-arrow'
-  const arrow = !edge.dimmed && !minimap && edge.direction !== 'undirected'
-    ? `${edge.direction === 'target_to_source' || edge.direction === 'bidirectional'
+    : `topology-arrow-${edge.edgeVisualRole || 'access'}`
+  const direction = edge.hierarchyDirection ?? edge.direction
+  const arrow = !edge.dimmed && !minimap && direction !== 'undirected'
+    ? `${direction === 'target_to_source' || direction === 'bidirectional'
       ? ` marker-start="url(#${marker})"`
-      : ''}${edge.direction === 'source_to_target' || edge.direction === 'bidirectional'
+      : ''}${direction === 'source_to_target' || direction === 'bidirectional'
       ? ` marker-end="url(#${marker})"`
       : ''}`
     : ''
   return `
     <g class="topology-edge-target" data-edge-id="${escapeAttribute(edge.id)}" tabindex="0"
       role="button" aria-label="Detail relasi ${escapeAttribute(edge.id)}">
-      <path class="topology-edge-underlay" d="${path}"/>
+      <path class="topology-edge-underlay" d="${path}"${edge.dimmed ? ' opacity="0.12"' : ''}/>
       <path class="${classes}" d="${path}" stroke="${escapeAttribute(color)}"${arrow}>
-        <title>${escapeXml(describeEdge(edge))}</title>
+        <title>${escapeXml(describeEdge(edge))}${edge.hierarchyDirection ? ' · Panah hierarki tampilan; arah komunikasi belum ditetapkan.' : ''}</title>
       </path>
     </g>
   `
@@ -695,12 +776,14 @@ function renderNode(node, {
   selectionPathNodes = new Set(),
   labelVisibility,
   forceEndpointLabels = false,
+  schematic = false,
   semanticLevel = 'overview',
   hoveredAssetId = null,
   minimap,
   highlightAssetId = null,
 }) {
   const { x, y, width, height } = node.diagram
+  if (schematic) return renderSchematicAssetCard(node, {selectedAssetId, hoveredAssetId, minimap, directNodes, selectionPathNodes})
   const selected = node.id === selectedAssetId
   const direct = directNodes.has(node.id) && !selected
   const selectedPath = selectionPathNodes.has(node.id) && !selected
@@ -760,6 +843,31 @@ function renderNode(node, {
       ` : ''}
     </g>
   `
+}
+
+function renderSchematicAssetCard(node, {selectedAssetId, hoveredAssetId, minimap, directNodes, selectionPathNodes}) {
+  const {x, y, width, height} = node.diagram
+  const role = node.diagramClass === 'rack-root' ? 'core'
+    : ['junction-peer', 'junction-extended'].includes(node.diagramClass) ? 'junction' : 'endpoint'
+  const expectation = node.mountingExpectation === 'indoor' ? 'indoor'
+    : node.mountingExpectation === 'standalone' ? 'standalone' : 'pole'
+  const family = normalizeFamilyClass(node.networkFamily)
+  const classes = ['topology-node', `schematic-${role}`, `schematic-${expectation}`, `family-${family}`,
+    node.id === selectedAssetId ? 'selected' : '', node.dimmed ? 'dimmed' : '',
+    node.id === hoveredAssetId ? 'hovered' : '',
+    directNodes.has(node.id) ? 'direct' : '', selectionPathNodes.has(node.id) ? 'selected-path' : ''].filter(Boolean).join(' ')
+  return `<g class="${classes}" data-node-id="${escapeAttribute(node.id)}" tabindex="0" role="button"
+    aria-label="${escapeAttribute(`${node.name} · ${assetDescription(node)}`)}">
+    <title>${escapeXml(describeNode(node))} · ${escapeXml(assetDescription(node))}</title>
+    <rect class="topology-schematic-card" x="${x}" y="${y}" width="${width}" height="${height}" rx="4"/>
+    ${minimap ? '' : `<g transform="translate(${x + 30} ${y + height / 2}) scale(${role === 'endpoint' ? 1.3 : .82}) translate(${-x - 30} ${-y - height / 2})">${renderNodeGlyph(node, x + 30, y + height / 2, schematicIconColor(role))}</g>
+    <text class="topology-schematic-name" x="${x + 60}" y="${y + height / 2 - 5}">${escapeXml(shorten(node.name || node.id, 18))}</text>
+    <text class="topology-schematic-type" x="${x + 60}" y="${y + height / 2 + 16}">${escapeXml(shorten(assetDescription(node), 22))}</text>`}
+  </g>`
+}
+
+function schematicIconColor(role) {
+  return role === 'core' ? '#245b4a' : role === 'junction' ? '#356b91' : '#a56b10'
 }
 
 function topologyNodeVisualBox(node, centerX, centerY) {
@@ -877,15 +985,30 @@ function renderNodeGlyph(node, x, y, color) {
     return `<path class="topology-device-icon" d="M ${x} ${y - 17} L ${x + 12} ${y + 13} L ${x - 12} ${y + 13} Z" stroke="${escapeAttribute(color)}"/>`
   }
   if (node.iconType === 'cctv' || node.isEndpoint) {
-    return `<g class="topology-endpoint-glyph" stroke="${escapeAttribute(color)}">
-      <rect class="topology-device-icon" x="${x - 12}" y="${y - 12}" width="24" height="24" rx="4"/>
-      <path class="topology-device-glyph" d="M ${x - 7} ${y - 4} H ${x + 3} Q ${x + 7} ${y - 4} ${x + 7} ${y} Q ${x + 7} ${y + 4} ${x + 3} ${y + 4} H ${x - 7} Z M ${x - 2} ${y + 4} L ${x - 6} ${y + 9}"/>
+    return `<g class="topology-endpoint-glyph topology-camera-glyph" stroke="${escapeAttribute(color)}" fill="none" stroke-width="1.8" stroke-linejoin="round">
+      <path d="M ${x - 12} ${y - 9} L ${x + 8} ${y - 4} L ${x + 5} ${y + 6} L ${x - 15} ${y + 1} Z"/>
+      <path d="M ${x + 8} ${y - 3} L ${x + 13} ${y - 2} L ${x + 11} ${y + 4} L ${x + 6} ${y + 3} M ${x - 5} ${y + 4} L ${x - 7} ${y + 11} H ${x - 14} M ${x - 14} ${y + 7} V ${y + 14}"/>
     </g>`
   }
   return `<rect class="topology-device-icon" x="${x - 12}" y="${y - 12}" width="24" height="24" rx="4" stroke="${escapeAttribute(color)}"/>`
 }
 
-function renderLegend(bottom, width, showMountingPhysical) {
+function renderLegend(bottom, width, showMountingPhysical, context = {}, schematic = false) {
+  if (schematic) {
+    const metadata = topologyDocumentMeta(context)
+    return `<g class="topology-document-legend" aria-label="Legenda dan metadata dokumen">
+      <line x1="32" y1="${bottom + 4}" x2="${width - 32}" y2="${bottom + 4}" stroke="#b8c7d3"/>
+      <text x="32" y="${bottom + 25}" font-size="13" font-weight="700" fill="#23374d">LEGENDA · Warna menunjukkan jenis / penempatan, bukan status</text>
+      ${[
+        ['Tiang', '#edf5fa', '#92b6cf'], ['Indoor', '#f4f0fc', '#9a86bb'], ['Non-tiang', '#fff4e8', '#c98b50'],
+        ['Belum ditempatkan', '#f8fafc', '#94a3b8'], ['Server', '#d3eddf', '#315f4f'],
+        ['JB', '#f0f6ff', '#376d9d'], ['Kamera', '#fff8ec', '#9b6928'],
+      ].map(([label, fill, stroke], index) => `<rect x="${32 + index * (width - 64) / 7}" y="${bottom + 35}" width="14" height="14" fill="${fill}" stroke="${stroke}"/>
+        <text x="${52 + index * (width - 64) / 7}" y="${bottom + 47}" font-size="11" fill="#34465a">${label}</text>`).join('')}
+      <text x="32" y="${bottom + 68}" font-size="12" fill="#34465a">Garis tebal: backbone · Tipis: cabang · Panah kosong: hierarki, bukan arah data · Panah penuh: arah tercatat · Lengkungan: crossing tanpa koneksi</text>
+      <text x="32" y="${bottom + 89}" font-size="11" fill="#526477">Versi ${escapeXml(metadata.version)} · Publikasi versi: ${escapeXml(metadata.updated)}</text>
+    </g>`
+  }
   return `
     <line x1="32" y1="${bottom + 8}" x2="${width - 32}" y2="${bottom + 8}" stroke="${THEME.sectionBorder}"/>
     <g class="topology-legend">

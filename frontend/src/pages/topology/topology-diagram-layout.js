@@ -1,4 +1,4 @@
-import { assetDescription } from '../../domain/asset-description.js'
+import {routeSchematicEdges} from './topology-obstacle-router.js'
 
 const DEFAULT_OPTIONS = Object.freeze({
   margin: 28,
@@ -47,9 +47,12 @@ const DEFAULT_OPTIONS = Object.freeze({
   mountingBoxPadding: 16,
   mountingBoxHeaderHeight: 44,
   mountingBoxGapX: 24,
+  mountingRootGapX: null,
   mountingBoxGapY: 26,
   mountingBoxLevelGapY: 34,
   mountingBoxNodeGapX: 18,
+  mountingRootColumns: null,
+  mountingRootRowGapY: 72,
   backboneCoreGapY: 70,
   peerColumns: 10,
   extendedColumns: 8,
@@ -78,9 +81,20 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
     }
   }
 
-  const settings = { ...DEFAULT_OPTIONS, ...options }
+  const settings = { ...DEFAULT_OPTIONS,
+    ...(options.layoutStyle === 'facility-schematic' ? {
+      mountingBoxPadding: 24,
+      mountingBoxHeaderHeight: 40,
+      mountingBoxGapX: 48,
+      mountingRootGapX: 144,
+      mountingBoxGapY: 72,
+      mountingBoxNodeGapX: 32,
+      mountingBoxLevelGapY: 64,
+      backboneCoreGapY: 80,
+    } : {}), ...options }
+  if (settings.layoutStyle === 'facility-schematic') settings.footerHeight = Math.max(100, settings.footerHeight)
   if (settings.overview) return calculateAreaOverviewLayout(model, settings)
-  const usesPoleBoxes = ['central-backbone', 'compound-poles'].includes(settings.layoutStyle)
+  const usesPoleBoxes = ['central-backbone', 'compound-poles', 'facility-schematic'].includes(settings.layoutStyle)
   const nodeById = new Map(model.nodes.map((node) => [node.id, node]))
   const componentById = new Map(model.components.map((component) => [component.componentId, component]))
   const layoutNodes = new Map()
@@ -281,7 +295,9 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
     height: finalHeight,
     options: settings,
     nodes: [...layoutNodes.values()].sort(compareLayoutNodes),
-    edges: layoutEdges.sort((left, right) => left.id.localeCompare(right.id, 'id')),
+    edges: (settings.layoutStyle === 'facility-schematic'
+      ? routeSchematicEdges([...layoutNodes.values()], layoutEdges, mountingBoxes) : layoutEdges)
+      .sort((left, right) => left.id.localeCompare(right.id, 'id')),
     mountingBoxes,
     mountingGroupBounds,
     backboneGaps,
@@ -544,6 +560,9 @@ export function refreshTopologyDiagramLinks(layout) {
       linePoints: straightLinkPoints(source, target),
     }
   })
+  if (settings.layoutStyle === 'facility-schematic') {
+    layout.edges = routeSchematicEdges(layout.nodes, layout.edges, layout.mountingBoxes)
+  }
   layout.backboneGaps = (layout.backboneGaps ?? []).map((gap, index) => {
     const source = nodeById.get(gap.sourceId)
     const target = nodeById.get(gap.targetId)
@@ -574,7 +593,7 @@ export function createTopologyLayoutWorkerModel(model) {
 }
 
 function buildLaneSpec(args) {
-  if (['central-backbone', 'compound-poles'].includes(args.settings.layoutStyle)) {
+  if (['central-backbone', 'compound-poles', 'facility-schematic'].includes(args.settings.layoutStyle)) {
     return buildCentralBackboneLaneSpec(args)
   }
   return buildSemanticLaneSpec(args)
@@ -690,6 +709,7 @@ function buildPoleBackboneAreaLaneSpec({
     .map(({ id }) => id)
     .sort((left, right) => compareNodes(nodeById.get(left), nodeById.get(right)))
   const excludedGroupSpecs = buildExcludedMountingGroupSpecs({
+    layoutStyle: settings.layoutStyle,
     area,
     nodeIds: excludedNodeIds,
     connectedNodes,
@@ -738,6 +758,25 @@ function buildPoleBackboneAreaLaneSpec({
     connectedNodes,
     edgeAdjacency,
   })
+  if (settings.layoutStyle === 'facility-schematic') {
+    // A separate indoor frame still belongs beside its actual upstream JB.
+    const boxByNode = new Map(mountingBoxes.flatMap(box => box.nodes.map(node => [node.id, box])))
+    for (const box of mountingBoxes) {
+      if (!box.nodes.length || box.nodes.some(node =>
+        ['rack-root', 'junction-peer', 'junction-extended'].includes(node.diagramClass))) continue
+      const anchors = box.nodes.flatMap(node => (edgeAdjacency.get(node.id) ?? []).map(({id}) => ({
+        child: node, parent: boxByNode.get(id)?.nodes.find(item => item.id === id), box: boxByNode.get(id),
+      }))).filter(item => item.box && item.box !== box
+        && ['junction-peer', 'junction-extended'].includes(item.parent?.diagramClass))
+      const owners = new Set(anchors.map(item => item.box.id))
+      if (owners.size !== 1) continue
+      const anchor = anchors[0]
+      box.layoutParentBoxId = anchor.box.id
+      box.layoutParentNodeId = anchor.parent.id
+      box.layoutChildNodeId = anchor.child.id
+      for (const item of anchors) item.child.layoutParentId = item.parent.id
+    }
+  }
   const mountingBoxTree = buildMountingBoxTree(mountingBoxes, settings)
   const boxesWidth = mountingBoxTree.width
   const coreWidth = coreNodes.reduce(
@@ -861,7 +900,7 @@ function mountingBoxOrder(kind) {
   return 4
 }
 
-function buildExcludedMountingGroupSpecs({ area, nodeIds = [], connectedNodes = [], edgeAdjacency }) {
+function buildExcludedMountingGroupSpecs({ area, nodeIds = [], connectedNodes = [], edgeAdjacency, layoutStyle }) {
   if (!nodeIds.length) return []
   const base = {
     hostId: null,
@@ -890,6 +929,21 @@ function buildExcludedMountingGroupSpecs({ area, nodeIds = [], connectedNodes = 
       const kind = byId.get(first)?.mountingExpectation === 'indoor' ? 'Indoor' : 'Non-tiang'
       groups.push({ ...base, id: `excluded-mounting:${area?.key}:${first}`,
         hostName: `${kind} · ${ids.map(id => byId.get(id)?.name ?? id).join(', ')}`, nodeIds: ids })
+    }
+    if (layoutStyle === 'facility-schematic') {
+      const grouped = new Map()
+      for (const group of groups) {
+        const indoor = group.nodeIds.every(id => byId.get(id)?.mountingExpectation === 'indoor')
+        const anchors = [...new Set(group.nodeIds.flatMap(id => (edgeAdjacency.get(id) ?? [])
+          .map(next => byId.get(next.id)).filter(node => node
+            && ['junction-peer', 'junction-extended'].includes(node.diagramClass)).map(node => node.id)))]
+        const anchor = indoor && anchors.length === 1 ? byId.get(anchors[0]) : null
+        const key = anchor?.id ?? group.id
+        if (grouped.has(key)) grouped.get(key).nodeIds.push(...group.nodeIds)
+        else grouped.set(key, {...group, nodeIds: [...group.nodeIds],
+          ...(anchor ? {hostName: `Indoor · ${anchor.name}`, connectionLabel: `Terhubung ke ${anchor.name}`} : {})})
+      }
+      return [...grouped.values()]
     }
     if (groups.length === 1) groups[0].id = `excluded-mounting:${area?.key ?? 'lainnya'}`
     return groups
@@ -1381,12 +1435,24 @@ function buildMountingBoxTree(mountingBoxes, settings) {
     return box
   }
   roots.forEach(measure)
+  const requestedColumns = Number(settings.mountingRootColumns)
+  const rootColumns = Number.isFinite(requestedColumns) && requestedColumns > 0
+    ? Math.max(1, Math.floor(requestedColumns))
+    : Math.max(1, roots.length)
+  const rootRows = []
+  for (let index = 0; index < roots.length; index += rootColumns) {
+    rootRows.push(roots.slice(index, index + rootColumns))
+  }
+  const rowWidth = (row) => row.reduce((total, root) => total + root.treeWidth, 0)
+    + Math.max(0, row.length - 1) * (settings.mountingRootGapX ?? settings.mountingBoxGapX)
+  const rowHeight = (row) => Math.max(0, ...row.map((root) => root.treeHeight))
   return {
     roots,
+    rootRows,
     childrenById,
-    width: roots.reduce((total, root) => total + root.treeWidth, 0)
-      + Math.max(0, roots.length - 1) * settings.mountingBoxGapX,
-    height: Math.max(0, ...roots.map((root) => root.treeHeight)),
+    width: Math.max(0, ...rootRows.map(rowWidth)),
+    height: rootRows.reduce((total, row) => total + rowHeight(row), 0)
+      + Math.max(0, rootRows.length - 1) * settings.mountingRootRowGapY,
   }
 }
 
@@ -1406,10 +1472,18 @@ function placeMountingBoxTree(tree, x, y, settings) {
       childX += child.treeWidth + settings.mountingBoxGapX
     })
   }
-  let rootX = x
-  tree.roots.forEach((root) => {
-    place(root, rootX, y)
-    rootX += root.treeWidth + settings.mountingBoxGapX
+  let rowY = y
+  const rows = tree.rootRows ?? [tree.roots]
+  rows.forEach((row) => {
+    const rowWidth = row.reduce((total, root) => total + root.treeWidth, 0)
+      + Math.max(0, row.length - 1) * (settings.mountingRootGapX ?? settings.mountingBoxGapX)
+    let rootX = x + (tree.width - rowWidth) / 2
+    row.forEach((root) => {
+      place(root, rootX, rowY)
+      rootX += root.treeWidth + (settings.mountingRootGapX ?? settings.mountingBoxGapX)
+    })
+    rowY += Math.max(0, ...row.map((root) => root.treeHeight))
+      + settings.mountingRootRowGapY
   })
 }
 
@@ -1930,16 +2004,8 @@ function translateNode(node, offsetX, offsetY) {
 }
 
 function nodeSize(node, settings) {
-  return reserveLabelSpace(node, baseNodeSize(node, settings))
-}
-
-function reserveLabelSpace(node, size) {
-  return {
-    width: Math.max(size.width, Math.min(36, assetDescription(node).length) * 4.8 + 16,
-      Math.min(32, String(node.name ?? node.id).length) * 6 + 16),
-    height: Math.max(size.height, node.diagramClass === 'rack-root' ? 112
-      : ['junction-peer', 'junction-extended'].includes(node.diagramClass) ? 100 : 84),
-  }
+  if (settings.layoutStyle === 'facility-schematic') return {width: 168, height: 64}
+  return baseNodeSize(node, settings)
 }
 
 function baseNodeSize(node, settings) {
@@ -1958,7 +2024,9 @@ function baseNodeSize(node, settings) {
 }
 
 function hubNodeSize(node, settings) {
-  return reserveLabelSpace(node, baseHubNodeSize(node, settings))
+  if (settings.layoutStyle === 'facility-schematic') return node.diagramClass === 'rack-root'
+    ? {width: 228, height: 88} : {width: 208, height: 76}
+  return baseHubNodeSize(node, settings)
 }
 
 function baseHubNodeSize(node, settings) {
@@ -2212,6 +2280,24 @@ function routeBackboneGap(source, target, layoutNodes, index = 0) {
 function connectionBoxForNode(node) {
   const diagram = node?.diagram
   if (!diagram) return null
+  if (node.layoutStyle === 'facility-schematic' || node.diagram?.width >= 160) {
+    const width = diagram.width || 168
+    const height = diagram.height || 64
+    const centerX = diagram.centerX
+    const centerY = diagram.centerY
+    return {
+      x: centerX - width / 2,
+      y: centerY - height / 2,
+      width,
+      height,
+      centerX,
+      centerY,
+      topX: centerX,
+      topY: centerY - height / 2,
+      bottomX: centerX,
+      bottomY: centerY + height / 2,
+    }
+  }
   const visualSize = node.diagramClass === 'rack-root'
     ? { width: 60, height: 52 }
     : ['junction-peer', 'junction-extended'].includes(node.diagramClass)

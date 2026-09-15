@@ -1,5 +1,5 @@
 import { resolveTopologyReadiness } from '../domain/topology-readiness.js'
-import { correctFacilityEdges, correctedMountingExpectation } from '../../../shared/facility-corrections.mjs'
+import { correctFacilityEdges, correctedMountingExpectation, correctAdditionalMounts } from '../../../shared/facility-corrections.mjs'
 import {
   buildPoleGroups,
   ensureDppuYiaKnownMountingRelations,
@@ -118,10 +118,10 @@ export function adaptActiveDatasetForMap(payload) {
   ))
   // The presentation layer may group confirmed mounting relations, but it must
   // never turn proximity into a physical attachment that is absent from data.
-  const mountingRelations = ensureDppuYiaKnownMountingRelations(
+  const mountingRelations = correctAdditionalMounts(ensureDppuYiaKnownMountingRelations(
     explicitMountingRelations.filter(relation => !correctedMountingExpectation(assetById[relation.sourceAssetId])),
     assets,
-  )
+  ), assets)
   const mountingOptions = normalizeMountingOptions(
     payload.mountingOptions ?? payload.mountingCandidates,
     resolver,
@@ -326,11 +326,11 @@ export function adaptActiveDatasetForTopology(payload) {
   }).filter(({ id }) => Boolean(id))
   topologyGraph.edges = correctFacilityEdges(topologyGraph.edges, assets)
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
-  const mountingRelations = ensureDppuYiaKnownMountingRelations(normalizeMountingRelations(
+  const mountingRelations = correctAdditionalMounts(ensureDppuYiaKnownMountingRelations(normalizeMountingRelations(
     payload.mountingRelations ?? [],
     resolver,
   ).filter((relation) => assetById[relation.sourceAssetId] && assetById[relation.targetAssetId]
-    && !correctedMountingExpectation(assetById[relation.sourceAssetId])), assets)
+    && !correctedMountingExpectation(assetById[relation.sourceAssetId])), assets), assets)
   const mountingExpectations = normalizeMountingExpectations(
     payload.mountingExpectations,
     resolver,
