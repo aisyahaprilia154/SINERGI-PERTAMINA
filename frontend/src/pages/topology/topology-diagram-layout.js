@@ -1147,7 +1147,7 @@ function buildMountingBoxSpec({
   })
   const height = Math.max(
     settings.mountingBoxHeaderHeight + settings.mountingBoxPadding * 2 + settings.hubEndpointHeight,
-    rowY - settings.mountingBoxLevelGapY + settings.mountingBoxPadding,
+    rowY - settings.mountingBoxLevelGapY + Math.max(32, settings.mountingBoxPadding),
   )
   return {
     ...group,
@@ -2181,24 +2181,27 @@ function routeEdge(source, target, mountingBoxById = new Map()) {
   if (sourceParentsTargetBox || targetParentsSourceBox) {
     const parentNode = sourceParentsTargetBox ? source : target
     const childNode = sourceParentsTargetBox ? target : source
+    const parentFrame = sourceParentsTargetBox ? sourceMountingBox : targetMountingBox
+    const childFrame = sourceParentsTargetBox ? targetMountingBox : sourceMountingBox
+    const parentVisual = connectionBoxForNode(parentNode)
+    const childVisual = connectionBoxForNode(childNode)
+    // Exit at the side of the JB and use the gutter between installations.
+    // A center drop would run through its local cameras and their labels.
+    const laneX = parentFrame.x + parentFrame.width + 12
+    const approachY = childFrame.y - 18
     const parentPoint = {
-      x: parentNode.diagram.centerX,
-      y: parentNode.diagram.bottomY,
+      x: parentVisual.x + parentVisual.width,
+      y: parentVisual.centerY,
     }
     const childPoint = {
-      x: childNode.diagram.centerX,
-      y: childNode.diagram.topY,
+      x: childVisual.centerX,
+      y: childVisual.topY,
     }
-    if (Math.abs(parentPoint.x - childPoint.x) < 1) {
-      return sourceParentsTargetBox
-        ? [parentPoint, childPoint]
-        : [childPoint, parentPoint]
-    }
-    const middleY = parentPoint.y + (childPoint.y - parentPoint.y) / 2
     const points = [
       parentPoint,
-      { x: parentPoint.x, y: middleY },
-      { x: childPoint.x, y: middleY },
+      { x: laneX, y: parentPoint.y },
+      { x: laneX, y: approachY },
+      { x: childPoint.x, y: approachY },
       childPoint,
     ]
     return sourceParentsTargetBox ? points : points.reverse()

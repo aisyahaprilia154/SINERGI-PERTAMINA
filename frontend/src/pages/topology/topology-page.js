@@ -166,7 +166,12 @@ function mountTopologyWorkspace(container, {
     componentColumns: 3,
     componentMaxColumns: 4,
     componentPackingAspectRatio: 2.25,
-    layoutStyle: 'facility-schematic',
+    layoutStyle: 'central-backbone',
+    mountingBoxMinWidth: 196,
+    mountingBoxPadding: 20,
+    mountingBoxNodeGapX: 32,
+    mountingBoxLevelGapY: 72,
+    mountingBoxGapY: 48,
     overview: state.area === null,
     ...overrides,
   })
@@ -847,11 +852,7 @@ function mountTopologyWorkspace(container, {
 
   function exportDiagram(kind) {
     if (!layout || layout.status !== 'ready') return showToast('Diagram belum siap untuk diekspor.')
-    const exportLayout = state.area === null ? layout : buildLayout({
-      mountingRootColumns: 4,
-      mountingRootRowGapY: 96,
-      minWidth: 1600,
-    })
+    const exportLayout = layout
     const svg = new DOMParser().parseFromString(renderTopologyDiagramSvg({
       model, layout: exportLayout, context: {...activeContext, areaKey: state.area},
       renderMode: 'export', showMountingPhysical: state.showMountingPhysical,
