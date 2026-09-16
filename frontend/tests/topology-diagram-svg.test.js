@@ -154,11 +154,11 @@ test('SVG overview renders area cards instead of the full node graph', () => {
   assert.doesNotMatch(svg, /data-edge-id="core-camera"/)
 })
 
-test('auto label visibility keeps endpoint labels hidden until close zoom', () => {
+test('pole layout keeps endpoint names visible for asset discovery at overview zoom', () => {
   const { model, layout } = renderFixture()
   const far = renderTopologyDiagramSvg({ model, layout, zoom: .6, labelMode: 'auto' })
   const close = renderTopologyDiagramSvg({ model, layout, zoom: .8, labelMode: 'auto' })
-  assert.doesNotMatch(far, /<text class="topology-node-name"[^>]*>Camera<\/text>/)
+  assert.match(far, /<text class="topology-node-name"[^>]*>Camera<\/text>/)
   assert.match(close, /<text class="topology-node-name"[^>]*>Camera<\/text>/)
 })
 

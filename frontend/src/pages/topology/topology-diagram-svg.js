@@ -399,7 +399,8 @@ export function renderTopologyDiagramSvg({
           directNodes,
           selectionPathNodes,
           labelVisibility,
-          forceEndpointLabels: schematic || ['ft-pengapon-semarang', 'dppu-yia'].includes(context.areaKey),
+          forceEndpointLabels: schematic || layout.options?.layoutStyle === 'central-backbone'
+            || ['ft-pengapon-semarang', 'dppu-yia'].includes(context.areaKey),
           schematic,
           semanticLevel: resolvedSemanticLevel,
           hoveredAssetId,

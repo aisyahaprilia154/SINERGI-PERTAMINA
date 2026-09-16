@@ -432,6 +432,7 @@ test('confirmed extension poles form child boxes below their numbered parent pol
     // though the source type/profile presents it as a regular junction.
     { id: 'child-11', name: 'JB-011.1-exp', type: 'JB Rekomendasi', topologyRole: 'junction', locationGroupKey: 'area-a' },
     { id: 'cam-1', name: 'C-019', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: 'area-a' },
+    { id: 'local-cam', name: 'C-001', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: 'area-a' },
     { id: 'cam-11', name: 'C-037', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: 'area-a' },
   ]
   const edges = [
@@ -440,6 +441,7 @@ test('confirmed extension poles form child boxes below their numbered parent pol
     ['base-child-1', 'base-1', 'child-1'],
     ['base-child-11', 'base-11', 'child-11'],
     ['child-cam-1', 'child-1', 'cam-1'],
+    ['base-local-cam', 'base-1', 'local-cam'],
     ['child-cam-11', 'child-11', 'cam-11'],
   ].map(([id, sourceNodeId, targetNodeId]) => ({
     id, sourceNodeId, targetNodeId, relationStatus: 'confirmed',
@@ -449,6 +451,7 @@ test('confirmed extension poles form child boxes below their numbered parent pol
     ['mount-base-11', 'base-11', 'pole-11'],
     ['mount-child-1', 'child-1', 'pole-19'],
     ['mount-cam-1', 'cam-1', 'pole-19'],
+    ['mount-local-cam', 'local-cam', 'pole-1'],
     ['mount-child-11', 'child-11', 'pole-21'],
     ['mount-cam-11', 'cam-11', 'pole-21'],
   ].map(([id, sourceAssetId, targetAssetId]) => ({
@@ -485,13 +488,26 @@ test('confirmed extension poles form child boxes below their numbered parent pol
     assert.ok(byId.get(childId).diagram.y > byId.get(baseId).diagram.y)
     const route = layout.edges.find(({ id }) => id === edgeId).routePoints
     assert.deepEqual(route[0], {
-      x: byId.get(baseId).diagram.centerX,
-      y: byId.get(baseId).diagram.bottomY,
+      x: byId.get(baseId).diagram.centerX + 22,
+      y: byId.get(baseId).diagram.centerY,
     })
     assert.deepEqual(route.at(-1), {
       x: byId.get(childId).diagram.centerX,
-      y: byId.get(childId).diagram.topY,
+      y: byId.get(childId).diagram.centerY - 19,
     })
+    assert.ok(route[1].x > parentBox.x + parentBox.width,
+      'downstream cable uses the outer gutter instead of crossing local devices')
+    for (let index = 1; index < route.length; index++) {
+      const a = route[index - 1], b = route[index]
+      assert.ok(a.x === b.x || a.y === b.y, 'every cable segment is orthogonal')
+      const camera = byId.get('local-cam').diagram
+      const crosses = a.x === b.x
+        ? a.x > camera.x && a.x < camera.x + camera.width
+          && Math.max(a.y, b.y) > camera.y && Math.min(a.y, b.y) < camera.y + camera.height + 28
+        : a.y > camera.y && a.y < camera.y + camera.height + 28
+          && Math.max(a.x, b.x) > camera.x && Math.min(a.x, b.x) < camera.x + camera.width
+      assert.equal(crosses, false, 'downstream cable avoids the local camera and its label')
+    }
   }
   assert.equal(boxes.get('pole-group:pole-1').y, boxes.get('pole-group:pole-11').y)
 })
