@@ -24,7 +24,7 @@ const DEFAULT_OPTIONS = Object.freeze({
   compactWidth: 36,
   compactHeight: 36,
   unresolvedHeight: 44,
-  footerHeight: 44,
+  footerHeight: 156,
   minWidth: 920,
   layoutStyle: 'central-backbone',
   componentColumns: 2,
@@ -739,7 +739,8 @@ function buildPoleBackboneAreaLaneSpec({
     }] : []),
     ...excludedGroupSpecs,
   ]
-  const mountingBoxes = groupSpecs.map((group) => buildMountingBoxSpec({
+  const logicalGroupSpecs = splitFramesByExternalJunction(groupSpecs, nodeById, edgeAdjacency)
+  const mountingBoxes = logicalGroupSpecs.map((group) => buildMountingBoxSpec({
     group,
     nodeById,
     componentByNodeId,
@@ -891,6 +892,43 @@ function buildPoleBackboneAreaLaneSpec({
     presentation: 'pole-backbone',
     mountingBoxes,
   }
+}
+
+// Physical co-location is not logical ownership. Keep the original mounting
+// metadata, but give devices owned by an external JB a separate presentation
+// frame that the subtree packer can place under that JB.
+function splitFramesByExternalJunction(groups, nodeById, adjacency) {
+  return groups.flatMap(group => {
+    const local = new Set(group.nodeIds)
+    const satellites = new Map()
+    const retained = []
+    for (const id of group.nodeIds) {
+      const node = nodeById.get(id)
+      const owners = node?.diagramClass === 'endpoint'
+        ? [...new Set((adjacency.get(id) ?? []).map(next => next.id).filter(otherId => {
+          const other = nodeById.get(otherId)
+          return other?.areaKey === node.areaKey
+            && ['junction-peer', 'junction-extended'].includes(other?.diagramClass)
+        }))] : []
+      const ownerId = owners.length === 1 ? owners[0] : null
+      if (!ownerId || local.has(ownerId)) {
+        retained.push(id)
+        continue
+      }
+      if (!satellites.has(ownerId)) satellites.set(ownerId, [])
+      satellites.get(ownerId).push(id)
+    }
+    if (!satellites.size) return [group]
+    const inherit = ids => (group.presentationInheritedNodeIds ?? []).filter(id => ids.includes(id))
+    return [
+      ...(retained.length ? [{...group, nodeIds: retained, presentationInheritedNodeIds: inherit(retained)}] : []),
+      ...[...satellites].map(([ownerId, ids]) => ({...group,
+        id: `${group.id}:junction:${ownerId}`, physicalGroupId: group.id,
+        nodeIds: ids, presentationInheritedNodeIds: inherit(ids),
+        connectionLabel: `Terhubung ke ${nodeById.get(ownerId).name || ownerId}`,
+      })),
+    ]
+  })
 }
 
 function mountingBoxOrder(kind) {
@@ -1419,13 +1457,16 @@ function buildMountingBoxTree(mountingBoxes, settings) {
     }
     visiting.add(box.id)
     const children = childrenById.get(box.id) ?? []
+    const owners = [...new Set(children.map(child => child.layoutParentNodeId))].sort()
+    children.forEach(child => { child.routingTrack = owners.indexOf(child.layoutParentNodeId) })
+    box.childRoutingGap = Math.max(settings.mountingBoxGapY, 24 + owners.length * 12)
     children.forEach(measure)
     const childrenWidth = children.reduce((total, child) => total + child.treeWidth, 0)
       + Math.max(0, children.length - 1) * settings.mountingBoxGapX
     const childrenHeight = Math.max(0, ...children.map((child) => child.treeHeight))
     box.treeWidth = Math.max(box.width, childrenWidth)
     box.treeHeight = box.height + (children.length
-      ? settings.mountingBoxGapY + childrenHeight
+      ? box.childRoutingGap + childrenHeight
       : 0)
     visiting.delete(box.id)
     return box
@@ -1462,7 +1503,7 @@ function placeMountingBoxTree(tree, x, y, settings) {
     const childrenWidth = children.reduce((total, child) => total + child.treeWidth, 0)
       + Math.max(0, children.length - 1) * settings.mountingBoxGapX
     let childX = subtreeX + (box.treeWidth - childrenWidth) / 2
-    const childY = subtreeY + box.height + settings.mountingBoxGapY
+    const childY = subtreeY + box.height + box.childRoutingGap
     children.forEach((child) => {
       place(child, childX, childY)
       childX += child.treeWidth + settings.mountingBoxGapX
@@ -2183,8 +2224,24 @@ function routeEdge(source, target, mountingBoxById = new Map()) {
     const childVisual = connectionBoxForNode(childNode)
     // Exit at the side of the JB and use the gutter between installations.
     // A center drop would run through its local cameras and their labels.
-    const laneX = parentFrame.x + parentFrame.width + 12
-    const approachY = childFrame.y - 18
+    const track = childFrame.routingTrack ?? 0
+    const laneX = parentFrame.x + parentFrame.width + 12 + track * 12
+    const approachY = childFrame.y - 18 - track * 12
+    const clearDrop = !(parentFrame.nodes ?? []).some(node => {
+      if (node.id === parentNode.id) return false
+      const box = node.diagram
+      return parentVisual.centerX > box.x - 12 && parentVisual.centerX < box.x + box.width + 12
+        && box.y + box.height + 28 > parentVisual.bottomY && box.y < approachY
+    })
+    if (clearDrop) {
+      const points = compactPoints([
+        {x: parentVisual.centerX, y: parentVisual.bottomY},
+        {x: parentVisual.centerX, y: approachY},
+        {x: childVisual.centerX, y: approachY},
+        {x: childVisual.centerX, y: childVisual.topY},
+      ])
+      return sourceParentsTargetBox ? points : points.reverse()
+    }
     const parentPoint = {
       x: parentVisual.x + parentVisual.width,
       y: parentVisual.centerY,

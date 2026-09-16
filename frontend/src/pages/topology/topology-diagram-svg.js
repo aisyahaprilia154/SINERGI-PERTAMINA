@@ -6,6 +6,7 @@ import { semanticZoomLevelForZoom } from './topology-viewport.js'
 import { assetDescription } from '../../domain/asset-description.js'
 import { lineJumpPaths } from './topology-line-jumps.js'
 import { topologyDocumentMeta } from './topology-document-meta.js'
+import { CONNECTION_STYLES, connectionStyle } from './topology-connection-style.js'
 
 const THEME = Object.freeze({
   background: '#fdfcfb',
@@ -82,7 +83,7 @@ export function renderTopologyDiagramSvg({
   const nodesById = new Map(nodes.map(node => [node.id, node]))
   const schematic = layout.options?.layoutStyle === 'facility-schematic'
   const edges = layout.edges
-  const jumpPaths = schematic && !minimap ? lineJumpPaths(edges) : new Map()
+  const jumpPaths = !minimap ? lineJumpPaths(edges) : new Map()
   const bottom = layout.height - layout.options.footerHeight
   const resolvedSemanticLevel = semanticLevel ?? semanticZoomLevelForZoom(zoom)
   const labelVisibility = getTopologyLabelVisibility({
@@ -125,6 +126,7 @@ export function renderTopologyDiagramSvg({
         datasetVersionId=${escapeXml(context.datasetVersionId ?? model.datasetVersionId ?? '')};
         area=${escapeXml(model.area ?? 'all')}</metadata>
       <defs>
+        ${Object.entries(CONNECTION_STYLES).map(([key, style]) => `<marker id="topology-arrow-type-${key}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="${style.color}"/></marker>`).join('')}
         <marker id="topology-arrow-hierarchy" viewBox="0 0 10 10" refX="9" refY="5"
           markerWidth="5" markerHeight="5" orient="auto-start-reverse">
           <path d="M 1 1 L 9 5 L 1 9 Z" fill="#fff" stroke="#344d65" stroke-width="1.5"/>
@@ -362,6 +364,7 @@ export function renderTopologyDiagramSvg({
         ${edges.map((edge) => renderEdge({
           ...model.edgeById.get(edge.id),
           ...edge,
+          connectionStyle: connectionStyle(nodesById.get(edge.sourceId), nodesById.get(edge.targetId)),
           hierarchyDirection: schematic && edge.direction === 'undirected'
             ? nodesById.get(edge.targetId)?.layoutParentId === edge.sourceId ? 'source_to_target'
               : nodesById.get(edge.sourceId)?.layoutParentId === edge.targetId ? 'target_to_source' : null
@@ -577,7 +580,7 @@ function renderMountingGroups(model, layout, {
         ? '0 aset · belum ada mounting'
       : inheritedCount
         ? `${mountedCount} terpasang · ${inheritedCount} non-tiang`
-      : `${box.nodeIds.length} aset terpasang`
+      : `${box.nodeIds.length} aset terpasang${box.connectionLabel ? ` · ${box.connectionLabel}` : ''}`
     const displayLabel = box.kind === 'confirmed' && !/^Tiang\s·/i.test(label)
       ? `Tiang · ${label}`
       : label
@@ -736,6 +739,7 @@ function renderEdge(edge, { selectedEdgeId, directIds, selectionPathIds, minimap
   const selected = edge.id === selectedEdgeId
   const direct = directIds.has(edge.id)
   const selectedPath = selectionPathIds.has(edge.id)
+  const style = edge.connectionStyle ?? CONNECTION_STYLES.other
   const classes = [
     'topology-edge',
     `family-${family}`,
@@ -748,10 +752,10 @@ function renderEdge(edge, { selectedEdgeId, directIds, selectionPathIds, minimap
   ].filter(Boolean).join(' ')
   const color = edge.trace || selected || selectedPath
     ? THEME.selected
-    : edge.dimmed ? THEME.dimmed : THEME.edge
+    : edge.dimmed ? THEME.dimmed : style.color
   const marker = edge.hierarchyDirection ? 'topology-arrow-hierarchy' : edge.trace || selected || selectedPath
     ? 'topology-arrow-selected'
-    : `topology-arrow-${edge.edgeVisualRole || 'access'}`
+    : `topology-arrow-type-${style.key ?? 'other'}`
   const direction = edge.hierarchyDirection ?? edge.direction
   const arrow = !edge.dimmed && !minimap && direction !== 'undirected'
     ? `${direction === 'target_to_source' || direction === 'bidirectional'
@@ -764,8 +768,8 @@ function renderEdge(edge, { selectedEdgeId, directIds, selectionPathIds, minimap
     <g class="topology-edge-target" data-edge-id="${escapeAttribute(edge.id)}" tabindex="0"
       role="button" aria-label="Detail relasi ${escapeAttribute(edge.id)}">
       <path class="topology-edge-underlay" d="${path}"${edge.dimmed ? ' opacity="0.12"' : ''}/>
-      <path class="${classes}" d="${path}" stroke="${escapeAttribute(color)}"${arrow}>
-        <title>${escapeXml(describeEdge(edge))}${edge.hierarchyDirection ? ' · Panah hierarki tampilan; arah komunikasi belum ditetapkan.' : ''}</title>
+      <path class="${classes}" data-connection-type="${style.key ?? 'other'}" d="${path}" stroke="${escapeAttribute(color)}" style="stroke:${escapeAttribute(color)}"${arrow}>
+        <title>${escapeXml(style.label)} · ${escapeXml(describeEdge(edge))}${edge.hierarchyDirection ? ' · Panah hierarki tampilan; arah komunikasi belum ditetapkan.' : ''}</title>
       </path>
     </g>
   `
@@ -994,6 +998,14 @@ function renderNodeGlyph(node, x, y, color) {
   return `<rect class="topology-device-icon" x="${x - 12}" y="${y - 12}" width="24" height="24" rx="4" stroke="${escapeAttribute(color)}"/>`
 }
 
+function renderConnectionLegend(bottom, width) {
+  return `<g aria-label="Warna garis menunjukkan jenis koneksi, bukan status">${Object.values(CONNECTION_STYLES).map((style, index) => {
+    const x = 32 + (index % 4) * (width - 64) / 4
+    const y = bottom + 112 + Math.floor(index / 4) * 22
+    return `<line x1="${x}" y1="${y - 4}" x2="${x + 22}" y2="${y - 4}" stroke="${style.color}" stroke-width="3"/><text x="${x + 28}" y="${y}" font-size="11" fill="#34465a">${escapeXml(style.label)}</text>`
+  }).join('')}</g>`
+}
+
 function renderLegend(bottom, width, showMountingPhysical, context = {}, schematic = false) {
   if (schematic) {
     const metadata = topologyDocumentMeta(context)
@@ -1008,6 +1020,7 @@ function renderLegend(bottom, width, showMountingPhysical, context = {}, schemat
         <text x="${52 + index * (width - 64) / 7}" y="${bottom + 47}" font-size="11" fill="#34465a">${label}</text>`).join('')}
       <text x="32" y="${bottom + 68}" font-size="12" fill="#34465a">Garis tebal: backbone · Tipis: cabang · Panah kosong: hierarki, bukan arah data · Panah penuh: arah tercatat · Lengkungan: crossing tanpa koneksi</text>
       <text x="32" y="${bottom + 89}" font-size="11" fill="#526477">Versi ${escapeXml(metadata.version)} · Publikasi versi: ${escapeXml(metadata.updated)}</text>
+      ${renderConnectionLegend(bottom, width)}
     </g>`
   }
   return `
@@ -1031,6 +1044,7 @@ function renderLegend(bottom, width, showMountingPhysical, context = {}, schemat
       <rect x="1015" y="${bottom + 23}" width="18" height="15" rx="3" fill="#fff9db" stroke="#d89b00"/>
       <text class="topology-legend-label" x="1040" y="${bottom + 34}">Perlu mounting</text>` : ''}
       <text class="topology-disclaimer" x="32" y="${bottom + 64}">Klik perangkat atau garis untuk melihat identitas dan detail relasinya.</text>
+      ${renderConnectionLegend(bottom, width)}
     </g>
   `
 }

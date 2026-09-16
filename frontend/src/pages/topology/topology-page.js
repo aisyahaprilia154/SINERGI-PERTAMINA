@@ -1,4 +1,5 @@
 import { adaptActiveDatasetForTopology } from '../../adapters/active-dataset-map-adapter.js'
+import { CONNECTION_STYLES } from './topology-connection-style.js'
 import {
   buildTopologyDiagramModel,
   getTopologyDiagramSearchResults,
@@ -985,6 +986,8 @@ function renderWorkspaceShell({ activeContext, state, model }) {
               <span><b style="color:#315f4f">▰</b>Server</span><span><b style="color:#376d9d">▰</b>JB</span>
               <span><b style="color:#9b6928">▰</b>Kamera (bukan warning)</span>
               <span><b>━</b>Backbone</span><span><b>─</b>Cabang</span>
+              ${Object.values(CONNECTION_STYLES).map(style => `<span><b style="color:${style.color}" aria-hidden="true">━</b>${escapeHtml(style.label)}</span>`).join('')}
+              <span>Warna garis = jenis koneksi, bukan status</span>
               <span>▷ Hierarki tampilan, bukan arah data</span><span>⌒ Crossing tanpa koneksi</span>
             </div>
             <div class="topology-document-version" title="${escapeHtml(metadata.version)}">Diagram Topologi · ${escapeHtml(activeContext.branchName ?? activeContext.branchId)} · Versi ${escapeHtml(metadata.version)} · Publikasi versi: ${escapeHtml(metadata.updated)}</div>

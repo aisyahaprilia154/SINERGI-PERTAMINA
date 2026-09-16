@@ -4,9 +4,11 @@ import {
   correctedMountingExpectation,
   facilityRelations,
   correctAdditionalMounts,
+  facilityConflictPredicate,
 } from '../../../shared/facility-corrections.mjs'
 import { buildAssetIdentityMapFromRecord, createAssetIdentityResolver } from '../domain/canonical-asset-identity.js'
 import { withTopologyGraphRevision } from './topology-graph-revision.js'
+import { unsafeAutomaticMount } from '../../../shared/mounting-policy.mjs'
 
 // Apply published facility facts to older stored datasets as well as freshly
 // regenerated ones. This is a read projection: the source aggregate is immutable.
@@ -29,7 +31,14 @@ export function projectFacilityRecord(record) {
     const expectation = correctedMountingExpectation(asset)
     return expectation ? [[asset.id, expectation]] : []
   }))
-  if (!facts.length && !exclusions.size) return record
+  const conflicts = facilityConflictPredicate(assets)
+  const hasConflicts = [...(record.topologyGraph?.edges ?? []), ...(record.confirmedRelations ?? [])]
+    .some(edge => conflicts({...edge,
+      sourceAssetId: resolver.resolve(edge.sourceAssetId ?? edge.sourceNodeId),
+      targetAssetId: resolver.resolve(edge.targetAssetId ?? edge.targetNodeId),
+    }))
+  const staleMounts = (record.mountingRelations ?? []).filter(unsafeAutomaticMount)
+  if (!facts.length && !exclusions.size && !hasConflicts && !staleMounts.length) return record
   const sourceId = relation => resolver.resolve(relation.sourceAssetId ?? relation.assetId)
   const expectations = new Map((record.mountingExpectations ?? []).map(item => [
     resolver.resolve(item.assetId), { ...item, assetId: resolver.resolve(item.assetId) },
@@ -64,7 +73,9 @@ export function projectFacilityRecord(record) {
   }
   return {...record, facilityCorrectionVersion: FACILITY_CORRECTION_VERSION,
     confirmedRelations: correctFacilityEdges((record.confirmedRelations ?? []).map(normalizeEdge), assets),
-    relations: (record.relations ?? []).filter(r => r.relationType !== 'mounted_on' || !exclusions.has(sourceId(r))),
+    relations: (record.relations ?? []).filter(r => r.relationType !== 'mounted_on'
+      || mountingRelations.some(m => m.sourceAssetId === sourceId(r)
+        && m.targetAssetId === resolver.resolve(r.targetAssetId))),
     mountingRelations,
     mountingExpectations: [...expectations.values()],
     mountingCandidates: (record.mountingCandidates ?? []).filter(r => !exclusions.has(sourceId(r))),
@@ -72,6 +83,13 @@ export function projectFacilityRecord(record) {
     mountingOverrides: (record.mountingOverrides ?? []).filter(r => !exclusions.has(sourceId(r))),
     mountingReviewItems: (record.mountingReviewItems ?? []).map(item => {
       const assetId = resolver.resolve(item.assetId), expectation = exclusions.get(assetId)
+      if (!expectation && item.targetAssetId && !mountingRelations.some(r => r.sourceAssetId === assetId)) {
+        const hasOptions = Boolean(item.options?.length || item.optionCount || item.candidateCount)
+        return {...item, assetId, targetAssetId: null, relationId: null, provenance: null,
+          reviewStatus: hasOptions ? 'ambiguous' : 'no-nearby-pole',
+          workflowStatus: hasOptions ? 'needs_choice' : 'no_nearby_pole',
+          warnings: [...new Set([...(item.warnings ?? []), 'automatic_mount_rejected'])]}
+      }
       return expectation ? {...item, assetId, mountingExpectation: expectation,
         expectationProvenance: 'facility_topology_correction', reviewStatus: expectation,
         workflowStatus: `excluded_${expectation}`, targetAssetId: null, relationId: null,

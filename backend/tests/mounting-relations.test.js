@@ -90,23 +90,18 @@ test('mounting inference consistently includes nearby CCTV and junction boxes on
     ['camera-18', 'pole-18'],
     ['jb-18', 'pole-18'],
   ].sort())
-  assert.equal(result.summary.searchRadiusMeters, 25)
+  assert.equal(result.summary.searchRadiusMeters, 5)
 })
 
-test('unique nearest pole within 25m mounts every eligible asset regardless of number', () => {
+test('a unique pole beyond 5m remains an option, even with a matching asset number', () => {
   const result = generateMountingArtifacts(topologyBundle([
     { id: 'pole-13', type: 'Tiang', sourceName: 'T-013', coordinate: [110, -7] },
     { id: 'jb-13', type: 'Junction Box', sourceName: 'JB-013', coordinate: [110.00008, -7] },
     { id: 'camera-unrelated', type: 'CCTV', sourceName: 'C-099', coordinate: [110.00008, -7] },
   ]))
 
-  assert.equal(result.relations.length, 2)
-  assert.deepEqual(result.relations.map(({ sourceAssetId, targetAssetId }) => (
-    [sourceAssetId, targetAssetId]
-  )).sort(), [
-    ['camera-unrelated', 'pole-13'],
-    ['jb-13', 'pole-13'],
-  ].sort())
+  assert.equal(result.relations.length, 0)
+  assert.equal(result.options.length, 2)
   assert.equal(result.summary.identityRadiusMeters, 10)
 })
 
