@@ -1,7 +1,7 @@
 // User-confirmed facility facts. Shared by regeneration and existing map projections.
 import {additionalRelations, additionalExpectation, additionalConflict} from './additional-facility-facts.mjs'
 export {correctAdditionalMounts} from './additional-facility-facts.mjs'
-export const FACILITY_CORRECTION_VERSION = 'facilities/2026-09-15'
+export const FACILITY_CORRECTION_VERSION = 'facilities/2026-09-16-mounting-distance'
 export function assetCode(asset) {
   return String(asset?.sourceName ?? asset?.name ?? '').trim().toUpperCase()
     .replace(/^(C|JB|T)-0+(\d)/, '$1-$2')
@@ -48,7 +48,6 @@ export function conflictsWithFacilityRelation(edge, assets) {
 }
 export function facilityConflictPredicate(assets) {
   const relations = facilityRelations(assets)
-  if (!relations.length) return () => false
   const byId = new Map(assets.map(a => [a.canonicalAssetId ?? a.assetId ?? a.id, a]))
   return edge => {
   if (additionalConflict(edge, byId)) return true
@@ -78,7 +77,6 @@ export function correctFacilityEdges(edges = [], assets = []) {
 export function correctFacilityBundle(input) {
   const nodes = input?.classifiedNodes ?? []
   const relations = facilityRelations(nodes)
-  if (!relations.length) return input
   const ids = new Set(relations.map(r => r.id))
   return { ...input, explicitRelations: [
     ...(input.explicitRelations ?? []).filter(r => !ids.has(r.explicitRelationEvidenceId)
@@ -88,7 +86,7 @@ export function correctFacilityBundle(input) {
       sourceReference: r.sourceAssetId, targetReference: r.targetAssetId,
       source: 'manual_admin', manualConfirmation: {
         actorId: 'facility-correction-policy', reviewedAt: '2026-09-14T00:00:00.000Z',
-        reason: 'Relasi dikonfirmasi pengguna untuk FT Tegal Baru.',
+        reason: 'Relasi fasilitas dikonfirmasi pengguna; mengungguli inferensi otomatis.',
       }, evidence: [] })),
   ] }
 }

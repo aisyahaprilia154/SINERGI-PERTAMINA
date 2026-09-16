@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { assetCode, facilityRelations, correctedMountingExpectation, correctFacilityEdges } from '../../shared/facility-corrections.mjs'
+import { assetCode, facilityRelations, correctedMountingExpectation, correctFacilityEdges, facilityConflictPredicate } from '../../shared/facility-corrections.mjs'
 import { generateRelationArtifacts, rebuildConfirmedRelationArtifacts, TOPOLOGY_RULE_SET_VERSION } from '../src/topology/semantic-relation-engine.js'
 import { adaptActiveDatasetForTopology } from '../../frontend/src/adapters/active-dataset-map-adapter.js'
 import { buildTopologyDiagramModel } from '../../frontend/src/domain/topology-diagram-model.js'
@@ -8,11 +8,101 @@ import { calculateTopologyDiagramLayout } from '../../frontend/src/pages/topolog
 import { projectFacilityRecord } from '../src/topology/facility-record-projection.js'
 import { TopologyService } from '../src/topology/topology-service.js'
 import { renderTopologyDiagramSvg } from '../../frontend/src/pages/topology/topology-diagram-svg.js'
+import { generateMountingArtifacts } from '../src/topology/mounting-relations.js'
+
+test('actual Booster coordinates cannot mount Cam-13 23m away or split it from Cam-12', () => {
+  // Coordinates from the imported Booster Kutawinangun source, not a synthetic distance.
+  const points = [
+    ['Cam-12', 'CCTV', [109.7624862679504, -7.714834989498747]],
+    ['Cam-13', 'CCTV', [109.7624530474359, -7.714844104916319]],
+    ['JB-02', 'Junction Box', [109.7624869986333, -7.714819640543506]],
+    ['JB-06', 'Junction Box', [109.7622803418273, -7.714963374886281]],
+    ['T-08', 'Tiang', [109.7622819601516, -7.714964853732579]],
+  ]
+  for (const area of ['booster-kutawinangun', 'another-facility']) {
+    const input = bundle()
+    input.classifiedNodes = points.map(([name, type]) => ({...input.classifiedNodes[0],
+      id: name, assetId: name, canonicalAssetId: name, sourceName: name, name, type, assetType: type,
+      locationGroupKey: area, sourceFolderPath: `/RJBT/${area}/Devices`,
+      topologyRole: type === 'CCTV' ? 'endpoint' : type === 'Tiang' ? 'physical_mount' : 'junction',
+      geometryIds: [`point:${name}`],
+    }))
+    input.geometries = points.map(([name, , coordinates]) => ({geometryId: `point:${name}`,
+      valid: true, geometryType: 'Point', coordinates}))
+    const mounting = generateMountingArtifacts(input, {config: {mountingSearchRadiusMeters: 25}})
+    assert.equal(mounting.relations.some(r => r.sourceAssetId === 'Cam-13'), false)
+    assert.ok(mounting.options.some(r => r.assetId === 'Cam-13' && r.targetAssetId === 'T-08'))
+    const oldMount = {sourceAssetId: 'Cam-13', targetAssetId: 'T-08', relationType: 'mounted_on',
+      provenance: 'spatial_inference', verificationStatus: 'confirmed', distanceMeters: 23.145}
+    const edges = ['Cam-12', 'Cam-13'].map(id => ({id, sourceAssetId: id,
+      targetAssetId: 'JB-02', verificationStatus: 'confirmed', relationKind: 'device_edge'}))
+    const record = {datasetVersion: {id: 'dv'}, assets: input.classifiedNodes,
+      topologyInputBundle: input, mountingRelations: [oldMount],
+      topologyGraph: {nodes: input.classifiedNodes, edges}}
+    const projected = projectFacilityRecord(record)
+    assert.equal(projected.mountingRelations.some(r => r.sourceAssetId === 'Cam-13'), false)
+    const view = adaptActiveDatasetForTopology(record)
+    const model = buildTopologyDiagramModel({assets: view.assets, graph: view.topologyGraph,
+      mountingRelations: view.mountingRelations, poleGroups: view.poleGroups, area})
+    const layout = calculateTopologyDiagramLayout(model)
+    const frame = id => layout.mountingBoxes.find(box => box.nodeIds.includes(id))
+    assert.equal(frame('Cam-13').id, frame('Cam-12').id)
+    assert.equal(frame('Cam-13').id, frame('JB-02').id)
+    assert.notEqual(frame('Cam-13').hostId, 'T-08')
+  }
+})
 
 const names = ['Server', 'JB-01', 'JB-014', 'JB-02', 'JB-02.2', 'JB-04', 'JB-09', 'JB-10-EXP', 'C-32',
   'C-08', 'C-09', 'C-10', 'C-11', 'C-12', 'C-013', 'C-15', 'C-27', 'C-031',
   'JB-08', 'JB-08.3', 'JB-09.1', 'C-033-EXP', 'JB-10.1', 'C-034-EXP', 'JB-13-EXP',
   'C-37-EXP', 'C-38-EXP', 'C-39-EXP', 'C-40-EXP', 'C-44', 'C-45', 'C-46', 'T-01']
+
+test('Booster C-13 belongs only to JB-02 through projection, generation, and regeneration', () => {
+  for (const cameraName of ['C-13', 'C-013', 'Cam-13', 'CAM-013']) {
+    const input = bundle()
+    input.classifiedNodes = input.classifiedNodes.slice(0, 3).map((node, i) => ({...node,
+      id: ['camera', 'owner', 'wrong-jb'][i], assetId: ['camera', 'owner', 'wrong-jb'][i],
+      canonicalAssetId: ['camera', 'owner', 'wrong-jb'][i],
+      name: [cameraName, 'JB-02', 'JB-06'][i], sourceName: [cameraName, 'JB-02', 'JB-06'][i],
+      locationGroupKey: 'booster-kutawinangun', sourceFolderPath: '/RJBT/Booster Kutawinangun/Devices',
+      topologyRole: i === 0 ? 'endpoint' : 'junction', assetType: i === 0 ? 'CCTV' : 'Junction Box',
+    }))
+    const oldEdge = {id: 'wrong', sourceAssetId: 'wrong-jb', targetAssetId: 'camera',
+      relationKind: 'device_edge', relationType: 'connected-to', verificationStatus: 'confirmed'}
+    const assertOwnership = edges => {
+      const neighbors = edges.flatMap(edge => {
+        const s = edge.sourceAssetId ?? edge.sourceNodeId, t = edge.targetAssetId ?? edge.targetNodeId
+        return s === 'camera' ? [t] : t === 'camera' ? [s] : []
+      })
+      assert.deepEqual(neighbors, ['owner'], cameraName)
+    }
+    const record = {datasetVersion: {id: 'dv'}, assets: input.classifiedNodes,
+      facilityCorrectionVersion: 'facilities/2026-09-15',
+      topologyGraph: {nodes: input.classifiedNodes, edges: [oldEdge]}}
+    const projected = projectFacilityRecord(record)
+    assertOwnership(projected.topologyGraph.edges)
+    assertOwnership(projected.confirmedRelations)
+    const view = adaptActiveDatasetForTopology(record)
+    assertOwnership(view.topologyGraph.edges)
+    const first = generateRelationArtifacts(input, {previousRelations: [oldEdge]})
+    assertOwnership(first.confirmedRelations)
+    const next = rebuildConfirmedRelationArtifacts(input, {candidates: first.candidates,
+      previousRelations: [...first.confirmedRelations, oldEdge]})
+    assertOwnership(next.confirmedRelations)
+    assert.equal(facilityConflictPredicate(input.classifiedNodes)(oldEdge), true)
+    const missingOwner = input.classifiedNodes.filter(node => node.id !== 'owner')
+    assert.deepEqual(correctFacilityEdges([oldEdge], missingOwner), [])
+    assert.deepEqual(projectFacilityRecord({...record, assets: missingOwner,
+      topologyGraph: {nodes: missingOwner, edges: [oldEdge]}}).topologyGraph.edges, [])
+    assert.equal(facilityConflictPredicate(missingOwner)({sourcePathAssetId: 'camera', targetAssetId: 'wrong-jb'}), true)
+    const ambiguous = [...input.classifiedNodes, {...input.classifiedNodes[1], id: 'duplicate',
+      assetId: 'duplicate', canonicalAssetId: 'duplicate'}]
+    assert.deepEqual(correctFacilityEdges([oldEdge], ambiguous), [])
+    const otherSite = input.classifiedNodes.map(node => ({...node,
+      locationGroupKey: 'other', sourceFolderPath: '/Other'}))
+    assert.deepEqual(correctFacilityEdges([oldEdge], otherSite), [oldEdge])
+  }
+})
 function assets() {
   return names.map(name => ({id: name, assetId: name, canonicalAssetId: name, name,
     sourceName: name, sourceFolderPath: '/RJBT/FT Tegal Baru/Devices',

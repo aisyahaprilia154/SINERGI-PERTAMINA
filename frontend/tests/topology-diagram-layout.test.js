@@ -55,6 +55,46 @@ test('camera frames stay in their JB subtree across facilities and pole layouts'
   }
 })
 
+test('a pole shared with another JB cannot override confirmed camera ownership in any facility', () => {
+  for (const area of ['booster-kutawinangun', 'dppu-yia', 'ft-tegal-baru', 'unlisted-facility']) {
+    for (const extended of [false, true]) {
+      const assets = [
+        ['root', 'Server', 'Server Rack', 'core'],
+        ['owner', extended ? 'JB-02.2' : 'JB-02', 'Junction Box', extended ? 'junction_extended' : 'junction'],
+        ['other', 'JB-06', 'Junction Box', 'junction'],
+        ['camera', 'Cam-13', 'CCTV', 'endpoint'],
+        ['local', 'Cam-16', 'CCTV', 'endpoint'],
+        ['pole', 'T-08', 'Pole', 'physical_mount'],
+      ].map(([id, name, type, topologyRole]) => ({id, name, type, topologyRole, locationGroupKey: area}))
+      const edges = [['root', 'owner'], ['root', 'other'], ['camera', 'owner'], ['other', 'local']]
+        .map(([sourceNodeId, targetNodeId]) => ({id: `${sourceNodeId}:${targetNodeId}`,
+          sourceNodeId, targetNodeId, relationStatus: 'confirmed'}))
+      const mounts = ['other', 'camera', 'local'].map(sourceAssetId => ({
+        sourceAssetId, targetAssetId: 'pole', relationType: 'mounted_on', verificationStatus: 'confirmed',
+      }))
+      const model = buildTopologyDiagramModel({assets, roots: ['root'], graph: {nodes: assets, edges},
+        mountingRelations: mounts, locationGroups: [{key: area, name: area}]})
+      const before = JSON.stringify(model.mountingGroups)
+      for (const layoutStyle of ['central-backbone', 'compound-poles', 'facility-schematic']) {
+        const layout = calculateTopologyDiagramLayout(model, {layoutStyle})
+        const frame = id => layout.mountingBoxes.find(box => box.nodeIds.includes(id))
+        assert.notEqual(frame('camera').id, frame('other').id)
+        assert.equal(frame('camera').layoutParentBoxId, frame('owner').id)
+        assert.equal(frame('camera').layoutParentNodeId, 'owner')
+        assert.ok(frame('camera').y >= frame('owner').y + frame('owner').height)
+        assert.ok(frame('camera').x >= frame('owner').treeX)
+        assert.ok(frame('camera').x + frame('camera').width <= frame('owner').treeX + frame('owner').treeWidth)
+        assert.equal(frame('camera').hostId, 'pole', 'physical mounting is preserved separately')
+        assert.equal(frame('local').id, frame('other').id)
+        assert.equal(layout.nodes.filter(node => node.id === 'camera').length, 1)
+        assert.equal(layout.nodes.find(node => node.id === 'camera').layoutParentId, 'owner')
+        assert.equal(layout.edges.length, edges.length)
+        assert.equal(JSON.stringify(model.mountingGroups), before)
+      }
+    }
+  }
+})
+
 function fixture() {
   const assets = [
     { id: 'root', name: 'Core', type: 'Core Router', topologyRole: 'core', locationGroupKey: 'area-a' },
@@ -537,14 +577,14 @@ test('confirmed extension poles form child boxes below their numbered parent pol
     assert.ok(byId.get(childId).diagram.y > byId.get(baseId).diagram.y)
     const route = layout.edges.find(({ id }) => id === edgeId).routePoints
     assert.deepEqual(route[0], {
-      x: byId.get(baseId).diagram.centerX + 22,
-      y: byId.get(baseId).diagram.centerY,
+      x: byId.get(baseId).diagram.centerX + (baseId === 'base-1' ? 22 : 0),
+      y: byId.get(baseId).diagram.centerY + (baseId === 'base-1' ? 0 : 19),
     })
     assert.deepEqual(route.at(-1), {
       x: byId.get(childId).diagram.centerX,
       y: byId.get(childId).diagram.centerY - 19,
     })
-    assert.ok(route[1].x > parentBox.x + parentBox.width,
+    if (baseId === 'base-1') assert.ok(route[1].x > parentBox.x + parentBox.width,
       'downstream cable uses the outer gutter instead of crossing local devices')
     for (let index = 1; index < route.length; index++) {
       const a = route[index - 1], b = route[index]
