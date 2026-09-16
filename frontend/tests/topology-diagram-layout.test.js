@@ -7,7 +7,8 @@ import {
 } from '../src/pages/topology/topology-diagram-layout.js'
 
 test('camera frames stay in their JB subtree across facilities and pole layouts', () => {
-  for (const area of ['ft-tegal-baru', 'another-facility']) {
+  for (const expectation of ['indoor', 'standalone']) {
+  for (const area of ['ft-tegal-baru', 'dppu-yia', 'ft-pengapon-semarang', 'another-facility']) {
     const assets = [
       ['server', 'Server', 'Server Rack', 'core'],
       ['jb1', 'JB-01', 'Junction Box', 'junction'],
@@ -21,7 +22,7 @@ test('camera frames stay in their JB subtree across facilities and pole layouts'
       ['ce', 'Extended camera', 'CCTV', 'endpoint'],
     ].map(([id, name, type, topologyRole]) => ({id, name, type, topologyRole,
       locationGroupKey: area,
-      ...(topologyRole === 'endpoint' ? {mountingExpectation: 'indoor'} : {}),
+      ...(topologyRole === 'endpoint' ? {mountingExpectation: expectation} : {}),
     }))
     const edges = [['server', 'jb1'], ['server', 'jb2'], ['jb2', 'ext'],
       ['jb1', 'c8'], ['jb1', 'c9'], ['ext', 'ce']].map(([sourceNodeId, targetNodeId]) => ({
@@ -50,6 +51,7 @@ test('camera frames stay in their JB subtree across facilities and pole layouts'
       assert.equal(layout.nodes.length, 7, 'every network asset is rendered exactly once')
       assert.equal(layout.edges.length, edges.length, 'grouping does not invent network connections')
     }
+  }
   }
 })
 
@@ -104,7 +106,7 @@ test('layout is top-down, orthogonal, bounded, and does not overlap nodes', () =
   assert.equal(layout.sections.length, 1)
   assert.equal(layout.unresolvedMarkers.length, 1)
   assert.equal(layout.sections[0].lanes[0].presentation, 'pole-backbone')
-  assert.equal(layout.mountingBoxes.length, 1)
+  assert.equal(layout.mountingBoxes.length, 2)
   assert.equal(layout.mountingBoxes[0].kind, 'needs-mounting')
   assert.equal(layout.mountingBoxes[0].label, 'Perlu mounting')
 
@@ -140,7 +142,7 @@ test('layout is top-down, orthogonal, bounded, and does not overlap nodes', () =
 
   for (const edge of layout.edges) {
     assert.ok(edge.routePoints.length >= 2)
-    assert.ok(edge.routePoints.length <= 4, 'edge routes through whitespace between hierarchy rows')
+    assert.ok(edge.routePoints.length <= 5, 'edge uses hierarchy whitespace or the outer frame gutter')
     for (let index = 1; index < edge.routePoints.length; index += 1) {
       const previous = edge.routePoints[index - 1]
       const current = edge.routePoints[index]
@@ -656,7 +658,11 @@ test('DPPU YIA orders poles and preserves cross-pole JB parent families', () => 
   )), false)
   assert.deepEqual(new Set(boxes.get('T-007').nodeIds), new Set(['jb-152', 'bc-41', 'dc-39']))
   assert.deepEqual(new Set(boxes.get('T-008').nodeIds), new Set(['jb-151', 'bc-37', 'bc-38']))
-  assert.deepEqual(new Set(boxes.get('Area non-tiang/indoor').nodeIds), new Set(['jb-15', 'dc-40']))
+  const jb15Frame = layout.mountingBoxes.find(box => box.nodeIds.includes('jb-15'))
+  const dc40Frame = layout.mountingBoxes.find(box => box.nodeIds.includes('dc-40'))
+  assert.notEqual(jb15Frame.id, dc40Frame.id)
+  assert.equal(dc40Frame.layoutParentBoxId, jb15Frame.id)
+  assert.ok(dc40Frame.y > jb15Frame.y)
   assert.equal(new Set(layout.nodes.map(({ id }) => id)).size, layout.nodes.length)
   assert.equal(layout.edges.length, graphEdges.length)
 })

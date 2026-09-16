@@ -903,92 +903,42 @@ function mountingBoxOrder(kind) {
 }
 
 function buildExcludedMountingGroupSpecs({ area, nodeIds = [], connectedNodes = [], edgeAdjacency }) {
-  if (!nodeIds.length) return []
-  const base = {
-    hostId: null,
-    hostType: 'Aset indoor atau standalone',
-    kind: 'excluded',
-    mountingConflict: false,
+  const byId = new Map(connectedNodes.map(node => [node.id, node]))
+  const isJunction = id => ['junction-peer', 'junction-extended'].includes(byId.get(id)?.diagramClass)
+  const base = {hostId: null, hostType: 'Aset indoor atau standalone', kind: 'excluded', mountingConflict: false}
+  const groups = new Map()
+  // A JB is a grouping boundary, even when it is itself indoor/non-pole.
+  // Never merge a whole connected backbone into one facility-specific frame.
+  for (const id of [...nodeIds].sort()) {
+    if (!isJunction(id)) continue
+    groups.set(id, {...base, id: `excluded-mounting:${area.key}:${id}`,
+      hostName: `Non-tiang · ${byId.get(id).name || id}`, nodeIds: [id]})
   }
-  if (area?.key !== 'dppu-yia') {
-    // Non-pole devices get separate frames per connected installation. A
-    // network edge to a pole-mounted JB must never imply physical mounting.
-    const remaining = new Set(nodeIds)
-    const byId = new Map(connectedNodes.map(node => [node.id, node]))
-    const groups = []
-    while (remaining.size) {
-      const first = [...remaining].sort()[0]
-      const ids = [], queue = [first]
-      while (queue.length) {
-        const id = queue.shift()
-        if (!remaining.delete(id)) continue
-        ids.push(id)
-        for (const next of edgeAdjacency.get(id) ?? []) {
-          if (remaining.has(next.id)
-            && byId.get(next.id)?.mountingExpectation === byId.get(first)?.mountingExpectation) queue.push(next.id)
-        }
-      }
-      const kind = byId.get(first)?.mountingExpectation === 'indoor' ? 'Indoor' : 'Non-tiang'
-      groups.push({ ...base, id: `excluded-mounting:${area?.key}:${first}`,
-        hostName: `${kind} · ${ids.map(id => byId.get(id)?.name ?? id).join(', ')}`, nodeIds: ids })
-    }
-    {
-      const grouped = new Map()
-      for (const group of groups) {
-        const indoor = group.nodeIds.every(id => byId.get(id)?.mountingExpectation === 'indoor')
-        const anchors = [...new Set(group.nodeIds.flatMap(id => (edgeAdjacency.get(id) ?? [])
-          .map(next => byId.get(next.id)).filter(node => node
-            && ['junction-peer', 'junction-extended'].includes(node.diagramClass)).map(node => node.id)))]
-        const anchor = indoor && anchors.length === 1 ? byId.get(anchors[0]) : null
-        const key = anchor ? `${anchor.id}:${byId.get(group.nodeIds[0])?.mountingExpectation}` : group.id
-        if (grouped.has(key)) grouped.get(key).nodeIds.push(...group.nodeIds)
-        else grouped.set(key, {...group, nodeIds: [...group.nodeIds],
-          ...(anchor ? {hostName: `Indoor · ${anchor.name}`, connectionLabel: `Terhubung ke ${anchor.name}`} : {})})
-      }
-      return [...grouped.values()]
-    }
-  }
-  const nodeSet = new Set(nodeIds)
-  const nodeById = new Map(connectedNodes.map((node) => [node.id, node]))
-  const branchAnchors = nodeIds
-    .map((id) => nodeById.get(id))
-    .filter((node) => ['junction-peer', 'junction-extended'].includes(node?.diagramClass))
-    .sort(compareNodes)
-  const branchIds = new Set()
-  branchAnchors.forEach((anchor) => {
-    const queue = [anchor.id]
+  const remaining = new Set(nodeIds.filter(id => !isJunction(id)))
+  while (remaining.size) {
+    const first = [...remaining].sort()[0]
+    const ids = [], queue = [first], owners = new Set()
     while (queue.length) {
-      const current = queue.shift()
-      if (branchIds.has(current) || !nodeSet.has(current)) continue
-      branchIds.add(current)
-      ;(edgeAdjacency.get(current) ?? []).forEach(({ id }) => {
-        if (nodeSet.has(id) && !branchIds.has(id)) queue.push(id)
-      })
+      const id = queue.shift()
+      if (!remaining.delete(id)) continue
+      ids.push(id)
+      for (const next of edgeAdjacency.get(id) ?? []) {
+        if (isJunction(next.id)) owners.add(next.id)
+        else if (remaining.has(next.id)
+          && byId.get(next.id)?.mountingExpectation === byId.get(first)?.mountingExpectation) queue.push(next.id)
+      }
     }
-  })
-  const branchNodeIds = nodeIds.filter((id) => branchIds.has(id))
-  const serverNodeIds = nodeIds.filter((id) => !branchIds.has(id))
-  const specs = []
-  if (branchNodeIds.length) {
-    specs.push({
-      ...base,
-      id: `excluded-mounting:${area.key}:jb-branch`,
-      hostName: 'Area non-tiang/indoor',
-      nodeIds: branchNodeIds,
-    })
+    const owner = owners.size === 1 ? [...owners][0] : null
+    const kind = byId.get(first)?.mountingExpectation === 'indoor' ? 'Indoor' : 'Non-tiang'
+    // Keep physical scope distinct from logical ownership, including standalone devices.
+    const key = `${owner ?? first}:${kind}`
+    if (groups.has(key)) groups.get(key).nodeIds.push(...ids)
+    else groups.set(key, {...base, id: `excluded-mounting:${area.key}:${first}`,
+      hostName: `${kind} · ${owner ? byId.get(owner).name || owner : ids.map(id => byId.get(id)?.name || id).join(', ')}`,
+      ...(owner ? {connectionLabel: `Terhubung ke ${byId.get(owner).name || owner}`} : {}), nodeIds: ids})
   }
-  if (serverNodeIds.length) {
-    specs.push({
-      ...base,
-      id: `excluded-mounting:${area.key}:server-branch`,
-      hostName: 'Area non-tiang/indoor · server',
-      hostType: 'Aset langsung terhubung ke server',
-      nodeIds: serverNodeIds,
-    })
-  }
-  return specs
+  return [...groups.values()]
 }
-
 function buildMountingBoxSpec({
   group,
   nodeById,
@@ -1063,8 +1013,8 @@ function buildMountingBoxSpec({
   const maximumJunctionLevel = Math.max(0, ...junctions.map((node) => levelById.get(node.id) ?? 0))
   const endpointLevel = maximumJunctionLevel + 1
   nodes.filter((node) => !levelById.has(node.id)).forEach((node) => {
-    levelById.set(node.id, endpointLevel)
     const parent = bestEndpointParent(node, nodeIds, nodeById, edgeAdjacency)
+    levelById.set(node.id, parent ? (levelById.get(parent.id) ?? 0) + 1 : endpointLevel)
     if (parent) parentById.set(node.id, parent.id)
   })
   const rows = new Map()
@@ -1091,10 +1041,48 @@ function buildMountingBoxSpec({
     ))
     rowHeights.set(level, Math.max(...row.map((node) => hubNodeSize(node, settings).height)))
   })
+  // Allocate horizontal space per logical subtree, independently of the
+  // physical frame. A camera under one JB must not drift under another JB.
+  const childrenById = new Map(nodes.map(node => [node.id, []]))
+  nodes.forEach(node => {
+    if (childrenById.has(parentById.get(node.id))) childrenById.get(parentById.get(node.id)).push(node)
+  })
+  childrenById.forEach(children => children.sort(compareNodes))
+  const roots = nodes.filter(node => !parentById.has(node.id)).sort(compareNodes)
+  const subtreeWidths = new Map()
+  const measure = node => {
+    const children = childrenById.get(node.id)
+    const childrenWidth = children.reduce((sum, child) => sum + measure(child), 0)
+      + Math.max(0, children.length - 1) * settings.mountingBoxNodeGapX
+    const size = Math.max(hubNodeSize(node, settings).width, childrenWidth)
+    subtreeWidths.set(node.id, size)
+    return size
+  }
+  const forestWidth = roots.reduce((sum, node) => sum + measure(node), 0)
+    + Math.max(0, roots.length - 1) * settings.mountingBoxNodeGapX
   const width = Math.max(
     settings.mountingBoxMinWidth,
+    forestWidth,
     ...rowWidths.values(),
   ) + settings.mountingBoxPadding * 2
+  const nodeX = new Map()
+  const place = (node, left) => {
+    const span = subtreeWidths.get(node.id)
+    nodeX.set(node.id, left + (span - hubNodeSize(node, settings).width) / 2)
+    const children = childrenById.get(node.id)
+    const childSpan = children.reduce((sum, child) => sum + subtreeWidths.get(child.id), 0)
+      + Math.max(0, children.length - 1) * settings.mountingBoxNodeGapX
+    let childX = left + (span - childSpan) / 2
+    children.forEach(child => {
+      place(child, childX)
+      childX += subtreeWidths.get(child.id) + settings.mountingBoxNodeGapX
+    })
+  }
+  let rootX = (width - forestWidth) / 2
+  roots.forEach(node => {
+    place(node, rootX)
+    rootX += subtreeWidths.get(node.id) + settings.mountingBoxNodeGapX
+  })
   const levels = [...rows.keys()].sort((left, right) => left - right)
   let rowY = settings.mountingBoxHeaderHeight + settings.mountingBoxPadding
   const layoutNodes = []
@@ -1105,7 +1093,7 @@ function buildMountingBoxSpec({
       const size = hubNodeSize(node, settings)
       const entry = uniqueEntryJunctionIds.includes(node.id)
       const layoutNode = toLayoutNode(node, {
-        x: rowX,
+        x: nodeX.get(node.id) ?? rowX,
         y: rowY,
         width: size.width,
         height: size.height,
@@ -1246,7 +1234,6 @@ function buildEndpointJunctionGroups({
   })
   const extraGroups = junctions
     .filter(node => !['indoor', 'standalone'].includes(node.mountingExpectation))
-    .filter((junction) => junction.diagramClass === 'junction-peer')
     .filter((junction) => !junctionGroupById.has(junction.id) && !assignedNodeIds.has(junction.id))
     .filter((junction) => (edgeAdjacency.get(junction.id) ?? [])
       .some(({ id }) => connectedNodeById.get(id)?.diagramClass === 'endpoint'))
@@ -1369,7 +1356,16 @@ function attachCrossBoxJunctionFamilies({
     box.nodeIds.forEach((nodeId) => boxByNodeId.set(nodeId, box))
   })
   const parentCandidatesByBoxId = new Map()
-  buildNamedJunctionParents(junctions, edgeAdjacency).forEach((parentNodeId, childNodeId) => {
+  const parentById = buildNamedJunctionParents(junctions, edgeAdjacency)
+  const junctionById = new Map(junctions.map(node => [node.id, node]))
+  for (const node of junctions) {
+    if (parentById.has(node.id) || node.diagramClass !== 'junction-extended') continue
+    const parents = (edgeAdjacency.get(node.id) ?? []).map(({id}) => junctionById.get(id))
+      .filter(parent => parent && parent.depth < node.depth)
+      .sort((a, b) => b.depth - a.depth || compareNodes(a, b))
+    if (parents.length === 1) parentById.set(node.id, parents[0].id)
+  }
+  parentById.forEach((parentNodeId, childNodeId) => {
     const childBox = boxByNodeId.get(childNodeId)
     const parentBox = boxByNodeId.get(parentNodeId)
     if (!childBox || !parentBox || childBox.id === parentBox.id) return
