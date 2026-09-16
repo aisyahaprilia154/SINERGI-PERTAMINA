@@ -6,6 +6,53 @@ import {
   createTopologyDiagramLayoutCacheKey,
 } from '../src/pages/topology/topology-diagram-layout.js'
 
+test('camera frames stay in their JB subtree across facilities and pole layouts', () => {
+  for (const area of ['ft-tegal-baru', 'another-facility']) {
+    const assets = [
+      ['server', 'Server', 'Server Rack', 'core'],
+      ['jb1', 'JB-01', 'Junction Box', 'junction'],
+      ['jb2', 'JB-02', 'Junction Box', 'junction'],
+      ['ext', 'JB-02.2', 'Extended', 'junction_extended'],
+      ['p1', 'T-001', 'Pole', 'physical_mount'],
+      ['p2', 'T-002', 'Pole', 'physical_mount'],
+      ['pe', 'T-003', 'Pole', 'physical_mount'],
+      ['c8', 'C-08', 'CCTV', 'endpoint'],
+      ['c9', 'C-09', 'CCTV', 'endpoint'],
+      ['ce', 'Extended camera', 'CCTV', 'endpoint'],
+    ].map(([id, name, type, topologyRole]) => ({id, name, type, topologyRole,
+      locationGroupKey: area,
+      ...(topologyRole === 'endpoint' ? {mountingExpectation: 'indoor'} : {}),
+    }))
+    const edges = [['server', 'jb1'], ['server', 'jb2'], ['jb2', 'ext'],
+      ['jb1', 'c8'], ['jb1', 'c9'], ['ext', 'ce']].map(([sourceNodeId, targetNodeId]) => ({
+      id: `${sourceNodeId}-${targetNodeId}`, sourceNodeId, targetNodeId, relationStatus: 'confirmed',
+    }))
+    const model = buildTopologyDiagramModel({assets, roots: ['server'],
+      graph: {nodes: assets, edges}, locationGroups: [{key: area, name: area}],
+      mountingRelations: [['jb1', 'p1'], ['jb2', 'p2'], ['ext', 'pe']]
+        .map(([sourceAssetId, targetAssetId]) => ({sourceAssetId, targetAssetId, relationType: 'mounted_on'})),
+    })
+    for (const layoutStyle of ['central-backbone', 'compound-poles', 'facility-schematic']) {
+      const layout = calculateTopologyDiagramLayout(model, {layoutStyle})
+      const frame = id => layout.mountingBoxes.find(box => box.nodeIds.includes(id))
+      assert.equal(frame('c8').id, frame('c9').id, 'indoor siblings share their own frame')
+      for (const [child, parent] of [['c8', 'jb1'], ['c9', 'jb1'], ['ce', 'ext']]) {
+        const childFrame = frame(child), parentFrame = frame(parent)
+        assert.notEqual(childFrame.id, parentFrame.id, 'network grouping does not imply pole mounting')
+        assert.equal(childFrame.layoutParentBoxId, parentFrame.id)
+        assert.equal(childFrame.layoutParentNodeId, parent)
+        assert.ok(childFrame.y >= parentFrame.y + parentFrame.height)
+        assert.ok(childFrame.x >= parentFrame.treeX)
+        assert.ok(childFrame.x + childFrame.width <= parentFrame.treeX + parentFrame.treeWidth)
+      }
+      assert.ok(frame('c8').x + frame('c8').width <= frame('jb2').treeX,
+        'the JB-01 family is kept together before the next JB family')
+      assert.equal(layout.nodes.length, 7, 'every network asset is rendered exactly once')
+      assert.equal(layout.edges.length, edges.length, 'grouping does not invent network connections')
+    }
+  }
+})
+
 function fixture() {
   const assets = [
     { id: 'root', name: 'Core', type: 'Core Router', topologyRole: 'core', locationGroupKey: 'area-a' },
