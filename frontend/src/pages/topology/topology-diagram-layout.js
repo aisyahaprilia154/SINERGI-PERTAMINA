@@ -213,6 +213,7 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
       lane.nodes.forEach((node) => translateNode(node, offsetX, offsetY))
       ;(lane.mountingBoxes ?? []).forEach((box) => {
         box.x += offsetX
+        if (Number.isFinite(box.treeX)) box.treeX += offsetX
         box.y += offsetY
       })
     })
@@ -709,7 +710,6 @@ function buildPoleBackboneAreaLaneSpec({
     .map(({ id }) => id)
     .sort((left, right) => compareNodes(nodeById.get(left), nodeById.get(right)))
   const excludedGroupSpecs = buildExcludedMountingGroupSpecs({
-    layoutStyle: settings.layoutStyle,
     area,
     nodeIds: excludedNodeIds,
     connectedNodes,
@@ -758,8 +758,9 @@ function buildPoleBackboneAreaLaneSpec({
     connectedNodes,
     edgeAdjacency,
   })
-  if (settings.layoutStyle === 'facility-schematic') {
-    // A separate indoor frame still belongs beside its actual upstream JB.
+  {
+    // Reserve an invisible subtree for every JB in every pole layout. Physical
+    // frames stay separate, but their network children travel with their owner.
     const boxByNode = new Map(mountingBoxes.flatMap(box => box.nodes.map(node => [node.id, box])))
     for (const box of mountingBoxes) {
       if (!box.nodes.length || box.nodes.some(node =>
@@ -768,12 +769,13 @@ function buildPoleBackboneAreaLaneSpec({
         child: node, parent: boxByNode.get(id)?.nodes.find(item => item.id === id), box: boxByNode.get(id),
       }))).filter(item => item.box && item.box !== box
         && ['junction-peer', 'junction-extended'].includes(item.parent?.diagramClass))
-      const owners = new Set(anchors.map(item => item.box.id))
+      const owners = new Set(anchors.map(item => item.parent.id))
       if (owners.size !== 1) continue
       const anchor = anchors[0]
       box.layoutParentBoxId = anchor.box.id
       box.layoutParentNodeId = anchor.parent.id
       box.layoutChildNodeId = anchor.child.id
+      box.connectionLabel = `Terhubung ke ${anchor.parent.name || anchor.parent.id}`
       for (const item of anchors) item.child.layoutParentId = item.parent.id
     }
   }
@@ -900,7 +902,7 @@ function mountingBoxOrder(kind) {
   return 4
 }
 
-function buildExcludedMountingGroupSpecs({ area, nodeIds = [], connectedNodes = [], edgeAdjacency, layoutStyle }) {
+function buildExcludedMountingGroupSpecs({ area, nodeIds = [], connectedNodes = [], edgeAdjacency }) {
   if (!nodeIds.length) return []
   const base = {
     hostId: null,
@@ -930,7 +932,7 @@ function buildExcludedMountingGroupSpecs({ area, nodeIds = [], connectedNodes = 
       groups.push({ ...base, id: `excluded-mounting:${area?.key}:${first}`,
         hostName: `${kind} · ${ids.map(id => byId.get(id)?.name ?? id).join(', ')}`, nodeIds: ids })
     }
-    if (layoutStyle === 'facility-schematic') {
+    {
       const grouped = new Map()
       for (const group of groups) {
         const indoor = group.nodeIds.every(id => byId.get(id)?.mountingExpectation === 'indoor')
@@ -938,15 +940,13 @@ function buildExcludedMountingGroupSpecs({ area, nodeIds = [], connectedNodes = 
           .map(next => byId.get(next.id)).filter(node => node
             && ['junction-peer', 'junction-extended'].includes(node.diagramClass)).map(node => node.id)))]
         const anchor = indoor && anchors.length === 1 ? byId.get(anchors[0]) : null
-        const key = anchor?.id ?? group.id
+        const key = anchor ? `${anchor.id}:${byId.get(group.nodeIds[0])?.mountingExpectation}` : group.id
         if (grouped.has(key)) grouped.get(key).nodeIds.push(...group.nodeIds)
         else grouped.set(key, {...group, nodeIds: [...group.nodeIds],
           ...(anchor ? {hostName: `Indoor · ${anchor.name}`, connectionLabel: `Terhubung ke ${anchor.name}`} : {})})
       }
       return [...grouped.values()]
     }
-    if (groups.length === 1) groups[0].id = `excluded-mounting:${area?.key ?? 'lainnya'}`
-    return groups
   }
   const nodeSet = new Set(nodeIds)
   const nodeById = new Map(connectedNodes.map((node) => [node.id, node]))
@@ -2173,11 +2173,11 @@ function routeEdge(source, target, mountingBoxById = new Map()) {
   const sourceParentsTargetBox = sourceMountingBox
     && targetMountingBox?.layoutParentBoxId === sourceMountingBox.id
     && targetMountingBox.layoutParentNodeId === source.id
-    && targetMountingBox.layoutChildNodeId === target.id
+    && (targetMountingBox.layoutChildNodeId === target.id || target.layoutParentId === source.id)
   const targetParentsSourceBox = targetMountingBox
     && sourceMountingBox?.layoutParentBoxId === targetMountingBox.id
     && sourceMountingBox.layoutParentNodeId === target.id
-    && sourceMountingBox.layoutChildNodeId === source.id
+    && (sourceMountingBox.layoutChildNodeId === source.id || source.layoutParentId === target.id)
   if (sourceParentsTargetBox || targetParentsSourceBox) {
     const parentNode = sourceParentsTargetBox ? source : target
     const childNode = sourceParentsTargetBox ? target : source
