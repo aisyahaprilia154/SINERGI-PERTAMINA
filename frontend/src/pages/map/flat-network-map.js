@@ -208,8 +208,6 @@ export function renderFlatNetworkSvg({
             return `
               <g data-flat-network="${escapeAttribute(network?.id || '')}" class="flat-cable">
                 <title>${escapeXml(owner?.name || network?.name || 'Jalur kabel')} · ${escapeXml(network?.type || geometry.category || 'Kabel')}</title>
-                <polyline points="${points}" fill="none" stroke="#07101b" stroke-width="7"
-                  stroke-linecap="round" stroke-linejoin="round" opacity="${opacity}"/>
                 <polyline points="${points}" fill="none" stroke="${color}" stroke-width="${highlighted ? 4.5 : 3}"
                   stroke-linecap="round" stroke-linejoin="round" opacity="${opacity}"/>
               </g>

@@ -1,4 +1,5 @@
 import { OPERATIONAL_NETWORK_COLORS } from '../../domain/network-colors.js'
+import { normalizeSearchText, searchMatchScore } from '../../domain/search-normalization.js'
 
 const DEFAULT_WIDTH = 1840
 const MIN_HEIGHT = 980
@@ -58,7 +59,7 @@ export function createSpatialTopologyLayout({
     padding: PADDING,
   })
   const selectedCategories = new Set(state.selectedCategories ?? [])
-  const search = String(state.search ?? '').trim().toLowerCase()
+  const search = normalizeSearchText(state.search)
   const confirmedGeometryIds = new Set((graph.edges ?? []).flatMap((edge) => (
     edge.verificationStatus === 'confirmed' ? edge.sourceGeometryIds ?? [] : []
   )))
@@ -357,7 +358,7 @@ function familyKey(...values) {
 
 function isDimmed({ family, searchable, selectedCategories, search }) {
   return (selectedCategories.size > 0 && !selectedCategories.has(family))
-    || (search && !String(searchable).toLowerCase().includes(search))
+    || (search && searchMatchScore([searchable], search) === 0)
 }
 
 function coordinateKey(coordinate) {

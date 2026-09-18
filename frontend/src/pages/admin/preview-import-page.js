@@ -5,6 +5,7 @@ import {
   loadImportPreview,
   rejectDatasetVersion,
 } from '../../services/import-dataset-service.js'
+import { patraNiagaLogoMarkup } from '../brand-logo.js'
 import { renderImportStatusBadge } from './import-status-badge.js'
 import { escapeAttribute, escapeHtml } from './import-view-utils.js'
 import { renderPreviewAssetDrawer } from './preview-asset-drawer.js'
@@ -337,9 +338,8 @@ function renderReady(page, datasetVersionId) {
 function renderAdminHeader() {
   return `
     <header class="admin-app-header">
-      <a class="brand-lockup" href="/map" aria-label="SINERGI">
-        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span class="brand-name">SINERGI</span>
+      <a class="brand-lockup" href="/map" aria-label="SINERGI — Pertamina Patra Niaga">
+        ${patraNiagaLogoMarkup()}
       </a>
       <span class="admin-area-label">Administrasi dataset</span>
       <nav aria-label="Navigasi admin">

@@ -6,6 +6,7 @@ import {
   setMountingExpectation,
   setMountingRelation,
 } from '../../services/active-dataset-service.js'
+import { searchMatchScore } from '../../domain/search-normalization.js'
 import { bindUserAccountMenu, renderTopNavigation } from '../map/map-page.js'
 
 const QUEUES = Object.freeze([
@@ -133,10 +134,10 @@ export async function initializeMountingReview(container, mapData) {
   }
 
   function filteredItems() {
-    const search = state.search.trim().toLocaleLowerCase('id')
+    const search = state.search.trim()
     return (state.review?.items ?? []).filter((item) => (
       queueFor(item) === state.queue
-        && (!search || `${item.assetName} ${item.assetId}`.toLocaleLowerCase('id').includes(search))
+        && (!search || searchMatchScore([item.assetName, item.assetId], search) > 0)
     ))
   }
 
@@ -297,11 +298,11 @@ export async function initializeMountingReview(container, mapData) {
       target.innerHTML = '<div class="mounting-review-empty">Pilih aset untuk melihat evidence dan opsi tiang.</div>'
       return
     }
-    const search = state.poleSearch.trim().toLocaleLowerCase('id')
+    const search = state.poleSearch.trim()
     const poles = (state.review?.poles ?? []).filter((pole) => (
       String(pole.areaKey ?? '').toLocaleLowerCase('id')
         === String(item.areaKey ?? '').toLocaleLowerCase('id')
-      && (!search || `${pole.name} ${pole.assetId}`.toLocaleLowerCase('id').includes(search))
+      && (!search || searchMatchScore([pole.name, pole.assetId], search) > 0)
     ))
     target.innerHTML = `
       <header><div><span>Detail mounting</span><h2>${escapeHtml(item.assetName)}</h2><small>${escapeHtml(item.assetId)}</small></div>

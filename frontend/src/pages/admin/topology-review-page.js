@@ -14,6 +14,7 @@ import {
   RELATION_CATEGORIES,
   relationCategoryForCandidate,
 } from '../../domain/topology-review-category.js'
+import { searchMatchScore } from '../../domain/search-normalization.js'
 import { prioritizeTopologyCandidates } from '../../domain/topology-view-model.js'
 import {
   describeTopologyReviewFailure,
@@ -1827,7 +1828,7 @@ function isWebGL2Available() {
 }
 
 function filterCandidates(items, state, { ignoreCategory = false } = {}) {
-  const query = state.search.trim().toLowerCase()
+  const query = state.search.trim()
   return prioritizeTopologyCandidates(items).filter((candidate) => {
     const queueMatch = state.status === 'all'
       || reviewQueueForCandidate(candidate) === state.status
@@ -1841,7 +1842,7 @@ function filterCandidates(items, state, { ignoreCategory = false } = {}) {
     const scoreMatch = (candidate.score ?? 0) >= state.minScore
     const distanceMatch = candidate.distanceMeters == null
       || candidate.distanceMeters <= state.maxDistance
-    const queryMatch = !query || [
+    const queryMatch = !query || searchMatchScore([
       candidate.candidateId,
       candidate.sourceEndpointId,
       candidate.sourcePathAssetId,
@@ -1850,7 +1851,7 @@ function filterCandidates(items, state, { ignoreCategory = false } = {}) {
       candidate.targetPathAssetId,
       candidate.targetDisplayName,
       ...(candidate.sourceGeometryIds ?? []),
-    ].filter(Boolean).join(' ').toLowerCase().includes(query)
+    ], query) > 0
     return queueMatch && statusMatch && categoryMatch && familyMatch && typeMatch
       && scoreMatch && distanceMatch && queryMatch
   })

@@ -1,3 +1,5 @@
+import { normalizeSearchText, searchMatchScore } from './search-normalization.js'
+
 const CATEGORY_ORDER = ['cctv', 'fiber-optic', 'lan', 'infrastructure', 'peripheral', 'unmapped']
 
 export function buildTopologyViewModel({
@@ -14,7 +16,7 @@ export function buildTopologyViewModel({
     ;(component.nodeIds ?? []).forEach((id) => componentByNode.set(id, component.id ?? `component-${index + 1}`))
   })
   const categories = new Set(state.selectedCategories ?? [])
-  const query = String(state.search ?? '').trim().toLowerCase()
+  const query = normalizeSearchText(state.search)
   const selectedId = state.selectedAssetId ?? null
   const neighborIds = selectedId
     ? new Set(confirmedGraph.edges.flatMap((edge) => {
@@ -27,8 +29,15 @@ export function buildTopologyViewModel({
     const asset = assetById.get(node.id) ?? assetById.get(node.assetId)
     const category = categoryKey(asset?.category, asset?.type, node.networkFamily)
     const matchesCategory = !categories.size || categories.has(category)
-    const matchesSearch = !query || `${node.id} ${asset?.name ?? ''} ${asset?.type ?? ''}`
-      .toLowerCase().includes(query)
+    const matchesSearch = !query || searchMatchScore([
+      node.id,
+      node.assetId,
+      asset?.id,
+      asset?.name,
+      asset?.type,
+      asset?.location,
+      asset?.locationGroupKey,
+    ], query) > 0
     const inFocus = !state.focusOnly || !selectedId
       || node.id === selectedId || neighborIds.has(node.id)
     return {

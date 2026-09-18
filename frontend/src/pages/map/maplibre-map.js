@@ -23,6 +23,7 @@ import {
 import {
   BASEMAP_LOAD_TIMEOUT_MS,
   BASEMAP_RETRY_DELAYS_MS,
+  DEFAULT_IMAGERY_MAX_ZOOM,
   basemapErrorMessage,
   createBaseStyle,
   isBasemapError,
@@ -105,6 +106,9 @@ export function createMapLibreSurface(element, {
   // that the same as an omitted value so the same-origin proxy remains the
   // safe default instead of rendering only the neutral canvas.
   const imageryTiles = String(import.meta.env.VITE_SINERGI_BASEMAP_TILES ?? '').trim()
+  const imageryMaxZoom = String(
+    import.meta.env.VITE_SINERGI_BASEMAP_MAX_ZOOM ?? DEFAULT_IMAGERY_MAX_ZOOM,
+  ).trim() || DEFAULT_IMAGERY_MAX_ZOOM
   const vectorTiles = String(
     import.meta.env.VITE_SINERGI_VECTOR_TILES_URL ?? '',
   ).trim() || '/api/basemap/openfreemap/planet'
@@ -113,7 +117,12 @@ export function createMapLibreSurface(element, {
   const loadedBasemapSourceIds = new Set()
   const map = new MapLibreMap({
     container: element,
-    style: createBaseStyle({ imageryTiles, vectorTiles, attribution: basemapAttribution }),
+    style: createBaseStyle({
+      imageryTiles,
+      imageryMaxZoom,
+      vectorTiles,
+      attribution: basemapAttribution,
+    }),
     center: initialBounds
       ? [(initialBounds[0] + initialBounds[2]) / 2, (initialBounds[1] + initialBounds[3]) / 2]
       : [117, -2],
@@ -642,13 +651,11 @@ export function createMapLibreSurface(element, {
     linework
       .filter(({ focused }) => !focused)
       .forEach((entry) => {
-        drawProjectedLine(context, map, entry, 'casing')
         drawProjectedLine(context, map, entry, 'color')
       })
     linework
       .filter(({ focused }) => focused)
       .forEach((entry) => {
-        drawProjectedLine(context, map, entry, 'focus-glow')
         drawProjectedLine(context, map, entry, 'focus-main')
       })
   }
@@ -887,17 +894,6 @@ function addOperationalLayers(map) {
     },
   })
   map.addLayer({
-    id: 'cable-lines-casing',
-    type: 'line',
-    source: 'sinergi-lines',
-    paint: {
-      'line-color': '#ffffff',
-      'line-opacity': ['get', 'opacity'],
-      'line-width': ['interpolate', ['linear'], ['zoom'], 14, 4, 19, 10],
-      'line-blur': 0.4,
-    },
-  })
-  map.addLayer({
     id: 'cable-lines',
     type: 'line',
     source: 'sinergi-lines',
@@ -920,17 +916,6 @@ function addOperationalLayers(map) {
     type: 'line',
     source: 'sinergi-lines',
     paint: { 'line-color': 'rgba(0,0,0,0)', 'line-width': 14 },
-  })
-  map.addLayer({
-    id: 'asset-relations-casing',
-    type: 'line',
-    source: 'sinergi-asset-relations',
-    layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: {
-      'line-color': '#ffffff',
-      'line-opacity': ['get', 'opacity'],
-      'line-width': ['interpolate', ['linear'], ['zoom'], 13, 4, 19, 8],
-    },
   })
   map.addLayer({
     id: 'asset-relations',
@@ -999,20 +984,8 @@ function addOperationalLayers(map) {
       'line-dasharray': [2, 2],
     },
   })
-  // Focus is rendered from a dedicated source so the selected network is
-  // always composited after every regular network line. The two passes keep
-  // the emphasis visible over satellite imagery without turning it neon.
-  map.addLayer({
-    id: 'cable-lines-focus-glow',
-    type: 'line',
-    source: 'sinergi-focus-lines',
-    paint: {
-      'line-color': ['get', 'focusColor'],
-      'line-opacity': ['*', ['get', 'focusOpacity'], 0.34],
-      'line-width': ['interpolate', ['linear'], ['zoom'], 14, 9, 19, 12],
-      'line-blur': 1.2,
-    },
-  })
+  // Focus uses one solid pass so the selected network stays visible without
+  // adding a casing or glow around the line.
   map.addLayer({
     id: 'cable-lines-focus',
     type: 'line',
@@ -1075,23 +1048,20 @@ function drawProjectedLine(context, map, {
   focusColor: entryFocusColor,
   candidateFocused,
 }, pass) {
-  const isFocusGlow = pass === 'focus-glow'
   const isFocusMain = pass === 'focus-main'
   const focusColor = safeColor(
     entryFocusColor ?? network?.color ?? operationalLineColor(network, geometry.category),
   )
-  const opacity = isFocusGlow
-    ? 0.34
-    : isFocusMain
-      ? 0.96
-      : candidateFocused
-        ? 0.16
-        : !active
-          ? 0
-          : focusContext
-            ? 0.32
-            : 0.94
-  const width = isFocusGlow ? 10 : isFocusMain ? 4.5 : highlighted ? 4.8 : 3
+  const opacity = isFocusMain
+    ? 0.96
+    : candidateFocused
+      ? 0.16
+      : !active
+        ? 0
+        : focusContext
+          ? 0.32
+          : 0.94
+  const width = isFocusMain ? 4.5 : highlighted ? 4.8 : 3
   context.beginPath()
   geometry.coordinates.forEach((coordinate, index) => {
     if (!validPosition(coordinate)) return
@@ -1100,16 +1070,12 @@ function drawProjectedLine(context, map, {
     else context.lineTo(point.x, point.y)
   })
   context.globalAlpha = opacity
-  context.strokeStyle = pass === 'casing'
-    ? 'rgba(2, 8, 16, .88)'
-    : isFocusGlow || isFocusMain
-      ? focusColor
-      : operationalLineColor(network, geometry.category)
-  context.lineWidth = pass === 'casing' ? width + 3.5 : width
-  context.shadowBlur = isFocusGlow ? 8 : pass === 'color' && active ? 4 : 0
-  context.shadowColor = isFocusGlow || isFocusMain
+  context.strokeStyle = isFocusMain
     ? focusColor
-    : 'transparent'
+    : operationalLineColor(network, geometry.category)
+  context.lineWidth = width
+  context.shadowBlur = 0
+  context.shadowColor = 'transparent'
   context.stroke()
   context.shadowBlur = 0
   context.globalAlpha = 1

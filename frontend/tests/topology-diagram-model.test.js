@@ -332,6 +332,30 @@ test('search covers hostname and edge provenance', () => {
   assert.equal(getTopologyDiagramSearchResults(model, 'line-a')[0].id, 'edge-core-dist')
 })
 
+test('search accepts separator, leading-zero, and minor-typo variations', () => {
+  const model = buildTopologyDiagramModel({
+    assets: [...assets, {
+      id: 'jb-015',
+      name: 'JB-015',
+      type: 'Junction Box',
+      topologyRole: 'junction',
+      locationGroupKey: 'north',
+      ...context,
+    }],
+    graph: {
+      ...graph,
+      nodes: [...graph.nodes, { id: 'jb-015', topologyRole: 'junction' }],
+    },
+    locationGroups,
+    roots: ['core-a'],
+    ...context,
+  })
+
+  assert.equal(getTopologyDiagramSearchResults(model, 'jb 15')[0].id, 'jb-015')
+  assert.equal(getTopologyDiagramSearchResults(model, 'JB015')[0].id, 'jb-015')
+  assert.equal(getTopologyDiagramSearchResults(model, 'JB-016')[0].id, 'jb-015')
+})
+
 test('search results expose translated type, area, and connection status', () => {
   const model = buildTopologyDiagramModel({
     assets,

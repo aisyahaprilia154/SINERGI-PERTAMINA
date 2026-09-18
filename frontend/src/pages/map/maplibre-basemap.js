@@ -2,8 +2,17 @@
 // A slow but successful tile must not be reported as an unavailable basemap.
 export const BASEMAP_LOAD_TIMEOUT_MS = 25_000
 export const BASEMAP_RETRY_DELAYS_MS = Object.freeze([600, 1_800])
+// ArcGIS World Imagery returns a placeholder tile above this level for many
+// locations. Keeping the map zoomable beyond it lets MapLibre overzoom the
+// last real image instead of showing the provider's "not yet available" tile.
+export const DEFAULT_IMAGERY_MAX_ZOOM = 18
 
-export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
+export function createBaseStyle({
+  imageryTiles,
+  vectorTiles,
+  attribution,
+  imageryMaxZoom = DEFAULT_IMAGERY_MAX_ZOOM,
+}) {
   const sources = {}
   const layers = [{
     id: 'safe-background',
@@ -11,10 +20,14 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
     paint: { 'background-color': '#f7f6f1' },
   }]
   if (imageryTiles) {
+    const sourceMaxZoom = Number.isFinite(Number(imageryMaxZoom))
+      ? Math.min(22, Math.max(0, Number(imageryMaxZoom)))
+      : DEFAULT_IMAGERY_MAX_ZOOM
     sources['satellite-imagery'] = {
       type: 'raster',
       tiles: [imageryTiles],
       tileSize: 256,
+      maxzoom: sourceMaxZoom,
       ...(attribution ? { attribution } : {}),
     }
     layers.push({
