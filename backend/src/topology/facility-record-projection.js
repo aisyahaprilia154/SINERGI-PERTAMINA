@@ -45,7 +45,7 @@ export function projectFacilityRecord(record) {
   ]))
   for (const [assetId, expectation] of exclusions) {
     expectations.set(assetId, {assetId, expectation, provenance: 'facility_topology_correction',
-      reason: 'Koreksi pemasangan FT Tegal Baru dari pengguna.', updatedAt: '2026-09-14T00:00:00.000Z'})
+      reason: 'Koreksi pemasangan fasilitas dari pengguna.', updatedAt: '2026-09-14T00:00:00.000Z'})
   }
   const mountingRelations = correctAdditionalMounts((record.mountingRelations ?? [])
     .map(r => ({...r, sourceAssetId: sourceId(r), targetAssetId: resolver.resolve(r.targetAssetId)}))

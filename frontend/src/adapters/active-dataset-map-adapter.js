@@ -1,4 +1,8 @@
 import { resolveTopologyReadiness } from '../domain/topology-readiness.js'
+import {
+  OPERATIONAL_NETWORK_COLORS,
+  OPERATIONAL_NETWORK_SOFT_COLORS,
+} from '../domain/network-colors.js'
 import { correctFacilityEdges, correctedMountingExpectation, correctAdditionalMounts } from '../../../shared/facility-corrections.mjs'
 import {
   buildPoleGroups,
@@ -13,10 +17,27 @@ import {
 const CATEGORY_STYLE = Object.freeze({
   cctv: { color: '#9698f4', softColor: '#f1f1fe', type: 'CCTV', order: 1 },
   'cctv-cable': { color: '#9698f4', softColor: '#f1f1fe', type: 'CCTV cable', order: 2 },
-  'fiber-optic': { color: '#70cfb5', softColor: '#edf8f5', type: 'Fiber optic', order: 3 },
-  lan: { color: '#aeb8c5', softColor: '#f1f3f5', type: 'LAN', order: 4 },
-  infrastructure: { color: '#efc363', softColor: '#fcf6e8', type: 'Infrastructure', order: 5 },
-  peripheral: { color: '#a88af3', softColor: '#f5f1fe', type: 'Peripheral', order: 6 },
+  'fiber-optic': {
+    color: OPERATIONAL_NETWORK_COLORS['fiber-optic'],
+    softColor: OPERATIONAL_NETWORK_SOFT_COLORS['fiber-optic'],
+    type: 'Fiber optic', order: 3,
+  },
+  lan: {
+    color: OPERATIONAL_NETWORK_COLORS.lan,
+    softColor: OPERATIONAL_NETWORK_SOFT_COLORS.lan,
+    type: 'LAN', order: 4,
+  },
+  power: {
+    color: OPERATIONAL_NETWORK_COLORS.power,
+    softColor: OPERATIONAL_NETWORK_SOFT_COLORS.power,
+    type: 'Power PLN', order: 5,
+  },
+  infrastructure: {
+    color: OPERATIONAL_NETWORK_COLORS.infrastructure,
+    softColor: OPERATIONAL_NETWORK_SOFT_COLORS.infrastructure,
+    type: 'Infrastructure', order: 6,
+  },
+  peripheral: { color: '#a88af3', softColor: '#f5f1fe', type: 'Peripheral', order: 7 },
   unmapped: { color: '#aeb8c5', softColor: '#f1f3f5', type: 'Belum terpetakan', order: 99 },
 })
 
@@ -764,7 +785,7 @@ export function adaptActiveAssetDetail(payload, mapAsset) {
 
 function createOwnerFeature({ asset, layer, geometries }) {
   const category = normalizeCategory(asset.category, asset.type, layer)
-  const type = normalizeAssetType(asset.type, asset.category || category, layer)
+  const type = normalizeAssetType(asset.type, asset.category || category, layer, asset.name)
   const operationalStatus = readOperationalStatus(asset)
   const locationGroup = locationGroupFor(layer?.sourceFolderPath)
   const canonicalAssetId = canonicalAssetIdFor(asset)
@@ -1143,10 +1164,12 @@ function normalizeCategory(category, type, layer) {
   return styleFor(key).type
 }
 
-function normalizeAssetType(type, category, layer) {
+function normalizeAssetType(type, category, layer, name = '') {
   const source = `${type || ''} ${category || ''} ${layer?.name || ''} `
     + `${layer?.sourceFolderPath || ''}`
   const value = source.toLowerCase()
+  if (/(^|\s)(tiang|pole|pylon)(\s|$)/.test(value)
+    || /^t[-_ ]?(?:\d+|tower)\b/i.test(String(name).trim())) return 'Tiang'
   if (value.includes('junction') || /\bjb\b/.test(value)) return 'Junction box'
   if (value.includes('core') && value.includes('switch')) return 'Core switch'
   if (value.includes('distribution') && value.includes('switch')) return 'Distribution switch'
@@ -1172,12 +1195,14 @@ function categoryKey(...values) {
     return 'fiber-optic'
   }
   if (value.includes('lan') || value.includes('utp')) return 'lan'
+  if (value.includes('power') || value.includes('pln') || value.includes('listrik')) return 'power'
   if (value.includes('peripheral') || value.includes('printer')
     || value.includes('access point') || /\bap\b/.test(value)) return 'peripheral'
   if (value.includes('infrastructure') || value.includes('switch')
     || value.includes('server') || value.includes('rack') || value.includes('otb')
     || value.includes('core') || value.includes('router') || value.includes('power')
-    || value.includes('tiang') || value.includes('stp')) return 'infrastructure'
+    || value.includes('tiang') || value.includes('pole') || value.includes('pylon')
+    || value.includes('stp')) return 'infrastructure'
   return 'unmapped'
 }
 
@@ -1193,6 +1218,7 @@ function networkName(key) {
     lan: 'Jaringan LAN',
     peripheral: 'Jaringan Peripheral',
     infrastructure: 'Jaringan Infrastruktur',
+    power: 'Jaringan Power PLN',
     unmapped: 'Belum terpetakan',
   }[key] ?? 'Belum terpetakan'
 }

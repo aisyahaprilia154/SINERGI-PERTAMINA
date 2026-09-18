@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { assetCode, facilityRelations, correctedMountingExpectation, correctFacilityEdges, facilityConflictPredicate } from '../../shared/facility-corrections.mjs'
+import { assetCode, facilityRelations, correctedMountingExpectation, correctFacilityEdges, facilityConflictPredicate, correctAdditionalMounts } from '../../shared/facility-corrections.mjs'
 import { generateRelationArtifacts, rebuildConfirmedRelationArtifacts, TOPOLOGY_RULE_SET_VERSION } from '../src/topology/semantic-relation-engine.js'
 import { adaptActiveDatasetForTopology } from '../../frontend/src/adapters/active-dataset-map-adapter.js'
 import { buildTopologyDiagramModel } from '../../frontend/src/domain/topology-diagram-model.js'
@@ -128,6 +128,61 @@ test('Tegal facts resolve padded numbers, camera EXP aliases, and remain facilit
   assert.equal(assets().filter(correctedMountingExpectation).length, 23)
   assert.equal(facilityRelations(assets().map(a => ({...a, locationGroupKey: 'other', sourceFolderPath: '/RJBT/Other'}))).length, 0)
   assert.equal(facilityRelations([...assets(), {...assets()[0], id: 'duplicate', assetId: 'duplicate', canonicalAssetId: 'duplicate'}]).length, 5)
+})
+
+function pengaponAssets() {
+  const names = [
+    ['T-010', 'Tiang'], ['JB-010-exp', 'Junction Box'], ['C-010', 'CCTV'],
+    ['C-035', 'CCTV'], ['C-036', 'CCTV'], ['T-015', 'Tiang'], ['JB-015', 'Junction Box'],
+    ['C-015', 'CCTV'], ['T-013', 'Tiang'], ['JB-013', 'Junction Box'], ['C-013', 'CCTV'],
+    ['T-014', 'Tiang'], ['JB-014', 'Junction Box'], ['C-014', 'CCTV'], ['T-017', 'Tiang'],
+    ['JB-017', 'Junction Box'], ['JB-17.1-WP', 'Junction Box'], ['C-017', 'CCTV'],
+    ['T-018', 'Tiang'], ['JB-018', 'Junction Box'], ['JB-18.1-WP', 'Junction Box'],
+    ['C-018', 'CCTV'], ['C-043', 'CCTV'], ['T-020', 'Tiang'], ['JB-019', 'Junction Box'],
+    ['JB-19.2-WP', 'Junction Box'], ['C-021', 'CCTV'], ['C-022', 'CCTV'], ['C-048', 'CCTV'],
+    ['T-021', 'Tiang'], ['JB-011.1-exp', 'Junction Box'], ['C-037', 'CCTV'],
+  ]
+  return names.map(([name, type]) => ({
+    id: name,
+    name,
+    sourceName: name,
+    type,
+    assetType: type,
+    locationGroupKey: 'ft-pengapon-semarang',
+    sourceFolderPath: `/RJBT/FT PENGAPON - SEMARANG/${type === 'Tiang' ? 'TIANG' : 'Devices'}`,
+  }))
+}
+
+test('FT Pengapon facts keep the confirmed pole groups and exclude assets outside T-017, T-018, and T-020', () => {
+  const sourceAssets = pengaponAssets()
+  const corrected = correctAdditionalMounts([], sourceAssets)
+  const actual = corrected.map(({ sourceAssetId, targetAssetId }) => [sourceAssetId, targetAssetId])
+  assert.deepEqual(actual.sort(), [
+    ['JB-010-exp', 'T-010'], ['C-010', 'T-010'], ['C-035', 'T-010'], ['C-036', 'T-010'],
+    ['JB-015', 'T-015'], ['C-015', 'T-015'],
+    ['JB-013', 'T-013'], ['C-013', 'T-013'],
+    ['JB-014', 'T-014'], ['C-014', 'T-014'],
+    ['JB-17.1-WP', 'T-017'], ['C-017', 'T-017'],
+    ['JB-18.1-WP', 'T-018'], ['C-018', 'T-018'], ['C-043', 'T-018'],
+    ['C-037', 'T-021'], ['JB-011.1-exp', 'T-021'],
+  ].sort())
+
+  const excluded = sourceAssets.filter((asset) => correctedMountingExpectation(asset))
+    .map(({ sourceName }) => sourceName).sort()
+  assert.deepEqual(excluded, [
+    'C-021', 'C-022', 'C-048', 'JB-017', 'JB-018', 'JB-019', 'JB-19.2-WP',
+  ])
+  assert.equal(correctedMountingExpectation({
+    sourceName: 'JB-017',
+    sourceFolderPath: '/RJBT/FT PENGAPON - SEMARANG/JUNCTION BOX',
+  }), 'standalone')
+
+  const stale = [
+    { sourceAssetId: 'JB-017', targetAssetId: 'T-017', provenance: 'spatial_inference' },
+    { sourceAssetId: 'C-021', targetAssetId: 'T-020', provenance: 'spatial_inference' },
+  ]
+  const cleaned = correctAdditionalMounts(stale, sourceAssets)
+  assert.equal(cleaned.some(({ sourceAssetId }) => ['JB-017', 'C-021'].includes(sourceAssetId)), false)
 })
 
 test('backend graph and tracing project facility facts before regeneration without changing storage', async () => {

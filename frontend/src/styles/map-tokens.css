@@ -24,10 +24,11 @@
   --color-divider: #e7ecf1;
 
   --color-cctv: #9698f4;
-  --color-fiber-optic: #70cfb5;
+  --color-fiber-optic: #0d47a1;
+  --color-power: #d32f2f;
   --color-peripheral: #a88af3;
-  --color-infrastructure: #efc363;
-  --color-lan: #aeb8c5;
+  --color-infrastructure: #f9a825;
+  --color-lan: #2e7d32;
 
   --color-success: #2e9b75;
   --color-warning: #cc8b25;

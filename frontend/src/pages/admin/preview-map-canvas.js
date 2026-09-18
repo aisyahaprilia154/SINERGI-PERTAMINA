@@ -259,6 +259,7 @@ function categoryClass(value) {
   if (compact.includes('fiber') || compact === 'fo') return 'fiber-optic'
   if (compact.includes('cctv')) return 'cctv'
   if (compact.includes('lan')) return 'lan'
+  if (compact.includes('power') || compact.includes('pln') || compact.includes('listrik')) return 'power'
   if (compact.includes('peripheral')) return 'peripheral'
   return 'infrastructure'
 }

@@ -3,14 +3,23 @@ import { unsafeAutomaticMount } from './mounting-policy.mjs'
 export function facilityKey(asset) {
   const values = [asset?.locationGroupKey, asset?.areaKey, asset?.locationGroupName,
     ...String(asset?.sourceFolderPath ?? '').replaceAll('\\', '/').split('/')]
-  return values.map(value => String(value ?? '').trim().toLowerCase().replaceAll(' ', '-'))
-    .find(value => ['dppu-yia', 'booster-kutawinangun'].includes(value))
+  const normalized = values.map(value => String(value ?? '').trim().toLowerCase()
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''))
+  const aliases = new Map([
+    ['dppu-yia', 'dppu-yia'],
+    ['booster-kutawinangun', 'booster-kutawinangun'],
+    ['ft-pengapon', 'ft-pengapon-semarang'],
+    ['ft-pengapon-semarang', 'ft-pengapon-semarang'],
+  ])
+  return normalized.map(value => aliases.get(value)).find(Boolean)
 }
 export function factCode(asset) {
   return String(asset?.sourceName ?? asset?.name ?? '').trim().toUpperCase()
     .replace(/^C-/, 'CAM-')
     .replace(/\.WP$/, '-WP').replace(/\s+WP$/, '-WP')
     .replace(/^(JB-CCTV-|BC-|DC-|CAM-|T-|JB-)0+(\d)/, '$1$2')
+    .replace(/-EXP$/, '')
 }
 const yia = [
   ['SERVER', 'JB-CCTV-10-WP'], ['SERVER', 'JB-CCTV-1-WP'],
@@ -32,6 +41,17 @@ const mountFacts = {
     ['JB-CCTV-15.2-WP', 'T-7'], ['BC-41', 'T-7'], ['BC-28', 'T-14'], ['BC-29', 'T-14']],
   'booster-kutawinangun': [['JB-1', 'T-4'], ['CAM-9', 'T-4'], ['CAM-10', 'T-4'],
     ['JB-6', 'T-8'], ['CAM-16', 'T-8']],
+  // FT Pengapon: these are field-confirmed physical groupings. They are
+  // deliberately kept separate from the inferred network graph.
+  'ft-pengapon-semarang': [
+    ['JB-10', 'T-10'], ['CAM-10', 'T-10'], ['CAM-35', 'T-10'], ['CAM-36', 'T-10'],
+    ['JB-15', 'T-15'], ['CAM-15', 'T-15'],
+    ['JB-13', 'T-13'], ['CAM-13', 'T-13'],
+    ['JB-14', 'T-14'], ['CAM-14', 'T-14'],
+    ['JB-17.1-WP', 'T-17'], ['CAM-17', 'T-17'],
+    ['JB-18.1-WP', 'T-18'], ['CAM-18', 'T-18'], ['CAM-43', 'T-18'],
+    ['CAM-37', 'T-21'], ['JB-11.1', 'T-21'],
+  ],
 }
 const idOf = a => a.canonicalAssetId ?? a.assetId ?? a.id
 function resolvePairs(assets, rules) {
@@ -63,6 +83,9 @@ export function additionalExpectation(asset) {
     if (code === 'DC-39') return 'indoor'
   }
   if (site === 'booster-kutawinangun' && ['CAM-6', 'CAM-7', 'CAM-8', 'CAM-17', 'CAM-18'].includes(code)) return 'indoor'
+  if (site === 'ft-pengapon-semarang' && [
+    'JB-17', 'JB-18', 'JB-19', 'JB-19.2-WP', 'CAM-21', 'CAM-22', 'CAM-48',
+  ].includes(code)) return 'standalone'
   return null
 }
 export function additionalConflict(edge, byId) {

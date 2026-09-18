@@ -231,6 +231,7 @@ function renderMapLegend() {
         <small>Warna jaringan</small>
         <span><i class="legend-color cctv"></i>CCTV</span>
         <span><i class="legend-color fiber"></i>Fiber Optic</span>
+        <span><i class="legend-color power"></i>Power PLN</span>
         <span><i class="legend-color lan"></i>LAN</span>
         <span><i class="legend-color infrastructure"></i>Infrastruktur</span>
       </section>

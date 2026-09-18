@@ -29,15 +29,17 @@ import {
   isBasemapLoadedEvent,
 } from './maplibre-basemap.js'
 import { assetPointRadiusExpression } from './maplibre-style-expressions.js'
+import { OPERATIONAL_NETWORK_COLORS } from '../../domain/network-colors.js'
 
 setWorkerUrl(maplibreWorkerUrl)
 
 const CATEGORY_COLORS = Object.freeze({
   CCTV: '#6f6de8',
   'CCTV cable': '#6f6de8',
-  'Fiber optic': '#26a985',
-  LAN: '#708196',
-  Infrastructure: '#c58722',
+  'Fiber optic': OPERATIONAL_NETWORK_COLORS['fiber-optic'],
+  'Power PLN': OPERATIONAL_NETWORK_COLORS.power,
+  LAN: OPERATIONAL_NETWORK_COLORS.lan,
+  Infrastructure: OPERATIONAL_NETWORK_COLORS.infrastructure,
   Peripheral: '#8a65d8',
   'Belum terpetakan': '#7b8794',
 })
@@ -1115,10 +1117,13 @@ function drawProjectedLine(context, map, {
 
 function operationalLineColor(network, category = '') {
   const key = String(network?.categoryKey ?? network?.type ?? category).toLowerCase()
-  if (key.includes('fiber') || key.includes('fibre')) return '#2de2a6'
-  if (key.includes('lan') || key.includes('utp')) return '#35b8ff'
+  if (key.includes('power') || key.includes('pln') || key.includes('listrik')) {
+    return OPERATIONAL_NETWORK_COLORS.power
+  }
+  if (key.includes('fiber') || key.includes('fibre')) return OPERATIONAL_NETWORK_COLORS['fiber-optic']
+  if (key.includes('lan') || key.includes('utp')) return OPERATIONAL_NETWORK_COLORS.lan
   if (key.includes('cctv')) return '#8d7cff'
-  if (key.includes('infra') || key.includes('power')) return '#ffc247'
+  if (key.includes('infra')) return OPERATIONAL_NETWORK_COLORS.infrastructure
   return safeColor(network?.color)
 }
 
@@ -1211,7 +1216,9 @@ function iconForAsset(asset) {
   if (type.includes('switch') || type.includes('router')) return 'device_hub'
   if (type.includes('fiber') || type.includes('fibre') || /\bfo\b/.test(type)) return 'cable'
   if (type.includes('lan') || type.includes('utp')) return 'lan'
-  if (type.includes('tiang')) return 'location_on'
+  if (type.includes('tiang') || /^t[-_ ]?(?:\d+|tower)\b/i.test(String(asset?.name ?? '').trim())) {
+    return 'location_on'
+  }
   return 'memory'
 }
 
@@ -1219,7 +1226,7 @@ function isPoleAsset(asset) {
   const identity = `${asset?.type || ''} ${asset?.category || ''}`.toLowerCase()
   const name = String(asset?.name || '').trim()
   return /\b(tiang|pole)\b/.test(identity)
-    || /^t[-_ ]?\d+[a-z]?$/i.test(name)
+    || /^t[-_ ]?(?:\d+[a-z]?|tower)\b/i.test(name)
 }
 
 function isInfrastructureNetwork(network) {

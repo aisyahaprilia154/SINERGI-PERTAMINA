@@ -3181,6 +3181,10 @@
   background: color-mix(in srgb, var(--color-fiber-optic) 18%, var(--color-surface));
 }
 
+.category-power {
+  background: color-mix(in srgb, var(--color-power) 16%, var(--color-surface));
+}
+
 .category-peripheral {
   background: color-mix(in srgb, var(--color-peripheral) 18%, var(--color-surface));
 }
@@ -4576,6 +4580,7 @@
 
 .legend-color.cctv { --legend-color: var(--color-cctv); }
 .legend-color.fiber { --legend-color: var(--color-fiber-optic); }
+.legend-color.power { --legend-color: var(--color-power); }
 .legend-color.lan { --legend-color: var(--color-lan); }
 .legend-color.infrastructure { --legend-color: var(--color-infrastructure); }
 

@@ -1,3 +1,5 @@
+import { OPERATIONAL_NETWORK_COLORS } from './network-colors.js'
+
 const NETWORK_FAMILY_ORDER = Object.freeze([
   'cctv',
   'fiber-optic',
@@ -13,7 +15,7 @@ const NETWORK_FAMILY_LABELS = Object.freeze({
   cctv: 'CCTV',
   'fiber-optic': 'Fiber optic',
   utp: 'UTP',
-  power: 'Power',
+  power: 'Power PLN',
   lan: 'LAN',
   infrastructure: 'Infrastruktur',
   peripheral: 'Peripheral',
@@ -22,11 +24,11 @@ const NETWORK_FAMILY_LABELS = Object.freeze({
 
 const NETWORK_FAMILY_COLORS = Object.freeze({
   cctv: '#5367d8',
-  'fiber-optic': '#0b9b79',
-  utp: '#2d7cc4',
-  power: '#c0801d',
-  lan: '#6f8295',
-  infrastructure: '#9b6b18',
+  'fiber-optic': OPERATIONAL_NETWORK_COLORS['fiber-optic'],
+  utp: OPERATIONAL_NETWORK_COLORS.lan,
+  power: OPERATIONAL_NETWORK_COLORS.power,
+  lan: OPERATIONAL_NETWORK_COLORS.lan,
+  infrastructure: OPERATIONAL_NETWORK_COLORS.infrastructure,
   peripheral: '#7957bd',
   unmapped: '#7e8b98',
 })
@@ -699,7 +701,7 @@ export function normalizeNetworkFamily(value) {
     return 'fiber-optic'
   }
   if (source.includes('utp') || source.includes('ethernet')) return 'utp'
-  if (source.includes('power') || source.includes('listrik')) return 'power'
+  if (source.includes('power') || source.includes('pln') || source.includes('listrik')) return 'power'
   if (source.includes('cctv') || source.includes('camera')) return 'cctv'
   if (source === 'lan' || source.includes('lan')) return 'lan'
   if (source.includes('peripheral') || source.includes('printer') || source.includes('access-point')) {
