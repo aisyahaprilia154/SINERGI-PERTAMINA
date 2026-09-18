@@ -13,6 +13,7 @@ import {
   setMountingRelation,
 } from '../../services/active-dataset-service.js'
 import { renderAssetDetailDrawer } from './asset-detail-drawer.js'
+import { patraNiagaLogoMarkup } from '../brand-logo.js'
 import { createMapLibreSurface } from './maplibre-map.js'
 import { renderNetworkMapCanvas } from './map-surface.js'
 import { renderNetworkList as renderNetworkSidebarList, renderNetworkSidebar } from './network-sidebar.js'
@@ -34,6 +35,7 @@ import {
   getConnectedAssets,
 } from './network-tracing.js'
 import { openMapDataTransferDialog } from './map-data-transfer-dialog.js'
+import { searchMatchScore } from '../../domain/search-normalization.js'
 
 export async function renderMapPage(container) {
   document.title = 'Peta Jaringan — SINERGI'
@@ -1357,32 +1359,36 @@ function closeUserAccountMenus() {
 }
 
 export function findAssetMatches(assets, query, limit = 8) {
-  const normalizedQuery = String(query ?? '').trim().toLocaleLowerCase('id')
-  if (normalizedQuery.length < 2) return []
+  const normalizedQuery = String(query ?? '').trim()
+  if (!normalizedQuery.replace(/[^\p{L}\p{N}]/gu, '').length) return []
 
   return assets
     .map((asset, index) => {
       const fields = [
         asset.id,
+        asset.assetId,
+        asset.canonicalAssetId,
         asset.name,
+        asset.sourceName,
         asset.location,
+        asset.locationGroupName,
+        asset.locationGroupKey,
         asset.hostname,
         asset.type,
         asset.category,
-      ].map((value) => String(value ?? '').toLocaleLowerCase('id'))
-      const exact = fields.some((value) => value === normalizedQuery)
-      const startsWith = fields.some((value) => value.startsWith(normalizedQuery))
-      const includes = fields.some((value) => value.includes(normalizedQuery))
-      if (!includes) return null
+        asset.sourceFolderPath,
+      ]
+      const score = searchMatchScore(fields, normalizedQuery)
+      if (!score) return null
       return {
         asset,
         index,
-        score: exact ? 0 : startsWith ? 1 : 2,
+        score,
       }
     })
     .filter(Boolean)
     .sort((left, right) => (
-      left.score - right.score
+      right.score - left.score
       || String(left.asset.name || left.asset.id).localeCompare(
         String(right.asset.name || right.asset.id),
         'id',
@@ -1698,9 +1704,8 @@ export function renderTopNavigation(activeView = 'map', context = null) {
   const contextQuery = contextParams ? `?${contextParams}` : ''
   return `
     <header class="top-navigation${topologyNavigation ? ' topology-top-navigation' : ''}">
-      <a class="brand-lockup nav-brand" href="/" aria-label="SINERGI">
-        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span><strong>SINERGI</strong><small>Asset Network</small></span>
+      <a class="brand-lockup nav-brand" href="/" aria-label="SINERGI — Pertamina Patra Niaga">
+        ${patraNiagaLogoMarkup()}
       </a>
       <nav aria-label="Navigasi utama">
         <a href="/map${contextQuery}" class="${activeView === 'map' ? 'active' : ''}">

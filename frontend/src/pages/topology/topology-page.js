@@ -130,6 +130,7 @@ function mountTopologyWorkspace(container, {
     labelMode: 'auto',
     showMountingPhysical: true,
     zoom: DEFAULT_ZOOM,
+    sidebarCollapsed: window.matchMedia?.('(max-width: 960px)').matches ?? false,
     filterOpen: false,
     viewOpen: false,
     exportOpen: false,
@@ -185,6 +186,7 @@ function mountTopologyWorkspace(container, {
     renderInspector()
     renderTray()
     renderFilterPanel()
+    renderTopologySidebar()
     updateToolbar()
     updatePanelState()
     if (fit) requestAnimationFrame(() => resetGraphViewport())
@@ -209,6 +211,7 @@ function mountTopologyWorkspace(container, {
   renderInspector()
   renderTray()
   renderFilterPanel()
+  renderTopologySidebar()
   updateToolbar()
   updatePanelState()
   requestAnimationFrame(() => state.selectedAssetId ? focusRelations() : resetGraphViewport())
@@ -282,6 +285,12 @@ function mountTopologyWorkspace(container, {
     if (action === 'toggle-filter') return togglePanel('filter')
     if (action === 'toggle-view') return togglePanel('view')
     if (action === 'toggle-export') return togglePanel('export')
+    if (action === 'toggle-sidebar') {
+      state.sidebarCollapsed = !state.sidebarCollapsed
+      updatePanelState()
+      requestAnimationFrame(() => syncGraphSurface({ preserveCenter: true }))
+      return
+    }
     if (action === 'toggle-inspector') {
       state.inspectorOpen = !state.inspectorOpen
       updatePanelState()
@@ -337,10 +346,9 @@ function mountTopologyWorkspace(container, {
     if (searchResult?.dataset.searchResult) {
       const [kind, ...idParts] = searchResult.dataset.searchResult.split(':')
       const id = idParts.join(':')
-      if (kind === 'edge') selectEdge(id)
-      else selectAsset(id)
-      state.searchResults = []
-      renderFilterPanel()
+      const result = state.searchResults.find((item) => item.kind === kind && item.id === id)
+      selectSearchResult(result ?? {kind, id})
+      return
     }
 
     const exportButton = event.target?.closest?.('[data-export]')
@@ -380,6 +388,16 @@ function mountTopologyWorkspace(container, {
   }
 
   function handleKeydown(event) {
+    if (event.target?.matches?.('[data-topology-search]')) {
+      if (event.key !== 'Enter') return
+      event.preventDefault()
+      const results = state.searchResults.length
+        ? state.searchResults
+        : getTopologyDiagramSearchResults(model, event.target.value)
+      if (results[0]) selectSearchResult(results[0])
+      else showToast('Aset atau relasi tidak ditemukan.')
+      return
+    }
     if (event.key !== 'Enter' && event.key !== ' ') return
     const target = event.target?.closest?.('[data-node-id], [data-edge-id], [data-mounting-group-id]')
     if (!target) return
@@ -389,7 +407,53 @@ function mountTopologyWorkspace(container, {
     else if (target.dataset.mountingGroupId) selectMountingGroup(target.dataset.mountingGroupId)
   }
 
-  function selectAsset(assetId) {
+  function selectSearchResult(result) {
+    if (!result) return
+    const targetAssetId = result.assetId ?? result.id
+    const targetAsset = model.nodeById.get(targetAssetId)
+      ?? mapData.assets.find((asset) => asset.id === targetAssetId)
+    const targetArea = targetAsset?.areaKey ?? targetAsset?.locationGroupKey
+    const shouldDrillIntoArea = layout?.mode === 'area-overview'
+      && targetArea
+      && targetArea !== state.area
+
+    state.search = ''
+    state.searchResults = []
+    state.filterOpen = false
+    if (shouldDrillIntoArea) {
+      state.area = targetArea
+      persistTopologyArea(areaStorageKey, state.area)
+      if (result.kind === 'mounting') {
+        state.selectedMountingGroupId = result.id
+        state.selectedAssetId = null
+        state.selectedEdgeId = null
+      } else if (result.kind === 'edge') {
+        state.selectedEdgeId = result.id
+        state.selectedAssetId = null
+        state.selectedMountingGroupId = null
+      } else {
+        state.selectedAssetId = result.id
+        state.selectedEdgeId = null
+        state.selectedMountingGroupId = null
+      }
+      rebuild()
+    }
+
+    if (result.kind === 'edge') {
+      selectEdge(result.id)
+      if (result.assetId) focusAssetCard(result.assetId)
+    } else if (result.kind === 'mounting') {
+      selectMountingGroup(result.id)
+      focusMountingGroup(result.id)
+    } else {
+      selectAsset(result.id, { focus: true })
+    }
+    renderFilterPanel()
+    renderTopologySidebar()
+    updatePanelState()
+  }
+
+  function selectAsset(assetId, { focus = false } = {}) {
     if (!assetId || !model.nodeById.has(assetId)) return
     state.selectedAssetId = assetId
     state.selectedEdgeId = null
@@ -399,6 +463,7 @@ function mountTopologyWorkspace(container, {
     renderInspector()
     updatePanelState()
     syncUrl()
+    if (focus) focusAssetCard(assetId)
   }
 
   function selectEdge(edgeId) {
@@ -473,6 +538,50 @@ function mountTopologyWorkspace(container, {
     renderGraph()
     updateToolbar()
     requestAnimationFrame(() => centerGraph({ smooth: true }))
+  }
+
+  function focusAssetCard(assetId) {
+    const target = layout?.nodes?.find((node) => node.id === assetId)
+    if (!target?.diagram) return
+    const viewport = container.querySelector('[data-topology-viewport]')
+    if (!viewport) return
+    const center = {
+      x: target.diagram.centerX,
+      y: target.diagram.centerY,
+    }
+    const nextZoom = Math.min(MAX_ZOOM, Math.max(state.zoom, 1))
+    if (nextZoom !== state.zoom) {
+      setZoom(nextZoom)
+      renderGraph()
+      updateToolbar()
+    }
+    requestAnimationFrame(() => {
+      const frame = container.querySelector('[data-topology-frame]')
+      if (!frame) return
+      restoreViewportCenter(viewport, frame, center)
+    })
+  }
+
+  function focusMountingGroup(groupId) {
+    const target = layout?.mountingBoxes?.find((box) => box.id === groupId)
+    if (!target) return
+    const viewport = container.querySelector('[data-topology-viewport]')
+    if (!viewport) return
+    const center = {
+      x: target.x + target.width / 2,
+      y: target.y + target.height / 2,
+    }
+    const nextZoom = Math.min(MAX_ZOOM, Math.max(state.zoom, 0.9))
+    if (nextZoom !== state.zoom) {
+      setZoom(nextZoom)
+      renderGraph()
+      updateToolbar()
+    }
+    requestAnimationFrame(() => {
+      const frame = container.querySelector('[data-topology-frame]')
+      if (!frame) return
+      restoreViewportCenter(viewport, frame, center)
+    })
   }
 
   function focusRelations() {
@@ -804,26 +913,38 @@ function mountTopologyWorkspace(container, {
     const panel = container.querySelector('[data-topology-filter-panel]')
     if (!panel) return
     const families = model?.networkOptions ?? []
-    const areas = mapData.locationGroups
-    const results = state.searchResults
     panel.innerHTML = `
-      <div class="topology-stitch-panel-head"><div><span class="topology-stitch-eyebrow">KONFIGURASI TAMPILAN</span><h2>Filter Diagram</h2></div><button type="button" class="topology-stitch-icon-button" data-action="close-filter" aria-label="Tutup filter"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>
-      <label class="topology-stitch-field-label" for="topology-area-filter">Area diagram</label>
-      <select id="topology-area-filter" class="topology-stitch-select" data-area-filter><option value="all" ${state.area === null ? 'selected' : ''}>Semua area</option>${areas.map(({ key, name }) => `<option value="${escapeAttribute(key)}" ${state.area === key ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('')}</select>
-      <label class="topology-stitch-field-label" for="topology-search">Cari perangkat atau relasi</label>
-      <div class="topology-stitch-search-field"><span class="material-symbols-outlined" aria-hidden="true">search</span><input id="topology-search" data-topology-search type="search" value="${escapeAttribute(state.search)}" placeholder="Cari ID, nama, atau jalur…" autocomplete="off"/></div>
-      ${results.length ? `<div class="topology-stitch-search-results">${results.map((result) => `<button type="button" data-search-result="${escapeAttribute(`${result.kind}:${result.id}`)}"><span class="material-symbols-outlined" aria-hidden="true">${result.kind === 'edge' ? 'route' : 'device_hub'}</span><span><strong>${escapeHtml(result.label)}</strong><small>${escapeHtml(result.detail)}</small></span></button>`).join('')}</div>` : ''}
+      <div class="topology-stitch-panel-head"><div><span class="topology-stitch-eyebrow">KONFIGURASI TAMBAHAN</span><h2>Filter Diagram</h2></div><button type="button" class="topology-stitch-icon-button" data-action="close-filter" aria-label="Tutup filter"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>
       <div class="topology-stitch-filter-section"><div class="topology-stitch-filter-heading"><span>Keluarga jaringan</span><button type="button" class="topology-stitch-link-button" data-family="__reset__">Tampilkan semua</button></div><div class="topology-stitch-family-list">${families.length ? families.map((family) => `<button type="button" class="topology-stitch-family ${state.selectedFamilies.has(family.id) ? 'active' : ''}" data-family="${escapeAttribute(family.id)}"><i style="--family-color:${escapeAttribute(family.color || networkFamilyColor(family.id))}"></i>${escapeHtml(family.label || networkFamilyLabel(family.id))}</button>`).join('') : '<span class="topology-stitch-muted">Belum ada keluarga jaringan.</span>'}</div></div>
       <div class="topology-stitch-filter-section"><label class="topology-stitch-check"><input type="checkbox" data-mounting-toggle ${state.showMountingPhysical ? 'checked' : ''}/><span><strong>Tampilkan mounting fisik</strong><small>Oranye = indoor/standalone; kuning = aset yang masih perlu mounting.</small></span></label></div>
       <div class="topology-stitch-filter-section"><label class="topology-stitch-field-label" for="topology-label-mode">Kepadatan label</label><select id="topology-label-mode" class="topology-stitch-select" data-label-mode><option value="auto" ${state.labelMode === 'auto' ? 'selected' : ''}>Otomatis</option><option value="detail" ${state.labelMode === 'detail' ? 'selected' : ''}>Detail</option><option value="all" ${state.labelMode === 'all' ? 'selected' : ''}>Semua label</option></select></div>
     `
   }
 
+  function renderTopologySidebar() {
+    const sidebar = container.querySelector('[data-topology-sidebar]')
+    if (!sidebar) return
+    const input = sidebar.querySelector('[data-topology-search]')
+    if (input && input.value !== state.search) input.value = state.search
+    const results = sidebar.querySelector('[data-topology-search-results]')
+    if (!results) return
+    const hasQuery = Boolean(String(state.search || '').trim())
+    results.hidden = !hasQuery
+    results.setAttribute('aria-expanded', String(hasQuery))
+    input?.setAttribute('aria-expanded', String(hasQuery))
+    results.innerHTML = state.searchResults.length
+      ? state.searchResults.map((result) => `<button type="button" data-search-result="${escapeAttribute(`${result.kind}:${result.id}`)}"><span class="material-symbols-outlined" aria-hidden="true">${result.kind === 'edge' ? 'route' : 'device_hub'}</span><span><strong>${escapeHtml(result.label)}</strong><small>${escapeHtml(result.detail)}</small></span><span class="material-symbols-outlined" aria-hidden="true">chevron_right</span></button>`).join('')
+      : hasQuery
+        ? '<p>Tidak ada perangkat atau relasi yang cocok.</p>'
+        : ''
+  }
+
   function updateToolbar() {
     const summary = model?.summary ?? {}
     const setText = (selector, value) => {
-      const element = container.querySelector(selector)
-      if (element) element.textContent = value
+      container.querySelectorAll(selector).forEach((element) => {
+        element.textContent = value
+      })
     }
     setText('[data-topology-area-title]', areaName(state.area, mapData.locationGroups))
     setText('[data-topology-connected-count]', `${summary.connectedAssetCount ?? 0} Aktif`)
@@ -846,9 +967,23 @@ function mountTopologyWorkspace(container, {
     setHidden('[data-topology-export-panel]', !state.exportOpen)
     const inspector = container.querySelector('.topology-stitch-inspector')
     if (inspector) inspector.hidden = !state.inspectorOpen
-    container.querySelector('[data-action="toggle-filter"]')?.classList.toggle('active', state.filterOpen)
-    container.querySelector('[data-action="toggle-view"]')?.classList.toggle('active', state.viewOpen)
-    container.querySelector('[data-action="toggle-export"]')?.classList.toggle('active', state.exportOpen)
+    const app = container.querySelector('[data-topology-app]')
+    app?.classList.toggle('topology-sidebar-collapsed', state.sidebarCollapsed)
+    container.querySelectorAll('[data-action="toggle-sidebar"]').forEach((button) => {
+      button.setAttribute('aria-expanded', String(!state.sidebarCollapsed))
+    })
+    const actionStates = {
+      'toggle-filter': state.filterOpen,
+      'toggle-view': state.viewOpen,
+      'toggle-export': state.exportOpen,
+      'toggle-inspector': state.inspectorOpen,
+    }
+    Object.entries(actionStates).forEach(([action, active]) => {
+      container.querySelectorAll(`[data-action="${action}"]`).forEach((button) => {
+        button.classList.toggle('active', active)
+        button.setAttribute('aria-pressed', String(active))
+      })
+    })
   }
 
   function exportDiagram(kind) {
@@ -945,23 +1080,130 @@ function prefersReducedMotion() {
   return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 }
 
-function renderWorkspaceShell({ activeContext, state, model }) {
+function renderTopologySidebarMarkup({ activeContext, mapData, state, summary }) {
+  const areas = mapData.locationGroups ?? []
+  const datasetLabel = activeContext.datasetName || activeContext.version || 'Dataset aktif'
+  return `
+    <aside class="network-sidebar topology-sidebar" id="topology-sidebar"
+      data-topology-sidebar aria-label="Kontrol diagram topologi">
+      <header class="sidebar-heading">
+        <div>
+          <span class="eyebrow">DATASET AKTIF</span>
+          <h1>Diagram topologi</h1>
+        </div>
+        <div class="sidebar-heading-actions">
+          <button class="icon-button sidebar-collapse desktop-only" type="button"
+            title="Tutup panel" aria-label="Tutup panel diagram" aria-expanded="true"
+            data-action="toggle-sidebar">
+            <span class="material-symbols-outlined" aria-hidden="true">left_panel_close</span>
+          </button>
+          <button class="icon-button close-sidebar mobile-only" type="button"
+            aria-label="Tutup panel diagram" aria-expanded="true" data-action="toggle-sidebar">
+            <span class="material-symbols-outlined" aria-hidden="true">close</span>
+          </button>
+        </div>
+      </header>
+      <div class="sidebar-content">
+        <label class="area-selector">
+          <span>Area fasilitas</span>
+          <span class="area-selector-control">
+            <select aria-label="Area fasilitas" data-area-filter>
+              <option value="all" ${state.area === null ? 'selected' : ''}>Semua area</option>
+              ${areas.map(({ key, name }) => `<option value="${escapeAttribute(key)}" ${state.area === key ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('')}
+            </select>
+            <span class="area-selector-icon material-symbols-outlined" aria-hidden="true">expand_more</span>
+          </span>
+        </label>
+
+        <div class="asset-search-combobox">
+          <label class="search-control">
+            <span class="material-symbols-outlined" aria-hidden="true">search</span>
+            <input id="topology-search" data-topology-search type="search" value="${escapeAttribute(state.search)}"
+              placeholder="Cari perangkat atau relasi" autocomplete="off" spellcheck="false"
+              aria-label="Cari perangkat atau relasi" aria-autocomplete="list" aria-haspopup="listbox"
+              aria-controls="topology-search-results" aria-expanded="false" />
+            <kbd>Ctrl K</kbd>
+          </label>
+          <div class="sidebar-asset-search-results topology-search-results" id="topology-search-results"
+            data-topology-search-results role="listbox" aria-label="Hasil pencarian diagram" hidden></div>
+        </div>
+
+        <div class="map-category-presets topology-sidebar-actions" aria-label="Aksi diagram">
+          <button type="button" data-action="toggle-view" aria-pressed="${state.viewOpen ? 'true' : 'false'}">
+            <span class="material-symbols-outlined" aria-hidden="true">visibility</span>Tampilan
+          </button>
+          <button type="button" data-action="toggle-filter" aria-pressed="${state.filterOpen ? 'true' : 'false'}">
+            <span class="material-symbols-outlined" aria-hidden="true">filter_list</span>Filter
+          </button>
+          <button type="button" data-action="toggle-export" aria-pressed="${state.exportOpen ? 'true' : 'false'}">
+            <span class="material-symbols-outlined" aria-hidden="true">download</span>Export
+          </button>
+          <button type="button" data-action="toggle-inspector" aria-pressed="${state.inspectorOpen ? 'true' : 'false'}">
+            <span class="material-symbols-outlined" aria-hidden="true">right_panel_open</span>Detail
+          </button>
+        </div>
+
+        <div class="sidebar-list-header topology-sidebar-summary">
+          <div class="selection-summary">
+            <span><strong data-topology-asset-count>${summary.totalAssetCount ?? 0}</strong> aset · <strong data-topology-edge-count>${summary.confirmedEdgeCount ?? 0}</strong> relasi aktif</span>
+          </div>
+          <div class="topology-sidebar-live">
+            <span class="topology-stitch-health online"><b></b><span data-topology-connected-count>${summary.connectedAssetCount ?? 0} Aktif</span></span>
+            <span class="topology-stitch-health offline"><b></b><span data-topology-offline-count>${summary.isolatedAssetCount ?? 0} Offline</span></span>
+          </div>
+        </div>
+
+        <section class="sidebar-secondary-context topology-sidebar-secondary" aria-label="Informasi diagram">
+          <section class="dataset-card" aria-label="${escapeAttribute(datasetLabel)}">
+            <span class="dataset-icon material-symbols-outlined" aria-hidden="true">account_tree</span>
+            <div>
+              <strong>${escapeHtml(datasetLabel)}</strong>
+              <span>Versi aktif</span>
+            </div>
+            <span class="status-dot" title="Dataset aktif"></span>
+          </section>
+          <details class="sidebar-topology-readiness ready" open>
+            <summary>
+              <span>
+                <strong>Status diagram</strong>
+                <small>${summary.connectedAssetCount ?? 0} aktif · ${summary.isolatedAssetCount ?? 0} offline · ${summary.physicalMountCount ?? 0} tiang</small>
+              </span>
+              <span class="material-symbols-outlined topology-summary-chevron" aria-hidden="true">expand_more</span>
+            </summary>
+            <div class="sidebar-topology-detail">
+              <span class="sidebar-topology-metrics">
+                <span><b>${summary.totalAssetCount ?? 0}</b> aset pada area</span>
+                <span><b>${summary.confirmedEdgeCount ?? 0}</b> relasi aktif</span>
+              </span>
+              <small>Gunakan search untuk langsung memusatkan diagram ke perangkat atau relasi.</small>
+            </div>
+          </details>
+        </section>
+
+        <footer class="sidebar-footer topology-sidebar-footer">
+          <span class="material-symbols-outlined" aria-hidden="true">info</span>
+          <p>Diagram bersifat read-only. Pilih node atau garis untuk melihat detail.</p>
+          <button type="button" class="topology-sidebar-help" data-action="help" aria-label="Bantuan diagram">
+            <span class="material-symbols-outlined" aria-hidden="true">help</span>
+          </button>
+        </footer>
+      </div>
+    </aside>
+  `
+}
+
+function renderWorkspaceShell({ activeContext, mapData, state, model }) {
   const summary = model?.summary ?? {}
   const metadata = topologyDocumentMeta(activeContext)
   return `
     <div class="topology-stitch-app" data-topology-app>
       ${renderTopNavigation('topology', activeContext)}
       <div class="topology-stitch-shell">
-        <nav class="topology-stitch-rail" aria-label="Opsi diagram">
-          <div class="topology-stitch-rail-group">
-            <button type="button" class="topology-stitch-rail-button active" data-action="toggle-view" title="Opsi tampilan" aria-label="Opsi tampilan"><span class="material-symbols-outlined" aria-hidden="true">visibility</span></button>
-            <button type="button" class="topology-stitch-rail-button" data-action="toggle-filter" title="Filter" aria-label="Filter"><span class="material-symbols-outlined" aria-hidden="true">filter_list</span></button>
-            <button type="button" class="topology-stitch-rail-button" data-action="toggle-export" title="Export" aria-label="Export"><span class="material-symbols-outlined" aria-hidden="true">download</span></button>
-            <button type="button" class="topology-stitch-rail-button topology-stitch-inspector-toggle" data-action="toggle-inspector" title="Panel detail" aria-label="Panel detail"><span class="material-symbols-outlined" aria-hidden="true">right_panel_open</span></button>
-          </div>
-          <button type="button" class="topology-stitch-rail-button" data-action="help" title="Bantuan" aria-label="Bantuan"><span class="material-symbols-outlined" aria-hidden="true">help</span></button>
-        </nav>
+        ${renderTopologySidebarMarkup({ activeContext, mapData, state, summary })}
         <main class="topology-stitch-main" aria-label="Workspace Diagram Topologi">
+          <button type="button" class="topology-sidebar-reopen" data-action="toggle-sidebar" aria-label="Buka panel diagram">
+            <span class="material-symbols-outlined" aria-hidden="true">left_panel_open</span>
+          </button>
           <div class="topology-stitch-toolbar">
             <div class="topology-stitch-toolbar-context"><strong data-topology-area-title>${escapeHtml(areaName(state.area, []))}</strong><span class="material-symbols-outlined" aria-hidden="true">chevron_right</span><span>Topologi Jaringan</span><i></i><span class="topology-stitch-health online"><b></b><span data-topology-connected-count>${summary.connectedAssetCount ?? 0} Aktif</span></span><span class="topology-stitch-health offline"><b></b><span data-topology-offline-count>${summary.isolatedAssetCount ?? 0} Offline</span></span><span class="topology-stitch-health mounting"><b></b><span data-topology-pole-count>${summary.physicalMountCount ?? 0} Tiang${summary.emptyPhysicalMountCount ? ` · ${summary.emptyPhysicalMountCount} kosong` : ''}</span></span></div>
             <div class="topology-stitch-toolbar-actions">

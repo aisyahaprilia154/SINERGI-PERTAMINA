@@ -32,6 +32,28 @@ test('MapLibre map class does not shadow the native Map collection', async () =>
   )
 })
 
+test('operational network lines render without a visible casing', async () => {
+  const mapSource = await readFile(
+    new URL('../src/pages/map/maplibre-map.js', import.meta.url),
+    'utf8',
+  )
+  const canvasSource = await readFile(
+    new URL('../src/pages/map/map-canvas.js', import.meta.url),
+    'utf8',
+  )
+  const flatMapSource = await readFile(
+    new URL('../src/pages/map/flat-network-map.js', import.meta.url),
+    'utf8',
+  )
+
+  assert.doesNotMatch(mapSource, /id: 'cable-lines-casing'/)
+  assert.doesNotMatch(mapSource, /id: 'asset-relations-casing'/)
+  assert.doesNotMatch(mapSource, /drawProjectedLine\(context, map, entry, 'casing'\)/)
+  assert.doesNotMatch(mapSource, /drawProjectedLine\(context, map, entry, 'focus-glow'\)/)
+  assert.doesNotMatch(canvasSource, /strokeCanvasPath\(points, colors\.surface/)
+  assert.doesNotMatch(flatMapSource, /stroke="#07101b"/)
+})
+
 test('Vite leaves MapLibre out of dependency optimization so its worker URL stays valid', async () => {
   const { default: config } = await import('../vite.config.js')
   assert.deepEqual(config.optimizeDeps?.exclude, ['maplibre-gl'])
@@ -223,6 +245,7 @@ test('fallback and vector basemap styles are valid and use a visible neutral can
       ?.layout?.visibility,
     'none',
   )
+  assert.equal(fieldStyle.sources['satellite-imagery']?.maxzoom, 18)
   assert.equal(
     fallbackStyle.layers.find(({ id }) => id === 'safe-background')
       ?.paint?.['background-color'],

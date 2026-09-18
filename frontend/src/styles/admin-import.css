@@ -64,14 +64,13 @@
 }
 
 .admin-app-header .brand-lockup {
-  gap: 8px;
   font-weight: 700;
   letter-spacing: .02em;
 }
 
-.admin-app-header .brand-mark {
-  color: var(--admin-primary);
-}
+.admin-app-header .brand-logo-mark { width: 52px; height: 40px; }
+.admin-app-header .brand-logo-wordmark strong { font-size: 16px; }
+.admin-app-header .brand-logo-wordmark small { font-size: 10px; }
 
 .admin-area-label {
   min-height: 28px;

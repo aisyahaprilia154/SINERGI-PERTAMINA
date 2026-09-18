@@ -4,6 +4,7 @@ import {
   loadImportStatus,
   uploadDataset,
 } from '../../services/import-dataset-service.js'
+import { patraNiagaLogoMarkup } from '../brand-logo.js'
 import { renderImportDatasetForm } from './import-dataset-form.js'
 import { validateImportFile } from './import-dataset-state.js'
 import { renderImportProgress } from './import-progress.js'
@@ -344,9 +345,8 @@ function renderShell(state) {
 function renderAdminHeader() {
   return `
     <header class="admin-app-header">
-      <a class="brand-lockup" href="/map" aria-label="SINERGI">
-        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span class="brand-name">SINERGI</span>
+      <a class="brand-lockup" href="/map" aria-label="SINERGI — Pertamina Patra Niaga">
+        ${patraNiagaLogoMarkup()}
       </a>
       <span class="admin-area-label">Administrasi dataset</span>
       <nav aria-label="Navigasi admin">

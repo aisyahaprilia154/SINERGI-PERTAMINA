@@ -1,3 +1,5 @@
+import { patraNiagaLogoMarkup } from './brand-logo.js'
+
 export function renderLoginPage(container) {
   document.title = 'SINERGI — Masuk'
   document.body.className = 'login-body'
@@ -5,9 +7,8 @@ export function renderLoginPage(container) {
   container.innerHTML = `
     <main class="login-page" aria-label="Halaman login SINERGI">
       <section class="login-card" aria-labelledby="login-title">
-        <div class="brand-lockup" aria-label="SINERGI">
-          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span class="brand-name">SINERGI</span>
+        <div class="brand-lockup" aria-label="SINERGI — Pertamina Patra Niaga">
+          ${patraNiagaLogoMarkup()}
         </div>
         <header class="login-header">
           <h1 id="login-title">Masuk ke SINERGI</h1>

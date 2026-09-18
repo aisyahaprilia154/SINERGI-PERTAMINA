@@ -1,4 +1,5 @@
 import { OPERATIONAL_NETWORK_COLORS } from './network-colors.js'
+import { normalizeSearchText, searchMatchScore } from './search-normalization.js'
 
 const NETWORK_FAMILY_ORDER = Object.freeze([
   'cctv',
@@ -628,6 +629,7 @@ export function getTopologyDiagramSearchResults(model, query, limit = 12) {
       return {
         kind: 'edge',
         id: edge.id,
+        assetId: source?.id ?? target?.id ?? null,
         label: edge.sourceGeometryId || edge.relationId || edge.id,
         typeLabel: 'Relasi terkonfirmasi',
         area: source?.areaName || target?.areaName || source?.areaKey || 'Area belum tersedia',
@@ -650,6 +652,7 @@ export function getTopologyDiagramSearchResults(model, query, limit = 12) {
       return {
         kind: 'mounting',
         id: group.id,
+        assetId: hostId,
         label: hostName,
         detail: `${group.hostType || 'Tiang'} · ${group.childCount ?? group.childIds?.length ?? 0} aset terpasang`,
         score,
@@ -1389,27 +1392,26 @@ function matchesSearch(asset, graphNode, query) {
 }
 
 function searchScore(value, normalized) {
-  const haystack = [
+  return searchMatchScore([
     value?.id,
     value?.assetId,
     value?.canonicalAssetId,
     value?.name,
+    value?.sourceName,
     value?.type,
     value?.assetType,
     value?.location,
     value?.locationGroupName,
+    value?.locationGroupKey,
     value?.hostname,
     value?.hostName,
+    value?.sourceFolderPath,
     value?.provenance,
-  ].filter(Boolean).join(' ').toLowerCase()
-  if (!haystack.includes(normalized)) return 0
-  if (String(value?.id ?? '').toLowerCase() === normalized) return 100
-  if (String(value?.name ?? '').toLowerCase().startsWith(normalized)) return 80
-  return haystack.startsWith(normalized) ? 60 : 40
+  ], normalized)
 }
 
 function normalizeSearch(value) {
-  return String(value ?? '').trim().toLowerCase()
+  return normalizeSearchText(value)
 }
 
 function shouldDimNode(node, { search, selectedFamilies }) {
