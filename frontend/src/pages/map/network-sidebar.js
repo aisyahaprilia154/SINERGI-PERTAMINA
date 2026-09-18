@@ -67,6 +67,7 @@ export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, 
             aria-pressed="true">Semua</button>
           <button type="button" data-category-preset="cctv" aria-pressed="false">CCTV</button>
           <button type="button" data-category-preset="fiber" aria-pressed="false">Fiber Optic</button>
+          <button type="button" data-category-preset="power" aria-pressed="false">Power PLN</button>
           <button type="button" data-category-preset="lan" aria-pressed="false">LAN</button>
           <button type="button" data-category-preset="infrastructure"
             aria-pressed="false">Infrastruktur</button>

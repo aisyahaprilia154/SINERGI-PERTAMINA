@@ -1678,6 +1678,7 @@ function networkMatchesPreset(network, preset) {
   const source = `${network.category ?? ''} ${network.type ?? ''} ${network.name ?? ''}`.toLowerCase()
   if (preset === 'cctv') return /cctv|camera|kamera|nvr|junction/.test(source)
   if (preset === 'fiber') return /fiber|fibre|\bfo\b|otb/.test(source)
+  if (preset === 'power') return /power|pln|listrik/.test(source)
   if (preset === 'lan') return /\blan\b|utp/.test(source)
   if (preset === 'infrastructure') {
     return /infrastructure|switch|server|router|rack|peripheral|printer|access point/.test(source)

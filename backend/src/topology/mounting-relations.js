@@ -71,7 +71,7 @@ export function generateMountingArtifacts(topologyInputBundle, {
       expectations.byAsset.set(asset.id, createMountingExpectation({
         assetId: asset.id, expectation: facilityExpectation,
         provenance: 'facility_topology_correction', updatedAt: generatedAt,
-        reason: 'Koreksi pemasangan FT Tegal Baru dari pengguna.',
+        reason: 'Koreksi pemasangan fasilitas dari pengguna.',
       }))
       return
     }

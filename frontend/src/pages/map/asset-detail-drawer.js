@@ -517,6 +517,9 @@ function getAssetCategory(asset, assetNetworks) {
     return { label: 'Peripheral', token: 'peripheral' }
   }
   if (assetSource.includes('lan')) return { label: 'LAN', token: 'lan' }
+  if (assetSource.includes('power') || assetSource.includes('pln') || assetSource.includes('listrik')) {
+    return { label: 'Power PLN', token: 'power' }
+  }
   if (['switch', 'server', 'access point'].some((type) => assetSource.includes(type))) {
     return { label: 'Infrastruktur', token: 'infrastructure' }
   }
@@ -524,6 +527,7 @@ function getAssetCategory(asset, assetNetworks) {
   const networkSource = assetNetworks.map((network) => network.type).join(' ').toLowerCase()
   if (networkSource.includes('cctv')) return { label: 'CCTV', token: 'cctv' }
   if (networkSource.includes('fiber')) return { label: 'Fiber optic', token: 'fiber' }
+  if (networkSource.includes('power')) return { label: 'Power PLN', token: 'power' }
   if (networkSource.includes('lan')) return { label: 'LAN', token: 'lan' }
   return { label: 'Infrastruktur', token: 'infrastructure' }
 }
