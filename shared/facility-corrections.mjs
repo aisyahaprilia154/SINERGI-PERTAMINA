@@ -1,7 +1,7 @@
 // User-confirmed facility facts. Shared by regeneration and existing map projections.
 import {additionalRelations, additionalExpectation, additionalConflict} from './additional-facility-facts.mjs'
 export {correctAdditionalMounts} from './additional-facility-facts.mjs'
-export const FACILITY_CORRECTION_VERSION = 'facilities/2026-09-18-pengapon-mounting'
+export const FACILITY_CORRECTION_VERSION = 'facilities/2026-09-18-pengapon-mounting-v2'
 export function assetCode(asset) {
   return String(asset?.sourceName ?? asset?.name ?? '').trim().toUpperCase()
     .replace(/^(C|JB|T)-0+(\d)/, '$1-$2')

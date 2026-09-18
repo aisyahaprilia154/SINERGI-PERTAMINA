@@ -1,4 +1,6 @@
 import { adaptActiveDatasetForTopology } from '../../adapters/active-dataset-map-adapter.js'
+import { branchNameForFacility } from '../../domain/facility-branch.js'
+import { createSourceIconLoader } from '../../domain/source-icon-loader.js'
 import { CONNECTION_STYLES } from './topology-connection-style.js'
 import {
   buildTopologyDiagramModel,
@@ -144,6 +146,7 @@ function mountTopologyWorkspace(container, {
   let searchTimer = null
   let panState = null
   let suppressViewportClick = false
+  const sourceIconLoader = createSourceIconLoader()
 
   const buildModel = () => buildTopologyDiagramModel({
     assets: mapData.assets,
@@ -653,13 +656,25 @@ function mountTopologyWorkspace(container, {
       syncGraphSurface()
       return
     }
+    const sourceIconPreload = sourceIconLoader.preload(
+      layout.nodes.map(({ sourceIconUrl }) => sourceIconUrl),
+    )
+    if (sourceIconPreload) {
+      void sourceIconPreload.then(() => {
+        if (container.isConnected) renderGraph()
+      })
+    }
+    const displayBranchName = branchNameForFacility(
+      mapData.locationGroups.find(({ key }) => key === state.area),
+      activeContext.branchName,
+    )
     const svg = renderTopologyDiagramSvg({
       model,
       layout,
       context: {
         ...activeContext,
         branchId: activeContext.branchId,
-        branchName: activeContext.branchName,
+        branchName: displayBranchName,
         datasetId: activeContext.datasetId,
         datasetVersionId: activeContext.datasetVersionId,
         areaKey: state.area,
@@ -671,6 +686,7 @@ function mountTopologyWorkspace(container, {
       showMountingPhysical: state.showMountingPhysical,
       zoom: state.zoom,
       renderMode: 'interactive',
+      sourceIconDataByUrl: sourceIconLoader.dataByUrl,
     })
     frame.innerHTML = svg
     frame.style.width = `${layout.width}px`
@@ -989,11 +1005,18 @@ function mountTopologyWorkspace(container, {
   function exportDiagram(kind) {
     if (!layout || layout.status !== 'ready') return showToast('Diagram belum siap untuk diekspor.')
     const exportLayout = layout
+    const displayBranchName = branchNameForFacility(
+      mapData.locationGroups.find(({ key }) => key === state.area),
+      activeContext.branchName,
+    )
     const svg = new DOMParser().parseFromString(renderTopologyDiagramSvg({
-      model, layout: exportLayout, context: {...activeContext, areaKey: state.area},
+      model,
+      layout: exportLayout,
+      context: {...activeContext, branchName: displayBranchName, areaKey: state.area},
       renderMode: 'export', showMountingPhysical: state.showMountingPhysical,
+      sourceIconDataByUrl: sourceIconLoader.dataByUrl,
     }), 'image/svg+xml').documentElement
-    const slug = slugify(`${activeContext.branchName || activeContext.branchId}-${areaName(state.area, mapData.locationGroups)}`)
+    const slug = slugify(`${displayBranchName || activeContext.branchId}-${areaName(state.area, mapData.locationGroups)}`)
     const filename = `sinergi-topologi-${slug}.${kind}`
     state.exportOpen = false
     updatePanelState()

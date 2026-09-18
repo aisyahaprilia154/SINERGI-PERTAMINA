@@ -77,6 +77,7 @@ export function renderTopologyDiagramSvg({
   hoveredAssetId = null,
   highlightAssetId = null,
   minimap = false,
+  sourceIconDataByUrl = null,
 } = {}) {
   if (!model || model.status !== 'ready' || !layout || layout.status !== 'ready') return ''
   const nodes = layout.nodes
@@ -409,6 +410,7 @@ export function renderTopologyDiagramSvg({
           hoveredAssetId,
           minimap,
           highlightAssetId,
+          sourceIconDataByUrl,
         })).join('')}
       </g>
       ${layout.mode === 'area-overview' ? '' : renderCrossAreaMarkers(layout)}
@@ -786,9 +788,17 @@ function renderNode(node, {
   hoveredAssetId = null,
   minimap,
   highlightAssetId = null,
+  sourceIconDataByUrl = null,
 }) {
   const { x, y, width, height } = node.diagram
-  if (schematic) return renderSchematicAssetCard(node, {selectedAssetId, hoveredAssetId, minimap, directNodes, selectionPathNodes})
+  if (schematic) return renderSchematicAssetCard(node, {
+    selectedAssetId,
+    hoveredAssetId,
+    minimap,
+    directNodes,
+    selectionPathNodes,
+    sourceIconDataByUrl,
+  })
   const selected = node.id === selectedAssetId
   const direct = directNodes.has(node.id) && !selected
   const selectedPath = selectionPathNodes.has(node.id) && !selected
@@ -839,7 +849,7 @@ function renderNode(node, {
       <rect class="topology-node-card topology-node-hitbox" x="${x}" y="${y}" width="${Math.max(36, width)}" height="${Math.max(36, height)}"/>
       <rect class="topology-node-selection-glow" x="${visualBox.x - 6}" y="${visualBox.y - 6}"
         width="${visualBox.width + 12}" height="${visualBox.height + 12}" rx="${visualBox.radius + 4}"/>
-      ${renderNodeGlyph(node, iconX, iconY, color)}
+      ${renderNodeGlyph(node, iconX, iconY, color, sourceIconDataByUrl)}
       <circle class="topology-node-status-dot${warning ? ' offline' : ' online'}"
         cx="${visualBox.x + visualBox.width - 1}" cy="${visualBox.y + 1}" r="${node.isEndpoint ? 3 : 4}"/>
       ${showLabels && (isCoreOrJunction || endpointLabel) ? `
@@ -850,7 +860,14 @@ function renderNode(node, {
   `
 }
 
-function renderSchematicAssetCard(node, {selectedAssetId, hoveredAssetId, minimap, directNodes, selectionPathNodes}) {
+function renderSchematicAssetCard(node, {
+  selectedAssetId,
+  hoveredAssetId,
+  minimap,
+  directNodes,
+  selectionPathNodes,
+  sourceIconDataByUrl,
+}) {
   const {x, y, width, height} = node.diagram
   const role = node.diagramClass === 'rack-root' ? 'core'
     : ['junction-peer', 'junction-extended'].includes(node.diagramClass) ? 'junction' : 'endpoint'
@@ -865,7 +882,7 @@ function renderSchematicAssetCard(node, {selectedAssetId, hoveredAssetId, minima
     aria-label="${escapeAttribute(`${node.name} · ${assetDescription(node)}`)}">
     <title>${escapeXml(describeNode(node))} · ${escapeXml(assetDescription(node))}</title>
     <rect class="topology-schematic-card" x="${x}" y="${y}" width="${width}" height="${height}" rx="4"/>
-    ${minimap ? '' : `<g transform="translate(${x + 30} ${y + height / 2}) scale(${role === 'endpoint' ? 1.3 : .82}) translate(${-x - 30} ${-y - height / 2})">${renderNodeGlyph(node, x + 30, y + height / 2, schematicIconColor(role))}</g>
+    ${minimap ? '' : `<g transform="translate(${x + 30} ${y + height / 2}) scale(${role === 'endpoint' ? 1.3 : .82}) translate(${-x - 30} ${-y - height / 2})">${renderNodeGlyph(node, x + 30, y + height / 2, schematicIconColor(role), sourceIconDataByUrl)}</g>
     <text class="topology-schematic-name" x="${x + 60}" y="${y + height / 2 - 5}">${escapeXml(shorten(node.name || node.id, 18))}</text>
     <text class="topology-schematic-type" x="${x + 60}" y="${y + height / 2 + 16}">${escapeXml(shorten(assetDescription(node), 22))}</text>`}
   </g>`
@@ -960,7 +977,9 @@ function renderAdminLayer(model, layout, { selectedCandidateId, selectedUnresolv
   return `<g class="topology-admin-layer" aria-label="Layer administrator">${candidateEdges}${markers}</g>`
 }
 
-function renderNodeGlyph(node, x, y, color) {
+function renderNodeGlyph(node, x, y, color, sourceIconDataByUrl = null) {
+  const sourceIcon = sourceIconDataByUrl?.get?.(node.sourceIconUrl) ?? null
+  if (sourceIcon) return renderSourceIcon(sourceIcon, x, y, node)
   const role = normalizeTopologyRole(node.topologyRole)
   if (node.iconType === 'server-rack-core' || ['root', 'core', 'server', 'nvr', 'router'].includes(role)) {
     return `<g class="topology-rack-glyph" stroke="${escapeAttribute(color)}">
@@ -996,6 +1015,14 @@ function renderNodeGlyph(node, x, y, color) {
     </g>`
   }
   return `<rect class="topology-device-icon" x="${x - 12}" y="${y - 12}" width="24" height="24" rx="4" stroke="${escapeAttribute(color)}"/>`
+}
+
+function renderSourceIcon(sourceIcon, x, y, node) {
+  const role = normalizeTopologyRole(node.topologyRole)
+  const size = node.isEndpoint || role === 'endpoint' ? 32 : 42
+  return `<image class="topology-source-icon" x="${x - size / 2}" y="${y - size / 2}"
+    width="${size}" height="${size}" href="${escapeAttribute(sourceIcon)}"
+    preserveAspectRatio="xMidYMid meet" aria-hidden="true"/>`
 }
 
 function renderConnectionLegend(bottom, width) {

@@ -289,6 +289,14 @@ test('active map exposes KMZ source icon resources for diagram nodes', async () 
     assert.equal(mapView.assets[0].sourceIconHref, 'files/camera.png')
     assert.equal(mapView.assets[0].sourceIconResourceId, 'resource-camera')
     assert.match(mapView.assets[0].sourceIconUrl, /source-resources\/resource-camera$/)
+
+    const topologyView = await fixture.service.getActiveTopologyDataset({
+      datasetId: 'dataset-semarang',
+      branchId: 'semarang',
+    })
+    assert.equal(topologyView.assets[0].sourceIconHref, 'files/camera.png')
+    assert.equal(topologyView.assets[0].sourceIconResourceId, 'resource-camera')
+    assert.match(topologyView.assets[0].sourceIconUrl, /source-resources\/resource-camera$/)
   } finally {
     await fixture.close()
   }

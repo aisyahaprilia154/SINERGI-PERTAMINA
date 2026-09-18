@@ -77,6 +77,53 @@ test('close zoom spreads dense assets while keeping leaders on canonical coordin
   assert.equal(layout.summary.displacedAssetCount, 3)
 })
 
+test('very close zoom adds compact labels for named equipment without labeling network lines', () => {
+  const assets = [
+    {
+      id: 'C-09',
+      label: 'CCTV-09',
+      type: 'CCTV',
+      point: { x: 120, y: 120 },
+    },
+    {
+      id: 'JB-09',
+      label: 'JB-09',
+      type: 'Junction Box',
+      point: { x: 360, y: 120 },
+    },
+    {
+      id: 'T-09',
+      label: 'T-09',
+      type: 'Tiang',
+      point: { x: 600, y: 120 },
+    },
+    {
+      id: 'FO-09',
+      label: 'Fiber optic 09',
+      type: 'Fiber optic',
+      point: { x: 120, y: 360 },
+    },
+  ]
+  const close = buildAdaptiveAssetLayout(assets, {
+    zoom: 18,
+    viewport: { width: 800, height: 600 },
+  })
+  const closeById = new Map(close.markers.map((marker) => [marker.id, marker]))
+
+  assert.equal(closeById.get('C-09').autoLabel, true)
+  assert.equal(closeById.get('C-09').showLabel, true)
+  assert.equal(closeById.get('JB-09').autoLabel, true)
+  assert.equal(closeById.get('T-09').autoLabel, true)
+  assert.equal(closeById.get('FO-09').autoLabel, false)
+  assert.equal(closeById.get('FO-09').showLabel, false)
+
+  const medium = buildAdaptiveAssetLayout(assets, {
+    zoom: 17.5,
+    viewport: { width: 800, height: 600 },
+  })
+  assert.equal(medium.markers.find(({ id }) => id === 'C-09').autoLabel, false)
+})
+
 test('selected asset expands its cluster and keeps its identity label visible', () => {
   const selected = denseAssets.map((asset) => ({
     ...asset,

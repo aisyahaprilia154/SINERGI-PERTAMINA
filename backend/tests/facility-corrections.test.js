@@ -132,9 +132,11 @@ test('Tegal facts resolve padded numbers, camera EXP aliases, and remain facilit
 
 function pengaponAssets() {
   const names = [
+    ['T-006', 'Tiang'], ['JB-006-exp', 'Junction Box'], ['C-006', 'CCTV'],
+    ['C-030', 'CCTV'], ['C-042', 'CCTV'],
     ['T-010', 'Tiang'], ['JB-010-exp', 'Junction Box'], ['C-010', 'CCTV'],
     ['C-035', 'CCTV'], ['C-036', 'CCTV'], ['T-015', 'Tiang'], ['JB-015', 'Junction Box'],
-    ['C-015', 'CCTV'], ['T-013', 'Tiang'], ['JB-013', 'Junction Box'], ['C-013', 'CCTV'],
+    ['JB-15.1-WP', 'Junction Box'], ['C-015', 'CCTV'], ['T-013', 'Tiang'], ['JB-013', 'Junction Box'], ['C-013', 'CCTV'],
     ['T-014', 'Tiang'], ['JB-014', 'Junction Box'], ['C-014', 'CCTV'], ['T-017', 'Tiang'],
     ['JB-017', 'Junction Box'], ['JB-17.1-WP', 'Junction Box'], ['C-017', 'CCTV'],
     ['T-018', 'Tiang'], ['JB-018', 'Junction Box'], ['JB-18.1-WP', 'Junction Box'],
@@ -153,11 +155,12 @@ function pengaponAssets() {
   }))
 }
 
-test('FT Pengapon facts keep the confirmed pole groups and exclude assets outside T-017, T-018, and T-020', () => {
+test('FT Pengapon facts keep confirmed pole groups and exclude standalone assets', () => {
   const sourceAssets = pengaponAssets()
   const corrected = correctAdditionalMounts([], sourceAssets)
   const actual = corrected.map(({ sourceAssetId, targetAssetId }) => [sourceAssetId, targetAssetId])
   assert.deepEqual(actual.sort(), [
+    ['JB-006-exp', 'T-006'], ['C-006', 'T-006'], ['C-030', 'T-006'],
     ['JB-010-exp', 'T-010'], ['C-010', 'T-010'], ['C-035', 'T-010'], ['C-036', 'T-010'],
     ['JB-015', 'T-015'], ['C-015', 'T-015'],
     ['JB-013', 'T-013'], ['C-013', 'T-013'],
@@ -170,7 +173,8 @@ test('FT Pengapon facts keep the confirmed pole groups and exclude assets outsid
   const excluded = sourceAssets.filter((asset) => correctedMountingExpectation(asset))
     .map(({ sourceName }) => sourceName).sort()
   assert.deepEqual(excluded, [
-    'C-021', 'C-022', 'C-048', 'JB-017', 'JB-018', 'JB-019', 'JB-19.2-WP',
+    'C-021', 'C-022', 'C-042', 'C-048', 'JB-017', 'JB-018', 'JB-019',
+    'JB-15.1-WP', 'JB-19.2-WP',
   ])
   assert.equal(correctedMountingExpectation({
     sourceName: 'JB-017',
@@ -178,11 +182,26 @@ test('FT Pengapon facts keep the confirmed pole groups and exclude assets outsid
   }), 'standalone')
 
   const stale = [
+    { sourceAssetId: 'JB-15.1-WP', targetAssetId: 'T-015', provenance: 'spatial_inference' },
+    { sourceAssetId: 'C-042', targetAssetId: 'T-015', provenance: 'spatial_inference' },
     { sourceAssetId: 'JB-017', targetAssetId: 'T-017', provenance: 'spatial_inference' },
     { sourceAssetId: 'C-021', targetAssetId: 'T-020', provenance: 'spatial_inference' },
   ]
   const cleaned = correctAdditionalMounts(stale, sourceAssets)
-  assert.equal(cleaned.some(({ sourceAssetId }) => ['JB-017', 'C-021'].includes(sourceAssetId)), false)
+  assert.equal(cleaned.some(({ sourceAssetId }) => [
+    'JB-15.1-WP', 'C-042', 'JB-017', 'C-021',
+  ].includes(sourceAssetId)), false)
+})
+
+test('new FT Pengapon mounting facts stay scoped to FT Pengapon', () => {
+  const foreignAssets = pengaponAssets().map((asset) => ({
+    ...asset,
+    locationGroupKey: 'ft-other-branch',
+    sourceFolderPath: '/RJBT/FT OTHER BRANCH/Devices',
+  }))
+  assert.deepEqual(correctAdditionalMounts([], foreignAssets), [])
+  assert.equal(correctedMountingExpectation(foreignAssets.find(({ sourceName }) => sourceName === 'C-042')), null)
+  assert.equal(correctedMountingExpectation(foreignAssets.find(({ sourceName }) => sourceName === 'JB-15.1-WP')), null)
 })
 
 test('backend graph and tracing project facility facts before regeneration without changing storage', async () => {

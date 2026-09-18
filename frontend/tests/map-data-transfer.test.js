@@ -125,7 +125,7 @@ test('map context and toolbar present compact professional map actions', () => {
   })
   const controls = renderMapFloatingControls()
 
-  assert.match(context, />Semarang</)
+  assert.match(context, />Kebumen</)
   assert.doesNotMatch(context, />Kantor Cabang Semarang</)
   assert.match(context, />Area</)
   assert.match(context, />Booster Kutawinangun</)

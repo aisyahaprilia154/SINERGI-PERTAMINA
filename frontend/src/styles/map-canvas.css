@@ -400,6 +400,18 @@
   font-variation-settings: "FILL" 1, "wght" 650;
 }
 
+.map-adaptive-asset-icon.source-icon {
+  padding: 2px;
+}
+
+.map-adaptive-source-icon {
+  width: 22px;
+  height: 22px;
+  display: block;
+  object-fit: contain;
+  pointer-events: none;
+}
+
 .map-adaptive-asset-name {
   max-width: 0;
   overflow: hidden;
@@ -416,6 +428,17 @@
   margin-left: 2px;
   padding-right: 7px;
   opacity: 1;
+}
+
+.map-adaptive-asset.auto-label.show-label .map-adaptive-asset-name {
+  max-width: 92px;
+  padding-right: 5px;
+  font-size: 9px;
+  letter-spacing: .01em;
+}
+
+.map-adaptive-asset.auto-label.show-label {
+  border-width: 1px;
 }
 
 .map-adaptive-asset.show-label,

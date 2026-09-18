@@ -36,6 +36,7 @@ import {
 } from './network-tracing.js'
 import { openMapDataTransferDialog } from './map-data-transfer-dialog.js'
 import { searchMatchScore } from '../../domain/search-normalization.js'
+import { branchNameForFacility } from '../../domain/facility-branch.js'
 
 export async function renderMapPage(container) {
   document.title = 'Peta Jaringan — SINERGI'
@@ -547,7 +548,10 @@ export async function renderMapPage(container) {
       mountingActionError: state.mountingActionError,
       mountingSearch: state.mountingSearch,
       mountingControlsAvailable: topologyReadiness.capabilities?.editAssetMounting === true,
-      activeContext,
+      activeContext: {
+        ...activeContext,
+        branchName: branchNameForFacility(selectedArea, activeContext.branchName),
+      },
       showAdditionalMetadata: state.showAdditionalMetadata,
       diagramAvailable,
       topologySummary,
@@ -877,7 +881,10 @@ export async function renderMapPage(container) {
 
   function openDataTransfer(initialMode = 'import') {
     openMapDataTransferDialog({
-      activeContext,
+      activeContext: {
+        ...activeContext,
+        branchName: branchNameForFacility(selectedArea, activeContext.branchName),
+      },
       assets: exportAssets,
       networks,
       selectedNetworkIds: selection.selectedNetworkIds,
