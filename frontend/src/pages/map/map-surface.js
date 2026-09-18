@@ -1,3 +1,5 @@
+import { branchNameForFacility } from '../../domain/facility-branch.js'
+
 export function renderNetworkMapCanvas(activeContext, {
   empty = false,
   assetsWithoutGeometry = 0,
@@ -92,7 +94,10 @@ export function renderMapContextPill(
   selectedArea = null,
   { counts = {}, confirmedConnectionCount = 0 } = {},
 ) {
-  const branchName = formatBranchName(activeContext.branchName)
+  const branchName = branchNameForFacility(
+    selectedArea,
+    formatBranchName(activeContext.branchName),
+  )
   const topologyStatus = 'ready'
   const assetCount = Number(counts.assetNodeCount) || 0
   const lineCount = Number(counts.lineCount) || 0

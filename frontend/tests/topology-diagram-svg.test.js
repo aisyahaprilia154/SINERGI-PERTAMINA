@@ -99,6 +99,20 @@ test('SVG is a light logical projection and hides admin evidence by default', ()
   assert.doesNotMatch(svg, /data-node-id="pole"/)
 })
 
+test('SVG uses the preloaded source icon from the KMZ style when available', () => {
+  const { model, layout } = renderFixture()
+  const iconUrl = '/api/dataset-versions/version-1/source-resources/resource-camera'
+  model.nodeById.get('camera').sourceIconUrl = iconUrl
+  const svg = renderTopologyDiagramSvg({
+    model,
+    layout,
+    sourceIconDataByUrl: new Map([[iconUrl, 'data:image/png;base64,Y2FtZXJh']]),
+  })
+
+  assert.match(svg, /class="topology-source-icon"/)
+  assert.match(svg, /data:image\/png;base64,Y2FtZXJh/)
+})
+
 test('SVG renders rack backbone gaps separately from confirmed edges', () => {
   const assets = [
     { id: 'rack', name: 'JB Rack Server', type: 'Server Rack', topologyRole: 'core', locationGroupKey: 'area-a' },

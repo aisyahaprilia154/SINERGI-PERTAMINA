@@ -1037,6 +1037,7 @@ function toActiveTopologyDataset(resolved) {
   const record = resolved.record
   const assetIdentityMap = buildAssetIdentityMapFromRecord(record)
   const resolver = createAssetIdentityResolver(assetIdentityMap)
+  const sourceIconIndex = buildSourceIconIndex(record)
   const topology = normalizeTopologyGraph(record, assetIdentityMap)
   const topologyGraph = projectTopologyGraph(topology.graph)
   const topologyRelations = filterConflictingCameraEdges(
@@ -1058,6 +1059,11 @@ function toActiveTopologyDataset(resolved) {
   const assets = catalog.map((item) => {
     const id = item.canonicalAssetId
     const graphNode = graphNodeById.get(id) ?? {}
+    const sourceIcon = resolveAssetSourceIcon(item.rawAsset, sourceIconIndex)
+    const sourceIconUrl = sourceIcon?.resource?.resourceId
+      ? `/api/dataset-versions/${encodeURIComponent(record.datasetVersion.id)}`
+        + `/source-resources/${encodeURIComponent(sourceIcon.resource.resourceId)}`
+      : null
     return {
       id,
       assetId: id,
@@ -1068,6 +1074,10 @@ function toActiveTopologyDataset(resolved) {
       identityStatus: item.identityStatus,
       identityAliases: item.identityAliases,
       sourceFeatureId: item.sourceFeatureId,
+      sourceStyleId: sourceIcon?.styleId ?? null,
+      sourceIconHref: sourceIcon?.href ?? null,
+      sourceIconResourceId: sourceIcon?.resource?.resourceId ?? null,
+      sourceIconUrl,
       name: item.name,
       type: item.assetType,
       assetType: item.assetType,

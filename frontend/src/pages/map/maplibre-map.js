@@ -15,6 +15,7 @@ import {
   attachClustersToPoleGroups,
   buildAdaptiveAssetLayout,
 } from './adaptive-asset-layout.js'
+import { createSourceIconLoader } from '../../domain/source-icon-loader.js'
 import {
   isCctvCoverageOverlay,
   shouldRenderCctvCoverageOverlay,
@@ -97,6 +98,7 @@ export function createMapLibreSurface(element, {
   let basemapLastError = ''
   let basemapHasLoadedTile = false
   let declutterEnabled = true
+  const sourceIconLoader = createSourceIconLoader()
   let layoutFrame = null
   let layoutStatusSignature = ''
   let clusterLookup = new Map()
@@ -417,6 +419,8 @@ export function createMapLibreSurface(element, {
           point: { x: projected.x, y: projected.y },
           color: assetColor(asset, networks, state.focusedNetworkId),
           icon: iconForAsset(asset),
+          sourceIconUrl: asset.sourceIconUrl || null,
+          sourceIconDataUrl: sourceIconLoader.dataByUrl.get(asset.sourceIconUrl) ?? null,
           active,
           focusContext,
           networkFocused,
@@ -428,6 +432,13 @@ export function createMapLibreSurface(element, {
         }
       })
       .filter(({ active }) => active)
+
+    const sourceIconPreload = sourceIconLoader.preload(items.map(({ sourceIconUrl }) => sourceIconUrl))
+    if (sourceIconPreload) {
+      void sourceIconPreload.then(() => {
+        if (!destroyed) scheduleAdaptiveMarkers()
+      })
+    }
 
     const layout = buildAdaptiveAssetLayout(items, {
       zoom: map.getZoom(),
@@ -1108,6 +1119,7 @@ function renderAdaptiveAssetMarker(marker) {
   const classes = [
     'map-adaptive-asset',
     marker.showLabel ? 'show-label' : '',
+    marker.autoLabel ? 'auto-label' : '',
     marker.selected ? 'selected' : '',
     marker.displaced ? 'displaced' : '',
     marker.networkFocused ? 'network-focused' : '',
@@ -1118,14 +1130,17 @@ function renderAdaptiveAssetMarker(marker) {
   ].filter(Boolean).join(' ')
   const label = shortAssetLabel(marker.label || marker.id)
   const title = `${marker.label || marker.id} · ${marker.type} · posisi aktual dari KML`
+  const icon = marker.sourceIconDataUrl
+    ? `<img class="map-adaptive-source-icon" src="${escapeHtml(marker.sourceIconDataUrl)}" alt="" aria-hidden="true">`
+    : escapeHtml(marker.icon)
   return `
     <button class="${classes}" type="button"
       data-adaptive-asset="${escapeHtml(marker.id)}"
       aria-label="${escapeHtml(title)}" title="${escapeHtml(title)}"
       style="left:${styleNumber(marker.point.x)}px;top:${styleNumber(marker.point.y)}px;
         --marker-color:${safeColor(marker.color)}">
-      <span class="map-adaptive-asset-icon material-symbols-outlined"
-        aria-hidden="true">${escapeHtml(marker.icon)}</span>
+      <span class="map-adaptive-asset-icon${marker.sourceIconDataUrl ? ' source-icon' : ' material-symbols-outlined'}"
+        aria-hidden="true">${icon}</span>
       <span class="map-adaptive-asset-name">${escapeHtml(label)}</span>
     </button>
   `

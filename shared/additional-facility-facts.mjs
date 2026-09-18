@@ -44,6 +44,7 @@ const mountFacts = {
   // FT Pengapon: these are field-confirmed physical groupings. They are
   // deliberately kept separate from the inferred network graph.
   'ft-pengapon-semarang': [
+    ['JB-6', 'T-6'], ['CAM-6', 'T-6'], ['CAM-30', 'T-6'],
     ['JB-10', 'T-10'], ['CAM-10', 'T-10'], ['CAM-35', 'T-10'], ['CAM-36', 'T-10'],
     ['JB-15', 'T-15'], ['CAM-15', 'T-15'],
     ['JB-13', 'T-13'], ['CAM-13', 'T-13'],
@@ -83,8 +84,11 @@ export function additionalExpectation(asset) {
     if (code === 'DC-39') return 'indoor'
   }
   if (site === 'booster-kutawinangun' && ['CAM-6', 'CAM-7', 'CAM-8', 'CAM-17', 'CAM-18'].includes(code)) return 'indoor'
+  // FT Pengapon confirms these two assets are not on T-015. No replacement
+  // pole ID was supplied, so keep them separate instead of guessing one.
   if (site === 'ft-pengapon-semarang' && [
-    'JB-17', 'JB-18', 'JB-19', 'JB-19.2-WP', 'CAM-21', 'CAM-22', 'CAM-48',
+    'JB-15.1-WP', 'CAM-42', 'JB-17', 'JB-18', 'JB-19', 'JB-19.2-WP',
+    'CAM-21', 'CAM-22', 'CAM-48',
   ].includes(code)) return 'standalone'
   return null
 }
@@ -118,6 +122,7 @@ export function correctAdditionalMounts(relations, assets) {
       && facilityKey(pole) === 'booster-kutawinangun' && factCode(pole) === 'T-8')
   }),
     ...facts.map(r => ({...r, id: `facility-mount:${r.sourceAssetId}:${r.targetAssetId}`,
+      relationId: `facility-mount:${r.sourceAssetId}:${r.targetAssetId}`,
       relationType: 'mounted_on', relationKind: 'installation_attachment',
       verificationStatus: 'confirmed', provenance: 'facility_topology_correction'}))]
 }
