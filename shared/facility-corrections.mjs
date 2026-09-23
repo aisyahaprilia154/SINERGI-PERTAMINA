@@ -1,7 +1,7 @@
 // User-confirmed facility facts. Shared by regeneration and existing map projections.
 import {additionalRelations, additionalExpectation, additionalConflict} from './additional-facility-facts.mjs'
 export {correctAdditionalMounts} from './additional-facility-facts.mjs'
-export const FACILITY_CORRECTION_VERSION = 'facilities/2026-09-18-pengapon-mounting-v2'
+export const FACILITY_CORRECTION_VERSION = 'facilities/2026-09-23-tegal-c17-termination-v1'
 export function assetCode(asset) {
   return String(asset?.sourceName ?? asset?.name ?? '').trim().toUpperCase()
     .replace(/^(C|JB|T)-0+(\d)/, '$1-$2')
@@ -32,6 +32,7 @@ export function facilityRelations(assets = []) {
   const resolve = code => index.get(code)?.length === 1 ? index.get(code)[0] : null
   const id = a => a.canonicalAssetId ?? a.assetId ?? a.id
   return [['SERVER', 'JB-1'], ['SERVER', 'JB-14'], ['C-8', 'JB-1'],
+    ['C-17', 'JB-1.1'],
     ['C-13', 'JB-2'], ['JB-2', 'JB-4'], ['C-31', 'JB-9'], ['C-32', 'JB-10-EXP']]
     .flatMap(([s, t]) => {
       const source = resolve(s), target = resolve(t)

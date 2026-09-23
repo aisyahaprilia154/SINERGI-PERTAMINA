@@ -266,6 +266,30 @@ test('LineString remains geometry and never becomes a map node', () => {
   assert.equal(result.counts.lineCount, 1)
 })
 
+test('FT Tegal Baru hides the redundant C-17 to JB-01 map stroke but retains KMZ export', () => {
+  const payload = activePayload({
+    layers: [{ ...layer('tegal-cable', 'Cable', 'LAN'),
+      sourceFolderPath: '/RJBT/FT Tegal Baru/Cable/UTP' },
+    { ...layer('tegal-jb', 'Junction Box', 'Infrastructure'),
+      sourceFolderPath: '/RJBT/FT Tegal Baru/Junction Box/Extended' }],
+    assets: [{ ...asset('cable-old', 'CABLE-OLD', 'LAN'),
+      name: 'Jalur JB-01 - C-17', layerId: 'tegal-cable', type: 'Cable' },
+    { ...asset('cable-other', 'CABLE-OTHER', 'LAN'),
+      name: 'Jalur JB-01 - C-18', layerId: 'tegal-cable', type: 'Cable' },
+    { ...asset('jb-preferred', 'JB-01.1', 'Infrastructure'),
+      name: 'JB-01.1', layerId: 'tegal-jb', type: 'Junction Box' }],
+    geometries: [{ id: 'old-line', assetNodeId: 'cable-old',
+      geometryType: 'line_string', coordinates: [[109, -6], [109.001, -6]] },
+    { id: 'other-line', assetNodeId: 'cable-other',
+      geometryType: 'line_string', coordinates: [[109, -6], [109.002, -6]] },
+    point('preferred-point', 'jb-preferred', 109.001, -6)],
+  })
+  const result = adaptActiveDatasetForMap(payload)
+  assert.equal(result.geometries.some(({ id }) => id === 'old-line'), false)
+  assert.equal(result.geometries.some(({ id }) => id === 'other-line'), true)
+  assert.equal(result.exportAssets.find(({ id }) => id === 'CABLE-OLD').geometry[0].id, 'old-line')
+})
+
 test('active adapter exposes confirmed endpoint topology for map and diagram consumers', () => {
   const payload = activePayload({
     layers: [layer('layer-lan', 'LAN', 'LAN')],

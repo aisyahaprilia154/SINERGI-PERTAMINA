@@ -82,7 +82,10 @@ export function adaptActiveDatasetForMap(payload) {
   ))
   const bounds = positionBounds(visibleGeometryParts.flatMap(extractPositions))
   const allMapGeometries = geometryParts.map((geometry) => toMapGeometry(geometry, bounds))
-  const geometries = allMapGeometries.filter(({ sourceStatus }) => sourceStatus === 'visible')
+  const hiddenOperationalCableNodeIds = tegalC17RedundantCableNodeIds(payload.assets, layerById)
+  const geometries = allMapGeometries.filter(({ sourceStatus, sourceNodeId }) => (
+    sourceStatus === 'visible' && !hiddenOperationalCableNodeIds.has(sourceNodeId)
+  ))
   const geometriesByOwner = groupBy(allMapGeometries, 'sourceNodeId')
 
   const exportAssets = payload.assets.map((asset) => createOwnerFeature({
@@ -830,6 +833,25 @@ function createOwnerFeature({ asset, layer, geometries }) {
     networkIds: [],
     geometry: geometries.map((geometry) => structuredClone(geometry)),
   }
+}
+
+function tegalC17RedundantCableNodeIds(assets, layerById) {
+  const inTegalBaru = (asset) => locationGroupFor(
+    layerById.get(asset.layerId)?.sourceFolderPath,
+  ).locationGroupKey === 'ft-tegal-baru'
+  const hasPreferredJunction = assets.some((asset) => (
+    inTegalBaru(asset) && /^JB-0*1\.1$/i.test(String(asset.name ?? '').trim())
+  ))
+  if (!hasPreferredJunction) return new Set()
+  // The original KMZ line is retained in exportAssets. Hide only its redundant
+  // map stroke so the operational C-17 → JB-01.1 connection stays readable.
+  return new Set(assets.filter((asset) => (
+    inTegalBaru(asset)
+      && /\bJB-0*1(?![.\d])\b/i.test(String(asset.name ?? ''))
+      && /\bC-0*17\b/i.test(String(asset.name ?? ''))
+      && /jalur|cable|kabel/i.test(String(asset.name ?? ''))
+      && /\/cable\//i.test(layerById.get(asset.layerId)?.sourceFolderPath ?? '')
+  )).map((asset) => asset.id))
 }
 
 function createMapNode(owner) {
