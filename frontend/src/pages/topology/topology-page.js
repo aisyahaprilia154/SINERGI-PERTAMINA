@@ -24,6 +24,7 @@ import { calculateTopologyDiagramLayout } from './topology-diagram-layout.js'
 import { renderTopologyDiagramSvg } from './topology-diagram-svg.js'
 import { resolveTopologyDropTarget } from './topology-drop-target.js'
 import { createAssetDragFeedback } from './topology-drag-feedback.js'
+import { createDragAutoPan } from './topology-drag-auto-pan.js'
 import {
   anchoredZoomScrollPosition,
   computeFitZoom,
@@ -984,10 +985,14 @@ function mountTopologyWorkspace(container, {
         return
       }
       dragState.feedback = createAssetDragFeedback(source, event, { reducedMotion: prefersReducedMotion() })
+      dragState.autoPan = createDragAutoPan(dragState.viewport, pointer => {
+        if (dragState?.active) updateAssetDropTarget(pointer)
+      })
       source.classList.add('is-dragging')
     }
     dragState.feedback.move(event)
     updateAssetDropTarget(event)
+    dragState.autoPan.move(event)
   }
 
   function updateAssetDropTarget(event) {
@@ -1007,6 +1012,7 @@ function mountTopologyWorkspace(container, {
   }
 
   function clearAssetDrag(completed) {
+    completed.autoPan?.stop()
     dragState = null
     completed.viewport.classList.remove('is-dragging-asset')
     container.querySelectorAll('.topology-node.is-dragging')
