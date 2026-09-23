@@ -276,8 +276,8 @@ test('FT Tegal Baru hides the redundant C-17 to JB-01 map stroke but retains KMZ
       name: 'Jalur JB-01 - C-17', layerId: 'tegal-cable', type: 'Cable' },
     { ...asset('cable-other', 'CABLE-OTHER', 'LAN'),
       name: 'Jalur JB-01 - C-18', layerId: 'tegal-cable', type: 'Cable' },
-    { ...asset('jb-preferred', 'JB-01.1', 'Infrastructure'),
-      name: 'JB-01.1', layerId: 'tegal-jb', type: 'Junction Box' }],
+    { ...asset('jb-preferred', 'JB-01.2', 'Infrastructure'),
+      name: 'JB-01.2', layerId: 'tegal-jb', type: 'Junction Box' }],
     geometries: [{ id: 'old-line', assetNodeId: 'cable-old',
       geometryType: 'line_string', coordinates: [[109, -6], [109.001, -6]] },
     { id: 'other-line', assetNodeId: 'cable-other',
@@ -334,6 +334,26 @@ test('active adapter exposes confirmed endpoint topology for map and diagram con
   assert.equal(result.topologyGraph.edges[0].relationSource, 'spatial_inference')
   assert.deepEqual(result.networks[0].edges, [['SW-A', 'AP-B']])
   assert.equal(result.assets.find(({ id }) => id === 'SW-A').relationCount, 1)
+})
+
+test('ambiguous old camera edges are hidden and surfaced for relation review', () => {
+  const payload = activePayload({
+    assets: [
+      { ...asset('camera-node', 'CAM-22', 'CCTV'), type: 'CCTV Camera' },
+      { ...asset('jb-a-node', 'JB-03', 'CCTV'), type: 'Junction Box' },
+      { ...asset('jb-b-node', 'JB-08', 'CCTV'), type: 'Junction Box' },
+    ],
+    relations: [
+      { id: 'edge-a', sourceAssetId: 'CAM-22', targetAssetId: 'JB-03',
+        relationType: 'connected-to', verificationStatus: 'confirmed', relationSource: 'spatial_inference' },
+      { id: 'edge-b', sourceAssetId: 'CAM-22', targetAssetId: 'JB-08',
+        relationType: 'connected-to', verificationStatus: 'confirmed', relationSource: 'spatial_inference' },
+    ],
+  })
+  const result = adaptActiveDatasetForTopology(payload)
+  assert.deepEqual(result.topologyGraph.edges, [])
+  assert.equal(result.topologyGraph.cameraRelationReview.length, 2)
+  assert.equal(result.topologyGraph.cameraRelationReview[0].cameraAssetId, 'CAM-22')
 })
 
 test('Polygon remains geometry and never becomes a map node', () => {

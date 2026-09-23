@@ -1,6 +1,7 @@
 import '../../styles/topology-workspace.css'
 import { adaptActiveDatasetForTopology } from '../../adapters/active-dataset-map-adapter.js'
 import { branchNameForFacility } from '../../domain/facility-branch.js'
+import { stageCameraRelationReplacement } from '../../domain/camera-relation-draft.js'
 import { createSourceIconLoader } from '../../domain/source-icon-loader.js'
 import { CONNECTION_STYLES } from './topology-connection-style.js'
 import {
@@ -204,6 +205,7 @@ function mountTopologyWorkspace(container, {
     mountingBoxNodeGapX: 32,
     mountingBoxLevelGapY: 72,
     mountingBoxGapY: 48,
+    mountingRootFrameGap: state.area === 'ft-tegal-baru' ? 64 : null,
     overview: state.area === null,
     frameAssignments: mapData.topologyFrameAssignments,
     customFrames: mapData.topologyFrames,
@@ -1127,6 +1129,30 @@ function mountTopologyWorkspace(container, {
     const target = model.nodeById.get(targetAssetId)
     if (!target) return
     if ((model.adjacency.get(sourceAssetId) ?? []).some(item => item.id === targetAssetId)) return
+    const replacement = stageCameraRelationReplacement({
+      graph, changes: state.changes, nodes: [...model.nodeById.values()],
+      sourceAssetId, targetAssetId,
+    })
+    graph = replacement.graph
+    state.changes = replacement.changes
+    const savedEdge = savedSnapshot.graph.edges.find(edge => {
+      const a = edge.sourceAssetId ?? edge.sourceNodeId
+      const b = edge.targetAssetId ?? edge.targetNodeId
+      return (a === sourceAssetId && b === targetAssetId)
+        || (a === targetAssetId && b === sourceAssetId)
+    })
+    const savedEdgeId = savedEdge?.id ?? savedEdge?.relationId
+    if (savedEdgeId && state.changes.some(change =>
+      change.type === 'remove-edge' && change.edgeId === savedEdgeId)) {
+      state.changes = state.changes.filter(change =>
+        change.type !== 'remove-edge' || change.edgeId !== savedEdgeId)
+      graph = { ...graph, edges: [...graph.edges, savedEdge] }
+      state.relationSearch = ''
+      state.selectedAssetId = sourceAssetId
+      rebuild()
+      showToast('Relasi awal dipulihkan dalam draft.')
+      return
+    }
     const id = `draft-edge:${crypto.randomUUID()}`
     graph = { ...graph, edges: [...graph.edges, { id, relationId: id, sourceAssetId, targetAssetId,
       sourceNodeId: sourceAssetId, targetNodeId: targetAssetId, relationType: 'connected-to',
@@ -1135,6 +1161,7 @@ function mountTopologyWorkspace(container, {
     state.relationSearch = ''
     state.selectedAssetId = sourceAssetId
     rebuild()
+    if (replacement.replaced.length) showToast('Relasi JB utama sebelumnya diganti dalam draft. Batal akan memulihkannya.')
   }
 
   function stageChange(change) {
@@ -1433,6 +1460,10 @@ function mountTopologyWorkspace(container, {
     const group = poleGroupForAsset(mapData.poleGroups, node.id)
     const path = networkPathFor(node.id)
     const relations = directRelationsFor(node.id)
+    const needsPrimaryReview = (graph.cameraRelationReview ?? []).some(item =>
+      item.cameraAssetId === node.id)
+      && !relations.some(({ other }) => ['junction-peer', 'junction-extended']
+        .includes(other.diagramClass))
     const online = node.connectivityStatus !== 'disconnected' && !isOfflineStatus(node.status)
     return `
       <div class="topology-stitch-inspector-head">
@@ -1454,6 +1485,7 @@ function mountTopologyWorkspace(container, {
             <span>${escapeHtml(node.type || node.assetType || 'Aset')}</span>
           </div>
         </div>
+        ${needsPrimaryReview ? `<p class="topology-primary-review" role="status">Beberapa kandidat JB memiliki bukti setara. Pilih satu relasi utama untuk kamera ini.</p>` : ''}
         <section class="topology-stitch-inspector-card">
           <div class="topology-stitch-section-label"><span class="material-symbols-outlined" aria-hidden="true">location_on</span>Lokasi Fisik</div>
           <p>${escapeHtml(physicalLocation(node, group))}</p>

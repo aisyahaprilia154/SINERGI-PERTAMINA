@@ -227,7 +227,17 @@ export function generateRelationArtifacts(topologyInputBundle, {
     interfaceContext,
     previousRelations,
   )
-  demoteConflictingCameraCandidates(candidates, nodes)
+  const mounting = generateMountingArtifacts(bundle, {
+    config,
+    previousRelations: previousMountingRelations,
+    previousOverrides: previousMountingOverrides,
+    previousExpectations: previousMountingExpectations,
+    generatedAt,
+  })
+  const resolvedCandidates = demoteConflictingCameraCandidates(candidates, nodes, {
+    mountingRelations: mounting.relations,
+  })
+  candidates.splice(0, candidates.length, ...resolvedCandidates)
 
   const confirmedRelations = buildConfirmedRelations({
     bundle,
@@ -277,14 +287,6 @@ export function generateRelationArtifacts(topologyInputBundle, {
     unresolved,
     accuracyGate,
   })
-  const mounting = generateMountingArtifacts(bundle, {
-    config,
-    previousRelations: previousMountingRelations,
-    previousOverrides: previousMountingOverrides,
-    previousExpectations: previousMountingExpectations,
-    generatedAt,
-  })
-
   return {
     schemaVersion: '1.0.0',
     datasetVersionId: bundle.datasetVersion.id,
@@ -370,10 +372,18 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
     computedLineworkIssues,
   )
   const conflictsWithFacilityRelation = facilityConflictPredicate(nodes)
+  const mounting = generateMountingArtifacts(bundle, {
+    config,
+    previousRelations: previousMountingRelations,
+    previousOverrides: previousMountingOverrides,
+    previousExpectations: previousMountingExpectations,
+    generatedAt,
+  })
   const normalizedCandidates = demoteConflictingCameraCandidates(
     structuredClone(asArray(candidates).filter(candidate =>
       !conflictsWithFacilityRelation(candidate))),
     nodes,
+    { mountingRelations: mounting.relations },
   )
   const confirmedRelations = buildConfirmedRelations({
     bundle,
@@ -426,14 +436,6 @@ export function rebuildConfirmedRelationArtifacts(topologyInputBundle, {
     unresolved,
     accuracyGate,
   })
-  const mounting = generateMountingArtifacts(bundle, {
-    config,
-    previousRelations: previousMountingRelations,
-    previousOverrides: previousMountingOverrides,
-    previousExpectations: previousMountingExpectations,
-    generatedAt,
-  })
-
   return {
     schemaVersion: '1.0.0',
     datasetVersionId: bundle.datasetVersion.id,

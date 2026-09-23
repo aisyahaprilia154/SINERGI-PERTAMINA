@@ -10,7 +10,7 @@ import {
   MOUNTING_RELATION_TYPE,
 } from '../domain/pole-groups.js'
 import {
-  filterConflictingCameraEdges,
+  resolveCameraEdges,
   filterDppuYiaPresentationEdges,
 } from '../domain/device-edge-policy.js'
 
@@ -467,6 +467,11 @@ function confirmedTopologyProjection(payload) {
   // from the operational map.
   const source = payload.topologyGraph
   const resolver = createFrontendIdentityResolver(payload)
+  const mountingRelations = (payload.mountingRelations ?? []).flatMap(relation => {
+    const sourceAssetId = resolver.resolve(relation.sourceAssetId)
+    const targetAssetId = resolver.resolve(relation.targetAssetId)
+    return sourceAssetId && targetAssetId ? [{ ...relation, sourceAssetId, targetAssetId }] : []
+  })
   if (source && Array.isArray(source.nodes) && Array.isArray(source.edges)) {
     const unresolvedNodes = []
     const nodes = source.nodes.flatMap((node) => {
@@ -486,8 +491,7 @@ function confirmedTopologyProjection(payload) {
     })
     const nodeIds = new Set(nodes.map(({ id }) => id))
     const unresolvedEdges = []
-    const edges = filterDppuYiaPresentationEdges(
-      filterConflictingCameraEdges(source.edges.flatMap((edge) => {
+    const cameraResolution = resolveCameraEdges(source.edges.flatMap((edge) => {
         if (!isConfirmedRelation(edge) || edge.relationType === MOUNTING_RELATION_TYPE) return []
         const originalSource = edge.sourceAssetId ?? edge.sourceNodeId
         const originalTarget = edge.targetAssetId ?? edge.targetNodeId
@@ -513,13 +517,14 @@ function confirmedTopologyProjection(payload) {
           canonicalSourceAssetId: sourceAssetId,
           canonicalTargetAssetId: targetAssetId,
         }]
-      }), nodes),
-      payload.assets,
-    )
+      }), nodes, { mountingRelations })
+    const edges = filterDppuYiaPresentationEdges(cameraResolution.edges, payload.assets)
     return {
       ...structuredClone(source),
       nodes,
       edges,
+      cameraRelationReview: cameraResolution.suppressedEdges.filter(item =>
+        item.reason === 'camera_primary_requires_review'),
       identityResolution: {
         unresolvedNodeCount: unresolvedNodes.length,
         unresolvedEdgeCount: unresolvedEdges.length,
@@ -540,8 +545,7 @@ function confirmedTopologyProjection(payload) {
     sourceName: asset.name,
   }))
   const validIds = new Set(nodes.map(({ id }) => id))
-  const edges = filterDppuYiaPresentationEdges(
-    filterConflictingCameraEdges((payload.relations ?? [])
+  const cameraResolution = resolveCameraEdges((payload.relations ?? [])
       .filter((relation) => (
         relation?.relationType !== MOUNTING_RELATION_TYPE
         &&
@@ -561,13 +565,14 @@ function confirmedTopologyProjection(payload) {
         targetNodeId: resolver.resolve(relation.targetAssetId),
         verificationStatus: 'confirmed',
         relationStatus: 'confirmed',
-      })), nodes),
-    payload.assets,
-  )
+      })), nodes, { mountingRelations })
+  const edges = filterDppuYiaPresentationEdges(cameraResolution.edges, payload.assets)
   return {
     datasetVersionId: payload.datasetVersion.id,
     nodes,
     edges,
+    cameraRelationReview: cameraResolution.suppressedEdges.filter(item =>
+      item.reason === 'camera_primary_requires_review'),
     components: [],
     degreeByNode: {},
     isolatedNodeIds: [],
@@ -840,11 +845,11 @@ function tegalC17RedundantCableNodeIds(assets, layerById) {
     layerById.get(asset.layerId)?.sourceFolderPath,
   ).locationGroupKey === 'ft-tegal-baru'
   const hasPreferredJunction = assets.some((asset) => (
-    inTegalBaru(asset) && /^JB-0*1\.1$/i.test(String(asset.name ?? '').trim())
+    inTegalBaru(asset) && /^JB-0*1\.2$/i.test(String(asset.name ?? '').trim())
   ))
   if (!hasPreferredJunction) return new Set()
   // The original KMZ line is retained in exportAssets. Hide only its redundant
-  // map stroke so the operational C-17 → JB-01.1 connection stays readable.
+  // map stroke so the operational C-17 → JB-01.2 connection stays readable.
   return new Set(assets.filter((asset) => (
     inTegalBaru(asset)
       && /\bJB-0*1(?![.\d])\b/i.test(String(asset.name ?? ''))
