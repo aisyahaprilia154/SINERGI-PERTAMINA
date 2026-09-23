@@ -130,7 +130,7 @@ test('Tegal facts resolve padded numbers, camera EXP aliases, and remain facilit
   assert.equal(facilityRelations([...assets(), {...assets()[0], id: 'duplicate', assetId: 'duplicate', canonicalAssetId: 'duplicate'}]).length, 5)
 })
 
-test('FT Tegal Baru C-17 presents one operational termination at JB-01.1 after KMZ import', () => {
+test('FT Tegal Baru C-17 presents one operational termination at JB-01.2 after KMZ import', () => {
   const names = ['C-17', 'JB-01', 'JB-01.1', 'JB-01.2', 'C-18']
   const nodes = names.map((name, index) => ({
     id: name,
@@ -166,13 +166,13 @@ test('FT Tegal Baru C-17 presents one operational termination at JB-01.1 after K
     const target = edge.targetAssetId ?? edge.targetNodeId
     return source === 'C-17' ? [target] : target === 'C-17' ? [source] : []
   })
-  assert.deepEqual(neighbors(correctFacilityEdges(oldEdges, nodes)), ['JB-01.1'])
+  assert.deepEqual(neighbors(correctFacilityEdges(oldEdges, nodes)), ['JB-01.2'])
   const sourceGeometries = [{ id: 'cable:c17-jb01', coordinates: [[109.1874, -6.87045]] }]
   const record = { datasetVersion: { id: 'dv', datasetId: 'dataset-semarang', branchId: 'semarang' },
     assets: nodes, sourceGeometries,
     topologyGraph: { nodes, edges: oldEdges }, confirmedRelations: oldEdges }
   const projected = projectFacilityRecord(record)
-  assert.deepEqual(neighbors(projected.topologyGraph.edges), ['JB-01.1'])
+  assert.deepEqual(neighbors(projected.topologyGraph.edges), ['JB-01.2'])
   assert.deepEqual(projected.sourceGeometries, sourceGeometries)
   assert.deepEqual(record.topologyGraph.edges, oldEdges)
   assert.ok(projected.topologyGraph.edges.some(edge => (
@@ -188,12 +188,12 @@ test('FT Tegal Baru C-17 presents one operational termination at JB-01.1 after K
       coordinates: node.coordinate })),
   }
   const generated = generateRelationArtifacts(input, { previousRelations: oldEdges })
-  assert.deepEqual(neighbors(generated.confirmedRelations), ['JB-01.1'])
+  assert.deepEqual(neighbors(generated.confirmedRelations), ['JB-01.2'])
   const regenerated = rebuildConfirmedRelationArtifacts(input, {
     candidates: generated.candidates,
     previousRelations: [...generated.confirmedRelations, ...oldEdges],
   })
-  assert.deepEqual(neighbors(regenerated.confirmedRelations), ['JB-01.1'])
+  assert.deepEqual(neighbors(regenerated.confirmedRelations), ['JB-01.2'])
 })
 
 function pengaponAssets() {

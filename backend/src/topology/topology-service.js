@@ -120,8 +120,14 @@ export class TopologyService {
               [frame.id]: frame,
             } }
           } else if (change.type === 'add-relation') {
-            await editor.createDeviceRelation(datasetVersionId, actorId,
-              { sourceAssetId: change.sourceAssetId, targetAssetId: change.targetAssetId, reason })
+            try {
+              await editor.createDeviceRelation(datasetVersionId, actorId,
+                { sourceAssetId: change.sourceAssetId, targetAssetId: change.targetAssetId, reason })
+            } catch (error) {
+              // A draft can contain a pair already confirmed by imported KMZ
+              // evidence. Keep the rest of the atomic batch saveable.
+              if (error?.code !== 'topology_manual_relation_exists') throw error
+            }
           } else if (['rename-frame', 'remove-edge'].includes(change.type)) {
             await editor.editDiagram(datasetVersionId, actorId, { ...change,
               action: change.type, expectedRecordRevision: recordRevision(draft) })
@@ -756,6 +762,7 @@ export class TopologyService {
     const confirmedRelations = filterConflictingCameraEdges(
       record.confirmedRelations,
       graph.nodes,
+      { mountingRelations: record.mountingRelations },
     ).edges
     return {
       datasetVersionId,
@@ -901,6 +908,7 @@ export class TopologyService {
     const confirmedRelations = filterConflictingCameraEdges(
       record.confirmedRelations,
       graph.nodes,
+      { mountingRelations: record.mountingRelations },
     ).edges
     return {
       datasetVersionId,
@@ -6045,7 +6053,10 @@ function normalizeTraceGraph(record, identityMap, projection = null) {
       canonicalTargetAssetId: targetAssetId,
     }]
   })
-  edges = filterConflictingCameraEdges(edges, nodes).edges
+  const cameraResolution = filterConflictingCameraEdges(edges, nodes, {
+    mountingRelations: record.mountingRelations,
+  })
+  edges = cameraResolution.edges
   const degreeByNode = Object.fromEntries([...nodeIds].map((id) => [id, 0]))
   edges.forEach((edge) => {
     degreeByNode[edge.sourceAssetId] += 1
@@ -6062,6 +6073,8 @@ function normalizeTraceGraph(record, identityMap, projection = null) {
     datasetVersionId: record.datasetVersion?.id ?? sourceGraph.datasetVersionId,
     nodes,
     edges,
+    cameraRelationReview: cameraResolution.suppressedEdges.filter(item =>
+      item.reason === 'camera_primary_requires_review'),
     components,
     degreeByNode,
     isolatedNodeIds: [...nodeIds].filter((id) => degreeByNode[id] === 0).sort(),

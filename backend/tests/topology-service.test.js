@@ -235,6 +235,41 @@ test('diagram save applies multiple edits with one write and one aggregate revis
     record.topologyInputBundle.classifiedNodes)
 })
 
+test('draft replaces a camera JB relation atomically while retaining source evidence', async () => {
+  const bundle = mountingBundle()
+  for (const id of ['JB-OLD', 'JB-NEW']) {
+    const node = mountingNode(id, 'Junction Box', [110.00001, -7])
+    bundle.classifiedNodes.push(node.object)
+    bundle.geometries.push(node.geometry)
+  }
+  const record = applyArtifacts(baseRecord(bundle), generateRelationArtifacts(bundle))
+  const repository = new SerializedMemoryRepository([record])
+  let minute = 0
+  const service = new TopologyService({ repository, auditLog: new MemoryAuditLog(),
+    clock: () => new Date(`2026-09-23T08:${String(minute++).padStart(2, '0')}:00.000Z`) })
+  await service.createDeviceRelation('dv-review', 'admin-1', {
+    sourceAssetId: 'CAM-01', targetAssetId: 'JB-OLD', reason: 'Koneksi pertama.',
+  })
+  const before = await repository.get('dv-review')
+  const oldEdge = projectFacilityRecord(before).topologyGraph.edges.find(edge =>
+    [edge.sourceAssetId, edge.targetAssetId].includes('JB-OLD'))
+  assert.ok(oldEdge)
+  const result = await service.saveDiagram('dv-review', 'admin-1', {
+    expectedRecordRevision: before.recordRevision,
+    changes: [
+      { type: 'remove-edge', edgeId: oldEdge.id },
+      { type: 'add-relation', sourceAssetId: 'CAM-01', targetAssetId: 'JB-NEW' },
+    ],
+  })
+  assert.deepEqual(result.graph.edges.filter(edge =>
+    [edge.sourceAssetId, edge.targetAssetId].includes('CAM-01'))
+    .map(edge => [edge.sourceAssetId, edge.targetAssetId].find(id => id !== 'CAM-01')),
+  ['JB-NEW'])
+  const stored = await repository.get('dv-review')
+  assert.equal(stored.topologyInputBundle.explicitRelations.length, 2)
+  assert.ok(stored.topologyEdgeOverrides.some(override => override.edgeId === oldEdge.id))
+})
+
 test('diagram save is all-or-nothing for invalid changes and rejects stale revisions', async () => {
   const bundle = mountingBundle()
   const record = applyArtifacts(baseRecord(bundle), generateRelationArtifacts(bundle))
@@ -254,6 +289,36 @@ test('diagram save is all-or-nothing for invalid changes and rejects stale revis
   await assert.rejects(service.saveDiagram('dv-review', 'admin-1', {
     expectedRecordRevision: 100, changes: [{ type: 'rename-frame', assetId: 'POLE-FIELD', name: 'Stale' }],
   }), { code: 'dataset_version_stale_revision' })
+})
+
+test('diagram draft saves a frame move when its added device pair is already confirmed', async () => {
+  const bundle = mountingBundle()
+  const junction = mountingNode('JB-01.2', 'Junction Box', [110.000005, -7])
+  bundle.classifiedNodes.push(junction.object)
+  bundle.geometries.push(junction.geometry)
+  const record = applyArtifacts(baseRecord(bundle), generateRelationArtifacts(bundle))
+  const existing = { id: 'existing-cam-jb', sourceAssetId: 'CAM-01',
+    targetAssetId: 'JB-01.2', sourceNodeId: 'CAM-01', targetNodeId: 'JB-01.2',
+    relationKind: 'device_edge', relationType: 'connected-to',
+    verificationStatus: 'confirmed', relationStatus: 'confirmed' }
+  record.topologyGraph.edges.push(existing)
+  record.confirmedRelations = [...(record.confirmedRelations ?? []), existing]
+  const repository = new SerializedMemoryRepository([record])
+  const service = new TopologyService({ repository, auditLog: new MemoryAuditLog() })
+
+  const result = await service.saveDiagram('dv-review', 'admin-1', {
+    expectedRecordRevision: record.recordRevision ?? 0,
+    changes: [
+      { type: 'add-relation', sourceAssetId: 'CAM-01', targetAssetId: 'JB-01.2' },
+      { type: 'move-frame', assetId: 'CAM-01',
+        frameId: 'excluded-mounting:booster-kutawinangun:indoor' },
+    ],
+  })
+  assert.equal(result.graph.edges.filter(edge => [edge.sourceAssetId, edge.targetAssetId]
+    .includes('CAM-01') && [edge.sourceAssetId, edge.targetAssetId]
+      .includes('JB-01.2')).length, 1)
+  assert.equal(result.topologyFrameAssignments['CAM-01'],
+    'excluded-mounting:booster-kutawinangun:indoor')
 })
 
 test('diagram removal accepts a derived edge ID and survives artifact rebuild', async () => {

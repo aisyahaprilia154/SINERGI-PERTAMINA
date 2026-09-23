@@ -88,3 +88,66 @@ test('locked manual camera relation remains stronger than geometry', () => {
   assert.deepEqual(result.edges.map(({ id }) => id), ['edge:manual'])
   assert.equal(result.suppressedEdges[0].reason, 'single_operational_camera_termination')
 })
+
+test('Cam-22 selects co-mounted JB-08 over independent JB-03', () => {
+  const edges = [
+    { id: 'cam03', sourceAssetId: 'CAM-22', targetAssetId: 'JB-03', relationSource: 'spatial_inference' },
+    { id: 'cam08', sourceAssetId: 'CAM-22', targetAssetId: 'JB-08', relationSource: 'spatial_inference' },
+  ]
+  const mountingRelations = ['CAM-22', 'JB-08'].map(sourceAssetId => ({
+    sourceAssetId, targetAssetId: 'T-10', verificationStatus: 'confirmed',
+  }))
+  const result = filterConflictingCameraEdges(edges, nodes, { mountingRelations })
+  assert.deepEqual(result.edges.map(edge => edge.id), ['cam08'])
+  assert.deepEqual(result.suppressedEdges.map(item => item.suppressedEdgeId), ['cam03'])
+})
+
+test('camera chooses JB child while preserving JB-to-parent backbone', () => {
+  const localNodes = [
+    { id: 'CAM-14', assetType: 'cctv' },
+    { id: 'JB-02.2', name: 'JB-02.2', assetType: 'junction box' },
+    { id: 'JB-02', name: 'JB-02', assetType: 'junction box' },
+    { id: 'SERVER', assetType: 'server' },
+  ]
+  const edges = [
+    { id: 'camera-parent', sourceAssetId: 'CAM-14', targetAssetId: 'JB-02', relationSource: 'spatial_inference' },
+    { id: 'camera-child', sourceAssetId: 'CAM-14', targetAssetId: 'JB-02.2', relationSource: 'spatial_inference' },
+    { id: 'child-parent', sourceAssetId: 'JB-02.2', targetAssetId: 'JB-02' },
+    { id: 'parent-server', sourceAssetId: 'JB-02', targetAssetId: 'SERVER' },
+  ]
+  assert.deepEqual(filterConflictingCameraEdges(edges, localNodes).edges.map(edge => edge.id),
+    ['camera-child', 'child-parent', 'parent-server'])
+})
+
+test('equally supported independent JBs require review and leave source evidence intact', () => {
+  const evidence = [
+    { id: 'one', sourceAssetId: 'CAM-22', targetAssetId: 'JB-03', relationSource: 'spatial_inference' },
+    { id: 'two', sourceAssetId: 'CAM-22', targetAssetId: 'JB-08', relationSource: 'spatial_inference' },
+  ]
+  const result = filterConflictingCameraEdges(evidence, nodes)
+  assert.deepEqual(result.edges, [])
+  assert.equal(result.suppressedEdges.every(item => item.reason === 'camera_primary_requires_review'), true)
+  assert.equal(evidence.length, 2)
+})
+
+test('a newer manual correction replaces the older independent camera JB choice', () => {
+  const result = filterConflictingCameraEdges([
+    { id: 'old', sourceAssetId: 'CAM-22', targetAssetId: 'JB-03',
+      relationSource: 'manual_admin', manualConfirmation: { reviewedAt: '2026-09-01T00:00:00Z' } },
+    { id: 'new', sourceAssetId: 'CAM-22', targetAssetId: 'JB-08',
+      relationSource: 'manual_admin', manualConfirmation: { reviewedAt: '2026-09-02T00:00:00Z' } },
+  ], nodes)
+  assert.deepEqual(result.edges.map(edge => edge.id), ['new'])
+  assert.equal(result.suppressedEdges[0].suppressedEdgeId, 'old')
+})
+
+test('two pieces of evidence for the same camera JB draw only one line', () => {
+  const result = filterConflictingCameraEdges([
+    { id: 'label', sourceAssetId: 'CAM-22', targetAssetId: 'JB-08',
+      relationSource: 'line_label_inference' },
+    { id: 'geometry', sourceAssetId: 'CAM-22', targetAssetId: 'JB-08',
+      relationSource: 'spatial_inference' },
+  ], nodes)
+  assert.deepEqual(result.edges.map(edge => edge.id), ['geometry'])
+  assert.equal(result.suppressedEdges[0].reason, 'duplicate_camera_termination_evidence')
+})

@@ -52,6 +52,7 @@ const DEFAULT_OPTIONS = Object.freeze({
   mountingBoxLevelGapY: 34,
   mountingBoxNodeGapX: 18,
   mountingRootColumns: null,
+  mountingRootFrameGap: null,
   mountingRootRowGapY: 72,
   backboneCoreGapY: 70,
   peerColumns: 10,
@@ -705,6 +706,8 @@ function buildPoleBackboneAreaLaneSpec({
     area,
   })
   const edgeAdjacency = buildLayoutEdgeAdjacency(connectedNodes, edges)
+  confirmedGroups.splice(0, confirmedGroups.length,
+    ...confirmedGroups.flatMap(group => splitIndependentPoleBranches(group, nodeById, edgeAdjacency)))
   const junctionGroups = buildEndpointJunctionGroups({
     confirmedGroups,
     connectedNodes,
@@ -812,23 +815,27 @@ function buildPoleBackboneAreaLaneSpec({
         child: node, parent: boxByNode.get(id)?.nodes.find(item => item.id === id), box: boxByNode.get(id),
       }))).filter(item => item.box && item.box !== box
         && ['junction-peer', 'junction-extended'].includes(item.parent?.diagramClass))
-      const owners = new Set(anchors.map(item => item.parent.id))
-      if (owners.size !== 1) continue
-      const anchor = anchors[0]
+      const ownerId = preferredJunctionOwnerId(
+        anchors.map(item => item.parent.id), nodeById, edgeAdjacency,
+      )
+      if (!ownerId) continue
+      const anchor = anchors.find(item => item.parent.id === ownerId)
       box.layoutParentBoxId = anchor.box.id
       box.layoutParentNodeId = anchor.parent.id
       box.layoutChildNodeId = anchor.child.id
       box.connectionLabel = `Terhubung ke ${anchor.parent.name || anchor.parent.id}`
-      for (const item of anchors) item.child.layoutParentId = item.parent.id
+      for (const item of anchors) {
+        if (item.parent.id === ownerId) item.child.layoutParentId = ownerId
+      }
     }
   }
-  const mountingBoxTree = buildMountingBoxTree(mountingBoxes, settings)
+  const mountingBoxTree = buildMountingBoxTree(mountingBoxes, settings, edgeAdjacency)
   const boxesWidth = mountingBoxTree.width
   const coreWidth = coreNodes.reduce(
     (total, node) => total + hubNodeSize(node, settings).width,
     0,
   ) + Math.max(0, coreNodes.length - 1) * settings.hubNodeGapX
-  const laneWidth = Math.max(settings.hubMinWidth, boxesWidth, coreWidth)
+  let laneWidth = Math.max(settings.hubMinWidth, boxesWidth, coreWidth)
   const coreY = settings.hubPadding + settings.hubHeaderHeight
   const coreHeight = Math.max(
     settings.hubRootHeight,
@@ -843,7 +850,16 @@ function buildPoleBackboneAreaLaneSpec({
     boxesY,
     settings,
   )
+  if (Number(settings.mountingRootFrameGap) > 0) {
+    const packedWidth = compactRootFrameSpacing(
+      mountingBoxTree, mountingBoxes, Number(settings.mountingRootFrameGap), settings.mountingBoxGapX,
+    )
+    laneWidth = Math.max(settings.hubMinWidth, packedWidth, coreWidth)
+    const offset = (laneWidth - packedWidth) / 2
+    mountingBoxes.forEach(box => { box.x += offset; box.treeX += offset })
+  }
   mountingBoxes.forEach((box) => {
+    delete box.branchRows
     box.nodes.forEach((node) => translateNode(node, box.x, box.y))
   })
 
@@ -936,6 +952,52 @@ function buildPoleBackboneAreaLaneSpec({
   }
 }
 
+function splitIndependentPoleBranches(group, nodeById, adjacency) {
+  if (group.kind !== 'confirmed' || !group.hostId || group.nodeIds.length < 2) return [group]
+  const local = new Set(group.nodeIds)
+  const namedParentById = buildNamedJunctionParents(group.nodeIds
+    .map(id => nodeById.get(id)).filter(node => node
+      && ['junction-peer', 'junction-extended'].includes(node.diagramClass)), adjacency)
+  const unseen = new Set(group.nodeIds)
+  const branches = []
+  while (unseen.size) {
+    const start = [...unseen].sort()[0]
+    const queue = [start], members = []
+    while (queue.length) {
+      const id = queue.shift()
+      if (!unseen.delete(id)) continue
+      members.push(id)
+      for (const next of adjacency.get(id) ?? []) {
+        if (local.has(next.id) && unseen.has(next.id)) queue.push(next.id)
+      }
+      const namedParent = namedParentById.get(id)
+      if (local.has(namedParent) && unseen.has(namedParent)) queue.push(namedParent)
+      for (const [childId, parentId] of namedParentById) {
+        if (parentId === id && unseen.has(childId)) queue.push(childId)
+      }
+    }
+    branches.push(members.sort())
+  }
+  const withJunction = branches.filter(ids => ids.some(id =>
+    ['junction-peer', 'junction-extended'].includes(nodeById.get(id)?.diagramClass)))
+  if (withJunction.length < 2) return [group]
+  branches.sort((left, right) => {
+    const anchor = ids => ids.find(id =>
+      ['junction-peer', 'junction-extended'].includes(nodeById.get(id)?.diagramClass)) ?? ids[0]
+    return String(nodeById.get(anchor(left))?.name ?? anchor(left)).localeCompare(
+      String(nodeById.get(anchor(right))?.name ?? anchor(right)), 'id')
+  })
+  return branches.map((nodeIds, index) => ({
+    ...group,
+    id: index === 0 ? group.id : `${group.id}:branch:${nodeIds.find(id =>
+      ['junction-peer', 'junction-extended'].includes(nodeById.get(id)?.diagramClass)) ?? nodeIds[0]}`,
+    physicalGroupId: group.id,
+    nodeIds,
+    presentationInheritedNodeIds: (group.presentationInheritedNodeIds ?? [])
+      .filter(id => nodeIds.includes(id)),
+  }))
+}
+
 // Physical co-location is not logical ownership. Keep the original mounting
 // metadata, but give devices owned by an external JB a separate presentation
 // frame that the subtree packer can place under that JB.
@@ -952,7 +1014,7 @@ function splitFramesByExternalJunction(groups, nodeById, adjacency) {
           return other?.areaKey === node.areaKey
             && ['junction-peer', 'junction-extended'].includes(other?.diagramClass)
         }))] : []
-      const ownerId = owners.length === 1 ? owners[0] : null
+      const ownerId = preferredJunctionOwnerId(owners, nodeById, adjacency)
       if (!ownerId || local.has(ownerId)) {
         retained.push(id)
         continue
@@ -1041,9 +1103,23 @@ function buildExcludedMountingGroupSpecs({ area, nodeIds = [], connectedNodes = 
   for (const id of [...nodeIds].sort()) {
     if (!isJunction(id)) continue
     groups.set(id, {...base, id: `excluded-mounting:${area.key}:${id}`,
-      hostName: `Non-tiang · ${byId.get(id).name || id}`, nodeIds: [id]})
+      hostName: `${byId.get(id)?.mountingExpectation === 'indoor' ? 'Indoor' : 'Non-tiang'} · ${byId.get(id).name || id}`,
+      nodeIds: [id]})
   }
   const remaining = new Set(nodeIds.filter(id => !isJunction(id)))
+  // Directly connected devices with the same physical context belong to the
+  // JB's own frame. Independent branches still receive separate frames.
+  for (const id of [...remaining].sort()) {
+    const node = byId.get(id)
+    const owners = (edgeAdjacency.get(id) ?? []).map(({ id: ownerId }) => ownerId)
+      .filter(ownerId => groups.has(ownerId)
+        && byId.get(ownerId)?.mountingExpectation === node?.mountingExpectation
+        && byId.get(ownerId)?.areaKey === node?.areaKey)
+    const owner = preferredJunctionOwnerId(owners, byId, edgeAdjacency)
+    if (!owner) continue
+    groups.get(owner).nodeIds.push(id)
+    remaining.delete(id)
+  }
   while (remaining.size) {
     const first = [...remaining].sort()[0]
     const ids = [], queue = [first], owners = new Set()
@@ -1057,7 +1133,7 @@ function buildExcludedMountingGroupSpecs({ area, nodeIds = [], connectedNodes = 
           && byId.get(next.id)?.mountingExpectation === byId.get(first)?.mountingExpectation) queue.push(next.id)
       }
     }
-    const owner = owners.size === 1 ? [...owners][0] : null
+    const owner = preferredJunctionOwnerId([...owners], byId, edgeAdjacency)
     const kind = byId.get(first)?.mountingExpectation === 'indoor' ? 'Indoor' : 'Non-tiang'
     // Keep physical scope distinct from logical ownership, including standalone devices.
     const key = `${owner ?? first}:${kind}`
@@ -1076,6 +1152,8 @@ function buildMountingBoxSpec({
   settings,
 }) {
   const nodes = group.nodeIds.map((id) => nodeById.get(id)).filter(Boolean)
+  const compactEndpointLabels = group.kind === 'excluded'
+    && nodes.filter(node => node.diagramClass === 'endpoint').length > 1
   const nodeIds = new Set(nodes.map(({ id }) => id))
   const byComponent = new Map()
   nodes.forEach((node) => {
@@ -1244,6 +1322,8 @@ function buildMountingBoxSpec({
             ? 'downstream-junction'
             : 'endpoint',
       })
+      layoutNode.suppressTypeLabel = compactEndpointLabels
+        && node.diagramClass === 'endpoint'
       layoutNode.mountingRelationStatus = group.kind === 'unassigned'
         ? 'unassigned'
         : group.presentationInheritedNodeIds?.includes(node.id)
@@ -1462,6 +1542,27 @@ function junctionNumberIdentity(value) {
   }
 }
 
+function preferredJunctionOwnerId(ownerIds, nodeById, adjacency) {
+  const ids = [...new Set(ownerIds)]
+  if (ids.length === 1) return ids[0]
+  if (!ids.length) return null
+  // A camera may retain a confirmed link to the base JB after gaining a
+  // direct link to its numbered extension. Only that ancestor pair is safe
+  // to collapse for presentation; unrelated multiple owners stay ambiguous.
+  const children = ids.filter(id => {
+    const identity = junctionNumberIdentity(nodeById.get(id)?.name)
+    if (identity?.childIndex == null) return false
+    const neighbors = new Set((adjacency.get(id) ?? []).map(({id: next}) => next))
+    return ids.every(otherId => {
+      if (otherId === id) return true
+      const other = junctionNumberIdentity(nodeById.get(otherId)?.name)
+      return other?.baseNumber === identity.baseNumber
+        && other.childIndex === null && neighbors.has(otherId)
+    })
+  })
+  return children.length === 1 ? children[0] : null
+}
+
 function compareLayoutParents(leftParentId, rightParentId, nodeById) {
   if (leftParentId === rightParentId) return 0
   if (!leftParentId) return -1
@@ -1526,7 +1627,7 @@ function attachCrossBoxJunctionFamilies({
   })
 }
 
-function buildMountingBoxTree(mountingBoxes, settings) {
+function buildMountingBoxTree(mountingBoxes, settings, edgeAdjacency) {
   const boxById = new Map(mountingBoxes.map((box) => [box.id, box]))
   const childrenById = new Map(mountingBoxes.map((box) => [box.id, []]))
   mountingBoxes.forEach((box) => {
@@ -1552,12 +1653,45 @@ function buildMountingBoxTree(mountingBoxes, settings) {
     children.forEach(child => { child.routingTrack = owners.indexOf(child.layoutParentNodeId) })
     box.childRoutingGap = Math.max(settings.mountingBoxGapY, 24 + owners.length * 12)
     children.forEach(measure)
+    box.branchRows = measureSiblingJunctionFrame(
+      box, children, boxById.get(box.layoutParentBoxId), edgeAdjacency, settings,
+    )
+    box.siblingJunctionGrid = Boolean(box.branchRows)
+    if (children.some(child => child.branchRows)) {
+      box.childRoutingGap = Math.max(box.childRoutingGap, settings.mountingBoxGapY + 48)
+    }
+    // Keep dense camera siblings in a small grid. Narrow branch children can
+    // share a column so every root frame keeps the same visible spacing.
+    box.gridEndpointChildren = !box.branchRows && shouldGridEndpointChildren(box, children)
+    const compactBranchChildren = Number(settings.mountingRootFrameGap) > 0
+      && children.length >= 2
+      && !children.some(child => child.branchRows)
+      && (box.kind === 'excluded' || children.every(child => child.kind === 'excluded'))
+      && children.every(child => child.treeWidth <= child.width)
+    if (box.gridEndpointChildren) children.sort((left, right) => {
+      const leftX = box.nodes.find(node => node.id === left.layoutParentNodeId).diagram.centerX
+      const rightX = box.nodes.find(node => node.id === right.layoutParentNodeId).diagram.centerX
+      return leftX - rightX || compareMountingBoxes(left, right)
+    })
+    box.gridColumns = box.branchRows ? 0 : box.gridEndpointChildren
+      ? Math.ceil(Math.sqrt(children.length)) : compactBranchChildren ? 1 : 0
+    const childGridRows = box.gridColumns ? chunk(children, box.gridColumns) : null
     const childrenWidth = children.reduce((total, child) => total + child.treeWidth, 0)
       + Math.max(0, children.length - 1) * settings.mountingBoxGapX
     const childrenHeight = Math.max(0, ...children.map((child) => child.treeHeight))
-    box.treeWidth = Math.max(box.width, childrenWidth)
+    box.treeWidth = box.branchRows ? box.width : childGridRows
+      ? Math.max(box.width, ...childGridRows.map(row => row.reduce(
+        (total, child) => total + child.treeWidth, 0)
+        + Math.max(0, row.length - 1) * settings.mountingBoxGapX))
+      : Math.max(box.width, childrenWidth)
     box.treeHeight = box.height + (children.length
-      ? box.childRoutingGap + childrenHeight
+      ? box.branchRows
+        ? box.childRoutingGap + box.branchRows.reduce((total, row) => total + row.height, 0)
+          + Math.max(0, box.branchRows.length - 1) * settings.mountingBoxGapY
+        : box.childRoutingGap + (childGridRows
+          ? childGridRows.reduce((total, row) => total + Math.max(...row.map(child => child.treeHeight)), 0)
+            + Math.max(0, childGridRows.length - 1) * settings.mountingBoxGapY
+          : childrenHeight)
       : 0)
     visiting.delete(box.id)
     return box
@@ -1584,19 +1718,118 @@ function buildMountingBoxTree(mountingBoxes, settings) {
   }
 }
 
+function shouldGridEndpointChildren(box, children) {
+  if (children.length < 3 || !children.every(child => child.kind === 'excluded'
+    && child.nodes.length && child.nodes.every(node => node.diagramClass === 'endpoint'))) return false
+  const anchors = children.map(child => box.nodes.find(node => node.id === child.layoutParentNodeId))
+  if (anchors.some(anchor => !anchor)
+    || new Set(anchors.map(anchor => anchor.id)).size !== anchors.length) return false
+  const centers = anchors.map(anchor => anchor.diagram.centerX)
+  return Math.max(...centers) - Math.min(...centers)
+    < Math.min(...children.map(child => child.treeWidth)) * 2
+}
+
+function measureSiblingJunctionFrame(box, children, parentBox, edgeAdjacency, settings) {
+  if (!box.custom || box.kind !== 'excluded' || !parentBox) return null
+  const junctions = box.nodes.filter(node =>
+    ['junction-peer', 'junction-extended'].includes(node.diagramClass))
+  const baseNumber = junctionNumberIdentity(junctions[0]?.name)?.baseNumber
+  const parentIds = new Set(parentBox.nodes
+    .filter(node => junctionNumberIdentity(node.name)?.baseNumber === baseNumber)
+    .map(node => node.id))
+  const junctionIds = new Set(junctions.map(node => node.id))
+  if (junctions.length < 2 || junctions.length !== box.nodes.length
+    || baseNumber == null || !parentIds.size
+    || children.some(child => !junctionIds.has(child.layoutParentNodeId))
+    || junctions.some(node => junctionNumberIdentity(node.name)?.baseNumber !== baseNumber
+      || !(edgeAdjacency.get(node.id) ?? []).some(({id}) => parentIds.has(id)))) return null
+  const ordered = junctions.sort((left, right) =>
+    String(left.name ?? '').localeCompare(String(right.name ?? ''), 'id', {numeric: true})
+      || left.id.localeCompare(right.id, 'id'))
+  const rows = chunk(ordered, 3).map(nodes => {
+    const columns = nodes.map(node => {
+      const childBoxes = children.filter(child => child.layoutParentNodeId === node.id)
+      return {
+        node,
+        children: childBoxes,
+        width: Math.max(node.diagram.width, ...childBoxes.map(child => child.treeWidth)),
+        height: childBoxes.reduce((total, child) => total + child.treeHeight, 0)
+          + Math.max(0, childBoxes.length - 1) * settings.mountingBoxGapY,
+      }
+    })
+    return {
+      columns,
+      width: columns.reduce((total, column) => total + column.width, 0)
+        + Math.max(0, columns.length - 1) * settings.mountingBoxGapX,
+      height: Math.max(0, ...columns.map(column => column.height)),
+    }
+  })
+  const originalHeight = box.height
+  const firstNodeY = Math.min(...ordered.map(node => node.diagram.y))
+  const nodeHeight = Math.max(...ordered.map(node => node.diagram.height))
+  box.width = Math.max(box.width,
+    ...rows.map(row => row.width + settings.mountingBoxPadding * 2))
+  box.height = originalHeight + (rows.length - 1)
+    * (nodeHeight + settings.mountingBoxLevelGapY)
+  rows.forEach((row, rowIndex) => {
+    let columnX = (box.width - row.width) / 2
+    row.columns.forEach(column => {
+      column.x = columnX
+      const nodeX = columnX + (column.width - column.node.diagram.width) / 2
+      const nodeY = firstNodeY + rowIndex * (nodeHeight + settings.mountingBoxLevelGapY)
+      translateNode(column.node, nodeX - column.node.diagram.x, nodeY - column.node.diagram.y)
+      column.node.rowIndex = rowIndex
+      columnX += column.width + settings.mountingBoxGapX
+    })
+  })
+  return rows
+}
+
 function placeMountingBoxTree(tree, x, y, settings) {
-  const place = (box, subtreeX, subtreeY) => {
+  const place = (box, subtreeX, subtreeY, rootBoxId) => {
+    box.rootBoxId = rootBoxId
     box.treeX = subtreeX
     box.x = subtreeX + (box.treeWidth - box.width) / 2
     box.y = subtreeY
     const children = tree.childrenById.get(box.id) ?? []
     if (!children.length) return
+    if (box.branchRows) {
+      let rowY = subtreeY + box.height + box.childRoutingGap
+      box.branchRows.forEach((row, rowIndex) => {
+        row.columns.forEach(column => {
+          let childY = rowY
+          column.children.forEach((child, stackIndex) => {
+            child.denseSiblingRowIndex = rowIndex + stackIndex
+            place(child, subtreeX + column.x + (column.width - child.treeWidth) / 2,
+              childY, rootBoxId)
+            childY += child.treeHeight + settings.mountingBoxGapY
+          })
+        })
+        rowY += row.height + settings.mountingBoxGapY
+      })
+      return
+    }
+    if (box.gridColumns) {
+      let childY = subtreeY + box.height + box.childRoutingGap
+      chunk(children, box.gridColumns).forEach((row, rowIndex) => {
+        const rowWidth = row.reduce((total, child) => total + child.treeWidth, 0)
+          + Math.max(0, row.length - 1) * settings.mountingBoxGapX
+        let childX = subtreeX + (box.treeWidth - rowWidth) / 2
+        row.forEach(child => {
+          child.denseSiblingRowIndex = rowIndex
+          place(child, childX, childY, rootBoxId)
+          childX += child.treeWidth + settings.mountingBoxGapX
+        })
+        childY += Math.max(...row.map(child => child.treeHeight)) + settings.mountingBoxGapY
+      })
+      return
+    }
     const childrenWidth = children.reduce((total, child) => total + child.treeWidth, 0)
       + Math.max(0, children.length - 1) * settings.mountingBoxGapX
     let childX = subtreeX + (box.treeWidth - childrenWidth) / 2
     const childY = subtreeY + box.height + box.childRoutingGap
     children.forEach((child) => {
-      place(child, childX, childY)
+      place(child, childX, childY, rootBoxId)
       childX += child.treeWidth + settings.mountingBoxGapX
     })
   }
@@ -1607,12 +1840,44 @@ function placeMountingBoxTree(tree, x, y, settings) {
       + Math.max(0, row.length - 1) * (settings.mountingRootGapX ?? settings.mountingBoxGapX)
     let rootX = x + (tree.width - rowWidth) / 2
     row.forEach((root) => {
-      place(root, rootX, rowY)
+      place(root, rootX, rowY, root.id)
       rootX += root.treeWidth + (settings.mountingRootGapX ?? settings.mountingBoxGapX)
     })
     rowY += Math.max(0, ...row.map((root) => root.treeHeight))
       + settings.mountingRootRowGapY
   })
+}
+
+function compactRootFrameSpacing(tree, boxes, frameGap, subtreeGap) {
+  const families = tree.roots.map(root => ({
+    root,
+    boxes: boxes.filter(box => box.rootBoxId === root.id),
+  }))
+  const placed = []
+  let previousRoot = null
+  families.forEach(({root, boxes: family}) => {
+    if (!previousRoot) {
+      placed.push(...family)
+      previousRoot = root
+      return
+    }
+    // Indent by the visible frame, then shift only as far as overlapping
+    // descendants require. Empty horizontal subtree slots are not spacing.
+    let shift = previousRoot.x + previousRoot.width + frameGap - root.x
+    for (const candidate of family) {
+      for (const earlier of placed) {
+        if (candidate.y >= earlier.y + earlier.height
+          || earlier.y >= candidate.y + candidate.height) continue
+        shift = Math.max(shift, earlier.x + earlier.width + subtreeGap - candidate.x)
+      }
+    }
+    family.forEach(box => { box.x += shift; box.treeX += shift })
+    placed.push(...family)
+    previousRoot = root
+  })
+  const left = Math.min(...boxes.map(box => box.x))
+  boxes.forEach(box => { box.x -= left; box.treeX -= left })
+  return Math.max(0, ...boxes.map(box => box.x + box.width))
 }
 
 function compareMountingBoxes(left, right) {
@@ -2300,30 +2565,109 @@ function routeEdge(source, target, mountingBoxById = new Map()) {
 
   const sourceParentsTargetBox = sourceMountingBox
     && targetMountingBox?.layoutParentBoxId === sourceMountingBox.id
-    && targetMountingBox.layoutParentNodeId === source.id
-    && (targetMountingBox.layoutChildNodeId === target.id || target.layoutParentId === source.id)
   const targetParentsSourceBox = targetMountingBox
     && sourceMountingBox?.layoutParentBoxId === targetMountingBox.id
-    && sourceMountingBox.layoutParentNodeId === target.id
-    && (sourceMountingBox.layoutChildNodeId === source.id || source.layoutParentId === target.id)
-  if (sourceParentsTargetBox || targetParentsSourceBox) {
-    const parentNode = sourceParentsTargetBox ? source : target
-    const childNode = sourceParentsTargetBox ? target : source
-    const parentFrame = sourceParentsTargetBox ? sourceMountingBox : targetMountingBox
-    const childFrame = sourceParentsTargetBox ? targetMountingBox : sourceMountingBox
+  const sourceTargetsLowerGrid = sourceMountingBox
+    && targetMountingBox?.layoutParentBoxId === sourceMountingBox.id
+    && targetMountingBox.denseSiblingRowIndex > 0
+  const targetTargetsLowerGrid = targetMountingBox
+    && sourceMountingBox?.layoutParentBoxId === targetMountingBox.id
+    && sourceMountingBox.denseSiblingRowIndex > 0
+  if (sourceParentsTargetBox || targetParentsSourceBox
+    || sourceTargetsLowerGrid || targetTargetsLowerGrid) {
+    const sourceIsParent = sourceParentsTargetBox || sourceTargetsLowerGrid
+    const parentNode = sourceIsParent ? source : target
+    const childNode = sourceIsParent ? target : source
+    const parentFrame = sourceIsParent ? sourceMountingBox : targetMountingBox
+    const childFrame = sourceIsParent ? targetMountingBox : sourceMountingBox
     const parentVisual = connectionBoxForNode(parentNode)
     const childVisual = connectionBoxForNode(childNode)
+    if (parentFrame.siblingJunctionGrid) {
+      const blockers = parentFrame.nodes.filter(node => node.id !== parentNode.id
+        && node.diagram.y > parentVisual.bottomY
+        && node.diagram.y < childFrame.y)
+      if (blockers.some(node => parentVisual.centerX > node.diagram.x
+        && parentVisual.centerX < node.diagram.x + node.diagram.width)) {
+        const lanes = [parentFrame.x + 12, parentFrame.x + parentFrame.width - 12]
+          .filter(x => blockers.every(node =>
+            x <= node.diagram.x - 12 || x >= node.diagram.x + node.diagram.width + 12))
+          .sort((left, right) => Math.abs(left - parentVisual.centerX)
+            - Math.abs(right - parentVisual.centerX))
+        if (lanes.length) {
+          const exitY = parentVisual.bottomY + 12
+          const approachY = childFrame.y - 18
+          const points = compactPoints([
+            {x: parentVisual.centerX, y: parentVisual.bottomY},
+            {x: parentVisual.centerX, y: exitY},
+            {x: lanes[0], y: exitY},
+            {x: lanes[0], y: approachY},
+            {x: childVisual.centerX, y: approachY},
+            {x: childVisual.centerX, y: childVisual.topY},
+          ])
+          return sourceIsParent ? points : points.reverse()
+        }
+      }
+    }
+    if (childFrame.siblingJunctionGrid && childNode.rowIndex > 0) {
+      const firstRow = childFrame.nodes
+        .filter(node => node.rowIndex === 0)
+        .sort((left, right) => left.diagram.x - right.diagram.x)
+      const lanes = firstRow.slice(1).map((node, index) =>
+        (firstRow[index].diagram.x + firstRow[index].diagram.width + node.diagram.x) / 2)
+      const laneX = lanes.sort((left, right) =>
+        Math.abs(left - childVisual.centerX) - Math.abs(right - childVisual.centerX))[0]
+      if (Number.isFinite(laneX)) {
+        const exitY = parentFrame.y + parentFrame.height + 12
+        const approachY = childVisual.topY - 18
+        const points = compactPoints([
+          {x: parentVisual.centerX, y: parentVisual.bottomY},
+          {x: parentVisual.centerX, y: exitY},
+          {x: laneX, y: exitY},
+          {x: laneX, y: approachY},
+          {x: childVisual.centerX, y: approachY},
+          {x: childVisual.centerX, y: childVisual.topY},
+        ])
+        return sourceIsParent ? points : points.reverse()
+      }
+    }
+    if (childFrame.denseSiblingRowIndex > 0) {
+      // Reach a lower child row through the gap between first-row frames.
+      const firstRow = [...mountingBoxById.values()]
+        .filter(box => box.layoutParentBoxId === parentFrame.id
+          && box.denseSiblingRowIndex === 0)
+        .sort((left, right) => left.x - right.x)
+      const gaps = firstRow.slice(1).map((box, index) => (
+        (firstRow[index].x + firstRow[index].width + box.x) / 2
+      ))
+      if (gaps.length) {
+        const laneX = gaps.sort((left, right) => (
+          Math.abs(left - parentVisual.centerX) - Math.abs(right - parentVisual.centerX)
+        ))[0]
+        const exitY = parentFrame.y + parentFrame.height + 12
+        const approachY = childFrame.y - 18
+        const points = compactPoints([
+          {x: parentVisual.centerX, y: parentVisual.bottomY},
+          {x: parentVisual.centerX, y: exitY},
+          {x: laneX, y: exitY},
+          {x: laneX, y: approachY},
+          {x: childVisual.centerX, y: approachY},
+          {x: childVisual.centerX, y: childVisual.topY},
+        ])
+        return sourceIsParent ? points : points.reverse()
+      }
+    }
     // Exit at the side of the JB and use the gutter between installations.
     // A center drop would run through its local cameras and their labels.
     const track = childFrame.routingTrack ?? 0
     const laneX = parentFrame.x + parentFrame.width + 12 + track * 12
     const approachY = childFrame.y - 18 - track * 12
-    const clearDrop = !(parentFrame.nodes ?? []).some(node => {
-      if (node.id === parentNode.id) return false
-      const box = node.diagram
-      return parentVisual.centerX > box.x - 12 && parentVisual.centerX < box.x + box.width + 12
-        && box.y + box.height + 28 > parentVisual.bottomY && box.y < approachY
-    })
+    const clearDrop = !(childFrame.denseSiblingRowIndex > 0)
+      && !(parentFrame.nodes ?? []).some(node => {
+        if (node.id === parentNode.id) return false
+        const box = node.diagram
+        return parentVisual.centerX > box.x - 12 && parentVisual.centerX < box.x + box.width + 12
+          && box.y + box.height + 28 > parentVisual.bottomY && box.y < approachY
+      })
     if (clearDrop) {
       const points = compactPoints([
         {x: parentVisual.centerX, y: parentVisual.bottomY},
@@ -2331,7 +2675,7 @@ function routeEdge(source, target, mountingBoxById = new Map()) {
         {x: childVisual.centerX, y: approachY},
         {x: childVisual.centerX, y: childVisual.topY},
       ])
-      return sourceParentsTargetBox ? points : points.reverse()
+      return sourceIsParent ? points : points.reverse()
     }
     const parentPoint = {
       x: parentVisual.x + parentVisual.width,
@@ -2348,7 +2692,7 @@ function routeEdge(source, target, mountingBoxById = new Map()) {
       { x: childPoint.x, y: approachY },
       childPoint,
     ]
-    return sourceParentsTargetBox ? points : points.reverse()
+    return sourceIsParent ? points : points.reverse()
   }
 
   if (crossesMountingBoxes) {

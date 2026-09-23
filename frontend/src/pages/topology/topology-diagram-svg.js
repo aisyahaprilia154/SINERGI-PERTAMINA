@@ -851,7 +851,7 @@ function renderNode(node, {
     || (labelVisibility === 'core-peer' && isCoreOrJunction)
   const endpointLabel = forceEndpointLabels || labelVisibility === 'all'
     || (labelVisibility === 'detail' && !isCoreOrJunction)
-  const showType = showLabels && !minimap
+  const showType = showLabels && !minimap && !node.suppressTypeLabel
   const detailLabel = false
   const labelDetailAttribute = detailLabel
     ? ' data-label-detail="true"'

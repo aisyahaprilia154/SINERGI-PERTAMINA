@@ -972,3 +972,13 @@
 @media (max-width: 620px) {
   .topology-frame-composer { top: auto; right: 12px; bottom: 62px; width: calc(100vw - 24px); box-sizing: border-box; }
 }
+.topology-primary-review {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid #f2cd84;
+  border-radius: 10px;
+  background: #fff9eb;
+  color: #704a0a;
+  font-size: 12px;
+  line-height: 1.45;
+}
