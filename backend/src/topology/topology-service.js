@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { projectFacilityRecord } from './facility-record-projection.js'
+import { verifiedRootNodes, graphValidationErrorCount } from './verified-roots.js'
+import { applyDiagramOverrides } from './diagram-overrides.js'
+import { diagramEdgeKey } from '../../../shared/topology-edge-overrides.mjs'
+import { projectTopologyGraph } from '../import/dataset-version-lifecycle-service.js'
 import { AppError } from '../errors.js'
 import {
   buildAssetIdentityMapFromRecord,
@@ -59,6 +63,130 @@ const MAX_MANUAL_REFERENCE_IDS = 256
 const MAX_MOUNTING_BULK_DECISIONS = 200
 
 export class TopologyService {
+  async saveDiagram(datasetVersionId, actorId, { changes, expectedRecordRevision, correlationId } = {}) {
+    if (!Array.isArray(changes) || !changes.length || changes.length > 200
+      || changes.some(change => !change || typeof change !== 'object' || Array.isArray(change))
+      || !Number.isInteger(expectedRecordRevision)) {
+      throw new AppError('Daftar perubahan dan revisi diagram wajib valid (maksimal 200).', { code: 'invalid_diagram_changes', statusCode: 400 })
+    }
+    return this.#withMutationTransaction(async ({ repository, auditLog }) => {
+      let batchAuditId
+      const updated = await repository.update(datasetVersionId, async initial => {
+        assertExpectedRecordRevision(initial, expectedRecordRevision)
+        // Run the existing validated mutation contracts against a private draft.
+        // Only the final record is written, once, under the repository lock.
+        let draft = initial
+        const audit = await auditLog.record('topology.diagram_edit_started', {
+          actorId, datasetVersionId, correlationId, outcome: 'pending', details: { changes },
+        })
+        batchAuditId = audit.id
+        const stagedRepository = {
+          get: async id => {
+            if (id !== datasetVersionId) throw new Error('Diagram draft scope mismatch')
+            return draft
+          },
+          update: async (id, updater, { expectedRevision } = {}) => {
+            if (id !== datasetVersionId) throw new Error('Diagram draft scope mismatch')
+            assertExpectedRecordRevision(draft, expectedRevision)
+            const next = await updater(draft)
+            draft = { ...next, recordRevision: recordRevision(draft) + 1 }
+            return draft
+          },
+        }
+        const editor = new TopologyService({ repository: stagedRepository,
+          auditLog: { record: async () => audit }, config: this.config, clock: this.clock })
+        editor.diagramDraft = true
+        for (const change of changes) {
+          const reason = 'Koreksi manual melalui draft diagram topologi.'
+          if (change.type === 'mount') {
+            await editor.setMountingRelation(datasetVersionId, actorId,
+              { assetId: change.assetId, poleAssetId: change.poleAssetId ?? null,
+                action: change.action ?? (change.poleAssetId ? 'assign' : 'detach'), reason })
+          } else if (change.type === 'move-frame') {
+            const device = resolveManualDevice(draft, change.assetId, 'assetId')
+            const frameId = normalizeDiagramFrameReference(change.frameId)
+            const assignments = { ...(draft.topologyFrameAssignments ?? {}) }
+            if (frameId) assignments[device.canonicalAssetId] = frameId
+            else delete assignments[device.canonicalAssetId]
+            draft = { ...draft, topologyFrameAssignments: assignments }
+          } else if (change.type === 'create-frame') {
+            const frame = normalizeCustomTopologyFrame(change.frame)
+            if (frame.type === 'pole') {
+              const pole = resolveManualDevice(draft, frame.poleAssetId, 'frame.poleAssetId')
+              assertPoleAsset(pole)
+            }
+            draft = { ...draft, topologyFrames: {
+              ...(draft.topologyFrames ?? {}),
+              [frame.id]: frame,
+            } }
+          } else if (change.type === 'add-relation') {
+            await editor.createDeviceRelation(datasetVersionId, actorId,
+              { sourceAssetId: change.sourceAssetId, targetAssetId: change.targetAssetId, reason })
+          } else if (['rename-frame', 'remove-edge'].includes(change.type)) {
+            await editor.editDiagram(datasetVersionId, actorId, { ...change,
+              action: change.type, expectedRecordRevision: recordRevision(draft) })
+          } else {
+            throw new AppError('Jenis perubahan diagram tidak valid.', { code: 'invalid_diagram_change', statusCode: 400 })
+          }
+        }
+        return draft
+      }, { expectedRevision: expectedRecordRevision, projectionMode: 'topology-review' })
+      await auditLog.record('topology.diagram_saved', { actorId, datasetVersionId,
+        correlationId, outcome: 'confirmed', details: { changes, auditEventId: batchAuditId } })
+      const projected = projectFacilityRecord(updated)
+      return { datasetVersionId, recordRevision: recordRevision(updated),
+        graph: projectTopologyGraph(projected.topologyGraph),
+        mountingRelations: projected.mountingRelations ?? [],
+        topologyFrameNames: updated.topologyFrameNames ?? {},
+        topologyFrameAssignments: updated.topologyFrameAssignments ?? {},
+        topologyFrames: updated.topologyFrames ?? {},
+        topologyEdgeOverrides: updated.topologyEdgeOverrides ?? [] }
+    })
+  }
+
+  async editDiagram(datasetVersionId, actorId, { action, assetId, edgeId, name,
+    expectedRecordRevision, correlationId } = {}) {
+    if (!['rename-frame', 'remove-edge'].includes(action)
+      || !Number.isInteger(expectedRecordRevision)) {
+      throw new AppError('Aksi dan revisi diagram wajib valid.', { code: 'invalid_diagram_edit', statusCode: 400 })
+    }
+    return this.#withMutationTransaction(async ({ repository, auditLog }) => {
+      const updated = await repository.update(datasetVersionId, async record => {
+        let next = record
+        let details
+        if (action === 'rename-frame') {
+          const pole = resolveManualDevice(record, assetId, 'assetId')
+          assertPoleAsset(pole)
+          const label = String(name ?? '').trim()
+          if (label.length > 80) throw new AppError('Nama frame maksimal 80 karakter.', { code: 'invalid_frame_name', statusCode: 400 })
+          const names = { ...(record.topologyFrameNames ?? {}) }
+          if (label) names[pole.canonicalAssetId] = label
+          else delete names[pole.canonicalAssetId]
+          next = { ...record, topologyFrameNames: names }
+          details = { assetId: pole.canonicalAssetId, name: label }
+        } else {
+          const edge = projectFacilityRecord(record).topologyGraph?.edges
+            .find(item => item.id === edgeId || item.relationId === edgeId)
+          if (!edge) throw new AppError('Garis sudah berubah. Muat ulang diagram.', { code: 'diagram_edge_not_found', statusCode: 409 })
+          const override = { action: 'remove', edgeId: edge.id ?? edge.relationId,
+            sourceAssetId: edge.sourceAssetId, targetAssetId: edge.targetAssetId,
+            edgeKey: diagramEdgeKey(edge), actorId, updatedAt: this.clock().toISOString() }
+          next = applyDiagramOverrides({ ...record,
+            topologyEdgeOverrides: [...(record.topologyEdgeOverrides ?? []), override] })
+          details = override
+        }
+        await auditLog.record(`topology.diagram_${action}`, {
+          actorId, datasetVersionId, branchId: record.datasetVersion.branchId,
+          correlationId, outcome: 'confirmed', details,
+        })
+        return next
+      }, { expectedRevision: expectedRecordRevision, projectionMode: 'topology-review' })
+      return { datasetVersionId, recordRevision: recordRevision(updated),
+        topologyFrameNames: updated.topologyFrameNames ?? {},
+        topologyEdgeOverrides: updated.topologyEdgeOverrides ?? [], removedEdgeId: action === 'remove-edge' ? edgeId : null }
+    })
+  }
+
   constructor({
     repository,
     auditLog,
@@ -2019,6 +2147,7 @@ export class TopologyService {
     reason,
     evidenceRefs,
     expectedGraphRevision,
+    expectedRecordRevision,
     expectedCandidateRevision,
     idempotencyKey,
     correlationId,
@@ -2068,6 +2197,7 @@ export class TopologyService {
     if (replay) return replay
     const current = await repository.get(datasetVersionId)
     assertTopologyBundle(current)
+    assertExpectedRecordRevision(current, expectedRecordRevision)
     assertReviewSnapshot(current, { expectedGraphRevision, expectedCandidateRevision })
     const initialSource = resolveManualDevice(current, normalizedSourceReference, 'sourceAssetId')
     const initialTarget = resolveManualDevice(current, normalizedTargetReference, 'targetAssetId')
@@ -2190,6 +2320,10 @@ export class TopologyService {
       }
       const rebuilt = applyArtifacts({
         ...record,
+        topologyEdgeOverrides: (record.topologyEdgeOverrides ?? []).filter(override => (
+          ![override.sourceAssetId, override.targetAssetId].includes(source.canonicalAssetId)
+          || ![override.sourceAssetId, override.targetAssetId].includes(target.canonicalAssetId)
+        )),
         topologyInputBundle: nextBundle,
       }, artifacts)
       if (!normalizedIdempotencyKey) return rebuilt
@@ -2211,7 +2345,7 @@ export class TopologyService {
       const receipt = findTopologyMutationReceipt(updated, normalizedIdempotencyKey)
       if (receipt) return structuredClone(receipt.response)
     }
-    return manualRelationResponse(updated, event.id)
+    return this.diagramDraft ? null : manualRelationResponse(updated, event.id)
     })
     } catch (error) {
       if (!normalizedIdempotencyKey || error?.code !== 'dataset_version_stale_revision') {
@@ -2468,7 +2602,7 @@ export class TopologyService {
         const receipt = findTopologyMutationReceipt(updated, normalizedIdempotencyKey)
         if (receipt) return structuredClone(receipt.response)
       }
-      return mountingRelationResponse(updated, event?.id ?? null, normalizedAssetReference)
+      return this.diagramDraft ? null : mountingRelationResponse(updated, event?.id ?? null, normalizedAssetReference)
     })
     } catch (error) {
       if (!normalizedIdempotencyKey || error?.code !== 'dataset_version_stale_revision') throw error
@@ -2676,16 +2810,6 @@ export class TopologyService {
       fingerprint,
     )
     if (initialReplay) return initialReplay
-    const current = await this.repository.get(datasetVersionId)
-    assertTopologyBundle(current)
-    const initialChild = resolveManualDevice(current, normalizedAssetReference, 'assetId')
-    assertMountableAsset(initialChild)
-    const initialPole = normalizedAction === 'assign'
-      ? resolveManualDevice(current, normalizedPoleReference, 'poleAssetId')
-      : null
-    if (initialPole) assertPoleAsset(initialPole)
-    if (initialPole) assertSameManualDeviceSite(initialChild, initialPole, current)
-
     let event = null
     try {
     return await this.#withMutationTransaction(async ({ repository, auditLog }) => {
@@ -2738,13 +2862,19 @@ export class TopologyService {
           auditEventId: event.id,
         },
       ]
-      const mounting = generateMountingArtifacts(record.topologyInputBundle, {
+      let mounting = generateMountingArtifacts(record.topologyInputBundle, {
         config: this.config,
         previousRelations: record.mountingRelations,
         previousOverrides: nextOverrides,
         previousExpectations: record.mountingExpectations,
         generatedAt: updatedAt,
       })
+      // A canvas drag is an asset-local correction. Rebuilding the full
+      // mounting projection here used to drop unrelated legacy placements in
+      // other facilities whenever inference settings changed.
+      if (this.diagramDraft) {
+        mounting = scopeMountingArtifactsToAssets(record, mounting, [child.canonicalAssetId])
+      }
       const updated = await repository.update(datasetVersionId, (currentRecord) => {
         const nextRecord = {
           ...currentRecord,
@@ -3411,7 +3541,7 @@ export function applyArtifacts(record, artifacts, {
     verificationStatus: 'confirmed',
     candidateId: edge.candidateId,
   }))
-  return {
+  return applyDiagramOverrides({
     ...record,
     topologyRuleSetVersion: artifacts.topologyRuleSetVersion,
     topologyPolicy: structuredClone(artifacts.topologyPolicy ?? record.topologyPolicy ?? null),
@@ -3467,7 +3597,7 @@ export function applyArtifacts(record, artifacts, {
         totalRelations: legacyRelations.length,
       },
     },
-  }
+  })
 }
 
 const ACTIVE_TOPOLOGY_SNAPSHOT_KEYS = Object.freeze([
@@ -3493,6 +3623,10 @@ const ACTIVE_TOPOLOGY_SNAPSHOT_KEYS = Object.freeze([
   'mountingExpectations',
   'mountingReviewItems',
   'mountingSummary',
+  'topologyFrameNames',
+  'topologyFrameAssignments',
+  'topologyFrames',
+  'topologyEdgeOverrides',
   'relations',
   'readiness',
 ])
@@ -3918,17 +4052,18 @@ function mountingRelationResponse(record, auditEventId, assetReference) {
   const canonicalAssetId = resolver.resolve(assetReference) ?? assetReference
   return canonicalizeJsonValue({
     datasetVersionId: record.datasetVersion.id,
-    relation: structuredClone((record.mountingRelations ?? []).find((relation) => (
+    relation: (record.mountingRelations ?? []).find((relation) => (
       relation.sourceAssetId === canonicalAssetId
-    )) ?? null),
-    mountingRelations: structuredClone(record.mountingRelations ?? []),
-    mountingCandidates: structuredClone(record.mountingCandidates ?? []),
-    mountingOptions: structuredClone(record.mountingOptions ?? []),
-    mountingOverrides: structuredClone(record.mountingOverrides ?? []),
-    mountingExpectations: structuredClone(record.mountingExpectations ?? []),
-    mountingReviewItems: structuredClone(record.mountingReviewItems ?? []),
-    mountingSummary: structuredClone(record.mountingSummary ?? null),
-    graph: structuredClone(record.topologyGraph),
+    )) ?? null,
+    // canonicalizeJsonValue below already makes an isolated JSON copy.
+    mountingRelations: record.mountingRelations ?? [],
+    mountingCandidates: record.mountingCandidates ?? [],
+    mountingOptions: record.mountingOptions ?? [],
+    mountingOverrides: record.mountingOverrides ?? [],
+    mountingExpectations: record.mountingExpectations ?? [],
+    mountingReviewItems: record.mountingReviewItems ?? [],
+    mountingSummary: record.mountingSummary ?? null,
+    graph: record.topologyGraph,
     auditEventId,
     recordRevision: recordRevision(record),
   })
@@ -4866,6 +5001,46 @@ function normalizeTopologyAssetReference(value, field) {
   return normalized
 }
 
+function normalizeDiagramFrameReference(value) {
+  if (value === null || value === undefined || String(value).trim() === '') return null
+  const normalized = normalizeTopologyAssetReference(value, 'frameId')
+  if (!/^(pole-group|excluded-mounting|junction-endpoints|needs-mounting|unassigned-mounting):/.test(normalized)) {
+    throw new AppError('Frame diagram tidak valid.', {
+      code: 'invalid_diagram_frame_reference',
+      statusCode: 400,
+    })
+  }
+  return normalized
+}
+
+function normalizeCustomTopologyFrame(value) {
+  const frame = value && typeof value === 'object' ? value : {}
+  const id = normalizeTopologyAssetReference(frame.id, 'frame.id')
+  const type = String(frame.type ?? '').trim().toLowerCase()
+  const areaKey = String(frame.areaKey ?? '').trim()
+  const poleAssetId = type === 'pole'
+    ? normalizeTopologyAssetReference(frame.poleAssetId, 'frame.poleAssetId')
+    : null
+  const validId = type === 'pole'
+    ? id === `pole-group:${poleAssetId}`
+    : /^excluded-mounting:[^:]+:custom:[a-z0-9-]+$/i.test(id)
+  if (!validId || !['indoor', 'non-pole', 'pole'].includes(type)
+    || !areaKey || areaKey.length > 120) {
+    throw new AppError('Frame kustom tidak valid.', {
+      code: 'invalid_custom_topology_frame',
+      statusCode: 400,
+    })
+  }
+  return {
+    id,
+    type,
+    areaKey,
+    ...(poleAssetId ? { poleAssetId } : {}),
+    name: String(frame.name ?? '').trim().slice(0, 80)
+      || (type === 'indoor' ? 'Indoor' : type === 'pole' ? poleAssetId : 'Non-tiang'),
+  }
+}
+
 function normalizeMountingAction(value, poleAssetId) {
   const action = String(value ?? (poleAssetId ? 'assign' : 'detach')).trim().toLowerCase()
   if (action === 'assign' && poleAssetId) return action
@@ -5000,6 +5175,32 @@ function mountingRecordPatch(mounting) {
     mountingReviewItems: mounting.reviewItems,
     mountingSummary: mounting.summary,
   }
+}
+
+function scopeMountingArtifactsToAssets(record, mounting, assetIds) {
+  const scopedIds = new Set(assetIds)
+  const belongsToScope = item => scopedIds.has(item?.assetId ?? item?.sourceAssetId)
+  const merge = (current = [], generated = []) => [
+    ...current.filter(item => !belongsToScope(item)),
+    ...generated.filter(belongsToScope),
+  ]
+  const localized = {
+    ...mounting,
+    relations: merge(record.mountingRelations, mounting.relations),
+    candidates: merge(record.mountingCandidates, mounting.candidates),
+    options: merge(record.mountingOptions, mounting.options),
+    overrides: merge(record.mountingOverrides, mounting.overrides),
+    expectations: merge(record.mountingExpectations, mounting.expectations),
+    reviewItems: merge(record.mountingReviewItems, mounting.reviewItems),
+  }
+  localized.summary = {
+    ...(record.mountingSummary ?? mounting.summary ?? {}),
+    ...summarizeStoredMounting({
+      ...record,
+      ...mountingRecordPatch({ ...localized, summary: localized.summary }),
+    }),
+  }
+  return localized
 }
 
 function ensureMountingProjection(record, config, generatedAt) {
@@ -5338,14 +5539,26 @@ function manualTopologyObjects(record, identityMap, resolver) {
     ...(record.topologyInputBundle?.classifiedNodes ?? []),
     ...(record.topologyInputBundle?.classifiedPaths ?? []),
   ]
+  const byCanonical = new Map()
+  const byAlias = new Map()
+  const byFeature = new Map()
+  ;(identityMap.items ?? []).forEach((item, index) => {
+    const entry = { item, index }
+    if (!byCanonical.has(item.canonicalAssetId)) byCanonical.set(item.canonicalAssetId, entry)
+    if (!byFeature.has(item.sourceFeatureId)) byFeature.set(item.sourceFeatureId, entry)
+    for (const alias of item.aliasValues ?? []) {
+      if (!byAlias.has(alias)) byAlias.set(alias, entry)
+    }
+  })
   return objects.map((object) => {
     const topologyAssetId = objectIdentityForManualRelation(object)
-    const identityItem = (identityMap.items ?? []).find((item) => (
-      item.canonicalAssetId === resolver.resolve(topologyAssetId)
-        || (item.aliasValues ?? []).includes(topologyAssetId)
-        || item.sourceFeatureId === object.sourceFeatureId
-    ))
-    const canonicalAssetId = resolver.resolve(topologyAssetId)
+    const resolvedId = resolver.resolve(topologyAssetId)
+    // Preserve the old first-match semantics without scanning all identities
+    // (and resolving the same ID) for every device and cable.
+    const identityItem = [byCanonical.get(resolvedId), byAlias.get(topologyAssetId),
+      byFeature.get(object.sourceFeatureId)]
+      .filter(Boolean).sort((a, b) => a.index - b.index)[0]?.item
+    const canonicalAssetId = resolvedId
       ?? identityItem?.canonicalAssetId
       ?? topologyAssetId
     return {
@@ -6109,14 +6322,6 @@ function directionCoverageForGraph(graph) {
   }
 }
 
-function verifiedRootNodes(graph) {
-  return graph.nodes.filter((node) => (
-    ['root', 'core'].includes(
-      String(node.topologyRole ?? '').trim().toLowerCase(),
-    )
-  ))
-}
-
 function traceAvailabilityReason(graph, physicalAdjacency, normalized, sourceAssetId) {
   const directionalMode = ['upstream', 'downstream'].includes(normalized.mode)
     || (['point_to_point', 'reachable'].includes(normalized.mode)
@@ -6377,11 +6582,6 @@ function sumLength(edges) {
   return lengths.length === edges.length
     ? lengths.reduce((total, length) => total + length, 0)
     : null
-}
-
-function graphValidationErrorCount(validation) {
-  return Number(validation?.summary?.errors)
-    || (validation?.issues ?? []).filter(({ severity }) => severity === 'error').length
 }
 
 function hasPendingCandidate(record, resolver, sourceAssetId, targetAssetId) {

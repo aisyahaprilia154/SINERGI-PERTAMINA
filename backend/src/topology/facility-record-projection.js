@@ -9,10 +9,15 @@ import {
 import { buildAssetIdentityMapFromRecord, createAssetIdentityResolver } from '../domain/canonical-asset-identity.js'
 import { withTopologyGraphRevision } from './topology-graph-revision.js'
 import { unsafeAutomaticMount } from '../../../shared/mounting-policy.mjs'
+import { applyDiagramOverrides } from './diagram-overrides.js'
 
 // Apply published facility facts to older stored datasets as well as freshly
 // regenerated ones. This is a read projection: the source aggregate is immutable.
 export function projectFacilityRecord(record) {
+  return applyDiagramOverrides(projectFacilityFacts(record))
+}
+
+function projectFacilityFacts(record) {
   if (!record || record.facilityCorrectionVersion === FACILITY_CORRECTION_VERSION) return record
   const resolver = createAssetIdentityResolver(buildAssetIdentityMapFromRecord(record))
   const layers = new Map((record.layers ?? []).map(layer => [layer.id, layer]))
@@ -31,6 +36,9 @@ export function projectFacilityRecord(record) {
     const expectation = correctedMountingExpectation(asset)
     return expectation ? [[asset.id, expectation]] : []
   }))
+  for (const override of record.mountingOverrides ?? []) {
+    if (override.provenance === 'manual_admin') exclusions.delete(resolver.resolve(override.assetId) ?? override.assetId)
+  }
   const conflicts = facilityConflictPredicate(assets)
   const hasConflicts = [...(record.topologyGraph?.edges ?? []), ...(record.confirmedRelations ?? [])]
     .some(edge => conflicts({...edge,

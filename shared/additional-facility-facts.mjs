@@ -110,11 +110,13 @@ export function additionalConflict(edge, byId) {
     || codes.has('JB-CCTV-8-WP') && codes.has('JB-CCTV-9.1-WP')
 }
 export function correctAdditionalMounts(relations, assets) {
-  const facts = resolvePairs(assets, mountFacts)
+  const manualIds = new Set(relations.filter(r => r.provenance === 'manual_admin').map(r => r.sourceAssetId))
+  const facts = resolvePairs(assets, mountFacts).filter(r => !manualIds.has(r.sourceAssetId))
   const overrides = new Set(facts.map(r => r.sourceAssetId))
   const excluded = new Set(assets.filter(additionalExpectation).map(idOf))
   const byId = new Map(assets.map(asset => [idOf(asset), asset]))
   return [...relations.filter(r => {
+    if (r.provenance === 'manual_admin') return true
     if (unsafeAutomaticMount(r) || overrides.has(r.sourceAssetId) || excluded.has(r.sourceAssetId)) return false
     const asset = byId.get(r.sourceAssetId), pole = byId.get(r.targetAssetId)
     // Explicit user correction: Cam-13 is not installed on T-08.

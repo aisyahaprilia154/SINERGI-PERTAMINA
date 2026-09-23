@@ -92,11 +92,25 @@ test('SVG is a light logical projection and hides admin evidence by default', ()
     selectedMountingGroupId: model.mountingGroups[0].id,
   })
   assert.match(selectedMountingBox, /<g class="topology-mounting-group confirmed selected"/)
+  assert.match(selectedMountingBox, /class="topology-mounting-selection"/)
   assert.match(svg, /T-018 · 1 aset/)
   assert.match(svg, /topology-mounting-group empty/)
   assert.match(svg, /T-021 · 0 aset · belum ada mounting/)
   assert.doesNotMatch(svg, /data-edge-id="mount-camera"/)
   assert.doesNotMatch(svg, /data-node-id="pole"/)
+})
+
+test('SVG exposes editable frame labels and renders a saved custom name', () => {
+  const { model, layout } = renderFixture()
+  const groupId = model.mountingGroups.find(({ hostId }) => hostId === 'pole').id
+  const svg = renderTopologyDiagramSvg({
+    model,
+    layout,
+    mountingLabelById: { [groupId]: 'Gerbang Utama' },
+  })
+
+  assert.match(svg, new RegExp(`data-frame-label="${groupId}"`))
+  assert.match(svg, /Tiang · Gerbang Utama/)
 })
 
 test('SVG uses the preloaded source icon from the KMZ style when available', () => {
@@ -221,6 +235,7 @@ test('SVG preserves selection without dropping graph nodes', () => {
     selectedEdgeId: 'core-camera',
   })
   assert.match(svg, /topology-node selected/)
+  assert.match(svg, /class="topology-node-selection-glow"/)
   assert.match(svg, /topology-edge.*selected/)
   assert.match(svg, /data-node-id="core"/)
   assert.match(svg, /data-node-id="camera"/)

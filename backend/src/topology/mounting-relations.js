@@ -67,7 +67,7 @@ export function generateMountingArtifacts(topologyInputBundle, {
   mountableNodes.forEach((asset) => {
     let expectation = expectations.byAsset.get(asset.id)
     const facilityExpectation = correctedMountingExpectation(asset)
-    if (facilityExpectation) {
+    if (facilityExpectation && !overrides.byAsset.has(asset.id)) {
       expectations.byAsset.set(asset.id, createMountingExpectation({
         assetId: asset.id, expectation: facilityExpectation,
         provenance: 'facility_topology_correction', updatedAt: generatedAt,

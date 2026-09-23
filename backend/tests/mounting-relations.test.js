@@ -190,6 +190,19 @@ test('mounting inference uses distance ratio when coordinate uncertainty exceeds
   assert.equal(result.summary.ambiguityRatio, 1.5)
 })
 
+test('manual mounting overrides historical indoor facility classification for only that asset', () => {
+  const bundle = topologyBundle([
+    { id: 'pole', sourceName: 'T-01', type: 'Tiang', coordinate: [110, -7], sourceFolderPath: '/FT Tegal Baru/Tiang' },
+    { id: 'camera', sourceName: 'C-08', type: 'CCTV', coordinate: [110.000004, -7], sourceFolderPath: '/FT Tegal Baru/CCTV' },
+  ])
+  assert.equal(generateMountingArtifacts(bundle).relations.length, 0)
+  const result = generateMountingArtifacts(bundle, {
+    previousOverrides: [{ assetId: 'camera', targetAssetId: 'pole', actorId: 'admin-1' }],
+  })
+  assert.equal(result.relations[0]?.targetAssetId, 'pole')
+  assert.equal(result.relations[0]?.provenance, 'manual_admin')
+})
+
 test('manual mounting override wins across regeneration and detach suppresses automatic inference', () => {
   const bundle = topologyBundle([
     { id: 'pole-near', type: 'Tiang', coordinate: [110, -7] },

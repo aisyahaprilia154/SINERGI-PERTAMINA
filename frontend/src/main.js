@@ -1,4 +1,7 @@
 import './style.css'
+import { initializeTheme } from './theme.js'
+
+initializeTheme()
 
 const app = document.querySelector('#app')
 const normalizedPath = window.location.pathname.replace(/\/+$/, '') || '/'

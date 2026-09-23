@@ -25,6 +25,7 @@ import {
   BASEMAP_LOAD_TIMEOUT_MS,
   BASEMAP_RETRY_DELAYS_MS,
   DEFAULT_IMAGERY_MAX_ZOOM,
+  applyBaseStyleTheme,
   basemapErrorMessage,
   createBaseStyle,
   isBasemapError,
@@ -115,6 +116,7 @@ export function createMapLibreSurface(element, {
     import.meta.env.VITE_SINERGI_VECTOR_TILES_URL ?? '',
   ).trim() || '/api/basemap/openfreemap/planet'
   const basemapAttribution = String(import.meta.env.VITE_SINERGI_BASEMAP_ATTRIBUTION ?? '').trim()
+  const darkMode = document.documentElement.dataset.theme === 'dark'
   let basemapMode = vectorTiles ? 'street' : 'satellite'
   const loadedBasemapSourceIds = new Set()
   const map = new MapLibreMap({
@@ -124,6 +126,7 @@ export function createMapLibreSurface(element, {
       imageryMaxZoom,
       vectorTiles,
       attribution: basemapAttribution,
+      darkMode,
     }),
     center: initialBounds
       ? [(initialBounds[0] + initialBounds[2]) / 2, (initialBounds[1] + initialBounds[3]) / 2]
@@ -145,6 +148,14 @@ export function createMapLibreSurface(element, {
         : { url }
     ),
   })
+  const handleThemeChange = (event) => {
+    applyBaseStyleTheme(map, {
+      darkMode: event.detail?.theme === 'dark',
+      imageryTiles,
+      vectorTiles,
+    })
+  }
+  window.addEventListener('sinergi:theme-change', handleThemeChange)
   const markerOverlay = document.createElement('div')
   markerOverlay.className = 'map-adaptive-marker-layer'
   markerOverlay.setAttribute('aria-label', 'Aset KML dengan tata letak adaptif')
@@ -875,6 +886,7 @@ export function createMapLibreSurface(element, {
       window.removeEventListener('keydown', enableCtrlPitch)
       window.removeEventListener('keyup', disableCtrlPitch)
       window.removeEventListener('blur', disableCtrlPitch)
+      window.removeEventListener('sinergi:theme-change', handleThemeChange)
       element.removeEventListener('pointerdown', toggleCtrlPitchFromPointer)
       markerOverlay.remove()
       selectedCandidateOverlay.remove()

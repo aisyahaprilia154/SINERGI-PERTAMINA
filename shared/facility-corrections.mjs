@@ -50,6 +50,10 @@ export function facilityConflictPredicate(assets) {
   const relations = facilityRelations(assets)
   const byId = new Map(assets.map(a => [a.canonicalAssetId ?? a.assetId ?? a.id, a]))
   return edge => {
+  // Keep the verified branch baseline, while allowing a later explicit admin
+  // edit to replace only the exact relation the administrator touched.
+  if ((edge.manualConfirmation && edge.manualConfirmation.actorId !== 'facility-correction-policy')
+    || (edge.provenance === 'manual_admin' && edge.verifiedBy !== 'facility-correction-policy')) return false
   if (additionalConflict(edge, byId)) return true
   const source = edge.sourceAssetId ?? edge.sourceNodeId ?? edge.sourcePathAssetId
   const target = edge.targetAssetId ?? edge.targetNodeId
@@ -80,7 +84,7 @@ export function correctFacilityBundle(input) {
   const ids = new Set(relations.map(r => r.id))
   return { ...input, explicitRelations: [
     ...(input.explicitRelations ?? []).filter(r => !ids.has(r.explicitRelationEvidenceId)
-      && !conflictsWithFacilityRelation({sourceAssetId: r.sourceReference, targetAssetId: r.targetReference}, nodes)),
+      && !conflictsWithFacilityRelation({...r, sourceAssetId: r.sourceReference, targetAssetId: r.targetReference}, nodes)),
     ...relations.map(r => ({ ...r, explicitRelationEvidenceId: r.id,
       datasetVersionId: input.datasetVersion?.id, siteId: input.site,
       sourceReference: r.sourceAssetId, targetReference: r.targetAssetId,

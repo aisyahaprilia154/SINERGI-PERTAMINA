@@ -2,6 +2,29 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createApp } from '../src/app.js'
 
+test('diagram batch API requires administrator and forwards one revision-guarded draft', async t => {
+  let role = 'Viewer'
+  const calls = []
+  const app = createApp({
+    authenticator: { authenticate: () => ({ id: 'user-1', role }) },
+    auditLog: { record: async () => ({ id: 'audit-denied' }) },
+    topologyService: { saveDiagram: async (...args) => { calls.push(args); return { recordRevision: 8 } } },
+  })
+  await new Promise(resolve => app.listen(0, '127.0.0.1', resolve))
+  t.after(() => { app.closeAllConnections(); app.close() })
+  const url = `http://127.0.0.1:${app.address().port}/api/dataset-versions/dv-1/topology/diagram`
+  const body = { expectedRecordRevision: 7, changes: [{ type: 'rename-frame', assetId: 'pole', name: 'Gate' }] }
+  const request = { method: 'POST', headers: { authorization: 'Bearer test',
+    'content-type': 'application/json', 'x-correlation-id': 'diagram-batch-test' }, body: JSON.stringify(body) }
+  assert.equal((await fetch(url, request)).status, 403)
+  assert.equal(calls.length, 0)
+  role = 'Administrator'
+  const response = await fetch(url, request)
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { recordRevision: 8 })
+  assert.deepEqual(calls, [['dv-1', 'user-1', { ...body, correlationId: 'diagram-batch-test' }]])
+})
+
 test('topology trace API authenticates a viewer and forwards the graph revision contract', async (t) => {
   const calls = []
   const app = createApp({

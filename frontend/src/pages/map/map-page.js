@@ -37,6 +37,7 @@ import {
 import { openMapDataTransferDialog } from './map-data-transfer-dialog.js'
 import { searchMatchScore } from '../../domain/search-normalization.js'
 import { branchNameForFacility } from '../../domain/facility-branch.js'
+import { bindThemeToggle } from '../../theme.js'
 
 export async function renderMapPage(container) {
   document.title = 'Peta Jaringan — SINERGI'
@@ -1305,6 +1306,7 @@ function renderDatasetState(container, {
 let userAccountMenuInteractionsBound = false
 
 export function bindUserAccountMenu() {
+  bindThemeToggle()
   if (userAccountMenuInteractionsBound || typeof document === 'undefined') return
   userAccountMenuInteractionsBound = true
 
@@ -1723,6 +1725,10 @@ export function renderTopNavigation(activeView = 'map', context = null) {
         </a>
       </nav>
       <div class="nav-actions">
+        <button class="icon-button theme-toggle" type="button" data-theme-toggle
+          aria-label="Aktifkan mode gelap" aria-pressed="false" title="Mode gelap">
+          <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+        </button>
         <button class="icon-button" type="button" aria-label="Bantuan">
           <span class="material-symbols-outlined" aria-hidden="true">help</span>
         </button>

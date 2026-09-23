@@ -4,6 +4,7 @@ import path from 'node:path'
 import { AppError, asAppError } from './errors.js'
 import { receiveImportUpload } from './http/multipart-upload.js'
 import { createOpenFreeMapProxy } from './http/openfreemap-proxy.js'
+import { createRevisionResponseCache } from './http/revision-response-cache.js'
 import {
   createProcessingRecord,
   summarizeImportJobResult,
@@ -48,6 +49,7 @@ export function createApp({
 }) {
   const openFreeMapProxy = createOpenFreeMapProxy({ fetchImpl: basemapFetch })
   const metricsRegistry = metrics ?? new MetricsRegistry({ clock })
+  const sendActiveView = createRevisionResponseCache()
   return http.createServer(async (request, response) => {
     setSecurityHeaders(response)
     const correlationId = resolveCorrelationId(request)
@@ -234,15 +236,17 @@ export function createApp({
             : null,
         }
         requireBranchAccess(user, context)
-        return sendJson(
-          response,
-          200,
-          url.searchParams.get('view') === 'map'
-            ? await lifecycleService.getActiveMapDataset(context)
-            : url.searchParams.get('view') === 'topology'
-              ? await lifecycleService.getActiveTopologyDataset(context)
-              : await lifecycleService.getActiveDataset(context),
-        )
+        const view = url.searchParams.get('view')
+        const revision = await repository?.getActiveReadRevision?.(context)
+        return await sendActiveView(request, response, {
+          key: JSON.stringify([context, view]),
+          revision,
+          load: () => view === 'map'
+            ? lifecycleService.getActiveMapDataset(context)
+            : view === 'topology'
+              ? lifecycleService.getActiveTopologyDataset(context)
+              : lifecycleService.getActiveDataset(context),
+        })
       }
       const parserProjectionMatch = request.method === 'GET'
         ? url.pathname.match(
@@ -807,6 +811,15 @@ export function createApp({
         })
         return sendJson(response, 200, result)
       }
+      const diagramEditMatch = request.method === 'POST'
+        ? url.pathname.match(/^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/diagram$/) : null
+      if (diagramEditMatch) {
+        const user = requireAdministrator(request, authenticator)
+        const body = await readJsonBody(request)
+        return sendJson(response, 200, await topologyService.saveDiagram(
+          diagramEditMatch[1], user.id, { ...body, correlationId },
+        ))
+      }
       const candidateActionMatch = request.method === 'POST'
         ? url.pathname.match(
           /^\/api\/topology\/candidates\/([^/]+)\/(confirm|reject|skip|select-target)$/,
@@ -870,6 +883,8 @@ export function createApp({
           auditLog,
           jobQueue,
           importPipeline,
+          lifecycleService,
+          topologyService,
           correlationId,
           clock,
         })
@@ -1579,6 +1594,8 @@ async function handleCreateImport({
   auditLog,
   jobQueue,
   importPipeline,
+  lifecycleService,
+  topologyService,
   correlationId,
   clock,
 }) {
@@ -1619,6 +1636,7 @@ async function handleCreateImport({
       'Catatan versi',
     )
     const officialSourceConfirmed = upload.fields.officialSourceConfirmed === 'true'
+    const importMode = normalizeImportMode(upload.fields.importMode)
     const validated = await validateUploadedFile({
       filePath: temporaryPath,
       filename: upload.filename,
@@ -1631,6 +1649,7 @@ async function handleCreateImport({
         && record.datasetVersion?.branchId === branchId
         && record.datasetVersion?.checksum === upload.checksum
     ))
+    const activeAtUpload = await repository.findActive(datasetId, { branchId })
 
     const datasetVersionId = `dv-${crypto.randomUUID()}`
     const importedAt = clock().toISOString()
@@ -1648,6 +1667,8 @@ async function handleCreateImport({
       versionName: requestedVersionName ?? createVersionName(importedAt),
       ...(versionNote ? { versionNote } : {}),
       officialSourceConfirmed,
+      importMode,
+      baseDatasetVersionId: activeAtUpload?.datasetVersion?.id ?? null,
       sourceFilename: validated.sourceFilename,
       sourceMimeType: validated.sourceMimeType,
       sourceSize: upload.size,
@@ -1677,6 +1698,8 @@ async function handleCreateImport({
         sourceMimeType: validated.sourceMimeType,
         sourceSize: upload.size,
         checksum: upload.checksum,
+        importMode,
+        baseDatasetVersionId: activeAtUpload?.datasetVersion?.id ?? null,
       },
     })
 
@@ -1696,15 +1719,83 @@ async function handleCreateImport({
         handler: async ({ sourceStorageKey, extension, actorId, correlationId: jobCorrelationId }, {
           job,
           updateProgress,
-        }) => summarizeImportJobResult(await importPipeline.process({
-          datasetVersionId,
-          sourcePath: fileStore.resolveOriginalPath(sourceStorageKey),
-          extension,
-          actorId,
-          correlationId: jobCorrelationId,
-          jobId: job.jobId,
-          progressReporter: updateProgress,
-        })),
+        }) => {
+          const imported = await importPipeline.process({
+            datasetVersionId,
+            sourcePath: fileStore.resolveOriginalPath(sourceStorageKey),
+            extension,
+            actorId,
+            correlationId: jobCorrelationId,
+            jobId: job.jobId,
+            progressReporter: updateProgress,
+          })
+          if (importMode !== 'replace_active' || imported.datasetVersion.status !== 'valid') {
+            return summarizeImportJobResult(imported)
+          }
+          try {
+            await lifecycleService.activate(datasetVersionId, actorId, {
+              expectedActiveVersionId: activeAtUpload?.datasetVersion?.id ?? null,
+              expectedRecordRevision: imported.recordRevision,
+              publicationProfile: 'map_only',
+              confirmBreakingChanges: true,
+              correlationId: jobCorrelationId,
+            })
+            await repository.update(datasetVersionId, (record) => ({
+              ...record,
+              autoActivation: {
+                status: 'succeeded',
+                activatedAt: clock().toISOString(),
+                previousDatasetVersionId: activeAtUpload?.datasetVersion?.id ?? null,
+              },
+            }))
+            await queueAutonomousTopologyRegeneration({
+              datasetVersionId,
+              actorId,
+              reason: 'Import pengganti diaktifkan; diagram topologi diperbarui otomatis.',
+              correlationId: jobCorrelationId,
+              repository,
+              auditLog,
+              jobQueue,
+              topologyService,
+              config,
+            }).catch(async (regenerationError) => {
+              await auditLog.record('topology.regeneration_enqueue_failed', {
+                actorId,
+                datasetVersionId,
+                branchId,
+                correlationId: jobCorrelationId,
+                outcome: 'failed',
+                details: { errorCode: regenerationError.code ?? regenerationError.name },
+              }).catch(() => {})
+            })
+            return summarizeImportJobResult(await repository.get(datasetVersionId))
+          } catch (error) {
+            const activationError = asAppError(error)
+            const retained = await repository.update(datasetVersionId, (record) => ({
+              ...record,
+              autoActivation: {
+                status: 'failed',
+                failedAt: clock().toISOString(),
+                code: activationError.code,
+                message: activationError.expose
+                  ? activationError.message
+                  : 'Aktivasi otomatis gagal. Versi hasil import tetap aman untuk ditinjau.',
+              },
+            }))
+            await auditLog.record('dataset_import.auto_activation_failed', {
+              actorId,
+              datasetVersionId,
+              branchId,
+              correlationId: jobCorrelationId,
+              outcome: 'failed',
+              details: {
+                errorCode: activationError.code,
+                expectedActiveVersionId: activeAtUpload?.datasetVersion?.id ?? null,
+              },
+            }).catch(() => {})
+            return summarizeImportJobResult(retained)
+          }
+        },
       })
     } catch (error) {
       await repository.update(datasetVersionId, (record) => ({
@@ -1742,7 +1833,9 @@ async function handleCreateImport({
       datasetVersion: withoutInternalStorage(datasetVersion),
       processing: processingRecord.processing,
       statusUrl: `/api/admin/imports/${datasetVersionId}`,
-      message: 'File diterima dan diproses di background. Dataset belum aktif.',
+      message: importMode === 'replace_active'
+        ? 'File diterima. Setelah valid, data aktif dan diagram topologi akan diperbarui otomatis.'
+        : 'File diterima sebagai versi tinjauan. Dataset aktif tidak berubah.',
     })
   } catch (error) {
     await fileStore.removeTemporary(temporaryPath)
@@ -1884,6 +1977,9 @@ function toImportConfigResponse(config) {
     workflow: {
       requiresOfficialSourceConfirmation: true,
       activatesAutomatically: false,
+      supportsAutomaticActivation: true,
+      importModes: ['stage_only', 'replace_active'],
+      defaultImportMode: 'stage_only',
       supportsCancellationAfterAccepted: false,
       publicationProfiles: ['map_only', 'operational_topology'],
       frontendUsesBackendPublishability: true,
@@ -1930,12 +2026,20 @@ function toStatusResponse(record) {
     publicationProfile: record.datasetVersion.publicationProfile ?? null,
     publishableProfiles: record.readiness?.publishableProfiles ?? [],
     comparisonSummary: record.comparisonSummary ?? null,
+    topology: {
+      generated: Boolean(record.topologyGraph),
+      graphRevision: record.topologyGraph?.graphRevision ?? null,
+      nodeCount: record.topologyGraph?.nodes?.length ?? 0,
+      edgeCount: record.topologyGraph?.edges?.length ?? 0,
+      candidateCount: record.topologyCandidates?.length ?? 0,
+    },
     links: {
       preview: `/api/admin/imports/${encodeURIComponent(record.datasetVersion.id)}/preview`,
       comparison: `/api/admin/imports/${encodeURIComponent(record.datasetVersion.id)}/comparison`,
     },
     sourceOverlays: record.sourceOverlays ?? [],
     sourceResources: record.sourceResources ?? [],
+    autoActivation: record.autoActivation ?? null,
     canActivate: record.validation?.canActivate === true
       && record.datasetVersion.status === 'valid',
     active: record.datasetVersion.status === 'active',
@@ -2076,6 +2180,15 @@ function resolveCorrelationId(request) {
 
 function createVersionName(importedAt) {
   return `Import ${importedAt.replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC')}`
+}
+
+function normalizeImportMode(value) {
+  const normalized = String(value ?? 'stage_only').normalize('NFKC').trim().toLowerCase()
+  if (['replace_active', 'stage_only'].includes(normalized)) return normalized
+  throw new AppError('Pilihan perlakuan data import tidak valid.', {
+    code: 'invalid_import_mode',
+    statusCode: 400,
+  })
 }
 
 function formatBranchName(branchId) {
