@@ -5,6 +5,7 @@ import { validateStyleMin } from '@maplibre/maplibre-gl-style-spec'
 import {
   BASEMAP_LOAD_TIMEOUT_MS,
   createBaseStyle,
+  applyBaseStyleTheme,
   isBasemapError,
   isBasemapLoadedEvent,
 } from '../src/pages/map/maplibre-basemap.js'
@@ -218,6 +219,12 @@ test('fallback and vector basemap styles are valid and use a visible neutral can
     vectorTiles: 'https://tiles.openfreemap.org/planet',
     attribution: 'Imagery test',
   })
+  const darkStyle = createBaseStyle({
+    imageryTiles: '',
+    vectorTiles: 'https://tiles.openfreemap.org/planet',
+    attribution: '',
+    darkMode: true,
+  })
 
   assert.deepEqual(validateStyleMin(fallbackStyle), [])
   assert.deepEqual(validateStyleMin(vectorStyle), [])
@@ -257,10 +264,40 @@ test('fallback and vector basemap styles are valid and use a visible neutral can
     '#a9dff0',
   )
   assert.equal(
+    darkStyle.layers.find(({ id }) => id === 'safe-background')
+      ?.paint?.['background-color'],
+    '#171719',
+  )
+  assert.equal(
+    darkStyle.layers.find(({ id }) => id === 'basemap-road-labels')
+      ?.paint?.['text-color'],
+    '#e5e5ea',
+  )
+  assert.equal(
     fieldStyle.layers.find(({ id }) => id === 'basemap-roads')
       ?.paint?.['line-color']?.[0],
     'match',
   )
+})
+
+test('basemap theme can be updated without rebuilding operational layers', () => {
+  const paintUpdates = []
+  const map = {
+    getLayer: (id) => id === 'safe-background' || id === 'basemap-road-labels',
+    setPaintProperty: (id, property, value) => paintUpdates.push({ id, property, value }),
+  }
+
+  applyBaseStyleTheme(map, {
+    darkMode: true,
+    vectorTiles: 'https://tiles.openfreemap.org/planet',
+  })
+
+  assert.ok(paintUpdates.some(({ id, property, value }) => (
+    id === 'safe-background' && property === 'background-color' && value === '#171719'
+  )))
+  assert.ok(paintUpdates.some(({ id, property, value }) => (
+    id === 'basemap-road-labels' && property === 'text-color' && value === '#e5e5ea'
+  )))
 })
 
 test('basemap errors are recognized from source ids and remote resource URLs', () => {

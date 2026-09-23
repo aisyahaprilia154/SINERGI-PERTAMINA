@@ -108,7 +108,7 @@ export function adaptActiveDatasetForMap(payload) {
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
   const validNodeIds = new Set(assets.map(({ id }) => id))
   const topologyGraph = confirmedTopologyProjection(payload)
-  topologyGraph.edges = correctFacilityEdges(topologyGraph.edges, assets)
+  topologyGraph.edges = filterRemovedDiagramEdges(correctFacilityEdges(topologyGraph.edges, assets), payload.topologyEdgeOverrides)
   const resolver = createFrontendIdentityResolver(payload)
   const topologyReadiness = resolveTopologyReadiness({
     topologyReadiness: payload.topologyReadiness,
@@ -140,7 +140,8 @@ export function adaptActiveDatasetForMap(payload) {
   // The presentation layer may group confirmed mounting relations, but it must
   // never turn proximity into a physical attachment that is absent from data.
   const mountingRelations = correctAdditionalMounts(ensureDppuYiaKnownMountingRelations(
-    explicitMountingRelations.filter(relation => !correctedMountingExpectation(assetById[relation.sourceAssetId])),
+    explicitMountingRelations.filter(relation => relation.provenance === 'manual_admin'
+      || !correctedMountingExpectation(assetById[relation.sourceAssetId])),
     assets,
   ), assets)
   const mountingOptions = normalizeMountingOptions(
@@ -211,7 +212,7 @@ export function adaptActiveDatasetForMap(payload) {
     asset.mountedAssetIds = mountingRelations
       .filter((relation) => relation.targetAssetId === asset.id)
       .map((relation) => relation.sourceAssetId)
-    asset.mountingExpectation = correctedMountingExpectation(asset)
+    asset.mountingExpectation = mountingRelations.some(relation => relation.sourceAssetId === asset.id && relation.provenance === 'manual_admin') ? 'pole' : correctedMountingExpectation(asset)
       ?? expectationByAssetId.get(asset.id)?.expectation ?? 'unknown'
     asset.mountingReview = mountingReviewByAssetId.get(asset.id) ?? null
   })
@@ -277,6 +278,8 @@ export function adaptActiveDatasetForMap(payload) {
     mountingExpectations,
     mountingReviewItems,
     mountingSummary: structuredClone(payload.mountingSummary ?? null),
+    topologyFrameAssignments: structuredClone(payload.topologyFrameAssignments ?? {}),
+    topologyFrames: structuredClone(payload.topologyFrames ?? {}),
     poleGroups,
     topologySummary: structuredClone(payload.topologySummary ?? {}),
     topologyReadiness,
@@ -345,13 +348,13 @@ export function adaptActiveDatasetForTopology(payload) {
       location: asset.location ?? asset.locationText ?? location.locationGroupName,
     }
   }).filter(({ id }) => Boolean(id))
-  topologyGraph.edges = correctFacilityEdges(topologyGraph.edges, assets)
+  topologyGraph.edges = filterRemovedDiagramEdges(correctFacilityEdges(topologyGraph.edges, assets), payload.topologyEdgeOverrides)
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
   const mountingRelations = correctAdditionalMounts(ensureDppuYiaKnownMountingRelations(normalizeMountingRelations(
     payload.mountingRelations ?? [],
     resolver,
   ).filter((relation) => assetById[relation.sourceAssetId] && assetById[relation.targetAssetId]
-    && !correctedMountingExpectation(assetById[relation.sourceAssetId])), assets), assets)
+    && (relation.provenance === 'manual_admin' || !correctedMountingExpectation(assetById[relation.sourceAssetId]))), assets), assets)
   const mountingExpectations = normalizeMountingExpectations(
     payload.mountingExpectations,
     resolver,
@@ -369,7 +372,7 @@ export function adaptActiveDatasetForTopology(payload) {
     item,
   ]))
   assets.forEach((asset) => {
-    asset.mountingExpectation = correctedMountingExpectation(asset)
+    asset.mountingExpectation = mountingRelations.some(relation => relation.sourceAssetId === asset.id && relation.provenance === 'manual_admin') ? 'pole' : correctedMountingExpectation(asset)
       ?? expectationByAssetId.get(asset.id)?.expectation ?? 'unknown'
     asset.mountingReview = mountingReviewByAssetId.get(asset.id) ?? null
   })
@@ -431,6 +434,8 @@ export function adaptActiveDatasetForTopology(payload) {
     mountingExpectations,
     mountingReviewItems,
     mountingSummary: structuredClone(payload.mountingSummary ?? null),
+    topologyFrameAssignments: structuredClone(payload.topologyFrameAssignments ?? {}),
+    topologyFrames: structuredClone(payload.topologyFrames ?? {}),
     poleGroups,
     topologySummary: structuredClone(payload.topologySummary ?? {}),
     topologyReadiness,
@@ -1420,3 +1425,4 @@ function formatName(value) {
     .replace(/[-_]+/g, ' ')
     .replace(/\b\w/g, (character) => character.toUpperCase())
 }
+import { filterRemovedDiagramEdges } from '../../../shared/topology-edge-overrides.mjs'

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { projectFacilityRecord } from '../topology/facility-record-projection.js'
+import { verifiedRootNodes, graphValidationErrorCount } from '../topology/verified-roots.js'
 import path from 'node:path'
 import { AppError } from '../errors.js'
 import {
@@ -671,10 +672,11 @@ export class DatasetVersionLifecycleService {
     correlationId = null,
   } = {}) {
     let target = null
+    let activationAuditContext = null
     const activatedAt = this.clock().toISOString()
     try {
       target = await this.repository.get(datasetVersionId)
-      const active = await this.repository.findActive(
+      let active = await this.repository.findActive(
         target.datasetVersion.datasetId,
         {
           excludeId: datasetVersionId,
@@ -703,6 +705,17 @@ export class DatasetVersionLifecycleService {
           },
         })
       }
+      activationAuditContext = {
+        branchId: target.datasetVersion.branchId,
+        datasetId: target.datasetVersion.datasetId,
+        graphRevision: target.topologyGraph?.graphRevision ?? null,
+        validationSummary: target.validation?.summary ?? {},
+      }
+      // The repository performs its own locked reads. Release the two large
+      // aggregates before entering that transaction so import activation does
+      // not keep duplicate 150+ MB object graphs alive.
+      target = null
+      active = null
       const transaction = await this.repository.activateVersionAtomically({
         datasetVersionId,
         actorId,
@@ -829,17 +842,21 @@ export class DatasetVersionLifecycleService {
         {
           actorId,
           datasetVersionId,
-          branchId: context.branchId ?? target?.datasetVersion.branchId ?? null,
+          branchId: context.branchId ?? activationAuditContext?.branchId
+            ?? target?.datasetVersion.branchId ?? null,
           correlationId,
           outcome: 'failed',
           details: {
-            datasetId: context.datasetId ?? target?.datasetVersion.datasetId ?? null,
+            datasetId: context.datasetId ?? activationAuditContext?.datasetId
+              ?? target?.datasetVersion.datasetId ?? null,
             previousVersionId: context.previousVersionId ?? null,
             newVersionId: datasetVersionId,
-            graphRevision: target?.topologyGraph?.graphRevision ?? null,
+            graphRevision: activationAuditContext?.graphRevision
+              ?? target?.topologyGraph?.graphRevision ?? null,
             activatedBy: actorId,
             activatedAt,
-            validationSummary: target?.validation?.summary ?? {},
+            validationSummary: activationAuditContext?.validationSummary
+              ?? target?.validation?.summary ?? {},
             result: 'rolled_back',
             errorCode: error.code ?? error.name,
             operation,
@@ -1127,6 +1144,14 @@ function toActiveTopologyDataset(resolved) {
   })
   return {
     topologyView: true,
+      recordRevision: Number(record.recordRevision ?? 0),
+      topologyFrameNames: record.topologyFrameNames ?? {},
+      topologyFrameAssignments: record.topologyFrameAssignments ?? {},
+      topologyFrames: record.topologyFrames ?? {},
+      topologyEdgeOverrides: record.topologyEdgeOverrides ?? [],
+    topologyRoots: graphValidationErrorCount(record.topologyValidation) > 0
+      ? []
+      : verifiedRootNodes(topologyGraph).map(node => ({ assetId: node.id, topologyRole: node.topologyRole })),
     activePointer: resolved.pointer,
     datasetVersion: publicDatasetVersion(record.datasetVersion, resolved.pointer),
     assets,
@@ -1176,7 +1201,7 @@ function toActiveTopologyDataset(resolved) {
 // evidence. Internal service/termination/interface registries are useful for
 // backend tracing and review, but shipping them with every topology page
 // response makes the initial render needlessly expensive.
-function projectTopologyGraph(graph = {}) {
+export function projectTopologyGraph(graph = {}) {
   const nodes = (graph.nodes ?? []).map((node) => ({
     id: node.id ?? node.canonicalAssetId ?? node.assetId,
     canonicalAssetId: node.canonicalAssetId ?? node.id ?? node.assetId,
@@ -1368,6 +1393,7 @@ function toActiveMapDataset(resolved, { siteId = null, siteBoundaries = {} } = {
   })
   return {
     mapView: true,
+    topologyEdgeOverrides: record.topologyEdgeOverrides ?? [],
     activePointer: resolved.pointer,
     datasetVersion: publicDatasetVersion(record.datasetVersion, resolved.pointer),
     layers: (record.layers ?? []).map((layer) => ({

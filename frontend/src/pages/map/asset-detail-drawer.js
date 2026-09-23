@@ -43,7 +43,6 @@ export function renderAssetDetailDrawer({
         </span>
         <span>
           <small>Detail aset</small>
-          <strong>${escapeHtml(assetName)}</strong>
         </span>
       </div>
       <button class="icon-button close-drawer" type="button" aria-label="Tutup detail aset">

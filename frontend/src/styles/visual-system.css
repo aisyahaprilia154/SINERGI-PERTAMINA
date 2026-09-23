@@ -1,0 +1,3905 @@
+/*
+ * Shared visual language for the two operational projections.
+ *
+ * The map and topology views intentionally keep their own canvas rendering,
+ * but their surrounding UI should read as one product: the same type scale,
+ * control geometry, surface rhythm, and semantic status colors.
+ */
+:root {
+  --ui-font: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --ui-ink: #17324d;
+  --ui-ink-strong: #10283f;
+  --ui-text: #53687b;
+  --ui-muted: #7b8b98;
+  --ui-line: #dce6ec;
+  --ui-line-subtle: #ebf0f3;
+  --ui-surface: #ffffff;
+  --ui-surface-soft: #f7fafb;
+  --ui-canvas: #f2f6f8;
+  --ui-primary: #17324d;
+  --ui-primary-hover: #244b6b;
+  --ui-selected: #5b7eff;
+  --ui-success: #187557;
+  --ui-warning: #b56d24;
+  --ui-danger: #b64a4a;
+  --ui-radius-control: 9px;
+  --ui-radius-card: 12px;
+  --ui-radius-panel: 16px;
+  --ui-shadow-float: 0 8px 24px rgba(23, 50, 77, .09);
+  --ui-shadow-panel: 0 12px 32px rgba(23, 50, 77, .12);
+}
+
+.map-body,
+.topology-body {
+  color: var(--ui-ink);
+  background: var(--ui-canvas);
+  font-family: var(--ui-font);
+  font-size: 13px;
+}
+
+.map-body .top-navigation,
+.topology-body .top-navigation {
+  height: 64px;
+  min-height: 64px;
+  flex-basis: 64px;
+  padding-inline: 20px;
+  background: var(--ui-surface);
+  border-bottom: 1px solid var(--ui-line);
+  box-shadow: 0 1px 0 rgba(23, 50, 77, .02);
+}
+
+.map-body .nav-brand,
+.topology-body .nav-brand {
+  width: 276px;
+}
+
+.map-body .top-navigation nav,
+.topology-body .top-navigation nav {
+  gap: 4px;
+}
+
+.map-body .top-navigation nav a,
+.topology-body .top-navigation nav a {
+  height: 42px;
+  margin-block: 11px;
+  padding-inline: 14px;
+  gap: 8px;
+  color: var(--ui-text);
+  border-radius: var(--ui-radius-control);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.map-body .top-navigation nav a:hover,
+.topology-body .top-navigation nav a:hover {
+  color: var(--ui-ink);
+  background: var(--ui-surface-soft);
+}
+
+.map-body .top-navigation nav a.active,
+.topology-body .top-navigation nav a.active {
+  color: var(--ui-primary);
+  background: #eef3f6;
+  font-weight: 700;
+}
+
+.map-body .top-navigation nav a.active::after,
+.topology-body .top-navigation nav a.active::after {
+  right: 14px;
+  bottom: 3px;
+  left: 14px;
+  height: 2px;
+  background: var(--ui-primary);
+}
+
+.map-body .nav-actions,
+.topology-body .nav-actions {
+  gap: 6px;
+}
+
+.map-body .icon-button,
+.topology-body .icon-button {
+  border-color: var(--ui-line);
+  border-radius: var(--ui-radius-control);
+}
+
+.map-body .icon-button:hover,
+.topology-body .icon-button:hover {
+  background: var(--ui-surface-soft);
+  border-color: #cbd8e0;
+}
+
+.map-body .user-menu,
+.topology-body .user-menu {
+  height: 42px;
+  border-left-color: var(--ui-line);
+}
+
+.map-body .user-menu > span:first-child,
+.topology-body .user-menu > span:first-child,
+.map-body .user-menu-avatar,
+.topology-body .user-menu-avatar {
+  background: var(--ui-primary);
+  border-radius: 10px;
+}
+
+.map-body .map-workspace,
+.topology-body .topology-stitch-shell {
+  background: var(--ui-canvas);
+}
+
+/* Sidebar rhythm -------------------------------------------------------- */
+.map-body .network-sidebar,
+.topology-body .topology-sidebar {
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+}
+
+.map-body .sidebar-heading,
+.topology-body .topology-sidebar .sidebar-heading {
+  min-height: 78px;
+  padding: 20px 20px 14px;
+}
+
+.map-body .sidebar-heading h1,
+.topology-body .sidebar-heading h1 {
+  margin-top: 4px;
+  color: var(--ui-ink-strong);
+  font-size: 21px;
+  font-weight: 750;
+  letter-spacing: -.025em;
+}
+
+.map-body .eyebrow,
+.topology-body .eyebrow {
+  color: var(--ui-muted);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .1em;
+}
+
+.map-body .sidebar-content,
+.topology-body .topology-sidebar .sidebar-content {
+  padding-top: 4px;
+}
+
+.map-body .area-selector,
+.topology-body .area-selector {
+  margin: 0 16px 12px;
+  gap: 7px;
+  color: var(--ui-text);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .07em;
+}
+
+.map-body .area-selector select,
+.topology-body .area-selector select {
+  min-height: 44px;
+  padding-inline: 14px 42px;
+  color: var(--ui-ink);
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius-control);
+  font-size: 13px;
+}
+
+.map-body .area-selector select:hover,
+.topology-body .area-selector select:hover {
+  background: var(--ui-surface-soft);
+  border-color: #cbd8e0;
+}
+
+.map-body .area-selector select:focus-visible,
+.topology-body .area-selector select:focus-visible {
+  border-color: var(--ui-selected);
+  outline: 3px solid rgba(53, 105, 212, .13);
+}
+
+.map-body .asset-search-combobox,
+.topology-body .asset-search-combobox {
+  margin-inline: 16px;
+}
+
+.map-body .search-control,
+.topology-body .search-control {
+  height: 42px;
+  min-height: 42px;
+  padding-inline: 11px;
+  gap: 8px;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius-control);
+}
+
+.map-body .search-control:focus-within,
+.topology-body .search-control:focus-within {
+  border-color: var(--ui-selected);
+  outline: 3px solid rgba(53, 105, 212, .13);
+  box-shadow: none;
+}
+
+.map-body .search-control input,
+.topology-body .search-control input {
+  color: var(--ui-ink);
+  font-size: 13px;
+}
+
+.map-body .search-control kbd,
+.topology-body .search-control kbd {
+  min-width: 44px;
+  padding: 3px 6px;
+  color: var(--ui-muted);
+  background: var(--ui-surface-soft);
+  border-color: var(--ui-line-subtle);
+  border-radius: 6px;
+  font-size: 10px;
+}
+
+.map-body .map-category-presets,
+.topology-body .topology-sidebar-actions {
+  margin: 0 16px 14px;
+  gap: 6px;
+}
+
+.map-body .map-category-presets button,
+.topology-body .topology-sidebar-actions button {
+  min-height: 30px;
+  padding-inline: 9px;
+  color: var(--ui-text);
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-line);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.map-body .map-category-presets button:hover,
+.topology-body .topology-sidebar-actions button:hover,
+.topology-body .topology-sidebar-actions button[aria-pressed='true'] {
+  color: var(--ui-primary);
+  background: #eef3f6;
+  border-color: #cbd8e0;
+}
+
+.map-body .map-category-presets button.active,
+.topology-body .topology-sidebar-actions button[aria-pressed='true'] {
+  color: #fff;
+  background: var(--ui-primary);
+  border-color: var(--ui-primary);
+}
+
+.topology-body .topology-sidebar-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.topology-body .topology-sidebar-actions button {
+  min-width: 0;
+  padding-inline: 4px;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 8px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.topology-body .topology-sidebar-actions button .material-symbols-outlined {
+  font-size: 15px;
+}
+
+.map-body .sidebar-list-header,
+.topology-body .sidebar-list-header {
+  padding-inline: 16px;
+  border-bottom-color: var(--ui-line);
+}
+
+.map-body .selection-summary,
+.topology-body .selection-summary {
+  color: var(--ui-text);
+  font-size: 11px;
+}
+
+.map-body .network-list,
+.topology-body .network-list {
+  padding: 12px;
+}
+
+.map-body .network-item,
+.topology-body .network-item {
+  margin-bottom: 8px;
+  border-radius: var(--ui-radius-card);
+}
+
+.map-body .network-item:hover,
+.topology-body .network-item:hover,
+.map-body .network-item:focus-within,
+.topology-body .network-item:focus-within {
+  background: var(--ui-surface-soft);
+  border-color: var(--ui-line);
+}
+
+.map-body .network-item.selected,
+.topology-body .network-item.selected {
+  background: #eef3f6;
+  border-color: #cbd8e0;
+}
+
+.map-body .network-copy strong,
+.topology-body .network-copy strong {
+  color: var(--ui-ink);
+  font-size: 13px;
+}
+
+.map-body .network-copy small,
+.topology-body .network-copy small {
+  color: var(--ui-text);
+  font-size: 11px;
+}
+
+.map-body .dataset-card,
+.topology-body .dataset-card,
+.map-body .sidebar-topology-readiness,
+.topology-body .sidebar-topology-readiness {
+  background: var(--ui-surface-soft);
+  border-color: var(--ui-line);
+  border-radius: var(--ui-radius-card);
+  box-shadow: none;
+}
+
+.map-body .sidebar-secondary-context .dataset-card,
+.topology-body .sidebar-secondary-context .dataset-card {
+  background: var(--ui-surface);
+}
+
+.map-body .dataset-icon,
+.topology-body .dataset-icon {
+  color: var(--ui-primary);
+  background: #eef3f6;
+  border-color: transparent;
+  border-radius: 9px;
+}
+
+.map-body .sidebar-footer,
+.topology-body .sidebar-footer {
+  color: var(--ui-text);
+  background: var(--ui-surface-soft);
+  border-top-color: var(--ui-line);
+}
+
+/* Shared floating controls ------------------------------------------------ */
+.map-body .map-context-pill,
+.topology-body .topology-stitch-toolbar,
+.map-body .map-action-group,
+.map-body .location-control,
+.map-body .map-legend,
+.map-body .zoom-controls,
+.topology-body .topology-stitch-floating-panel,
+.topology-body .topology-stitch-tray {
+  border-color: var(--ui-line);
+  box-shadow: var(--ui-shadow-float);
+}
+
+.map-body .map-context-pill {
+  border-radius: var(--ui-radius-panel);
+}
+
+.map-body .map-context-pill small,
+.map-body .map-context-pill strong,
+.map-body .context-metrics {
+  font-family: var(--ui-font);
+}
+
+.map-body .map-context-pill small {
+  color: var(--ui-text);
+  font-size: 11px;
+}
+
+.map-body .map-context-pill strong {
+  color: var(--ui-ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.map-body .context-readonly,
+.map-body .context-topology {
+  border-radius: 999px;
+}
+
+.map-body .context-readonly {
+  color: var(--ui-text);
+  background: var(--ui-surface-soft);
+}
+
+.map-body .context-topology.ready,
+.map-body .context-topology.partial_ready {
+  color: var(--ui-success);
+  background: #eaf6f0;
+  border-color: #c9e7d9;
+}
+
+.map-body .map-action-group {
+  min-height: 48px;
+  padding: 4px;
+  gap: 4px;
+  border-radius: var(--ui-radius-card);
+}
+
+.map-body .map-action-group .tool-button {
+  min-height: 38px;
+  padding-inline: 11px;
+  gap: 7px;
+  color: var(--ui-primary);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.map-body .map-action-group .map-action-primary {
+  color: #fff;
+  background: var(--ui-primary);
+  border-color: var(--ui-primary);
+}
+
+.map-body .map-action-group .map-action-primary:hover {
+  background: var(--ui-primary-hover);
+}
+
+.map-body .map-action-group .map-action-secondary:hover,
+.map-body .map-action-group .map-action-ghost:hover {
+  background: var(--ui-surface-soft);
+}
+
+.map-body .map-legend,
+.map-body .zoom-controls,
+.map-body .map-secondary-controls .icon-button {
+  border-radius: var(--ui-radius-card);
+}
+
+.map-body .map-legend strong {
+  color: var(--ui-ink);
+}
+
+.map-body .map-attribution {
+  color: var(--ui-muted);
+}
+
+.map-body .asset-drawer {
+  border-radius: var(--ui-radius-panel);
+  box-shadow: var(--ui-shadow-panel);
+}
+
+/* Topology workspace ------------------------------------------------------ */
+.topology-body .topology-stitch-app,
+.topology-body .topology-stitch-main {
+  background: var(--ui-canvas);
+}
+
+.topology-body .topology-sidebar {
+  flex-basis: clamp(300px, var(--map-sidebar-width, 336px), 380px);
+}
+
+.topology-body .topology-stitch-toolbar {
+  height: 52px;
+  top: 16px;
+  right: 16px;
+  left: 16px;
+  padding-inline: 12px;
+  background: rgba(255, 255, 255, .97);
+  border-radius: var(--ui-radius-card);
+  box-shadow: var(--ui-shadow-float);
+}
+
+.topology-body .topology-stitch-toolbar-context {
+  gap: 8px;
+  color: var(--ui-text);
+  font-size: 12px;
+}
+
+.topology-body .topology-stitch-toolbar-context > strong {
+  color: var(--ui-ink);
+  font-weight: 750;
+}
+
+.topology-body .topology-stitch-toolbar-context > .material-symbols-outlined {
+  color: var(--ui-muted);
+}
+
+.topology-body .topology-stitch-health {
+  gap: 5px;
+  color: var(--ui-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.topology-body .topology-stitch-health.online b {
+  background: var(--ui-success);
+}
+
+.topology-body .topology-stitch-health.offline b {
+  background: var(--ui-danger);
+}
+
+.topology-body .topology-stitch-health.mounting b {
+  background: var(--ui-warning);
+}
+
+.topology-body .topology-stitch-zoom-control {
+  height: 38px;
+  background: var(--ui-surface-soft);
+  border-color: var(--ui-line);
+  border-radius: 9px;
+}
+
+.topology-body .topology-stitch-zoom-control button,
+.topology-body .topology-stitch-toolbar-button {
+  width: 36px;
+  height: 36px;
+  color: var(--ui-text);
+  border-radius: 8px;
+}
+
+.topology-body .topology-stitch-toolbar-button {
+  border: 1px solid var(--ui-line);
+}
+
+.topology-body .topology-stitch-zoom-control button:hover,
+.topology-body .topology-stitch-toolbar-button:hover {
+  color: var(--ui-primary);
+  background: #eef3f6;
+}
+
+.topology-body .topology-stitch-zoom-control > span {
+  color: var(--ui-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.topology-body .topology-stitch-viewport {
+  background-color: var(--ui-canvas);
+  background-image:
+    linear-gradient(rgba(117, 139, 152, .08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(117, 139, 152, .08) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.topology-body .topology-stitch-graph-frame .topology-device-icon {
+  stroke: #7790a0;
+}
+
+.topology-body .topology-stitch-tray {
+  min-height: 54px;
+  padding: 8px 16px;
+  background: var(--ui-surface);
+  border-top-color: var(--ui-line);
+}
+
+.topology-body .topology-stitch-tray-title {
+  color: var(--ui-ink);
+  border-right-color: var(--ui-line);
+  font-size: 11px;
+}
+
+.topology-body .topology-stitch-tray-item {
+  color: var(--ui-text);
+}
+
+.topology-body .topology-stitch-tray-icon {
+  color: var(--ui-muted);
+  border-color: #aebdc7;
+  border-radius: 8px;
+}
+
+.topology-body .topology-document-key {
+  padding: 10px 16px;
+  color: var(--ui-text);
+  background: var(--ui-surface);
+  border-top-color: var(--ui-line);
+  font-family: var(--ui-font);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.topology-body .topology-document-key summary {
+  color: var(--ui-ink);
+  font-size: 12px;
+}
+
+.topology-body .topology-document-key-items {
+  gap: 5px 14px;
+  padding-top: 7px;
+}
+
+.topology-body .topology-document-version {
+  color: var(--ui-muted);
+  padding-top: 7px;
+}
+
+.topology-body .topology-stitch-inspector {
+  width: 368px;
+  min-width: 368px;
+  background: var(--ui-surface);
+  border-left-color: var(--ui-line);
+  box-shadow: -8px 0 24px rgba(23, 50, 77, .06);
+}
+
+.topology-body .topology-stitch-inspector-head,
+.topology-body .topology-stitch-panel-head {
+  min-height: 58px;
+  border-bottom-color: var(--ui-line);
+}
+
+.topology-body .topology-stitch-inspector-head h3,
+.topology-body .topology-stitch-panel-head h2 {
+  color: var(--ui-ink);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.topology-body .topology-stitch-inspector-body {
+  padding: 18px;
+}
+
+.topology-body .topology-stitch-asset-icon {
+  color: var(--ui-primary);
+  background: #eef3f6;
+  border-color: transparent;
+  border-radius: 10px;
+}
+
+.topology-body .topology-stitch-status {
+  padding: 4px 8px;
+  color: var(--ui-success);
+  background: #eaf6f0;
+  border-color: #c9e7d9;
+  border-radius: 999px;
+  font-size: 9px;
+}
+
+.topology-body .topology-stitch-status.offline {
+  color: var(--ui-danger);
+  background: #fff1f1;
+  border-color: #f0cccc;
+}
+
+.topology-body .topology-stitch-inspector-card,
+.topology-body .topology-stitch-relation,
+.topology-body .topology-stitch-view-stats div {
+  border-color: var(--ui-line);
+  border-radius: var(--ui-radius-control);
+  box-shadow: none;
+}
+
+.topology-body .topology-stitch-inspector-card {
+  margin-bottom: 18px;
+  padding: 12px;
+  background: var(--ui-surface-soft);
+}
+
+.topology-body .topology-stitch-section-label,
+.topology-body .topology-stitch-inspector-section > label,
+.topology-body .topology-stitch-field-label {
+  color: var(--ui-text);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .07em;
+}
+
+.topology-body .topology-stitch-inspector-card p,
+.topology-body .topology-stitch-provenance,
+.topology-body .topology-stitch-facts dd {
+  color: var(--ui-ink);
+  font-size: 12px;
+}
+
+.topology-body .topology-stitch-inspector-section {
+  margin-bottom: 18px;
+}
+
+.topology-body .topology-stitch-relation:hover,
+.topology-body .topology-stitch-relation.traced {
+  background: #eef3fb;
+  border-color: #9db5e8;
+}
+
+.topology-body .topology-stitch-primary-button {
+  background: var(--ui-primary);
+  border-color: var(--ui-primary);
+  border-radius: 8px;
+}
+
+.topology-body .topology-stitch-primary-button:hover {
+  background: var(--ui-primary-hover);
+}
+
+.topology-body .topology-stitch-secondary-button {
+  color: var(--ui-primary);
+  border-color: var(--ui-line);
+  border-radius: 8px;
+}
+
+.topology-body .topology-stitch-secondary-button:hover {
+  background: var(--ui-surface-soft);
+}
+
+.topology-body .topology-stitch-floating-panel {
+  width: 320px;
+  border-radius: var(--ui-radius-panel);
+  box-shadow: var(--ui-shadow-panel);
+}
+
+.topology-body .topology-stitch-panel-head {
+  border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0;
+}
+
+.topology-body .topology-stitch-select,
+.topology-body .topology-stitch-search-field {
+  min-height: 42px;
+  border-color: var(--ui-line);
+  border-radius: var(--ui-radius-control);
+}
+
+.topology-body .topology-stitch-family {
+  min-height: 28px;
+  border-color: var(--ui-line);
+  border-radius: 999px;
+}
+
+.topology-body .topology-stitch-family:hover,
+.topology-body .topology-stitch-family.active {
+  color: var(--ui-primary);
+  background: #eef3f6;
+  border-color: #9db5c3;
+}
+
+.topology-body .topology-stitch-toast {
+  color: #f5f5f7;
+  background: rgba(28, 28, 30, .92);
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 13px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .2), 0 1px 1px rgba(255, 255, 255, .1) inset;
+  font-size: 11px;
+}
+
+/* A collapsed topology sidebar must not cover the toolbar's context. */
+.topology-body .topology-stitch-app.topology-sidebar-collapsed .topology-stitch-toolbar {
+  padding-left: 64px;
+}
+
+@media (max-width: 760px) {
+  .map-body .top-navigation,
+  .topology-body .top-navigation {
+    padding-inline: 12px;
+  }
+
+  .map-body .nav-brand,
+  .topology-body .nav-brand {
+    width: auto;
+    flex: 1 1 auto;
+  }
+
+  .topology-body .topology-stitch-app.topology-sidebar-collapsed .topology-stitch-toolbar {
+    padding-left: 58px;
+  }
+
+  .topology-body .topology-stitch-toolbar-context {
+    gap: 6px;
+    font-size: 11px;
+  }
+
+  .topology-body .topology-stitch-toolbar-context > .topology-stitch-health.offline,
+  .topology-body .topology-stitch-toolbar-context > .topology-stitch-health.mounting {
+    display: none;
+  }
+
+  .topology-body .topology-stitch-inspector {
+    width: min(368px, calc(100vw - 32px));
+    min-width: min(368px, calc(100vw - 32px));
+  }
+}
+
+@media (max-width: 620px) {
+  .topology-body .topology-stitch-toolbar {
+    top: 10px;
+    right: 8px;
+    left: 8px;
+    padding-right: 8px;
+  }
+
+  .topology-body .topology-stitch-tray {
+    padding-inline: 10px;
+  }
+}
+
+/* Apple-inspired finishing pass -----------------------------------------
+ * Keep the operational navy/green semantics, but let the product chrome
+ * feel lighter: quieter typography, glassy utility surfaces, and depth that
+ * comes from soft layered shadows rather than heavy borders.
+ */
+:root {
+  --ui-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", Inter, ui-sans-serif, system-ui, sans-serif;
+  --ui-ink: #1d1d1f;
+  --ui-ink-strong: #101820;
+  --ui-text: #687582;
+  --ui-muted: #8a96a1;
+  --ui-line: rgba(60, 60, 67, .14);
+  --ui-line-subtle: rgba(60, 60, 67, .08);
+  --ui-surface: #ffffff;
+  --ui-surface-soft: #f7f8fa;
+  --ui-canvas: #f4f7fa;
+  --ui-primary: #17324d;
+  --ui-primary-hover: #244b6b;
+  --ui-accent: #0a84ff;
+  --ui-selected: #5b7eff;
+  --ui-success: #187557;
+  --ui-warning: #b56d24;
+  --ui-danger: #b64a4a;
+  --ui-radius-control: 12px;
+  --ui-radius-card: 16px;
+  --ui-radius-panel: 22px;
+  --ui-shadow-float: 0 12px 30px rgba(15, 23, 42, .10), 0 2px 8px rgba(15, 23, 42, .05);
+  --ui-shadow-panel: 0 20px 52px rgba(15, 23, 42, .14), 0 4px 16px rgba(15, 23, 42, .06);
+  --ui-glass: rgba(255, 255, 255, .78);
+}
+
+.map-body,
+.topology-body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.map-body .top-navigation,
+.topology-body .top-navigation {
+  position: relative;
+  z-index: 500;
+  background: rgba(255, 255, 255, .84);
+  border-bottom-color: rgba(60, 60, 67, .13);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .9);
+  -webkit-backdrop-filter: blur(20px) saturate(145%);
+  backdrop-filter: blur(20px) saturate(145%);
+}
+
+.map-body .top-navigation nav a,
+.topology-body .top-navigation nav a {
+  border: 1px solid transparent;
+  transition: color 160ms ease, background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.map-body .top-navigation nav a:hover,
+.topology-body .top-navigation nav a:hover {
+  background: rgba(10, 132, 255, .06);
+  border-color: rgba(10, 132, 255, .09);
+}
+
+.map-body .top-navigation nav a.active,
+.topology-body .top-navigation nav a.active {
+  color: var(--ui-accent);
+  background: rgba(10, 132, 255, .11);
+  border-color: rgba(10, 132, 255, .14);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .42);
+}
+
+.map-body .top-navigation nav a.active::after,
+.topology-body .top-navigation nav a.active::after {
+  display: none;
+}
+
+.map-body .icon-button,
+.topology-body .icon-button {
+  width: 40px;
+  height: 40px;
+  background: rgba(255, 255, 255, .64);
+  border-color: rgba(60, 60, 67, .14);
+  border-radius: 12px;
+  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.map-body .icon-button:hover,
+.topology-body .icon-button:hover {
+  background: rgba(10, 132, 255, .08);
+  border-color: rgba(10, 132, 255, .18);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, .08);
+  transform: translateY(-1px);
+}
+
+.map-body .user-menu,
+.topology-body .user-menu {
+  border-left-color: rgba(60, 60, 67, .12);
+}
+
+.map-body .user-menu > span:first-child,
+.topology-body .user-menu > span:first-child,
+.map-body .user-menu-avatar,
+.topology-body .user-menu-avatar {
+  background: linear-gradient(145deg, #244b6b 0%, #132a43 100%);
+  box-shadow: 0 2px 7px rgba(23, 50, 77, .22);
+}
+
+.map-body .map-workspace,
+.topology-body .topology-stitch-shell,
+.topology-body .topology-stitch-app,
+.topology-body .topology-stitch-main {
+  background:
+    radial-gradient(circle at 15% 0%, rgba(10, 132, 255, .055), transparent 34%),
+    var(--ui-canvas);
+}
+
+.map-body .network-sidebar,
+.topology-body .topology-sidebar {
+  background: rgba(255, 255, 255, .86);
+  border-color: rgba(60, 60, 67, .12);
+  box-shadow: 1px 0 0 rgba(255, 255, 255, .74);
+  -webkit-backdrop-filter: blur(18px) saturate(130%);
+  backdrop-filter: blur(18px) saturate(130%);
+}
+
+.map-body .sidebar-heading h1,
+.topology-body .sidebar-heading h1 {
+  letter-spacing: -.04em;
+  line-height: 1.08;
+}
+
+.map-body .area-selector select,
+.topology-body .area-selector select,
+.map-body .search-control,
+.topology-body .search-control,
+.topology-body .topology-stitch-select,
+.topology-body .topology-stitch-search-field {
+  background: rgba(255, 255, 255, .78);
+  border-color: rgba(60, 60, 67, .14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .92), 0 1px 2px rgba(15, 23, 42, .025);
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.map-body .area-selector select:hover,
+.topology-body .area-selector select:hover,
+.map-body .search-control:hover,
+.topology-body .search-control:hover {
+  background: rgba(255, 255, 255, .94);
+  border-color: rgba(10, 132, 255, .22);
+}
+
+.map-body .area-selector select:focus-visible,
+.topology-body .area-selector select:focus-visible,
+.map-body .search-control:focus-within,
+.topology-body .search-control:focus-within,
+.topology-body .topology-stitch-select:focus-visible,
+.topology-body .topology-stitch-search-field:focus-visible {
+  border-color: rgba(10, 132, 255, .62);
+  outline: 0;
+  box-shadow: 0 0 0 4px rgba(10, 132, 255, .14), inset 0 1px 0 rgba(255, 255, 255, .92);
+}
+
+.map-body .map-category-presets button,
+.topology-body .topology-sidebar-actions button {
+  background: rgba(255, 255, 255, .78);
+  border-color: rgba(60, 60, 67, .13);
+  transition: color 160ms ease, background 160ms ease, border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.map-body .map-category-presets button:hover,
+.topology-body .topology-sidebar-actions button:hover,
+.topology-body .topology-sidebar-actions button[aria-pressed='true'] {
+  color: var(--ui-accent);
+  background: rgba(10, 132, 255, .08);
+  border-color: rgba(10, 132, 255, .2);
+  box-shadow: 0 3px 10px rgba(10, 132, 255, .08);
+  transform: translateY(-1px);
+}
+
+.map-body .map-category-presets button.active,
+.topology-body .topology-sidebar-actions button[aria-pressed='true'] {
+  color: #fff;
+  background: linear-gradient(145deg, #0a84ff, #176fc9);
+  border-color: transparent;
+  box-shadow: 0 5px 13px rgba(10, 132, 255, .22);
+}
+
+.map-body .network-item,
+.topology-body .network-item {
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.map-body .network-item:hover,
+.topology-body .network-item:hover,
+.map-body .network-item:focus-within,
+.topology-body .network-item:focus-within {
+  background: rgba(255, 255, 255, .86);
+  border-color: rgba(10, 132, 255, .12);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, .05);
+  transform: translateY(-1px);
+}
+
+.map-body .network-item.selected,
+.topology-body .network-item.selected {
+  background: rgba(10, 132, 255, .08);
+  border-color: rgba(10, 132, 255, .24);
+  box-shadow: inset 3px 0 0 var(--ui-accent), 0 5px 16px rgba(10, 132, 255, .07);
+}
+
+.map-body .dataset-card,
+.topology-body .dataset-card,
+.map-body .sidebar-topology-readiness,
+.topology-body .sidebar-topology-readiness {
+  background: rgba(248, 250, 252, .74);
+  border-color: rgba(60, 60, 67, .1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8), 0 4px 14px rgba(15, 23, 42, .035);
+}
+
+.map-body .dataset-icon,
+.topology-body .dataset-icon,
+.topology-body .topology-stitch-asset-icon {
+  background: rgba(10, 132, 255, .09);
+  color: var(--ui-accent);
+}
+
+.map-body .sidebar-footer,
+.topology-body .sidebar-footer {
+  background: rgba(247, 248, 250, .76);
+  border-top-color: rgba(60, 60, 67, .1);
+}
+
+.map-body .map-context-pill,
+.map-body .map-action-group,
+.map-body .location-control,
+.map-body .map-legend,
+.map-body .zoom-controls,
+.map-body .asset-drawer,
+.topology-body .topology-stitch-toolbar,
+.topology-body .topology-stitch-floating-panel,
+.topology-body .topology-stitch-tray,
+.topology-body .topology-document-key {
+  background: var(--ui-glass);
+  border-color: rgba(255, 255, 255, .82);
+  box-shadow: var(--ui-shadow-float);
+  -webkit-backdrop-filter: blur(22px) saturate(135%);
+  backdrop-filter: blur(22px) saturate(135%);
+}
+
+.map-body .map-context-pill {
+  padding: 14px 18px;
+  border-radius: 18px;
+}
+
+.map-body .map-context-pill strong {
+  letter-spacing: -.015em;
+}
+
+.map-body .context-readonly,
+.map-body .context-topology.ready,
+.map-body .context-topology.partial_ready {
+  background: rgba(255, 255, 255, .72);
+  border-color: rgba(60, 60, 67, .1);
+}
+
+.map-body .context-topology.ready,
+.map-body .context-topology.partial_ready {
+  color: var(--ui-success);
+  background: rgba(52, 199, 89, .10);
+  border-color: rgba(52, 199, 89, .2);
+}
+
+.map-body .map-action-group {
+  min-height: 52px;
+  border-radius: 17px;
+}
+
+.map-body .map-action-group .tool-button {
+  min-height: 40px;
+  border-radius: 11px;
+  transition: color 160ms ease, background 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.map-body .map-action-group .map-action-primary {
+  background: linear-gradient(145deg, #244b6b, #17324d);
+  box-shadow: 0 5px 13px rgba(23, 50, 77, .2);
+}
+
+.map-body .map-action-group .map-action-primary:hover,
+.map-body .map-action-group .map-action-secondary:hover,
+.map-body .map-action-group .map-action-ghost:hover {
+  transform: translateY(-1px);
+}
+
+.map-body .map-action-group .map-action-secondary:hover,
+.map-body .map-action-group .map-action-ghost:hover {
+  background: rgba(10, 132, 255, .08);
+  color: var(--ui-accent);
+}
+
+.map-body .map-legend,
+.map-body .zoom-controls,
+.map-body .map-secondary-controls .icon-button {
+  border-radius: 15px;
+}
+
+.map-body .location-control,
+.map-body .zoom-controls button,
+.map-body .map-secondary-controls .icon-button {
+  transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.map-body .location-control:hover,
+.map-body .zoom-controls button:hover,
+.map-body .map-secondary-controls .icon-button:hover {
+  background: rgba(10, 132, 255, .08);
+  transform: translateY(-1px);
+}
+
+.map-body .map-pole-group-collapsed {
+  border: 1px solid rgba(60, 60, 67, .16);
+  border-radius: 15px;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, .82), 0 8px 18px rgba(15, 23, 42, .13);
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.map-body .map-pole-group-collapsed:hover,
+.map-body .map-pole-group-collapsed:focus-visible {
+  border-color: rgba(10, 132, 255, .46);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, .96), 0 0 0 4px rgba(10, 132, 255, .18), 0 10px 22px rgba(15, 23, 42, .16);
+}
+
+.map-body .map-adaptive-asset {
+  box-shadow: 0 0 0 1px rgba(23, 50, 77, .24), 0 5px 12px rgba(15, 23, 42, .18);
+}
+
+.map-body .map-adaptive-asset:hover,
+.map-body .map-adaptive-asset:focus-visible,
+.map-body .map-adaptive-asset.selected {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px color-mix(in srgb, var(--marker-color) 72%, transparent), 0 8px 18px rgba(15, 23, 42, .22);
+}
+
+.topology-body .topology-stitch-toolbar {
+  background: rgba(255, 255, 255, .78);
+  border-radius: 17px;
+}
+
+.topology-body .topology-stitch-health {
+  padding: 5px 8px;
+  background: rgba(247, 248, 250, .76);
+  border: 1px solid rgba(60, 60, 67, .08);
+  border-radius: 999px;
+}
+
+.topology-body .topology-stitch-toolbar-button,
+.topology-body .topology-stitch-zoom-control {
+  background: rgba(247, 248, 250, .72);
+  border-color: rgba(60, 60, 67, .12);
+  border-radius: 12px;
+}
+
+.topology-body .topology-stitch-toolbar-button {
+  transition: color 160ms ease, background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.topology-body .topology-stitch-toolbar-button:hover,
+.topology-body .topology-stitch-toolbar-button.active,
+.topology-body .topology-stitch-zoom-control button:hover {
+  color: var(--ui-accent);
+  background: rgba(10, 132, 255, .09);
+  border-color: rgba(10, 132, 255, .18);
+  transform: translateY(-1px);
+}
+
+.topology-body .topology-stitch-viewport {
+  background-color: var(--ui-canvas);
+  background-image: radial-gradient(circle at 1px 1px, rgba(99, 111, 125, .18) 1px, transparent 1.5px);
+  background-size: 24px 24px;
+}
+
+.topology-body .topology-stitch-tray {
+  min-height: 62px;
+  background: rgba(255, 255, 255, .76);
+  border-top-color: rgba(60, 60, 67, .11);
+}
+
+.topology-body .topology-stitch-tray-title {
+  border-right-color: rgba(60, 60, 67, .1);
+}
+
+.topology-body .topology-stitch-tray-item {
+  padding: 4px 6px;
+  border-radius: 11px;
+  transition: color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.topology-body .topology-stitch-tray-item:hover {
+  color: var(--ui-accent);
+  background: rgba(10, 132, 255, .07);
+  transform: translateY(-1px);
+}
+
+.topology-body .topology-stitch-tray-icon {
+  border-color: rgba(138, 150, 161, .66);
+  border-radius: 9px;
+}
+
+.topology-body .topology-document-key {
+  border-top-color: rgba(60, 60, 67, .11);
+}
+
+.topology-body .topology-document-key-items span {
+  padding: 3px 7px;
+  background: rgba(247, 248, 250, .76);
+  border: 1px solid rgba(60, 60, 67, .08);
+  border-radius: 999px;
+}
+
+.topology-body .topology-stitch-inspector {
+  background: rgba(255, 255, 255, .88);
+  border-left-color: rgba(60, 60, 67, .11);
+  box-shadow: -12px 0 30px rgba(15, 23, 42, .08);
+  -webkit-backdrop-filter: blur(18px) saturate(130%);
+  backdrop-filter: blur(18px) saturate(130%);
+}
+
+.topology-body .topology-stitch-inspector-head,
+.topology-body .topology-stitch-panel-head {
+  border-bottom-color: rgba(60, 60, 67, .1);
+}
+
+.topology-body .topology-stitch-inspector-card {
+  background: rgba(247, 248, 250, .7);
+  border-color: rgba(60, 60, 67, .1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8), 0 4px 14px rgba(15, 23, 42, .035);
+}
+
+.topology-body .topology-stitch-relation:hover,
+.topology-body .topology-stitch-relation.traced {
+  background: rgba(10, 132, 255, .08);
+  border-color: rgba(10, 132, 255, .24);
+}
+
+.topology-body .topology-stitch-primary-button {
+  background: linear-gradient(145deg, #244b6b, #17324d);
+  border-color: transparent;
+  border-radius: 11px;
+  box-shadow: 0 5px 13px rgba(23, 50, 77, .18);
+}
+
+.topology-body .topology-stitch-secondary-button {
+  border-color: rgba(60, 60, 67, .13);
+  border-radius: 11px;
+}
+
+.topology-body .topology-stitch-secondary-button:hover {
+  color: var(--ui-accent);
+  background: rgba(10, 132, 255, .08);
+  border-color: rgba(10, 132, 255, .18);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-body *,
+  .topology-body * {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+/* Topology workspace polish ---------------------------------------------
+ * The topology view is an editing surface, not a dashboard of controls.
+ * Keep the canvas dominant, give editing actions a clear hierarchy, and use
+ * graphite as the default action color so blue remains reserved for focus.
+ */
+.topology-body {
+  --topology-graphite: #1d1d1f;
+  --topology-graphite-soft: #f2f2f7;
+  --topology-hairline: rgba(60, 60, 67, .14);
+  --topology-glass: rgba(255, 255, 255, .78);
+  background: #f5f5f7;
+}
+
+.topology-body .topology-stitch-app,
+.topology-body .topology-stitch-main,
+.topology-body .topology-stitch-shell {
+  background: #f5f5f7;
+}
+
+.topology-body .top-navigation {
+  height: 58px;
+  min-height: 58px;
+  flex-basis: 58px;
+  padding-inline: 22px;
+}
+
+.topology-body .topology-stitch-shell {
+  position: relative;
+}
+
+.topology-body .topology-sidebar {
+  width: 316px;
+  min-width: 316px;
+  flex-basis: 316px;
+  background: rgba(255, 255, 255, .84);
+  border-right-color: var(--topology-hairline);
+  box-shadow: 1px 0 0 rgba(255, 255, 255, .8);
+}
+
+.topology-body .topology-sidebar .sidebar-heading {
+  min-height: 88px;
+  padding: 24px 22px 17px;
+}
+
+.topology-body .topology-sidebar .sidebar-heading h1 {
+  margin-top: 5px;
+  color: var(--topology-graphite);
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -.045em;
+}
+
+.topology-body .topology-sidebar .eyebrow,
+.topology-body .topology-sidebar .topology-sidebar-summary,
+.topology-body .topology-sidebar .topology-sidebar-live {
+  color: #85858b;
+}
+
+.topology-body .topology-sidebar .eyebrow,
+.topology-body .topology-stitch-eyebrow {
+  letter-spacing: .025em;
+  text-transform: none;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.topology-body .topology-sidebar .sidebar-content {
+  padding-top: 4px;
+}
+
+.topology-body .topology-sidebar .area-selector {
+  margin: 0 20px 14px;
+  color: #73777d;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+
+.topology-body .topology-sidebar .area-selector select {
+  min-height: 44px;
+  padding-inline: 13px 40px;
+  color: var(--topology-graphite);
+  background: rgba(255, 255, 255, .86);
+  border-color: var(--topology-hairline);
+  border-radius: 13px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .025);
+}
+
+.topology-body .topology-sidebar .asset-search-combobox {
+  margin-inline: 20px;
+}
+
+.topology-body .topology-sidebar .search-control {
+  height: 42px;
+  min-height: 42px;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, .86);
+  border-color: var(--topology-hairline);
+}
+
+.topology-body .topology-sidebar .search-control input::placeholder {
+  color: #a0a0a6;
+}
+
+.topology-body .topology-sidebar-actions {
+  margin: 16px 20px 18px;
+  padding: 4px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  background: rgba(118, 118, 128, .12);
+  border: 0;
+  border-radius: 14px;
+}
+
+.topology-body .topology-sidebar-actions button {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 7px;
+  justify-content: center;
+  gap: 5px;
+  color: #686b72;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  transition: color 160ms ease, background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.topology-body .topology-sidebar-actions button .material-symbols-outlined {
+  font-size: 16px;
+}
+
+.topology-body .topology-sidebar-actions button:hover {
+  color: var(--topology-graphite);
+  background: rgba(255, 255, 255, .55);
+}
+
+.topology-body .topology-sidebar-actions button[aria-pressed='true'] {
+  color: var(--topology-graphite);
+  background: rgba(255, 255, 255, .98);
+  border: 0;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, .10), inset 0 1px 0 rgba(255, 255, 255, .9);
+  transform: none;
+}
+
+.topology-body .topology-sidebar-summary {
+  margin-top: 4px;
+  padding: 14px 20px;
+  border-top-color: var(--topology-hairline);
+  border-bottom-color: var(--topology-hairline);
+}
+
+.topology-body .topology-sidebar-summary .selection-summary {
+  color: #73777d;
+}
+
+.topology-body .topology-sidebar-summary .selection-summary strong {
+  color: var(--topology-graphite);
+  font-weight: 650;
+}
+
+.topology-body .topology-sidebar-live {
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.topology-body .topology-sidebar-live .topology-stitch-health {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.topology-body .topology-sidebar-secondary {
+  padding: 16px 20px 0;
+}
+
+.topology-body .topology-sidebar-secondary .dataset-card {
+  padding: 12px;
+  border-radius: 15px;
+}
+
+.topology-body .topology-sidebar-secondary .sidebar-topology-readiness {
+  margin-top: 10px;
+  border-radius: 15px;
+}
+
+.topology-body .topology-sidebar-footer {
+  padding: 13px 20px 18px;
+  background: rgba(247, 248, 250, .62);
+  border-top-color: var(--topology-hairline);
+}
+
+.topology-body .topology-sidebar-footer p {
+  color: #85858b;
+  line-height: 1.45;
+}
+
+.topology-body .topology-stitch-toolbar {
+  top: 20px;
+  right: 20px;
+  left: 20px;
+  min-height: 60px;
+  height: auto;
+  padding: 8px 10px 8px 14px;
+  gap: 14px;
+  background: var(--topology-glass);
+  border-color: rgba(255, 255, 255, .84);
+  border-radius: 18px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, .10), 0 2px 8px rgba(15, 23, 42, .04);
+}
+
+.topology-body .topology-stitch-toolbar-context {
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 9px;
+}
+
+.topology-body .topology-toolbar-symbol {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: grid;
+  place-items: center;
+  color: #5f6368;
+  background: rgba(118, 118, 128, .11);
+  border-radius: 9px;
+  font-size: 17px;
+}
+
+.topology-body .topology-toolbar-context-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.topology-body .topology-toolbar-context-copy strong {
+  max-width: 220px;
+  color: var(--topology-graphite);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+}
+
+.topology-body .topology-toolbar-context-copy > span {
+  color: #929399;
+  font-size: 10px;
+}
+
+.topology-body .topology-toolbar-context-divider {
+  width: 1px;
+  height: 28px;
+  flex: 0 0 1px;
+  background: var(--topology-hairline);
+}
+
+.topology-body .topology-stitch-health {
+  padding: 5px 7px;
+  background: rgba(118, 118, 128, .07);
+  border: 1px solid rgba(60, 60, 67, .07);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.topology-body .topology-stitch-health.online b {
+  box-shadow: 0 0 0 3px rgba(52, 199, 89, .11);
+}
+
+.topology-body .topology-stitch-toolbar-actions,
+.topology-body .topology-toolbar-group {
+  display: flex;
+  align-items: center;
+}
+
+.topology-body .topology-stitch-toolbar-actions {
+  flex: 0 0 auto;
+  gap: 9px;
+}
+
+.topology-body .topology-toolbar-group {
+  gap: 5px;
+}
+
+.topology-body .topology-stitch-toolbar-divider {
+  height: 28px;
+  margin: 0 1px;
+  background: var(--topology-hairline);
+}
+
+.topology-body .topology-stitch-zoom-control {
+  height: 36px;
+  background: rgba(118, 118, 128, .10);
+  border-color: transparent;
+  border-radius: 11px;
+}
+
+.topology-body .topology-stitch-zoom-control button,
+.topology-body .topology-stitch-toolbar-button {
+  width: 36px;
+  height: 36px;
+  color: #65686f;
+  border-color: transparent;
+  border-radius: 10px;
+  box-shadow: none;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+}
+
+.topology-body .topology-stitch-zoom-control > span {
+  min-width: 45px;
+  color: #565a61;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.topology-body .topology-stitch-zoom-control button:hover,
+.topology-body .topology-stitch-toolbar-button:hover {
+  color: var(--topology-graphite);
+  background: rgba(118, 118, 128, .15);
+  border-color: transparent;
+  transform: translateY(-1px);
+}
+
+.topology-body .topology-stitch-toolbar-button:active,
+.topology-body .topology-stitch-zoom-control button:active {
+  transform: scale(.96);
+}
+
+.topology-body .topology-toolbar-icon-only {
+  background: rgba(118, 118, 128, .08);
+}
+
+.topology-body .topology-toolbar-labeled {
+  width: auto;
+  min-width: 36px;
+  padding: 0 10px;
+  display: inline-flex;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.topology-body .topology-toolbar-labeled .material-symbols-outlined {
+  font-size: 17px;
+}
+
+.topology-body .topology-toolbar-primary {
+  color: #fff;
+  background: var(--topology-graphite);
+  box-shadow: 0 4px 11px rgba(29, 29, 31, .18);
+}
+
+.topology-body .topology-toolbar-primary:hover {
+  color: #fff;
+  background: #2c2c2e;
+  box-shadow: 0 6px 15px rgba(29, 29, 31, .21);
+}
+
+.topology-body .topology-stitch-toolbar-button:disabled {
+  color: #b4b5ba;
+  background: rgba(118, 118, 128, .06);
+  border-color: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.topology-body .topology-remove-edge-tool.active {
+  color: #b3261e;
+  background: rgba(255, 59, 48, .10);
+  border-color: rgba(255, 59, 48, .17);
+  box-shadow: 0 0 0 3px rgba(255, 59, 48, .08);
+}
+
+.topology-body .topology-stitch-viewport {
+  background-color: #f5f5f7;
+  background-image: radial-gradient(circle at 1px 1px, rgba(90, 96, 104, .16) 1px, transparent 1.4px);
+  background-size: 24px 24px;
+}
+
+.topology-body .topology-stitch-graph-frame {
+  transition: transform .34s cubic-bezier(.22, 1, .36, 1);
+}
+
+.topology-body .topology-stitch-tray {
+  min-height: 62px;
+  padding: 8px 18px;
+  background: rgba(255, 255, 255, .76);
+  border-top-color: var(--topology-hairline);
+  box-shadow: 0 -8px 24px rgba(15, 23, 42, .035);
+}
+
+.topology-body .topology-stitch-tray[hidden] {
+  display: none;
+}
+
+.topology-body .topology-stitch-tray-title {
+  gap: 7px;
+  color: #65686f;
+  border-right-color: var(--topology-hairline);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.topology-body .topology-stitch-tray-title strong {
+  min-width: 20px;
+  padding: 2px 6px;
+  color: #696b71;
+  background: rgba(118, 118, 128, .11);
+  border-radius: 999px;
+  font-size: 10px;
+  text-align: center;
+}
+
+.topology-body .topology-stitch-tray-item {
+  border-radius: 11px;
+}
+
+.topology-body .topology-document-key {
+  padding: 9px 18px 11px;
+  color: #777b82;
+  background: rgba(255, 255, 255, .66);
+  border-top-color: transparent;
+  font-size: 10px;
+}
+
+.topology-body .topology-document-key summary {
+  color: #6c7077;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.topology-body .topology-document-key-items span {
+  padding: 3px 7px;
+  color: #777b82;
+  background: rgba(118, 118, 128, .07);
+  border-color: rgba(60, 60, 67, .08);
+}
+
+.topology-body .topology-stitch-inspector {
+  width: 352px;
+  min-width: 352px;
+  background: rgba(255, 255, 255, .84);
+  border-left-color: var(--topology-hairline);
+  box-shadow: -12px 0 30px rgba(15, 23, 42, .08);
+}
+
+.topology-body .topology-stitch-inspector-head,
+.topology-body .topology-stitch-panel-head {
+  min-height: 62px;
+  padding-inline: 20px 14px;
+  background: rgba(255, 255, 255, .66);
+  border-bottom-color: var(--topology-hairline);
+}
+
+.topology-body .topology-stitch-inspector-head h3,
+.topology-body .topology-stitch-panel-head h2 {
+  color: var(--topology-graphite);
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -.02em;
+}
+
+.topology-body .topology-stitch-inspector-body {
+  padding: 20px;
+}
+
+.topology-body .topology-stitch-inspector-card {
+  background: rgba(247, 248, 250, .76);
+  border-color: var(--topology-hairline);
+  border-radius: 15px;
+}
+
+.topology-body .topology-stitch-relation,
+.topology-body .topology-stitch-secondary-button,
+.topology-body .topology-stitch-primary-button {
+  border-radius: 11px;
+}
+
+.topology-body .topology-stitch-relation {
+  min-height: 40px;
+  background: rgba(255, 255, 255, .74);
+}
+
+.topology-body .topology-stitch-relation:hover,
+.topology-body .topology-stitch-relation.traced {
+  color: var(--topology-graphite);
+  background: rgba(118, 118, 128, .10);
+  border-color: rgba(60, 60, 67, .18);
+}
+
+.topology-body .topology-stitch-inspector-footer {
+  padding: 14px 20px 18px;
+  background: rgba(247, 248, 250, .66);
+  border-top-color: var(--topology-hairline);
+}
+
+.topology-body .topology-stitch-secondary-button {
+  color: #5f6368;
+  background: rgba(255, 255, 255, .75);
+  border-color: var(--topology-hairline);
+}
+
+.topology-body .topology-stitch-secondary-button:hover {
+  color: var(--topology-graphite);
+  background: rgba(118, 118, 128, .10);
+  border-color: rgba(60, 60, 67, .18);
+}
+
+.topology-body .topology-stitch-detail-link,
+.topology-body .topology-stitch-text-button,
+.topology-body .topology-stitch-link-button {
+  color: #696b71;
+}
+
+.topology-body .topology-stitch-detail-link:hover,
+.topology-body .topology-stitch-text-button:hover,
+.topology-body .topology-stitch-link-button:hover {
+  color: var(--topology-graphite);
+}
+
+.topology-body .topology-stitch-floating-panel {
+  top: 92px;
+  left: calc(316px + 24px);
+  width: 340px;
+  background: rgba(255, 255, 255, .86);
+  border-color: rgba(255, 255, 255, .88);
+  border-radius: 20px;
+  box-shadow: 0 20px 52px rgba(15, 23, 42, .14), 0 4px 16px rgba(15, 23, 42, .06);
+}
+
+.topology-body .topology-stitch-app.topology-sidebar-collapsed .topology-stitch-floating-panel {
+  left: 24px;
+}
+
+.topology-body .topology-stitch-toast {
+  bottom: 32px;
+  padding: 11px 15px;
+  color: #f5f5f7;
+  background: rgba(29, 29, 31, .92);
+  border-color: rgba(255, 255, 255, .12);
+  border-radius: 14px;
+  font-size: 12px;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, .18), 0 1px 1px rgba(255, 255, 255, .12) inset;
+}
+
+.topology-body .topology-draft-bar {
+  bottom: 78px;
+  padding: 10px 11px 10px 13px;
+  gap: 10px;
+  background: rgba(255, 255, 255, .86);
+  border-color: rgba(255, 255, 255, .88);
+  border-radius: 18px;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, .15), 0 3px 10px rgba(15, 23, 42, .06);
+}
+
+.topology-body .topology-draft-bar strong {
+  color: var(--topology-graphite);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.topology-body .topology-draft-indicator {
+  width: 8px;
+  height: 8px;
+  background: #ff9f0a;
+  box-shadow: 0 0 0 4px rgba(255, 159, 10, .13);
+}
+
+.topology-body .topology-draft-bar button {
+  min-height: 34px;
+  padding: 0 13px;
+  color: #64666c;
+  background: rgba(118, 118, 128, .10);
+  border: 0;
+  border-radius: 10px;
+  font-size: 11px;
+  transition: color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.topology-body .topology-draft-bar button:hover {
+  color: var(--topology-graphite);
+  background: rgba(118, 118, 128, .16);
+  transform: translateY(-1px);
+}
+
+.topology-body .topology-draft-bar .topology-save-button {
+  color: #fff;
+  background: var(--topology-graphite);
+  box-shadow: 0 4px 11px rgba(29, 29, 31, .18);
+}
+
+.topology-body .topology-draft-bar .topology-save-button:hover {
+  color: #fff;
+  background: #2c2c2e;
+}
+
+@media (max-width: 1180px) {
+  .topology-body .topology-toolbar-labeled > span:last-child {
+    display: none;
+  }
+
+  .topology-body .topology-toolbar-labeled {
+    width: 36px;
+    padding-inline: 0;
+    justify-content: center;
+  }
+
+  .topology-body .topology-stitch-toolbar-context .topology-stitch-health.mounting {
+    display: none;
+  }
+}
+
+@media (max-width: 820px) {
+  .topology-body .topology-stitch-toolbar {
+    right: 14px;
+    left: 14px;
+  }
+
+  .topology-body .topology-stitch-floating-panel {
+    left: 24px;
+    width: min(340px, calc(100vw - 48px));
+  }
+
+  .topology-body .topology-stitch-inspector {
+    width: min(352px, calc(100vw - 32px));
+    min-width: min(352px, calc(100vw - 32px));
+  }
+}
+
+@media (max-width: 620px) {
+  .topology-body .topology-stitch-toolbar {
+    top: 10px;
+    right: 8px;
+    left: 8px;
+    padding-left: 10px;
+  }
+
+  .topology-body .topology-toolbar-context-copy > span,
+  .topology-body .topology-stitch-health.offline,
+  .topology-body .topology-stitch-health.mounting,
+  .topology-body .topology-toolbar-context-divider {
+    display: none;
+  }
+
+  .topology-body .topology-toolbar-symbol {
+    width: 28px;
+    height: 28px;
+    flex-basis: 28px;
+  }
+
+  .topology-body .topology-toolbar-edit-actions {
+    gap: 3px;
+  }
+
+  .topology-body .topology-stitch-toolbar-actions {
+    gap: 5px;
+  }
+
+  .topology-body .topology-stitch-toolbar-divider {
+    margin-inline: 0;
+  }
+
+  .topology-body .topology-draft-bar {
+    right: 10px;
+    bottom: 62px;
+    left: 10px;
+    width: auto;
+    max-width: none;
+    transform: none;
+  }
+}
+
+/* Network list refinement -----------------------------------------------
+ * Visibility is already communicated by the checkbox. The row itself can
+ * therefore stay calm and neutral instead of turning every active network
+ * into a blue card.
+ */
+.map-body .network-list,
+.topology-body .network-list {
+  padding: 10px 12px 8px;
+  background: transparent;
+}
+
+.map-body .network-item,
+.topology-body .network-item {
+  margin-bottom: 7px;
+  background: rgba(255, 255, 255, .76);
+  border: 1px solid rgba(60, 60, 67, .11);
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .035);
+  transform: none;
+}
+
+.map-body .network-item:hover,
+.topology-body .network-item:hover,
+.map-body .network-item:focus-within,
+.topology-body .network-item:focus-within {
+  background: rgba(255, 255, 255, .96);
+  border-color: rgba(10, 132, 255, .2);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, .07), inset 0 0 0 1px rgba(255, 255, 255, .7);
+  transform: translateY(-1px);
+}
+
+.map-body .network-item.selected,
+.topology-body .network-item.selected {
+  background: rgba(255, 255, 255, .76);
+  border-color: rgba(60, 60, 67, .11);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .035);
+}
+
+.map-body .network-item.selected:hover,
+.topology-body .network-item.selected:hover,
+.map-body .network-item.selected:focus-within,
+.topology-body .network-item.selected:focus-within {
+  background: rgba(255, 255, 255, .96);
+  border-color: rgba(10, 132, 255, .2);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, .07), inset 0 0 0 1px rgba(255, 255, 255, .7);
+}
+
+.map-body .network-item.focused,
+.topology-body .network-item.focused {
+  background: rgba(10, 132, 255, .075);
+  border-color: rgba(10, 132, 255, .27);
+  box-shadow: inset 0 0 0 1px rgba(10, 132, 255, .07), 0 5px 14px rgba(10, 132, 255, .08);
+}
+
+.map-body .network-row,
+.topology-body .network-row {
+  min-height: 62px;
+}
+
+.map-body .network-main,
+.topology-body .network-main {
+  min-height: 60px;
+  padding: 8px 4px 8px 11px;
+  grid-template-columns: 20px 8px minmax(0, 1fr);
+  gap: 10px;
+  border-radius: 13px;
+}
+
+.map-body .network-checkbox,
+.topology-body .network-checkbox {
+  width: 20px;
+  height: 20px;
+  color: #fff;
+  background: rgba(255, 255, 255, .85);
+  border: 1px solid rgba(60, 60, 67, .2);
+  border-radius: 6px;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, .8);
+}
+
+.map-body .network-checkbox.checked,
+.topology-body .network-checkbox.checked {
+  background: #172b40;
+  border-color: #172b40;
+  box-shadow: 0 2px 5px rgba(23, 43, 64, .18);
+}
+
+.map-body .network-checkbox .material-symbols-outlined,
+.topology-body .network-checkbox .material-symbols-outlined {
+  font-size: 14px;
+  font-variation-settings: "FILL" 1, "wght" 700;
+}
+
+.map-body .network-color-indicator,
+.topology-body .network-color-indicator {
+  width: 8px;
+  height: 8px;
+  background: var(--network-color);
+  border-radius: 999px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--network-color) 13%, transparent);
+}
+
+.map-body .network-copy strong,
+.topology-body .network-copy strong {
+  color: #1d1d1f;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -.012em;
+  line-height: 1.25;
+}
+
+.map-body .network-copy small,
+.topology-body .network-copy small {
+  margin-top: 4px;
+  color: #7a8590;
+  font-size: 11px;
+  line-height: 1.15;
+}
+
+.map-body .network-copy small > span + span::before,
+.topology-body .network-copy small > span + span::before {
+  margin-right: 5px;
+  color: #b1bac3;
+}
+
+.map-body .network-health,
+.topology-body .network-health {
+  color: #249766;
+  font-weight: 650;
+}
+
+.map-body .network-health i,
+.topology-body .network-health i {
+  width: 6px;
+  height: 6px;
+  background: #2ba875;
+  box-shadow: 0 0 0 2px rgba(43, 168, 117, .1);
+}
+
+.map-body .network-row-actions,
+.topology-body .network-row-actions {
+  width: 54px;
+  min-width: 54px;
+  padding-right: 5px;
+}
+
+.map-body .network-icon-action,
+.topology-body .network-icon-action {
+  width: 25px;
+  height: 34px;
+  color: #9aa6b1;
+  border-radius: 9px;
+  transition: color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.map-body .network-icon-action:hover,
+.topology-body .network-icon-action:hover {
+  color: #52687b;
+  background: rgba(10, 132, 255, .08);
+  transform: translateY(-1px);
+}
+
+.map-body .network-item.focused .focus-network,
+.topology-body .network-item.focused .focus-network,
+.map-body .network-item.focused .focus-network:hover,
+.topology-body .network-item.focused .focus-network:hover {
+  color: var(--ui-accent);
+  background: rgba(10, 132, 255, .11);
+  box-shadow: none;
+}
+
+.map-body .network-row-actions.has-coverage-toggle .network-coverage-toggle,
+.topology-body .network-row-actions.has-coverage-toggle .network-coverage-toggle {
+  right: calc(100% + 9px);
+}
+
+.map-body .network-coverage-toggle,
+.topology-body .network-coverage-toggle {
+  width: 38px;
+  height: 22px;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  background: #e5e7eb;
+  border: 1px solid rgba(60, 60, 67, .12);
+  border-radius: 999px;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, .08);
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.map-body .network-coverage-toggle[aria-checked="true"],
+.topology-body .network-coverage-toggle[aria-checked="true"] {
+  justify-content: flex-end;
+  color: #fff;
+  background: #2ebd68;
+  border-color: #2ebd68;
+  box-shadow: 0 2px 6px rgba(46, 189, 104, .22);
+}
+
+.map-body .coverage-toggle-label,
+.topology-body .coverage-toggle-label {
+  display: none;
+}
+
+.map-body .coverage-toggle-dot,
+.topology-body .coverage-toggle-dot {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, .2);
+}
+
+.map-body .network-relation-warning,
+.topology-body .network-relation-warning {
+  color: #b87420;
+}
+
+/* Native Apple-style grouped list -------------------------------------- */
+:root {
+  --apple-blue: #007aff;
+  --apple-green: #34c759;
+  --apple-orange: #ff9f0a;
+  --apple-gray: #8e8e93;
+  --apple-group: rgba(255, 255, 255, .76);
+  --apple-hairline: rgba(60, 60, 67, .12);
+}
+
+.map-body .network-sidebar,
+.topology-body .topology-sidebar {
+  background: rgba(246, 246, 248, .88);
+  border-right-color: rgba(60, 60, 67, .12);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, .65);
+}
+
+.map-body .sidebar-heading,
+.topology-body .topology-sidebar .sidebar-heading {
+  background: transparent;
+}
+
+.map-body .sidebar-list-header,
+.topology-body .sidebar-list-header {
+  padding: 6px 16px 8px;
+  background: transparent;
+  border-bottom: 0;
+}
+
+.map-body .network-list,
+.topology-body .network-list {
+  margin: 0 16px 16px;
+  padding: 0;
+  background: var(--apple-group);
+  border: 1px solid var(--apple-hairline);
+  border-radius: 18px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04), inset 0 1px 0 rgba(255, 255, 255, .72);
+  overflow: hidden;
+}
+
+.map-body .network-item,
+.topology-body .network-item,
+.map-body .network-item.selected,
+.topology-body .network-item.selected {
+  margin: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  transform: none;
+}
+
+.map-body .network-item + .network-item,
+.topology-body .network-item + .network-item {
+  border-top: 1px solid var(--apple-hairline);
+}
+
+.map-body .network-item:hover,
+.topology-body .network-item:hover,
+.map-body .network-item:focus-within,
+.topology-body .network-item:focus-within,
+.map-body .network-item.selected:hover,
+.topology-body .network-item.selected:hover,
+.map-body .network-item.selected:focus-within,
+.topology-body .network-item.selected:focus-within {
+  background: rgba(255, 255, 255, .7);
+  border-color: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.map-body .network-item.focused,
+.topology-body .network-item.focused {
+  background: rgba(0, 122, 255, .065);
+  border-color: transparent;
+  box-shadow: inset 3px 0 0 var(--apple-blue);
+}
+
+.map-body .network-row,
+.topology-body .network-row {
+  min-height: 66px;
+}
+
+.map-body .network-main,
+.topology-body .network-main {
+  min-height: 66px;
+  padding: 10px 4px 10px 16px;
+  grid-template-columns: 20px 8px minmax(0, 1fr);
+  gap: 11px;
+  border-radius: 0;
+}
+
+.map-body .network-main:focus-visible,
+.topology-body .network-main:focus-visible {
+  outline: 3px solid rgba(0, 122, 255, .2);
+  outline-offset: -4px;
+}
+
+.map-body .network-checkbox,
+.topology-body .network-checkbox {
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: 1px solid rgba(60, 60, 67, .22);
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.map-body .network-checkbox.checked,
+.topology-body .network-checkbox.checked {
+  background: var(--apple-blue);
+  border-color: var(--apple-blue);
+  box-shadow: 0 2px 5px rgba(0, 122, 255, .22);
+}
+
+.map-body .network-color-indicator,
+.topology-body .network-color-indicator {
+  width: 8px;
+  height: 8px;
+  background: var(--network-color);
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--network-color) 12%, transparent);
+}
+
+.map-body .network-copy strong,
+.topology-body .network-copy strong {
+  color: #1d1d1f;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  line-height: 1.2;
+}
+
+.map-body .network-copy small,
+.topology-body .network-copy small {
+  margin-top: 5px;
+  color: var(--apple-gray);
+  font-size: 11px;
+  line-height: 1.15;
+}
+
+.map-body .network-health,
+.topology-body .network-health {
+  color: var(--apple-green);
+  font-weight: 600;
+}
+
+.map-body .network-health i,
+.topology-body .network-health i {
+  background: var(--apple-green);
+  box-shadow: none;
+}
+
+.map-body .network-row-actions,
+.topology-body .network-row-actions {
+  width: 58px;
+  min-width: 58px;
+  padding-right: 7px;
+}
+
+.map-body .network-icon-action,
+.topology-body .network-icon-action {
+  width: 26px;
+  height: 34px;
+  color: #b0b5bb;
+  border-radius: 9px;
+}
+
+.map-body .network-icon-action:hover,
+.topology-body .network-icon-action:hover {
+  color: var(--apple-blue);
+  background: rgba(0, 122, 255, .08);
+  transform: none;
+}
+
+.map-body .network-row-actions.has-coverage-toggle .network-coverage-toggle,
+.topology-body .network-row-actions.has-coverage-toggle .network-coverage-toggle {
+  right: calc(100% + 8px);
+}
+
+.map-body .network-coverage-toggle,
+.topology-body .network-coverage-toggle {
+  width: 38px;
+  height: 22px;
+  padding: 2px;
+  background: #e5e5ea;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .08);
+}
+
+.map-body .network-coverage-toggle[aria-checked="true"],
+.topology-body .network-coverage-toggle[aria-checked="true"] {
+  background: var(--apple-green);
+  border: 0;
+  box-shadow: 0 2px 6px rgba(52, 199, 89, .2);
+}
+
+.map-body .coverage-toggle-label,
+.topology-body .coverage-toggle-label {
+  display: none;
+}
+
+.map-body .coverage-toggle-dot,
+.topology-body .coverage-toggle-dot {
+  width: 18px;
+  height: 18px;
+  flex-basis: 18px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .2);
+}
+
+.map-body .network-relation-warning,
+.topology-body .network-relation-warning {
+  color: var(--apple-orange);
+}
+
+/* Quiet the dense diagram key: Apple-style documentation uses whitespace
+   and small color markers instead of a pill around every legend item. */
+.topology-body .topology-document-key {
+  padding: 10px 18px;
+  background: rgba(255, 255, 255, .72);
+  border-top-color: rgba(60, 60, 67, .1);
+}
+
+.topology-body .topology-document-key summary {
+  color: #1d1d1f;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+}
+
+.topology-body .topology-document-key-items {
+  gap: 7px 18px;
+  padding-top: 8px;
+}
+
+.topology-body .topology-document-key-items span {
+  padding: 0;
+  color: #6f7780;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.topology-body .topology-document-key-items i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.map-body .map-action-group .map-action-primary,
+.topology-body .topology-stitch-primary-button {
+  background: var(--apple-blue);
+  border-color: var(--apple-blue);
+  box-shadow: 0 6px 15px rgba(0, 122, 255, .2);
+}
+
+.map-body .map-action-group .map-action-primary:hover,
+.topology-body .topology-stitch-primary-button:hover {
+  background: #006fe6;
+  border-color: #006fe6;
+}
+
+:root {
+  --ui-accent: var(--apple-blue);
+  --ui-success: var(--apple-green);
+  --ui-warning: var(--apple-orange);
+  --ui-danger: #ff3b30;
+}
+
+/* Muted product chrome ---------------------------------------------------
+ * Operational colors still belong to the map data. The surrounding UI uses
+ * a lower-chroma steel palette so the data layer, not the controls, gets the
+ * user's attention.
+ */
+:root {
+  --apple-blue: #496f8b;
+  --apple-green: #4f9274;
+  --apple-orange: #b7864d;
+  --apple-gray: #858c94;
+}
+
+.map-body {
+  --color-surface-subtle: #f7f8fa;
+  --color-surface-hover: #f1f3f5;
+  --color-text-primary: #1d1d1f;
+  --color-text-secondary: #6f7780;
+  --color-text-muted: #9299a2;
+  --color-primary: #496f8b;
+  --color-primary-hover: #3d617c;
+  --color-primary-pressed: #304e64;
+  --color-primary-soft: #edf2f5;
+  --color-border: rgba(60, 60, 67, .14);
+  --color-border-strong: rgba(60, 60, 67, .22);
+  --color-divider: rgba(60, 60, 67, .11);
+  --color-cctv: #858bbd;
+  --color-fiber-optic: #5d7891;
+  --color-power: #b66b70;
+  --color-peripheral: #9b8ab4;
+  --color-infrastructure: #b48a52;
+  --color-lan: #5d8d6e;
+  --color-success: #4f9274;
+  --color-warning: #b7864d;
+  --color-danger: #b66b70;
+}
+
+.map-body .top-navigation nav a.active,
+.topology-body .top-navigation nav a.active {
+  color: var(--apple-blue);
+  background: rgba(73, 111, 139, .1);
+  border-color: rgba(73, 111, 139, .15);
+}
+
+.map-body .map-category-presets button.active,
+.topology-body .topology-sidebar-actions button[aria-pressed='true'] {
+  background: var(--apple-blue);
+  border-color: var(--apple-blue);
+  box-shadow: 0 5px 13px rgba(73, 111, 139, .18);
+}
+
+.map-body .map-action-group .map-action-primary,
+.topology-body .topology-stitch-primary-button {
+  background: linear-gradient(145deg, #557b96, #496f8b);
+  border-color: #496f8b;
+  box-shadow: 0 6px 15px rgba(73, 111, 139, .2);
+}
+
+.map-body .map-action-group .map-action-primary:hover,
+.topology-body .topology-stitch-primary-button:hover {
+  background: #3d617c;
+  border-color: #3d617c;
+}
+
+.map-body .network-checkbox.checked,
+.topology-body .network-checkbox.checked {
+  background: var(--apple-blue);
+  border-color: var(--apple-blue);
+  box-shadow: 0 2px 5px rgba(73, 111, 139, .2);
+}
+
+.map-body .network-coverage-toggle[aria-checked="true"],
+.topology-body .network-coverage-toggle[aria-checked="true"] {
+  background: var(--apple-green);
+  border-color: var(--apple-green);
+  box-shadow: 0 2px 6px rgba(79, 146, 116, .18);
+}
+
+/* Keep topology editing chrome neutral after the shared product palette is
+   applied. The graph owns semantic color; controls should stay quiet. */
+.topology-body .topology-sidebar-actions button[aria-pressed='true'] {
+  color: var(--topology-graphite);
+  background: rgba(255, 255, 255, .98);
+  border-color: transparent;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, .10), inset 0 1px 0 rgba(255, 255, 255, .9);
+}
+
+.topology-body .topology-stitch-primary-button {
+  color: #fff;
+  background: var(--topology-graphite);
+  border-color: var(--topology-graphite);
+  box-shadow: 0 5px 13px rgba(29, 29, 31, .18);
+}
+
+.topology-body .topology-stitch-primary-button:hover {
+  background: #2c2c2e;
+  border-color: #2c2c2e;
+}
+
+.topology-body .topology-document-key {
+  padding: 9px 18px 11px;
+  background: rgba(255, 255, 255, .66);
+  border-top-color: transparent;
+}
+
+.map-body .asset-drawer {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  color: #1d1d1f;
+  background: rgba(250, 250, 252, .97);
+  border: 1px solid rgba(255, 255, 255, .88);
+  border-radius: 24px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, .18), 0 4px 18px rgba(15, 23, 42, .08);
+  -webkit-backdrop-filter: blur(26px) saturate(115%);
+  backdrop-filter: blur(26px) saturate(115%);
+}
+
+.map-body .asset-drawer .drawer-header {
+  min-height: 80px;
+  padding: 16px 20px;
+  background: rgba(255, 255, 255, .96);
+  border-bottom-color: rgba(60, 60, 67, .1);
+}
+
+.map-body .drawer-heading {
+  gap: 12px;
+}
+
+.map-body .drawer-heading small {
+  color: #1d1d1f;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.2;
+}
+
+.map-body .drawer-heading strong {
+  color: #1d1d1f;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+
+.map-body .asset-type-icon {
+  width: 46px;
+  height: 46px;
+  color: #314d65;
+  background: #eef1f4;
+  border: 1px solid rgba(60, 60, 67, .06);
+  border-radius: 15px;
+}
+
+.map-body .asset-drawer .drawer-header .close-drawer {
+  width: 44px;
+  height: 44px;
+  color: #1d1d1f;
+  background: rgba(255, 255, 255, .9);
+  border-color: rgba(60, 60, 67, .14);
+  border-radius: 14px;
+}
+
+.map-body .asset-drawer .drawer-header .close-drawer:hover {
+  color: var(--apple-blue);
+  background: rgba(73, 111, 139, .08);
+  border-color: rgba(73, 111, 139, .2);
+}
+
+.map-body .drawer-scroll-content {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 0;
+  background: #fafafd;
+  padding-bottom: 18px;
+  overflow-y: auto;
+}
+
+.map-body .asset-drawer .drawer-title {
+  padding: 20px 20px 22px;
+  background: #fff;
+  border-bottom-color: rgba(60, 60, 67, .1);
+}
+
+.map-body .asset-badge-row {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.map-body .asset-drawer .category-badge {
+  min-height: 30px;
+  padding: 4px 11px;
+  color: #465363;
+  background: #f0f2f5;
+  border-color: rgba(60, 60, 67, .14);
+  border-radius: 999px;
+}
+
+.map-body .asset-drawer .category-cctv {
+  color: #59648a;
+  background: #f0f1fa;
+  border-color: #d9dced;
+}
+
+.map-body .asset-drawer .category-fiber {
+  color: #536d84;
+  background: #eef3f7;
+  border-color: #d3dfe7;
+}
+
+.map-body .asset-drawer .category-power {
+  color: #956064;
+  background: #f8f0f1;
+  border-color: #ebd7d9;
+}
+
+.map-body .asset-drawer .category-lan {
+  color: #547c63;
+  background: #eff6f1;
+  border-color: #d6e7da;
+}
+
+.map-body .asset-drawer .category-infrastructure {
+  color: #8d6d40;
+  background: #f8f3ea;
+  border-color: #eadfca;
+}
+
+.map-body .asset-drawer .asset-status {
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+}
+
+.map-body .asset-drawer .asset-status.success {
+  color: var(--apple-green);
+  background: #eff7f2;
+  border-color: #d7e9dd;
+}
+
+.map-body .asset-drawer .asset-status.warning {
+  color: var(--apple-orange);
+  background: #faf4eb;
+  border-color: #ecdfcb;
+}
+
+.map-body .asset-drawer .drawer-title h2 {
+  margin-top: 16px;
+  color: #1d1d1f;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -.02em;
+  line-height: 1.14;
+}
+
+.map-body .asset-drawer .drawer-title p {
+  margin-top: 6px;
+  color: #737c86;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.map-body .asset-drawer .drawer-section {
+  padding: 20px;
+  background: #fafafd;
+  border-bottom-color: rgba(60, 60, 67, .1);
+}
+
+.map-body .asset-drawer .drawer-topology-summary {
+  background: #fff;
+}
+
+.map-body .asset-drawer .drawer-section-heading {
+  margin-bottom: 12px;
+}
+
+.map-body .asset-drawer .drawer-section > h3,
+.map-body .asset-drawer .drawer-section-heading h3 {
+  color: #1d1d1f;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  line-height: 1.25;
+}
+
+.map-body .asset-drawer .count-badge {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  color: #6f7780;
+  background: transparent;
+  border: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.map-body .asset-drawer .drawer-topology-summary p {
+  color: #2d3742;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.map-body .asset-drawer .drawer-topology-summary > small {
+  margin-top: 6px;
+  color: #7f8790;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.map-body .asset-drawer .drawer-relation-add {
+  margin-top: 16px;
+  padding-top: 14px;
+  color: #293b4b;
+  border-top-color: rgba(60, 60, 67, .11);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.map-body .asset-drawer .drawer-relation-add .material-symbols-outlined:first-child {
+  color: var(--apple-blue);
+}
+
+.map-body .asset-drawer .drawer-relation-add .material-symbols-outlined:last-child {
+  color: #5e6b76;
+}
+
+.map-body .asset-drawer .mounting-section {
+  background: #f7f8fa;
+}
+
+.map-body .asset-drawer .mounting-label {
+  color: #858c94;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+
+.map-body .asset-drawer .mounting-current,
+.map-body .asset-drawer .relation-list.mounting-asset-list,
+.map-body .asset-drawer .relation-list.mounting-candidate-list {
+  background: #fff;
+  border-color: rgba(60, 60, 67, .11);
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+}
+
+.map-body .asset-drawer .mounting-current {
+  min-height: 64px;
+  padding: 10px 12px;
+}
+
+.map-body .asset-drawer .mounting-current:hover,
+.map-body .asset-drawer .mounting-current:focus-visible {
+  background: #fff;
+  border-color: rgba(73, 111, 139, .3);
+  box-shadow: 0 0 0 3px rgba(73, 111, 139, .1);
+}
+
+.map-body .asset-drawer .mounting-current > .relation-icon,
+.map-body .asset-drawer .mounting-asset-list .relation-icon,
+.map-body .asset-drawer .mounting-candidate-list .relation-icon {
+  color: var(--apple-blue);
+  background: #f0f3f5;
+  border-radius: 11px;
+}
+
+.map-body .asset-drawer .mounting-current strong,
+.map-body .asset-drawer .mounting-asset-list strong,
+.map-body .asset-drawer .mounting-candidate-list strong {
+  color: #293442;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.map-body .asset-drawer .mounting-current small,
+.map-body .asset-drawer .mounting-asset-list small,
+.map-body .asset-drawer .mounting-candidate-list small {
+  color: #78828d;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.map-body .asset-drawer .asset-properties {
+  padding: 4px 0 0;
+}
+
+.map-body .asset-drawer .asset-properties div {
+  padding: 11px 0;
+  border-bottom-color: rgba(60, 60, 67, .09);
+}
+
+.map-body .asset-drawer .asset-properties dt {
+  color: #858c94;
+  font-size: 13px;
+}
+
+.map-body .asset-drawer .asset-properties dd {
+  color: #303b47;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.map-body .asset-drawer .asset-technical-metadata {
+  border-top-color: rgba(60, 60, 67, .09);
+}
+
+.map-body .asset-drawer .connected-networks button,
+.map-body .asset-drawer .relation-list button {
+  color: #303b47;
+}
+
+.map-body .asset-drawer .connected-networks button:hover,
+.map-body .asset-drawer .relation-list button:hover {
+  background: rgba(73, 111, 139, .06);
+}
+
+.map-body .asset-drawer .connected-networks button > i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--network-indicator) 12%, transparent);
+}
+
+.map-body .asset-drawer .relation-list {
+  border-top-color: rgba(60, 60, 67, .1);
+}
+
+.map-body .asset-drawer .relation-list li {
+  border-bottom-color: rgba(60, 60, 67, .1);
+}
+
+.map-body .asset-drawer .relation-list .relation-icon {
+  color: var(--apple-blue);
+  background: #f0f3f5;
+  border-radius: 11px;
+}
+
+.map-body .asset-drawer .read-only-note {
+  margin: 20px;
+  color: #858c94;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.map-body .asset-drawer .drawer-actions {
+  padding: 12px 16px calc(14px + env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, .96);
+  border-top-color: rgba(60, 60, 67, .1);
+  box-shadow: 0 -12px 24px rgba(15, 23, 42, .07);
+  z-index: 4;
+}
+
+.map-body .asset-drawer .drawer-secondary-actions {
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr);
+  gap: 8px;
+}
+
+.map-body .asset-drawer .drawer-secondary-actions .button {
+  min-width: 0;
+  min-height: 48px;
+  padding: 0 10px;
+  gap: 7px;
+  border-radius: 14px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.map-body .asset-drawer .drawer-secondary-actions .open-asset-detail {
+  color: #303b47;
+  background: #fff;
+  border-color: rgba(60, 60, 67, .14);
+}
+
+.map-body .asset-drawer .drawer-secondary-actions .open-asset-detail:hover {
+  color: var(--apple-blue);
+  background: #f7f9fa;
+  border-color: rgba(73, 111, 139, .26);
+}
+
+.map-body .asset-drawer .drawer-secondary-actions .open-schematic {
+  color: #fff;
+  background: var(--apple-blue);
+  border-color: var(--apple-blue);
+  box-shadow: 0 5px 13px rgba(73, 111, 139, .18);
+}
+
+.map-body .asset-drawer .drawer-secondary-actions .open-schematic:hover {
+  background: #3d617c;
+  border-color: #3d617c;
+}
+
+@media (max-width: 960px) {
+  .map-body .asset-drawer {
+    height: auto;
+    max-height: none;
+    top: 12px;
+    bottom: 12px;
+  }
+
+  .map-body .asset-drawer::before {
+    content: "";
+    width: 36px;
+    height: 4px;
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    z-index: 6;
+    background: rgba(60, 60, 67, .2);
+    border-radius: 999px;
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .map-body .asset-drawer .drawer-secondary-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .map-body .asset-drawer .drawer-secondary-actions .button {
+    white-space: normal;
+  }
+}
+
+/* Drag state and frame hierarchy ----------------------------------------
+ * A lifted asset should read as a compact object in motion. The destination
+ * gets a quiet invitation state; it should never look like a warning banner.
+ */
+.topology-body .topology-stitch-graph-frame .topology-node.is-dragging {
+  opacity: .15;
+  filter: saturate(.46);
+}
+
+.topology-body .topology-stitch-graph-frame .topology-node.is-dragging .topology-node-card {
+  stroke: rgba(29, 29, 31, .24);
+  stroke-dasharray: none;
+  stroke-width: 1.2;
+}
+
+.topology-body .topology-stitch-graph-frame .topology-mounting-group.drop-target {
+  filter: drop-shadow(0 5px 10px rgba(29, 29, 31, .10));
+}
+
+.topology-body .topology-stitch-graph-frame .topology-mounting-group.drop-target .topology-mounting-bubble {
+  fill: rgba(255, 255, 255, .64) !important;
+  stroke: #5f6368 !important;
+  stroke-width: 1.8 !important;
+  stroke-dasharray: 6 4 !important;
+}
+
+.topology-body .topology-stitch-graph-frame .topology-drop-slot rect {
+  fill: rgba(255, 255, 255, .52);
+  stroke: rgba(95, 99, 104, .58);
+  stroke-width: 1.1;
+  stroke-dasharray: 5 4;
+}
+
+.topology-body .topology-drag-ghost {
+  filter: drop-shadow(0 18px 30px rgba(15, 23, 42, .17));
+}
+
+.topology-body .topology-drag-ghost-surface {
+  padding: 5px;
+  border: 1px solid rgba(255, 255, 255, .82);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, .74);
+  box-shadow: 0 1px 1px rgba(255, 255, 255, .95) inset, 0 0 0 1px rgba(29, 29, 31, .06), 0 12px 24px rgba(15, 23, 42, .12);
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+  backdrop-filter: blur(18px) saturate(125%);
+}
+
+.topology-body .topology-drag-ghost-surface::before {
+  inset: -4px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, .17);
+  filter: blur(13px);
+  opacity: .58;
+}
+
+.topology-body .topology-drag-ghost.is-over-frame {
+  filter: drop-shadow(0 18px 30px rgba(29, 29, 31, .13));
+}
+
+.topology-body .topology-drag-ghost.is-over-frame .topology-drag-ghost-surface {
+  border-color: rgba(95, 99, 104, .26);
+  background: rgba(255, 255, 255, .84);
+  box-shadow: 0 1px 1px rgba(255, 255, 255, .96) inset, 0 0 0 3px rgba(95, 99, 104, .08), 0 16px 28px rgba(15, 23, 42, .14);
+}
+
+/* Dark appearance -------------------------------------------------------
+ * Dark mode follows the same restrained Apple-style language: near-black
+ * canvas, layered graphite surfaces, quiet separators, and a single cool
+ * accent. Operational network colors remain semantic and are only lifted
+ * enough to stay legible against dark surfaces.
+ */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --navy: #f5f5f7;
+  --navy-strong: #ffffff;
+  --ink: #e5e5ea;
+  --muted: #98989f;
+  --line: rgba(255, 255, 255, .13);
+  --soft-line: rgba(255, 255, 255, .08);
+  --surface: #1c1c1e;
+  --page: #000000;
+
+  --ui-ink: #f5f5f7;
+  --ui-ink-strong: #ffffff;
+  --ui-text: #a1a1aa;
+  --ui-muted: #8e8e93;
+  --ui-line: rgba(255, 255, 255, .13);
+  --ui-line-subtle: rgba(255, 255, 255, .08);
+  --ui-surface: #1c1c1e;
+  --ui-surface-soft: #242426;
+  --ui-canvas: #101012;
+  --ui-primary: #5c89a4;
+  --ui-primary-hover: #709db7;
+  --ui-accent: #78b7e6;
+  --ui-selected: #91aaff;
+  --ui-success: #68bf9b;
+  --ui-warning: #d8aa61;
+  --ui-danger: #ef9299;
+  --ui-glass: rgba(28, 28, 30, .84);
+  --ui-shadow-float: 0 12px 30px rgba(0, 0, 0, .34), 0 2px 8px rgba(0, 0, 0, .2);
+  --ui-shadow-panel: 0 20px 52px rgba(0, 0, 0, .46), 0 4px 16px rgba(0, 0, 0, .24);
+
+  --topology-navy: #f5f5f7;
+  --topology-warm: #101012;
+  --topology-surface: #1c1c1e;
+  --topology-low: #242426;
+  --topology-container: #2c2c2e;
+  --topology-border: rgba(255, 255, 255, .13);
+  --topology-muted: #8e8e93;
+  --topology-text-muted: #a1a1aa;
+  --topology-error: #ef9299;
+  --topology-shadow: 0 12px 32px rgba(0, 0, 0, .38);
+}
+
+:root[data-theme="dark"] body {
+  color: #f5f5f7;
+  background: #000;
+}
+
+:root[data-theme="dark"] .brand-logo-wordmark strong {
+  color: #f5f5f7;
+}
+
+:root[data-theme="dark"] .brand-logo-wordmark small {
+  color: #ff7b80;
+}
+
+:root[data-theme="dark"] .map-body,
+:root[data-theme="dark"] .topology-body,
+:root[data-theme="dark"] .map-body .map-app,
+:root[data-theme="dark"] .topology-body .topology-stitch-app,
+:root[data-theme="dark"] .topology-body .topology-stitch-main {
+  color: var(--ui-ink);
+  background: var(--ui-canvas);
+}
+
+:root[data-theme="dark"] .map-body {
+  --color-page: #101012;
+  --color-surface: #1c1c1e;
+  --color-surface-subtle: #242426;
+  --color-surface-hover: #2c2c2e;
+  --color-overlay: rgba(0, 0, 0, .62);
+  --color-text-primary: #f5f5f7;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted: #8e8e93;
+  --color-text-inverse: #101012;
+  --color-primary: #5c89a4;
+  --color-primary-hover: #709db7;
+  --color-primary-pressed: #4b7088;
+  --color-primary-soft: rgba(92, 137, 164, .18);
+  --color-border: rgba(255, 255, 255, .13);
+  --color-border-strong: rgba(255, 255, 255, .22);
+  --color-divider: rgba(255, 255, 255, .09);
+  --color-cctv: #b2b3ff;
+  --color-fiber-optic: #83afd1;
+  --color-power: #f08b91;
+  --color-peripheral: #c0a5ec;
+  --color-infrastructure: #ddb064;
+  --color-lan: #78bd91;
+  --color-success: #68bf9b;
+  --color-warning: #d8aa61;
+  --color-danger: #ef9299;
+  --color-map-canvas: #1a1a1c;
+  --color-map-road: #343438;
+  --color-map-grid: #3a3a40;
+  --color-map-label: #b2b2ba;
+  --shadow-shell: 0 1px 0 rgba(255, 255, 255, .05);
+  --shadow-floating: 0 8px 24px rgba(0, 0, 0, .28);
+  --shadow-drawer: 0 18px 46px rgba(0, 0, 0, .46);
+  --shadow-popover: 0 14px 34px rgba(0, 0, 0, .48);
+}
+
+/* Shared shell and controls */
+:root[data-theme="dark"] .map-body .top-navigation,
+:root[data-theme="dark"] .topology-body .top-navigation {
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .04);
+}
+
+:root[data-theme="dark"] .map-body .top-navigation nav a,
+:root[data-theme="dark"] .topology-body .top-navigation nav a {
+  color: var(--ui-text);
+}
+
+:root[data-theme="dark"] .map-body .top-navigation nav a:hover,
+:root[data-theme="dark"] .topology-body .top-navigation nav a:hover,
+:root[data-theme="dark"] .map-body .top-navigation nav a.active,
+:root[data-theme="dark"] .topology-body .top-navigation nav a.active {
+  color: var(--ui-ink);
+  background: #2c2c2e;
+}
+
+:root[data-theme="dark"] .map-body .top-navigation nav a.active::after,
+:root[data-theme="dark"] .topology-body .top-navigation nav a.active::after {
+  background: var(--ui-accent);
+}
+
+:root[data-theme="dark"] .map-body .icon-button,
+:root[data-theme="dark"] .topology-body .icon-button,
+:root[data-theme="dark"] .map-body .theme-toggle,
+:root[data-theme="dark"] .topology-body .theme-toggle {
+  color: var(--ui-text);
+  background: rgba(255, 255, 255, .055);
+  border-color: var(--ui-line);
+}
+
+:root[data-theme="dark"] .map-body .icon-button:hover,
+:root[data-theme="dark"] .topology-body .icon-button:hover,
+:root[data-theme="dark"] .map-body .theme-toggle:hover,
+:root[data-theme="dark"] .topology-body .theme-toggle:hover {
+  color: var(--ui-ink);
+  background: #2c2c2e;
+  border-color: rgba(255, 255, 255, .2);
+}
+
+:root[data-theme="dark"] .map-body .user-menu,
+:root[data-theme="dark"] .topology-body .user-menu {
+  color: var(--ui-ink);
+  background: #242426;
+  border-color: var(--ui-line);
+}
+
+:root[data-theme="dark"] .map-body .user-menu:hover,
+:root[data-theme="dark"] .map-body .user-account-menu.is-open .user-menu,
+:root[data-theme="dark"] .topology-body .user-menu:hover,
+:root[data-theme="dark"] .topology-body .user-account-menu.is-open .user-menu {
+  background: #2c2c2e;
+  border-color: rgba(255, 255, 255, .2);
+}
+
+:root[data-theme="dark"] .map-body .user-menu-dropdown,
+:root[data-theme="dark"] .topology-body .user-menu-dropdown {
+  color: var(--ui-ink);
+  background: #1c1c1e;
+  border-color: var(--ui-line);
+  box-shadow: var(--ui-shadow-panel);
+}
+
+:root[data-theme="dark"] .map-body .user-menu-dropdown-divider,
+:root[data-theme="dark"] .topology-body .user-menu-dropdown-divider {
+  background: var(--ui-line);
+}
+
+:root[data-theme="dark"] .map-body .user-menu-dropdown-item:hover,
+:root[data-theme="dark"] .topology-body .user-menu-dropdown-item:hover {
+  background: #2c2c2e;
+}
+
+:root[data-theme="dark"] .map-body .map-workspace,
+:root[data-theme="dark"] .topology-body .topology-stitch-shell,
+:root[data-theme="dark"] .map-body .network-sidebar,
+:root[data-theme="dark"] .topology-body .topology-sidebar {
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+}
+
+:root[data-theme="dark"] .map-body .dataset-card,
+:root[data-theme="dark"] .map-body .sidebar-topology-readiness,
+:root[data-theme="dark"] .topology-body .dataset-card,
+:root[data-theme="dark"] .topology-body .sidebar-topology-readiness,
+:root[data-theme="dark"] .map-body .sidebar-footer,
+:root[data-theme="dark"] .topology-body .sidebar-footer {
+  background: var(--ui-surface-soft);
+  border-color: var(--ui-line);
+}
+
+:root[data-theme="dark"] .map-body .sidebar-secondary-context .dataset-card,
+:root[data-theme="dark"] .topology-body .sidebar-secondary-context .dataset-card {
+  background: var(--ui-surface);
+}
+
+:root[data-theme="dark"] .map-body .dataset-icon,
+:root[data-theme="dark"] .topology-body .dataset-icon,
+:root[data-theme="dark"] .topology-body .topology-stitch-asset-icon {
+  color: var(--ui-accent);
+  background: #2c2c2e;
+}
+
+:root[data-theme="dark"] .map-body .area-selector select,
+:root[data-theme="dark"] .topology-body .area-selector select,
+:root[data-theme="dark"] .map-body .search-control,
+:root[data-theme="dark"] .topology-body .search-control,
+:root[data-theme="dark"] .topology-body .topology-stitch-select,
+:root[data-theme="dark"] .topology-body .topology-stitch-search-field {
+  color: var(--ui-ink);
+  background: var(--ui-surface-soft);
+  border-color: var(--ui-line);
+}
+
+:root[data-theme="dark"] .map-body .area-selector select:hover,
+:root[data-theme="dark"] .map-body .search-control:hover,
+:root[data-theme="dark"] .topology-body .topology-stitch-select:hover,
+:root[data-theme="dark"] .topology-body .topology-stitch-search-field:hover {
+  background: #2c2c2e;
+  border-color: rgba(255, 255, 255, .2);
+}
+
+:root[data-theme="dark"] .map-body .map-category-presets button,
+:root[data-theme="dark"] .topology-body .topology-sidebar-actions button {
+  color: var(--ui-text);
+  background: var(--ui-surface-soft);
+  border-color: var(--ui-line);
+}
+
+:root[data-theme="dark"] .map-body .map-category-presets button:hover,
+:root[data-theme="dark"] .topology-body .topology-sidebar-actions button:hover,
+:root[data-theme="dark"] .topology-body .topology-sidebar-actions button[aria-pressed="true"] {
+  color: var(--ui-ink);
+  background: #2c2c2e;
+  border-color: rgba(255, 255, 255, .2);
+}
+
+:root[data-theme="dark"] .map-body .map-category-presets button.active,
+:root[data-theme="dark"] .topology-body .topology-sidebar-actions button[aria-pressed="true"] {
+  color: #fff;
+  background: var(--ui-primary);
+  border-color: var(--ui-primary);
+}
+
+:root[data-theme="dark"] .map-body .network-item.selected,
+:root[data-theme="dark"] .topology-body .network-item.selected,
+:root[data-theme="dark"] .map-body .network-item:hover,
+:root[data-theme="dark"] .topology-body .network-item:hover,
+:root[data-theme="dark"] .map-body .network-item:focus-within,
+:root[data-theme="dark"] .topology-body .network-item:focus-within {
+  background: #2c2c2e;
+  border-color: var(--ui-line);
+}
+
+/* Floating map UI */
+:root[data-theme="dark"] .map-body .map-context-pill,
+:root[data-theme="dark"] .map-body .map-action-group,
+:root[data-theme="dark"] .map-body .location-control,
+:root[data-theme="dark"] .map-body .map-legend,
+:root[data-theme="dark"] .map-body .zoom-controls,
+:root[data-theme="dark"] .topology-body .topology-stitch-toolbar,
+:root[data-theme="dark"] .topology-body .topology-stitch-floating-panel,
+:root[data-theme="dark"] .topology-body .topology-stitch-tray,
+:root[data-theme="dark"] .topology-body .topology-document-key {
+  color: var(--ui-ink);
+  background: var(--ui-glass);
+  border-color: var(--ui-line);
+  box-shadow: var(--ui-shadow-float);
+  -webkit-backdrop-filter: blur(22px) saturate(130%);
+  backdrop-filter: blur(22px) saturate(130%);
+}
+
+:root[data-theme="dark"] .map-body .context-readonly,
+:root[data-theme="dark"] .map-body .context-topology.ready,
+:root[data-theme="dark"] .map-body .context-topology.partial_ready {
+  background: rgba(255, 255, 255, .07);
+  border-color: var(--ui-line);
+}
+
+:root[data-theme="dark"] .map-body .context-topology.ready,
+:root[data-theme="dark"] .map-body .context-topology.partial_ready {
+  color: var(--ui-success);
+  background: rgba(104, 191, 155, .14);
+  border-color: rgba(104, 191, 155, .3);
+}
+
+:root[data-theme="dark"] .map-body .map-action-group .map-action-primary,
+:root[data-theme="dark"] .topology-body .topology-stitch-primary-button {
+  color: #fff;
+  background: var(--ui-primary);
+  border-color: var(--ui-primary);
+}
+
+:root[data-theme="dark"] .map-body .map-action-group .map-action-primary:hover,
+:root[data-theme="dark"] .topology-body .topology-stitch-primary-button:hover {
+  background: var(--ui-primary-hover);
+  border-color: var(--ui-primary-hover);
+}
+
+:root[data-theme="dark"] .map-body .map-legend strong,
+:root[data-theme="dark"] .map-body .map-context-pill strong,
+:root[data-theme="dark"] .topology-body .topology-stitch-toolbar-context > strong,
+:root[data-theme="dark"] .topology-body .topology-document-key summary {
+  color: var(--ui-ink);
+}
+
+/* Asset drawer */
+:root[data-theme="dark"] .map-body .asset-drawer {
+  color: #f5f5f7;
+  background: rgba(28, 28, 30, .97);
+  border-color: rgba(255, 255, 255, .14);
+  box-shadow: var(--ui-shadow-panel);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-header,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-title,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-topology-summary,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-actions {
+  background: #1c1c1e;
+  border-color: var(--ui-line);
+}
+
+:root[data-theme="dark"] .map-body .drawer-scroll-content,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-section {
+  background: #1c1c1e;
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .mounting-section {
+  background: #242426;
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-heading small,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-title h2,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-section-heading h3 {
+  color: #f5f5f7;
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-title p,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-topology-summary p,
+:root[data-theme="dark"] .map-body .asset-drawer .mounting-current strong,
+:root[data-theme="dark"] .map-body .asset-drawer .asset-properties dd,
+:root[data-theme="dark"] .map-body .asset-drawer .connected-networks button,
+:root[data-theme="dark"] .map-body .asset-drawer .relation-list button {
+  color: #e5e5ea;
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-topology-summary > small,
+:root[data-theme="dark"] .map-body .asset-drawer .mounting-current small,
+:root[data-theme="dark"] .map-body .asset-drawer .asset-properties dt,
+:root[data-theme="dark"] .map-body .asset-drawer .read-only-note,
+:root[data-theme="dark"] .map-body .asset-drawer .count-badge {
+  color: #a1a1aa;
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .asset-type-icon,
+:root[data-theme="dark"] .map-body .asset-drawer .mounting-current > .relation-icon,
+:root[data-theme="dark"] .map-body .asset-drawer .relation-list .relation-icon {
+  color: var(--ui-accent);
+  background: #2c2c2e;
+  border-color: rgba(255, 255, 255, .08);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .category-badge {
+  color: #d7d7dc;
+  background: #2c2c2e;
+  border-color: var(--ui-line);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .category-cctv {
+  color: #c0c0ff;
+  background: rgba(178, 179, 255, .15);
+  border-color: rgba(178, 179, 255, .3);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .category-fiber {
+  color: #9fc5df;
+  background: rgba(131, 175, 209, .14);
+  border-color: rgba(131, 175, 209, .3);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .category-power {
+  color: #f2a0a5;
+  background: rgba(240, 139, 145, .14);
+  border-color: rgba(240, 139, 145, .3);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .category-lan {
+  color: #96d1aa;
+  background: rgba(120, 189, 145, .14);
+  border-color: rgba(120, 189, 145, .3);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .category-infrastructure {
+  color: #e9c27d;
+  background: rgba(221, 176, 100, .14);
+  border-color: rgba(221, 176, 100, .3);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .asset-status.success {
+  color: var(--ui-success);
+  background: rgba(104, 191, 155, .14);
+  border-color: rgba(104, 191, 155, .3);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .asset-status.warning {
+  color: var(--ui-warning);
+  background: rgba(216, 170, 97, .14);
+  border-color: rgba(216, 170, 97, .3);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .mounting-current,
+:root[data-theme="dark"] .map-body .asset-drawer .relation-list.mounting-asset-list,
+:root[data-theme="dark"] .map-body .asset-drawer .relation-list.mounting-candidate-list {
+  background: #2c2c2e;
+  border-color: var(--ui-line);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .2);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .asset-properties div,
+:root[data-theme="dark"] .map-body .asset-drawer .relation-list,
+:root[data-theme="dark"] .map-body .asset-drawer .relation-list li,
+:root[data-theme="dark"] .map-body .asset-drawer .asset-technical-metadata {
+  border-color: var(--ui-line);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .connected-networks button:hover,
+:root[data-theme="dark"] .map-body .asset-drawer .relation-list button:hover {
+  background: rgba(120, 183, 230, .12);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-secondary-actions .open-asset-detail {
+  color: #e5e5ea;
+  background: #2c2c2e;
+  border-color: var(--ui-line);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-secondary-actions .open-asset-detail:hover {
+  background: #343438;
+  border-color: rgba(255, 255, 255, .2);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-secondary-actions .open-schematic {
+  color: #fff;
+  background: var(--ui-primary);
+  border-color: var(--ui-primary);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, .28);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer::before {
+  background: rgba(255, 255, 255, .24);
+}
+
+/* MapLibre controls and canvas */
+:root[data-theme="dark"] .map-body #network-map .maplibregl-canvas {
+  filter: brightness(.72) saturate(.82) contrast(1.06);
+}
+
+:root[data-theme="dark"] .map-body #network-map .maplibregl-ctrl-group,
+:root[data-theme="dark"] .map-body #network-map .maplibregl-ctrl-attrib {
+  color: #d7d7dc;
+  background: rgba(28, 28, 30, .86);
+  border-color: var(--ui-line);
+  box-shadow: var(--ui-shadow-float);
+}
+
+:root[data-theme="dark"] .map-body #network-map .maplibregl-ctrl-group button {
+  color: #d7d7dc;
+  background: transparent;
+  border-color: var(--ui-line);
+}
+
+:root[data-theme="dark"] .map-body #network-map .maplibregl-ctrl-group button:hover {
+  background: #2c2c2e;
+}
+
+:root[data-theme="dark"] .map-body #network-map .maplibregl-ctrl-attrib a {
+  color: #b9d7eb;
+}
+
+/* Topology canvas surfaces */
+:root[data-theme="dark"] .topology-body .topology-stitch-viewport {
+  background-color: #101012;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, .045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, .045) 1px, transparent 1px);
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-zoom-control,
+:root[data-theme="dark"] .topology-body .topology-stitch-toolbar-button,
+:root[data-theme="dark"] .topology-body .topology-stitch-secondary-button,
+:root[data-theme="dark"] .topology-body .topology-stitch-family {
+  color: var(--ui-text);
+  background: var(--ui-surface-soft);
+  border-color: var(--ui-line);
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-zoom-control button:hover,
+:root[data-theme="dark"] .topology-body .topology-stitch-toolbar-button:hover,
+:root[data-theme="dark"] .topology-body .topology-stitch-secondary-button:hover,
+:root[data-theme="dark"] .topology-body .topology-stitch-family:hover,
+:root[data-theme="dark"] .topology-body .topology-stitch-family.active {
+  color: var(--ui-ink);
+  background: #2c2c2e;
+  border-color: rgba(255, 255, 255, .2);
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-inspector,
+:root[data-theme="dark"] .topology-body .topology-stitch-inspector-card,
+:root[data-theme="dark"] .topology-body .topology-stitch-relation,
+:root[data-theme="dark"] .topology-body .topology-stitch-view-stats div {
+  color: var(--ui-ink);
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-inspector-card,
+:root[data-theme="dark"] .topology-body .topology-stitch-relation {
+  background: var(--ui-surface-soft);
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-relation:hover,
+:root[data-theme="dark"] .topology-body .topology-stitch-relation.traced {
+  background: rgba(120, 183, 230, .14);
+  border-color: rgba(120, 183, 230, .34);
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-status {
+  color: var(--ui-success);
+  background: rgba(104, 191, 155, .14);
+  border-color: rgba(104, 191, 155, .3);
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-status.offline {
+  color: var(--ui-danger);
+  background: rgba(239, 146, 153, .14);
+  border-color: rgba(239, 146, 153, .3);
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-tray,
+:root[data-theme="dark"] .topology-body .topology-document-key {
+  border-top-color: var(--ui-line);
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg {
+  filter: brightness(.78) saturate(.9);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-add {
+  color: #e5e5ea;
+  border-top-color: rgba(255, 255, 255, .1);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-add .material-symbols-outlined:first-child {
+  color: var(--ui-accent);
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-add .material-symbols-outlined:last-child {
+  color: #b7c0c8;
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-add:hover {
+  color: #fff;
+  background: rgba(120, 183, 230, .1);
+}
+
+:root[data-theme="dark"] .map-body .network-copy strong,
+:root[data-theme="dark"] .topology-body .network-copy strong {
+  color: #f5f5f7;
+}
+
+:root[data-theme="dark"] .map-body .network-copy small,
+:root[data-theme="dark"] .topology-body .network-copy small {
+  color: #a1a1aa;
+}
+
+:root[data-theme="dark"] .map-body .network-copy small > span + span::before,
+:root[data-theme="dark"] .topology-body .network-copy small > span + span::before {
+  color: #6f7078;
+}
+
+:root[data-theme="dark"] .map-body .network-icon-action,
+:root[data-theme="dark"] .topology-body .network-icon-action {
+  color: #a1a1aa;
+}
+
+:root[data-theme="dark"] .map-body .network-icon-action:hover,
+:root[data-theme="dark"] .topology-body .network-icon-action:hover {
+  color: #f5f5f7;
+  background: #2c2c2e;
+}
+
+:root[data-theme="dark"] .map-body .network-icon-action .material-symbols-outlined,
+:root[data-theme="dark"] .topology-body .network-icon-action .material-symbols-outlined {
+  color: inherit;
+  background: transparent;
+}
+
+:root[data-theme="dark"] .map-body .network-coverage-toggle,
+:root[data-theme="dark"] .topology-body .network-coverage-toggle {
+  color: #a1a1aa;
+  background: #343438;
+  border-color: rgba(255, 255, 255, .12);
+}
+
+:root[data-theme="dark"] .map-body .network-coverage-toggle[aria-checked="true"],
+:root[data-theme="dark"] .topology-body .network-coverage-toggle[aria-checked="true"] {
+  color: #c0c0ff;
+  background: rgba(178, 179, 255, .16);
+  border-color: rgba(178, 179, 255, .3);
+}
+
+:root[data-theme="dark"] .map-body .network-coverage-toggle:hover,
+:root[data-theme="dark"] .topology-body .network-coverage-toggle:hover {
+  color: #f5f5f7;
+  background: #3a3a40;
+  border-color: rgba(255, 255, 255, .2);
+}
+
+/* Final dark-mode polish: keep map controls and the geographic canvas in the
+   same tonal system as the shell instead of leaving light-theme fallbacks. */
+:root[data-theme="dark"] ::selection {
+  color: #fff;
+  background: rgba(120, 183, 230, .34);
+}
+
+:root[data-theme="dark"] .map-body ::-webkit-scrollbar-thumb,
+:root[data-theme="dark"] .topology-body ::-webkit-scrollbar-thumb {
+  background: #4b4b52;
+}
+
+:root[data-theme="dark"] .map-body ::-webkit-scrollbar-track,
+:root[data-theme="dark"] .topology-body ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:root[data-theme="dark"] .map-body .map-stage,
+:root[data-theme="dark"] .map-body #network-map {
+  background: #111214;
+}
+
+:root[data-theme="dark"] .map-body #network-map .maplibregl-canvas {
+  filter: none;
+}
+
+:root[data-theme="dark"] .map-body .context-metrics {
+  color: #a1a1aa;
+}
+
+:root[data-theme="dark"] .map-body .context-separator {
+  background: rgba(255, 255, 255, .11);
+}
+
+:root[data-theme="dark"] .map-body .map-action-group .map-action-secondary,
+:root[data-theme="dark"] .map-body .map-action-group .map-action-ghost {
+  color: #d7d7dc;
+  background: rgba(255, 255, 255, .06);
+  border-color: rgba(255, 255, 255, .12);
+}
+
+:root[data-theme="dark"] .map-body .map-action-group .map-action-primary {
+  color: #fff;
+  background: #5c89a4;
+  border-color: #5c89a4;
+}
+
+:root[data-theme="dark"] .map-body .map-action-group .map-action-secondary:hover,
+:root[data-theme="dark"] .map-body .map-action-group .map-action-ghost:hover {
+  color: #fff;
+  background: #343438;
+  border-color: rgba(255, 255, 255, .2);
+}
+
+:root[data-theme="dark"] .map-body .map-action-group .map-action-primary:hover {
+  background: #709db7;
+  border-color: #709db7;
+}
+
+:root[data-theme="dark"] .map-body .map-action-group .map-action-primary:disabled,
+:root[data-theme="dark"] .map-body .map-action-group .map-action-primary[aria-disabled="true"] {
+  color: #8e8e93;
+  background: #343438;
+  border-color: #343438;
+}
+
+/* Dark topology nodes retain semantic edge colors, but their cards and labels
+   use the same graphite hierarchy as the surrounding workspace. */
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg {
+  filter: brightness(.9) saturate(.84);
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-node-card,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-schematic-card,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-isolated,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-area-overview-card rect {
+  fill: #242426;
+  stroke: #505057;
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-node.selected .topology-node-card,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-area-overview-card:hover rect,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-area-overview-card:focus rect {
+  fill: rgba(92, 137, 164, .24);
+  stroke: #78b7e6;
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-device-icon {
+  fill: #2c2c2e;
+  stroke: #9ba7b1;
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-node-name,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-compact-name,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-isolated-title,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-area-overview-name {
+  fill: #f5f5f7;
+  stroke: #242426;
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-node-type,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-compact-type,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-node-status,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-meta,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-section-count,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-legend-label {
+  fill: #a1a1aa;
+  stroke: #242426;
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-node-status-dot {
+  stroke: #242426;
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-edge-underlay,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-presentation-backbone-underlay,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-backbone-gap-underlay {
+  stroke: #1c1c1e;
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-mounting-label-bg,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-topology-schematic-card {
+  fill: #2c2c2e;
+  stroke: #505057;
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-mounting-label,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-mounting-meta,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-island-label,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-island-meta,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-lane-kicker,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-lane-meta {
+  fill: #a1a1aa;
+  stroke: #242426;
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-mounting-group .topology-mounting-bubble {
+  fill: #242426;
+  stroke: #68747e;
+}
+
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-node.disconnected .topology-node-card,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-node.suggested-only .topology-node-card,
+:root[data-theme="dark"] .topology-body .topology-stitch-graph-frame svg .topology-unresolved-panel {
+  fill: #2b2527;
+  stroke: #a66c72;
+}
+
+/* Dark-mode legibility -------------------------------------------------
+ * Small operational labels need a stronger luminance step than the light
+ * palette's muted greys provide. Keep the hierarchy quiet, but never dim
+ * information that helps somebody understand the active map or diagram.
+ */
+:root[data-theme="dark"] {
+  --muted: #c7c7cc;
+  --ui-text: #d1d1d6;
+  --ui-muted: #b8b8be;
+}
+
+:root[data-theme="dark"] .map-body {
+  --color-text-secondary: #d1d1d6;
+  --color-text-muted: #b8b8be;
+  --color-map-label: #e5e5ea;
+}
+
+:root[data-theme="dark"] .map-body :where(input, select, textarea)::placeholder,
+:root[data-theme="dark"] .topology-body :where(input, select, textarea)::placeholder {
+  color: #b8b8be;
+  opacity: 1;
+}
+
+:root[data-theme="dark"] .map-body :where(
+  .sidebar-heading p,
+  .area-selector,
+  .selection-summary,
+  .network-copy small,
+  .dataset-card span,
+  .sidebar-topology-readiness,
+  .sidebar-topology-detail,
+  .sidebar-footer,
+  .map-transfer-intro,
+  .map-transfer-progress p,
+  .map-transfer-invalid p,
+  .map-transfer-state p
+) {
+  color: #d1d1d6;
+}
+
+:root[data-theme="dark"] .map-body .map-context-pill small,
+:root[data-theme="dark"] .map-body .context-metrics,
+:root[data-theme="dark"] .map-body .map-stage .basemap-status-overview small,
+:root[data-theme="dark"] .map-body .map-stage .basemap-status-metrics {
+  color: #d1d1d6;
+}
+
+:root[data-theme="dark"] .map-body .map-context-pill small,
+:root[data-theme="dark"] .map-body .context-metrics {
+  font-weight: 550;
+}
+
+:root[data-theme="dark"] .map-body .map-attribution {
+  padding: 3px 7px;
+  color: #d1d1d6;
+  background: rgba(18, 18, 20, .82);
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 6px;
+  text-shadow: none;
+}
+
+:root[data-theme="dark"] .map-body .map-stage .basemap-status {
+  color: #f5f5f7;
+  background: rgba(28, 28, 30, .94);
+  border-color: rgba(255, 255, 255, .16);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .32);
+}
+
+:root[data-theme="dark"] .map-body .map-stage .basemap-status-overview > .material-symbols-outlined {
+  color: #8bc3ef;
+  background: #343438;
+}
+
+@media (max-width: 620px) {
+  :root[data-theme="dark"] .map-body .mobile-map-tabs {
+    background: rgba(28, 28, 30, .96);
+    border-color: rgba(255, 255, 255, .16);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .38);
+  }
+
+  :root[data-theme="dark"] .map-body .mobile-map-tab {
+    color: #d1d1d6;
+  }
+
+  :root[data-theme="dark"] .map-body .mobile-map-tab:hover {
+    color: #fff;
+    background: #2c2c2e;
+  }
+
+  :root[data-theme="dark"] .map-body .mobile-map-tab.active {
+    color: #fff;
+    background: #0a84ff;
+  }
+}

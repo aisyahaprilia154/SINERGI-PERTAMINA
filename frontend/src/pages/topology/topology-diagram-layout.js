@@ -111,7 +111,9 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
         || left.componentId.localeCompare(right.componentId, 'id'))
     const nonPoleIds = (area.nodeIds ?? []).filter(id =>
       ['indoor', 'standalone'].includes(nodeById.get(id)?.mountingExpectation))
-    const laneSpecs = usesPoleBoxes && (areaComponents.length || nonPoleIds.length)
+    const hasCustomFrames = Object.values(settings.customFrames ?? {})
+      .some((frame) => frame?.areaKey === area.key)
+    const laneSpecs = usesPoleBoxes && (areaComponents.length || nonPoleIds.length || hasCustomFrames)
       ? [buildPoleBackboneAreaLaneSpec({
         area,
         components: areaComponents,
@@ -119,6 +121,8 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
         edges: model.edges,
         mountingGroups: model.mountingGroups,
         physicalMounts: model.physicalMounts,
+        frameAssignments: settings.frameAssignments,
+        customFrames: settings.customFrames,
         settings,
       })]
       : areaComponents.map((component, index) => buildLaneSpec({
@@ -487,12 +491,24 @@ export function createTopologyDiagramLayoutCacheKey({
   branchId = model?.branchId,
   area = model?.area,
   selectedFamilies = model?.selectedFamilies,
+  frameAssignments = {},
+  customFrames = {},
   hideFiltered = false,
   overview = false,
 } = {}) {
   const nodeIds = (model?.nodes ?? []).map(({ id }) => id).sort().join(',')
   const edgeIds = (model?.edges ?? []).map(({ id }) => id).sort().join(',')
   const families = [...(selectedFamilies ?? [])].sort().join(',')
+  const assignments = (frameAssignments instanceof Map
+    ? [...frameAssignments.entries()]
+    : Object.entries(frameAssignments ?? {}))
+    .sort(([left], [right]) => String(left).localeCompare(String(right), 'id'))
+    .map(([assetId, frameId]) => `${assetId}:${frameId}`)
+    .join(',')
+  const frames = Object.values(customFrames ?? {})
+    .map((frame) => `${frame.id}:${frame.type}:${frame.areaKey}:${frame.name ?? ''}`)
+    .sort((left, right) => left.localeCompare(right, 'id'))
+    .join(',')
   return [
     datasetVersionId ?? '',
     branchId ?? '',
@@ -506,6 +522,8 @@ export function createTopologyDiagramLayoutCacheKey({
     (model?.candidates ?? []).map(({ candidateId }) => candidateId).sort().join(','),
     (model?.mountingGroups ?? []).map(({ id, childIds }) => `${id}:${childIds.join(',')}`).sort().join(','),
     (model?.nodes ?? []).map(node => `${node.id}:${node.mountingExpectation ?? ''}`).sort().join(','),
+    assignments,
+    frames,
     families,
     hideFiltered ? 'hide' : 'dim',
     overview ? 'overview' : 'detail',
@@ -607,6 +625,8 @@ function buildPoleBackboneAreaLaneSpec({
   edges,
   mountingGroups = [],
   physicalMounts = [],
+  frameAssignments = {},
+  customFrames = {},
   settings,
 }) {
   const componentByNodeId = new Map()
@@ -715,6 +735,12 @@ function buildPoleBackboneAreaLaneSpec({
     connectedNodes,
     edgeAdjacency,
   })
+  const builtGroupIds = new Set([
+    ...confirmedGroups,
+    ...emptyPhysicalGroups,
+    ...junctionGroups,
+    ...excludedGroupSpecs,
+  ].map(({ id }) => id))
   const groupSpecs = [
     ...confirmedGroups,
     ...emptyPhysicalGroups,
@@ -738,8 +764,24 @@ function buildPoleBackboneAreaLaneSpec({
       mountingConflict: false,
     }] : []),
     ...excludedGroupSpecs,
+    ...Object.values(customFrames ?? {})
+      .filter((frame) => frame?.areaKey === area.key && !builtGroupIds.has(frame.id))
+      .map((frame) => ({
+        id: frame.id,
+        hostId: frame.type === 'pole' ? frame.poleAssetId : null,
+        hostName: frame.name || (frame.type === 'indoor' ? 'Indoor' : frame.type === 'pole' ? frame.poleAssetId : 'Non-tiang'),
+        hostType: frame.type === 'pole' ? 'Tiang' : frame.type === 'indoor' ? 'Aset dalam ruangan' : 'Aset non-tiang',
+        kind: frame.type === 'pole' ? 'empty' : 'excluded',
+        nodeIds: [],
+        mountingConflict: false,
+        custom: true,
+      })),
   ]
-  const logicalGroupSpecs = splitFramesByExternalJunction(groupSpecs, nodeById, edgeAdjacency)
+  const logicalGroupSpecs = applyFrameAssignmentsToGroups(
+    splitFramesByExternalJunction(groupSpecs, nodeById, edgeAdjacency),
+    frameAssignments,
+    nodeById,
+  )
   const mountingBoxes = logicalGroupSpecs.map((group) => buildMountingBoxSpec({
     group,
     nodeById,
@@ -929,6 +971,55 @@ function splitFramesByExternalJunction(groups, nodeById, adjacency) {
       })),
     ]
   })
+}
+
+// Diagram moves are presentation overrides. They intentionally do not rewrite
+// mountingRelations: an administrator may want to show an asset inside an
+// Indoor/Non-tiang frame while the physical mounting evidence stays intact.
+function applyFrameAssignmentsToGroups(groups, assignments = {}, nodeById) {
+  const entries = assignments instanceof Map
+    ? [...assignments.entries()]
+    : Object.entries(assignments ?? {})
+  if (!entries.length) return groups
+
+  const nextGroups = groups.map((group) => ({
+    ...group,
+    nodeIds: [...(group.nodeIds ?? [])],
+    presentationInheritedNodeIds: [...(group.presentationInheritedNodeIds ?? [])],
+  }))
+  const groupById = new Map(nextGroups.map((group) => [group.id, group]))
+  const groupByNodeId = new Map()
+  nextGroups.forEach((group) => {
+    group.nodeIds.forEach((nodeId) => groupByNodeId.set(nodeId, group))
+  })
+
+  entries
+    .filter(([assetId, frameId]) => assetId && frameId)
+    .sort(([left], [right]) => String(left).localeCompare(String(right), 'id'))
+    .forEach(([assetId, frameId]) => {
+      const node = nodeById.get(assetId)
+      const source = groupByNodeId.get(assetId)
+      const target = groupById.get(frameId)
+      if (!node || !source || !target || source === target
+        || !['confirmed', 'empty', 'excluded'].includes(target.kind)) return
+
+      source.nodeIds = source.nodeIds.filter((id) => id !== assetId)
+      source.presentationInheritedNodeIds = source.presentationInheritedNodeIds
+        .filter((id) => id !== assetId)
+      target.nodeIds = [...new Set([...target.nodeIds, assetId])]
+      target.presentationInheritedNodeIds = target.presentationInheritedNodeIds
+        .filter((id) => id !== assetId)
+      groupByNodeId.set(assetId, target)
+
+      // Keep a pole frame visible after its last child is moved, but let its
+      // header truthfully switch to the empty state. Excluded frames without
+      // nodes are removed below so stale visual containers do not linger.
+      if (source.hostId && !source.nodeIds.length && source.kind === 'confirmed') {
+        source.kind = 'empty'
+      }
+    })
+
+  return nextGroups.filter((group) => group.custom || group.hostId || group.nodeIds.length || group.kind !== 'excluded')
 }
 
 function mountingBoxOrder(kind) {

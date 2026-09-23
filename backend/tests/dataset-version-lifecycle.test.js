@@ -144,6 +144,30 @@ test('atomic activation archives the previous version and publishes one shared p
   }
 })
 
+test('pointer-based activation does not load the complete dataset history', async () => {
+  const fixture = await createLifecycleFixture()
+  try {
+    await fixture.repository.create(versionRecord('version-old', 'active'))
+    await fixture.repository.create(versionRecord('version-middle', 'valid'))
+    await fixture.service.activate('version-middle', 'admin-1', {
+      expectedActiveVersionId: 'version-old',
+    })
+    await fixture.repository.create(versionRecord('version-new', 'valid'))
+
+    fixture.repository.list = async () => {
+      throw new Error('Full history must not be loaded after an active pointer exists.')
+    }
+    const result = await fixture.service.activate('version-new', 'admin-1', {
+      expectedActiveVersionId: 'version-middle',
+    })
+
+    assert.equal(result.datasetVersion.id, 'version-new')
+    assert.equal(result.archivedDatasetVersion.id, 'version-middle')
+  } finally {
+    await fixture.close()
+  }
+})
+
 test('rollback reactivates the previous archived version and publishes a new pointer', async () => {
   const fixture = await createLifecycleFixture()
   try {

@@ -55,6 +55,63 @@ test('camera frames stay in their JB subtree across facilities and pole layouts'
   }
 })
 
+test('diagram frame assignment can move an asset into an Indoor frame without changing mounting evidence', () => {
+  const area = 'area-a'
+  const assets = [
+    { id: 'server', name: 'Server', type: 'Server Rack', topologyRole: 'core', locationGroupKey: area },
+    { id: 'pole', name: 'T-01', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area },
+    { id: 'camera', name: 'CAM-01', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: area,
+      mountingExpectation: 'pole' },
+    { id: 'indoor', name: 'DC-01', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: area,
+      mountingExpectation: 'indoor' },
+  ]
+  const model = buildTopologyDiagramModel({
+    assets,
+    graph: { nodes: assets, edges: [] },
+    mountingRelations: [{ sourceAssetId: 'camera', targetAssetId: 'pole', relationType: 'mounted_on' }],
+    locationGroups: [{ key: area, name: area }],
+  })
+  const baseline = calculateTopologyDiagramLayout(model)
+  const indoorFrame = baseline.mountingBoxes.find(box => box.kind === 'excluded')
+  const poleFrame = baseline.mountingBoxes.find(box => box.hostId === 'pole')
+  assert.ok(indoorFrame)
+  assert.ok(poleFrame)
+
+  const moved = calculateTopologyDiagramLayout(model, {
+    frameAssignments: { camera: indoorFrame.id },
+  })
+  const movedIndoorFrame = moved.mountingBoxes.find(({ id }) => id === indoorFrame.id)
+  const movedPoleFrame = moved.mountingBoxes.find(({ id }) => id === poleFrame.id)
+  assert.ok(movedIndoorFrame.nodeIds.includes('camera'))
+  assert.equal(movedPoleFrame.nodeIds.includes('camera'), false)
+  assert.equal(model.mountingGroups.find(({ hostId }) => hostId === 'pole').childIds.includes('camera'), true)
+})
+
+test('custom Indoor and selected empty-pole frames stay visible before assets are dropped into them', () => {
+  const area = 'area-a'
+  const assets = [
+    { id: 'server', name: 'Server', type: 'Server Rack', topologyRole: 'core', locationGroupKey: area },
+    { id: 'pole-empty', name: 'Tiang 02', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area },
+  ]
+  const model = buildTopologyDiagramModel({ assets,
+    graph: { nodes: assets, edges: [] },
+    locationGroups: [{ key: area, name: 'Area A' }],
+  })
+  const indoorId = `excluded-mounting:${area}:custom:frame-1`
+  const poleId = 'pole-group:pole-empty'
+  const layout = calculateTopologyDiagramLayout(model, { customFrames: {
+    [indoorId]: { id: indoorId, type: 'indoor', areaKey: area, name: 'Indoor' },
+    [poleId]: { id: poleId, type: 'pole', areaKey: area, poleAssetId: 'pole-empty', name: 'Tiang 02' },
+  } })
+
+  const indoor = layout.mountingBoxes.find(({ id }) => id === indoorId)
+  const pole = layout.mountingBoxes.find(({ id }) => id === poleId)
+  assert.equal(indoor?.kind, 'excluded')
+  assert.deepEqual(indoor?.nodeIds, [])
+  assert.equal(pole?.kind, 'empty')
+  assert.equal(pole?.hostId, 'pole-empty')
+})
+
 test('a pole shared with another JB cannot override confirmed camera ownership in any facility', () => {
   for (const area of ['booster-kutawinangun', 'dppu-yia', 'ft-tegal-baru', 'unlisted-facility']) {
     for (const extended of [false, true]) {
