@@ -130,6 +130,72 @@ test('Tegal facts resolve padded numbers, camera EXP aliases, and remain facilit
   assert.equal(facilityRelations([...assets(), {...assets()[0], id: 'duplicate', assetId: 'duplicate', canonicalAssetId: 'duplicate'}]).length, 5)
 })
 
+test('FT Tegal Baru C-17 presents one operational termination at JB-01.1 after KMZ import', () => {
+  const names = ['C-17', 'JB-01', 'JB-01.1', 'JB-01.2', 'C-18']
+  const nodes = names.map((name, index) => ({
+    id: name,
+    assetId: name,
+    canonicalAssetId: name,
+    sourceName: name,
+    name,
+    sourceFolderPath: '/RJBT/FT Tegal Baru/Devices',
+    locationGroupKey: 'ft-tegal-baru',
+    objectRole: 'device_node',
+    topologyRole: name.startsWith('C-') ? 'endpoint' : 'junction',
+    assetType: name.startsWith('C-') ? 'CCTV' : 'Junction Box',
+    networkFamily: 'cctv',
+    classificationStatus: 'classified',
+    sourceFeatureId: `feature:${name}`,
+    siteId: 'site',
+    geometryIds: [`point:${name}`],
+    coordinate: [109.1874 + index * 0.00001, -6.87045],
+  }))
+  const oldEdges = [
+    { id: 'kmz-label', sourceAssetId: 'C-17', targetAssetId: 'JB-01',
+      relationKind: 'device_edge', relationSource: 'line_label_inference',
+      verificationStatus: 'confirmed', sourceGeometryIds: ['cable:c17-jb01'] },
+    { id: 'kmz-spatial', sourceAssetId: 'C-17', targetAssetId: 'JB-01.2',
+      relationKind: 'device_edge', relationSource: 'spatial_inference',
+      verificationStatus: 'confirmed' },
+    { id: 'other-camera', sourceAssetId: 'C-18', targetAssetId: 'JB-01.2',
+      relationKind: 'device_edge', relationSource: 'spatial_inference',
+      verificationStatus: 'confirmed' },
+  ]
+  const neighbors = edges => edges.flatMap(edge => {
+    const source = edge.sourceAssetId ?? edge.sourceNodeId
+    const target = edge.targetAssetId ?? edge.targetNodeId
+    return source === 'C-17' ? [target] : target === 'C-17' ? [source] : []
+  })
+  assert.deepEqual(neighbors(correctFacilityEdges(oldEdges, nodes)), ['JB-01.1'])
+  const sourceGeometries = [{ id: 'cable:c17-jb01', coordinates: [[109.1874, -6.87045]] }]
+  const record = { datasetVersion: { id: 'dv', datasetId: 'dataset-semarang', branchId: 'semarang' },
+    assets: nodes, sourceGeometries,
+    topologyGraph: { nodes, edges: oldEdges }, confirmedRelations: oldEdges }
+  const projected = projectFacilityRecord(record)
+  assert.deepEqual(neighbors(projected.topologyGraph.edges), ['JB-01.1'])
+  assert.deepEqual(projected.sourceGeometries, sourceGeometries)
+  assert.deepEqual(record.topologyGraph.edges, oldEdges)
+  assert.ok(projected.topologyGraph.edges.some(edge => (
+    edge.sourceAssetId === 'C-18' && edge.targetAssetId === 'JB-01.2'
+  )))
+
+  const input = { datasetVersion: { id: 'dv' }, site: 'site',
+    semanticRuleSetVersion: 'test/1', topologyRuleSetVersion: TOPOLOGY_RULE_SET_VERSION,
+    classifiedPaths: [], explicitRelations: [], classifiedNodes: nodes,
+    geometries: nodes.map(node => ({ geometryId: `point:${node.id}`,
+      datasetVersionId: 'dv',
+      sourceFeatureId: node.sourceFeatureId, geometryType: 'Point', valid: true,
+      coordinates: node.coordinate })),
+  }
+  const generated = generateRelationArtifacts(input, { previousRelations: oldEdges })
+  assert.deepEqual(neighbors(generated.confirmedRelations), ['JB-01.1'])
+  const regenerated = rebuildConfirmedRelationArtifacts(input, {
+    candidates: generated.candidates,
+    previousRelations: [...generated.confirmedRelations, ...oldEdges],
+  })
+  assert.deepEqual(neighbors(regenerated.confirmedRelations), ['JB-01.1'])
+})
+
 function pengaponAssets() {
   const names = [
     ['T-006', 'Tiang'], ['JB-006-exp', 'Junction Box'], ['C-006', 'CCTV'],
