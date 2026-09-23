@@ -24,7 +24,7 @@ export function renderAssetDetailDrawer({
   relationStatus = 'idle',
   relationError = null,
 }) {
-  if (status === 'loading') return renderLoadingState()
+  if (status === 'loading' && !asset) return renderLoadingState()
   if (status === 'error') return renderErrorState(errorMessage)
   if (!asset) return renderEmptyState()
 
@@ -49,6 +49,8 @@ export function renderAssetDetailDrawer({
         <span class="material-symbols-outlined" aria-hidden="true">close</span>
       </button>
     </header>
+
+    ${status === 'loading' ? `<p class="drawer-detail-loading" role="status" aria-live="polite">Memuat data tambahan aset…</p>` : ''}
 
     <div class="drawer-scroll-content">
       <section class="drawer-title">
@@ -407,14 +409,19 @@ function renderMountingSection({
   `
 }
 
-function renderLoadingState() {
+function renderLoadingState(asset) {
   return `
     <header class="drawer-header">
-      <div class="drawer-heading"><span class="drawer-title-placeholder">Memuat detail aset</span></div>
+      <div class="drawer-heading"><span class="drawer-title-placeholder">Detail aset</span></div>
       <button class="icon-button close-drawer" type="button" aria-label="Tutup detail aset">
         <span class="material-symbols-outlined" aria-hidden="true">close</span>
       </button>
     </header>
+    ${asset ? `<section class="drawer-title">
+      <h2>${escapeHtml(displayAssetName(asset))}</h2>
+      <p>${escapeHtml(asset.type || 'Jenis aset belum tersedia')}</p>
+      ${asset.location ? `<small>${escapeHtml(asset.location)}</small>` : ''}
+    </section>` : ''}
     <div class="drawer-state drawer-loading" aria-live="polite" aria-busy="true">
       <div class="drawer-skeleton"><i></i><i></i><i></i><i></i></div>
       <span>Memuat aset dari dataset aktif…</span>

@@ -56,6 +56,7 @@ export function createMapLibreSurface(element, {
   candidates = [],
   overlays = [],
   onSelectAsset = () => {},
+  onHoverAsset = () => {},
   onSelectNetwork = () => {},
   onSelectCandidate = () => {},
   onBasemapStatus = () => {},
@@ -101,6 +102,8 @@ export function createMapLibreSurface(element, {
   let declutterEnabled = true
   const sourceIconLoader = createSourceIconLoader()
   let layoutFrame = null
+  let transformFrame = null
+  let layoutAnchor = null
   let layoutStatusSignature = ''
   let clusterLookup = new Map()
   let groundOverlayLayers = []
@@ -311,8 +314,10 @@ export function createMapLibreSurface(element, {
   map.on('mousemove', 'candidate-connectors-hit', (event) => (
     showFeatureTooltip(event, 'candidate')
   ))
-  map.on('move', scheduleAdaptiveMarkers)
-  map.on('zoom', scheduleAdaptiveMarkers)
+  // Keep existing DOM markers in step with the map while the camera moves.
+  // Rebuilding the adaptive layout and its canvas on every frame stalls panning.
+  map.on('move', scheduleMarkerTransform)
+  map.on('moveend', scheduleAdaptiveMarkers)
   map.on('resize', scheduleAdaptiveMarkers)
   markerOverlay.addEventListener('click', (event) => {
     const assetButton = event.target.closest('[data-adaptive-asset]')
@@ -325,6 +330,10 @@ export function createMapLibreSurface(element, {
     if (!clusterButton) return
     event.stopPropagation()
     focusCluster(clusterLookup.get(clusterButton.dataset.adaptiveCluster))
+  })
+  markerOverlay.addEventListener('pointerover', (event) => {
+    const assetButton = event.target.closest('[data-adaptive-asset]')
+    if (assetButton && !map.isMoving()) onHoverAsset(assetButton.dataset.adaptiveAsset)
   })
 
   renderAccessibleAssets(element, assets, onSelectAsset)
@@ -371,8 +380,26 @@ export function createMapLibreSurface(element, {
     })
   }
 
+  function scheduleMarkerTransform() {
+    if (transformFrame !== null || destroyed || !layoutAnchor) return
+    transformFrame = window.requestAnimationFrame(() => {
+      transformFrame = null
+      if (!layoutAnchor || destroyed) return
+      const projected = map.project(layoutAnchor.coordinate)
+      const scale = 2 ** (map.getZoom() - layoutAnchor.zoom)
+      const transform = `translate(${projected.x - scale * layoutAnchor.point.x}px, ${projected.y - scale * layoutAnchor.point.y}px) scale(${scale})`
+      for (const child of markerOverlay.children) child.style.transform = transform
+    })
+  }
+
   function syncAdaptiveMarkers() {
     if (!loaded || destroyed) return
+    if (transformFrame !== null) {
+      window.cancelAnimationFrame(transformFrame)
+      transformFrame = null
+    }
+    const anchorCoordinate = map.getCenter().toArray()
+    const anchorPoint = map.project(anchorCoordinate)
     const selectedCandidate = currentCandidates.find(({ candidateId }) => (
       candidateId === state.selectedCandidateId
     ))
@@ -478,6 +505,7 @@ export function createMapLibreSurface(element, {
       + `<div class="map-adaptive-markers">${markers}</div>`
     drawKmlLineOverlay(markerOverlay.querySelector('.map-kml-line-overlay'))
     syncSelectedCandidateOverlay()
+    layoutAnchor = { coordinate: anchorCoordinate, point: anchorPoint, zoom: map.getZoom() }
 
     const signature = JSON.stringify({
       enabled: declutterEnabled,
@@ -883,6 +911,7 @@ export function createMapLibreSurface(element, {
       if (basemapTimer !== null) window.clearTimeout(basemapTimer)
       clearBasemapRetry()
       if (layoutFrame !== null) window.cancelAnimationFrame(layoutFrame)
+      if (transformFrame !== null) window.cancelAnimationFrame(transformFrame)
       window.removeEventListener('keydown', enableCtrlPitch)
       window.removeEventListener('keyup', disableCtrlPitch)
       window.removeEventListener('blur', disableCtrlPitch)
