@@ -199,6 +199,8 @@ export async function renderMapPage(container) {
     topologyGraph,
   })
   const assetDetailCache = new Map()
+  const pendingAssetDetails = new Map()
+  let assetPrefetchTimer = null
   let assetDetailRequest = 0
   const state = {
     assetDetailStatus: 'ready',
@@ -271,6 +273,7 @@ export async function renderMapPage(container) {
     overlays: resolvedOverlays,
     candidates: [],
     onSelectAsset: handleAssetSelect,
+    onHoverAsset: prefetchAssetDetail,
     onSelectNetwork: handleNetworkSelect,
     onBasemapStatus: updateBasemapStatus,
     onLayoutStatus: updateLayoutStatus,
@@ -435,6 +438,7 @@ export async function renderMapPage(container) {
   }
 
   function handleAssetSelect(assetId) {
+    if (assetPrefetchTimer !== null) window.clearTimeout(assetPrefetchTimer)
     const previousAssetId = selection.selectedAssetId
     selection.selectAsset(assetId)
     state.assetDetailStatus = assetDetailCache.has(assetId) ? 'ready' : 'loading'
@@ -471,6 +475,22 @@ export async function renderMapPage(container) {
       return
     }
     const asset = assetDetailCache.get(mapAsset.id) ?? mapAsset
+    if (state.assetDetailStatus === 'error') {
+      drawer.innerHTML = renderAssetDetailDrawer({
+        status: state.assetDetailStatus,
+        errorMessage: state.assetDetailError,
+        asset,
+      })
+      drawer.classList.add('open')
+      drawer.setAttribute('aria-hidden', 'false')
+      workspace.classList.add('drawer-open')
+      invalidateMapAfterPanelChange(drawer)
+      drawer.querySelector('.close-drawer')?.addEventListener('click', closeAssetDrawer)
+      drawer.querySelector('.retry-asset-detail')?.addEventListener('click', () => {
+        loadAssetDetail(selection.selectedAssetId, { force: true })
+      })
+      return
+    }
     const assetId = mapAsset.id
     const mountingAssetRelations = mergeMountingRelations([
       mountingRelations,
@@ -835,18 +855,9 @@ export async function renderMapPage(container) {
     const requestId = ++assetDetailRequest
     state.assetDetailStatus = 'loading'
     state.assetDetailError = null
-    renderDrawer()
+    if (force) renderDrawer()
     try {
-      const detailPayload = await loadActiveAssetDetail({
-        datasetId: activeContext.datasetId,
-        branchId: activeContext.branchId,
-        assetId,
-      })
-      if (detailPayload.activePointer?.revision !== activeContext.activePointerRevision) {
-        throw new Error(
-          'Dataset aktif berubah saat detail dimuat. Muat ulang peta untuk menggunakan versi terbaru.',
-        )
-      }
+      const detailPayload = await fetchAssetDetail(assetId, { force })
       assetDetailCache.set(assetId, adaptActiveAssetDetail(detailPayload, mapAsset))
       if (requestId !== assetDetailRequest || selection.selectedAssetId !== assetId) return
       state.assetDetailStatus = 'ready'
@@ -857,6 +868,40 @@ export async function renderMapPage(container) {
       state.assetDetailError = error.message
     }
     renderDrawer()
+  }
+
+  function fetchAssetDetail(assetId, { force = false } = {}) {
+    if (!force && pendingAssetDetails.has(assetId)) return pendingAssetDetails.get(assetId)
+    const request = loadActiveAssetDetail({
+      datasetId: activeContext.datasetId,
+      branchId: activeContext.branchId,
+      assetId,
+    }).then((detailPayload) => {
+      if (detailPayload.activePointer?.revision !== activeContext.activePointerRevision) {
+        throw new Error(
+          'Dataset aktif berubah saat detail dimuat. Muat ulang peta untuk menggunakan versi terbaru.',
+        )
+      }
+      return detailPayload
+    }).finally(() => {
+      if (pendingAssetDetails.get(assetId) === request) pendingAssetDetails.delete(assetId)
+    })
+    pendingAssetDetails.set(assetId, request)
+    return request
+  }
+
+  function prefetchAssetDetail(assetId) {
+    if (!assetById[assetId] || assetDetailCache.has(assetId)
+      || pendingAssetDetails.has(assetId)) return
+    if (assetPrefetchTimer !== null) window.clearTimeout(assetPrefetchTimer)
+    assetPrefetchTimer = window.setTimeout(() => {
+      assetPrefetchTimer = null
+      if (pendingAssetDetails.size > 1) return
+      void fetchAssetDetail(assetId).then((payload) => {
+        assetDetailCache.set(assetId, adaptActiveAssetDetail(payload, assetById[assetId]))
+        if (assetDetailCache.size > 32) assetDetailCache.delete(assetDetailCache.keys().next().value)
+      }).catch(() => {})
+    }, 250)
   }
 
   function toggleNetworkFocus(networkId) {

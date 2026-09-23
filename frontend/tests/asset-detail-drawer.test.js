@@ -89,6 +89,13 @@ test('drawer supports loading and error states', () => {
   assert.match(error, /Coba lagi/)
 })
 
+test('drawer shows known asset details while additional data loads', () => {
+  const html = renderAssetDetailDrawer({ status: 'loading', asset, activeContext })
+  assert.match(html, /CCTV-GATE-01/)
+  assert.match(html, /Gerbang Utama/)
+  assert.match(html, /Memuat data tambahan aset/)
+})
+
 test('drawer keeps missing relations actionable without the retired review warning', () => {
   const html = renderAssetDetailDrawer({
     asset,

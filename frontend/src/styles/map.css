@@ -3094,6 +3094,15 @@
   scrollbar-width: thin;
 }
 
+.drawer-detail-loading {
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-muted, var(--color-surface));
+  border-bottom: 1px solid var(--color-divider);
+  font-size: var(--font-size-caption);
+}
+
 .asset-drawer .drawer-title {
   padding: var(--space-4);
 }
