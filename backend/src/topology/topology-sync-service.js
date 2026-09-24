@@ -311,8 +311,7 @@ export class TopologySyncService {
     const active = await this.repository.findActive(localVersion.datasetId, {
       branchId: localVersion.branchId,
     })
-    if (localVersion.baseDatasetVersionId
-      || active?.datasetVersion.id !== localVersion.id) {
+    if (active?.datasetVersion.id !== localVersion.id) {
       throw new AppError('Penyelarasan hanya bisa dimulai dari dataset aktif.', {
         code: 'topology_sync_reconciliation_requires_active', statusCode: 409,
       })

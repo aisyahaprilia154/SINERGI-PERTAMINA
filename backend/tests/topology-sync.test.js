@@ -271,7 +271,8 @@ test('paket awal impor independen membuat draft dengan titik bersama tanpa mengu
     code: 'topology_sync_reconciliation_already_shared',
   })
   await repository.update(local.datasetVersion.id, record => ({ ...record,
-    datasetVersion: { ...record.datasetVersion, publicationStatus: 'unpublished' },
+    datasetVersion: { ...record.datasetVersion,
+      publicationStatus: 'unpublished', baseDatasetVersionId: 'dv-earlier' },
   }))
   const incompatible = structuredClone(sender)
   incompatible.assets[0].canonicalAssetId = 'DIFFERENT-ASSET'
