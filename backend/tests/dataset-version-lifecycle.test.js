@@ -326,6 +326,68 @@ test('active map exposes KMZ source icon resources for diagram nodes', async () 
   }
 })
 
+test('active map and topology use the same source-feature area for newly imported branches', async () => {
+  const fixture = await createLifecycleFixture()
+  try {
+    const record = versionRecord('version-new-branch', 'active')
+    record.datasetVersion.datasetId = 'dataset-new-branch'
+    record.datasetVersion.branchId = 'branch-new'
+    record.assets[0].branchId = 'branch-new'
+    record.layers[0].sourceFolderPath = '/RJBT/Parent Area/Devices'
+    record.sourceFeatures = [{
+      sourceFeatureId: 'source-feature-version-new-branch',
+      sourceFolderPath: '/RJBT/New Facility/Devices/Switches',
+    }]
+    record.assets.push({
+      ...record.assets[0],
+      id: 'node-second',
+      assetId: 'ASSET-second',
+      name: 'Second switch',
+      properties: { sourceFeatureId: 'source-feature-second' },
+    })
+    record.geometries.push({
+      ...record.geometries[0],
+      id: 'geometry-second',
+      assetNodeId: 'node-second',
+      sourceFeatureId: 'source-feature-second',
+      coordinates: [110.001, -7],
+    })
+    record.sourceFeatures.push({
+      sourceFeatureId: 'source-feature-second',
+      sourceFolderPath: '/RJBT/New Facility/Devices/Switches',
+    })
+    record.topologyGraph = {
+      nodes: [
+        { id: 'ASSET-version-new-branch' },
+        { id: 'ASSET-second' },
+      ],
+      edges: [{
+        id: 'confirmed-connection',
+        sourceAssetId: 'ASSET-version-new-branch',
+        targetAssetId: 'ASSET-second',
+        relationType: 'connected_to',
+        verificationStatus: 'confirmed',
+      }],
+    }
+    await fixture.repository.create(record)
+
+    const context = { datasetId: 'dataset-new-branch', branchId: 'branch-new' }
+    const [mapView, topologyView] = await Promise.all([
+      fixture.service.getActiveMapDataset(context),
+      fixture.service.getActiveTopologyDataset(context),
+    ])
+    assert.equal(mapView.assets[0].locationGroupKey, 'new-facility')
+    assert.equal(mapView.assets[0].locationGroupName, 'New Facility')
+    assert.equal(mapView.assets[0].locationGroupKey, topologyView.assets[0].locationGroupKey)
+    assert.deepEqual(
+      mapView.topologyGraph.edges.map(({ id, sourceAssetId, targetAssetId }) => ({ id, sourceAssetId, targetAssetId })),
+      topologyView.topologyGraph.edges.map(({ id, sourceAssetId, targetAssetId }) => ({ id, sourceAssetId, targetAssetId })),
+    )
+  } finally {
+    await fixture.close()
+  }
+})
+
 test('automatic identity assignment persists source feature mapping and is idempotent', async () => {
   const fixture = await createLifecycleFixture()
   try {

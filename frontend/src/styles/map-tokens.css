@@ -2,7 +2,8 @@
  * Design foundation khusus network map.
  * Seluruh token di-scope ke .map-body agar halaman lain tidak ikut berubah.
  */
-.map-body {
+.map-body,
+.topology-body {
   --color-page: #f4f7fa;
   --color-surface: #ffffff;
   --color-surface-subtle: #f8fafc;
@@ -48,7 +49,7 @@
   --space-6: 24px;
   --space-8: 32px;
 
-  --font-family-map: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-family-map: -apple-system, BlinkMacSystemFont, 'Inter Variable', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
   --font-size-page-title: 24px;
   --font-size-section-title: 16px;
   --font-size-body: 14px;

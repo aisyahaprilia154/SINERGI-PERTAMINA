@@ -63,10 +63,14 @@ const MAX_MANUAL_REFERENCE_IDS = 256
 const MAX_MOUNTING_BULK_DECISIONS = 200
 
 export class TopologyService {
-  async saveDiagram(datasetVersionId, actorId, { changes, expectedRecordRevision, correlationId } = {}) {
-    if (!Array.isArray(changes) || !changes.length || changes.length > 200
+  async saveDiagram(datasetVersionId, actorId, { changes, expectedRecordRevision,
+    correlationId, syncAcceptedIds = [] } = {}) {
+    if (!Array.isArray(changes) || (!changes.length && !syncAcceptedIds.length)
+      || changes.length > 200
       || changes.some(change => !change || typeof change !== 'object' || Array.isArray(change))
-      || !Number.isInteger(expectedRecordRevision)) {
+      || !Number.isInteger(expectedRecordRevision)
+      || !Array.isArray(syncAcceptedIds) || syncAcceptedIds.length > 200
+      || syncAcceptedIds.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id))) {
       throw new AppError('Daftar perubahan dan revisi diagram wajib valid (maksimal 200).', { code: 'invalid_diagram_changes', statusCode: 400 })
     }
     return this.#withMutationTransaction(async ({ repository, auditLog }) => {
@@ -135,6 +139,19 @@ export class TopologyService {
             throw new AppError('Jenis perubahan diagram tidak valid.', { code: 'invalid_diagram_change', statusCode: 400 })
           }
         }
+        if (syncAcceptedIds.length) {
+          if (!draft.topologySync?.id) {
+            throw new AppError('Sinkronisasi dataset belum disiapkan.', {
+              code: 'topology_sync_not_initialized', statusCode: 409,
+            })
+          }
+          draft = { ...draft, topologySync: {
+            ...draft.topologySync,
+            appliedChangeIds: [...new Set([
+              ...(draft.topologySync.appliedChangeIds ?? []), ...syncAcceptedIds,
+            ])],
+          } }
+        }
         return draft
       }, { expectedRevision: expectedRecordRevision, projectionMode: 'topology-review' })
       await auditLog.record('topology.diagram_saved', { actorId, datasetVersionId,
@@ -150,7 +167,7 @@ export class TopologyService {
     })
   }
 
-  async editDiagram(datasetVersionId, actorId, { action, assetId, edgeId, name,
+  async editDiagram(datasetVersionId, actorId, { action, assetId, edgeId, edgeKey, name,
     expectedRecordRevision, correlationId } = {}) {
     if (!['rename-frame', 'remove-edge'].includes(action)
       || !Number.isInteger(expectedRecordRevision)) {
@@ -172,7 +189,8 @@ export class TopologyService {
           details = { assetId: pole.canonicalAssetId, name: label }
         } else {
           const edge = projectFacilityRecord(record).topologyGraph?.edges
-            .find(item => item.id === edgeId || item.relationId === edgeId)
+            .find(item => item.id === edgeId || item.relationId === edgeId
+              || (edgeKey && diagramEdgeKey(item) === edgeKey))
           if (!edge) throw new AppError('Garis sudah berubah. Muat ulang diagram.', { code: 'diagram_edge_not_found', statusCode: 409 })
           const override = { action: 'remove', edgeId: edge.id ?? edge.relationId,
             sourceAssetId: edge.sourceAssetId, targetAssetId: edge.targetAssetId,

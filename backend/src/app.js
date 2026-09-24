@@ -28,6 +28,7 @@ import {
   normalizeTopologyRegenerationReason,
 } from './topology/topology-service.js'
 import { MAX_CANDIDATE_RESPONSE_BYTES } from './topology/topology-candidate-pagination.js'
+import { TopologySyncService } from './topology/topology-sync-service.js'
 import { MetricsRegistry, normalizeHttpRoute } from './observability/metrics.js'
 
 // 5,000 candidate IDs plus the review snapshot fit within this bounded body.
@@ -50,6 +51,9 @@ export function createApp({
   const openFreeMapProxy = createOpenFreeMapProxy({ fetchImpl: basemapFetch })
   const metricsRegistry = metrics ?? new MetricsRegistry({ clock })
   const sendActiveView = createRevisionResponseCache()
+  const topologySyncService = topologyService
+    ? new TopologySyncService({ repository, topologyService, auditLog,
+      fileStore, lifecycleService, config }) : null
   return http.createServer(async (request, response) => {
     setSecurityHeaders(response)
     const correlationId = resolveCorrelationId(request)
@@ -99,6 +103,15 @@ export function createApp({
       }
       if (request.method === 'GET' && url.pathname === '/health') {
         return sendJson(response, 200, { status: 'ok' })
+      }
+      if (config?.topologyDraftRequired && request.method === 'POST') {
+        const topologyMutation = url.pathname.match(
+          /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/(?:rollback|confirm-all|confirm-selected|confirm-line-labels|revoke-all|relations|mounting-regeneration|mounting-expectations|mounting-review\/bulk|mounting-relations|diagram)$/,
+        )
+        if (topologyMutation) {
+          requireAdministrator(request, authenticator)
+          await assertSyncEditTarget(topologyMutation[1], repository, config)
+        }
       }
       if (request.method === 'GET'
         && url.pathname.startsWith('/api/basemap/openfreemap/')
@@ -244,7 +257,9 @@ export function createApp({
           load: () => view === 'map'
             ? lifecycleService.getActiveMapDataset(context)
             : view === 'topology'
-              ? lifecycleService.getActiveTopologyDataset(context)
+              ? lifecycleService.getActiveTopologyDataset(context).then(payload => ({
+                ...payload, editingRequiresDraft: config?.topologyDraftRequired === true,
+              }))
               : lifecycleService.getActiveDataset(context),
         })
       }
@@ -816,9 +831,95 @@ export function createApp({
       if (diagramEditMatch) {
         const user = requireAdministrator(request, authenticator)
         const body = await readJsonBody(request)
+        if (config?.topologyDraftRequired) {
+          const record = await repository.get(diagramEditMatch[1])
+          if (!record.datasetVersion.baseDatasetVersionId
+            || record.datasetVersion.publicationStatus !== 'unpublished') {
+            throw new AppError('Buat dan buka draft sebelum mengedit diagram.', {
+              code: 'topology_draft_required', statusCode: 409,
+            })
+          }
+        }
         return sendJson(response, 200, await topologyService.saveDiagram(
           diagramEditMatch[1], user.id, { ...body, correlationId },
         ))
+      }
+      const draftViewMatch = request.method === 'GET'
+        ? url.pathname.match(/^\/api\/admin\/topology-sync\/drafts\/([a-zA-Z0-9_-]+)\/view$/)
+        : null
+      if (draftViewMatch) {
+        requireAdministrator(request, authenticator)
+        return sendJson(response, 200,
+          await lifecycleService.getDraftTopologyDataset(draftViewMatch[1]))
+      }
+      const draftReviewMatch = url.pathname.match(
+        /^\/api\/admin\/topology-sync\/drafts\/([a-zA-Z0-9_-]+)\/(review|publish)$/,
+      )
+      if (draftReviewMatch) {
+        const user = requireAdministrator(request, authenticator)
+        if (request.method === 'GET' && draftReviewMatch[2] === 'review') {
+          return sendJson(response, 200,
+            await topologySyncService.reviewDraft(draftReviewMatch[1]))
+        }
+        if (request.method === 'POST' && draftReviewMatch[2] === 'publish') {
+          const body = await readJsonBody(request)
+          const result = await topologySyncService.publishDraft(draftReviewMatch[1],
+            user.id, body.reviewHash)
+          await queueAutonomousTopologyRegeneration({
+            datasetVersionId: draftReviewMatch[1], actorId: user.id,
+            reason: 'Draft koreksi topologi diterbitkan setelah peninjauan.',
+            correlationId, repository, auditLog, jobQueue, topologyService, config,
+          })
+          return sendJson(response, 200, result)
+        }
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/topology-sync/drafts') {
+        const user = requireAdministrator(request, authenticator)
+        const body = await readJsonBody(request)
+        return sendJson(response, 201,
+          await topologySyncService.createDraft(body.datasetVersionId, user.id))
+      }
+      const syncMatch = url.pathname.match(
+        /^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/topology\/sync(?:\/(initialize|export|preview|apply))?$/,
+      )
+      if (syncMatch && (request.method === 'GET' || request.method === 'POST')) {
+        const user = requireAdministrator(request, authenticator)
+        const datasetVersionId = syncMatch[1]
+        const action = syncMatch[2] ?? 'status'
+        if (!topologySyncService) throw new AppError('Sinkronisasi tidak tersedia.', {
+          code: 'topology_sync_unavailable', statusCode: 503,
+        })
+        if (request.method === 'GET' && action === 'status') {
+          return sendJson(response, 200, await topologySyncService.status(datasetVersionId))
+        }
+        if (request.method !== 'POST' || action === 'status') {
+          throw new AppError('Metode tidak didukung.', { code: 'method_not_allowed', statusCode: 405 })
+        }
+        const body = await readJsonBody(request, 16 * 1024 * 1024)
+        if (action === 'initialize') return sendJson(response, 200,
+          await topologySyncService.initialize(datasetVersionId, user.id, body.expectedRecordRevision))
+        if (action === 'export') return sendJson(response, 200,
+          await topologySyncService.export(datasetVersionId, body.passphrase, body.offset ?? 0))
+        if (action === 'preview') return sendJson(response, 200,
+          await topologySyncService.preview(datasetVersionId, body.envelope, body.passphrase))
+        if (action === 'apply') return sendJson(response, 200,
+          await topologySyncService.apply(await assertSyncEditTarget(datasetVersionId,
+            repository, config), user.id,
+            body.envelope, body.passphrase, {
+              expectedRecordRevision: body.expectedRecordRevision,
+              resolutions: body.resolutions,
+            }))
+      }
+      if (request.method === 'POST'
+        && /^\/api\/admin\/topology-sync\/bootstrap\/(export|import)$/.test(url.pathname)) {
+        const user = requireAdministrator(request, authenticator)
+        const action = url.pathname.endsWith('/export') ? 'export' : 'import'
+        const body = await readJsonBody(request,
+          action === 'import' ? 256 * 1024 * 1024 : MAX_JSON_BODY_BYTES)
+        if (action === 'export') return sendJson(response, 200,
+          await topologySyncService.exportBootstrap(body.datasetVersionId, body.passphrase))
+        return sendJson(response, 200,
+          await topologySyncService.importBootstrap(user.id, body.envelope, body.passphrase))
       }
       const candidateActionMatch = request.method === 'POST'
         ? url.pathname.match(
@@ -830,6 +931,9 @@ export function createApp({
         assertTopologyService(topologyService)
         const candidateId = decodePathSegment(candidateActionMatch[1])
         const body = await readJsonBody(request)
+        if (config?.topologyDraftRequired) {
+          await assertSyncEditTarget(body.datasetVersionId, repository, config)
+        }
         const action = candidateActionMatch[2]
         const mutationInput = {
           ...body,
@@ -854,6 +958,9 @@ export function createApp({
         const user = requireAdministrator(request, authenticator)
         assertTopologyService(topologyService)
         const body = await readJsonBody(request)
+        if (config?.topologyDraftRequired) {
+          await assertSyncEditTarget(body.datasetVersionId, repository, config)
+        }
         const mutationInput = {
           ...body,
           correlationId,
@@ -1002,6 +1109,14 @@ export function createApp({
       if (activationMatch) {
         const user = requireAdministrator(request, authenticator)
         const body = await readJsonBody(request)
+        if (config?.topologyDraftRequired) {
+          const candidate = await repository.get(activationMatch[1])
+          if (candidate.datasetVersion.syncRootDatasetVersionId) {
+            throw new AppError('Draft topologi harus diterbitkan dari pratinjau koreksi.', {
+              code: 'topology_sync_review_required', statusCode: 409,
+            })
+          }
+        }
         if (body.confirmArchiveCurrent !== true) {
           throw new AppError('Konfirmasi pengarsipan dataset aktif wajib diberikan.', {
             code: 'activation_confirmation_required',
@@ -1637,6 +1752,11 @@ async function handleCreateImport({
     )
     const officialSourceConfirmed = upload.fields.officialSourceConfirmed === 'true'
     const importMode = normalizeImportMode(upload.fields.importMode)
+    if (config?.topologyDraftRequired && importMode === 'replace_active') {
+      throw new AppError('Impor produksi harus melalui versi tinjauan.', {
+        code: 'topology_review_required', statusCode: 409,
+      })
+    }
     const validated = await validateUploadedFile({
       filePath: temporaryPath,
       filename: upload.filename,
@@ -1977,8 +2097,9 @@ function toImportConfigResponse(config) {
     workflow: {
       requiresOfficialSourceConfirmation: true,
       activatesAutomatically: false,
-      supportsAutomaticActivation: true,
-      importModes: ['stage_only', 'replace_active'],
+      supportsAutomaticActivation: config.topologyDraftRequired !== true,
+      importModes: config.topologyDraftRequired
+        ? ['stage_only'] : ['stage_only', 'replace_active'],
       defaultImportMode: 'stage_only',
       supportsCancellationAfterAccepted: false,
       publicationProfiles: ['map_only', 'operational_topology'],
@@ -2136,7 +2257,24 @@ function ifNoneMatchMatches(header, etag) {
     || value.split(',').map((item) => item.trim()).includes(etag)
 }
 
-async function readJsonBody(request) {
+async function assertSyncEditTarget(datasetVersionId, repository, config) {
+  if (!config?.topologyDraftRequired) return datasetVersionId
+  if (!/^[a-zA-Z0-9_-]+$/.test(String(datasetVersionId ?? ''))) {
+    throw new AppError('ID draft wajib untuk koreksi topologi.', {
+      code: 'topology_draft_required', statusCode: 409,
+    })
+  }
+  const record = await repository.get(datasetVersionId)
+  if (!record.datasetVersion.baseDatasetVersionId
+    || record.datasetVersion.publicationStatus !== 'unpublished') {
+    throw new AppError('Buat draft sebelum menerima koreksi.', {
+      code: 'topology_draft_required', statusCode: 409,
+    })
+  }
+  return datasetVersionId
+}
+
+async function readJsonBody(request, maxBytes = MAX_JSON_BODY_BYTES) {
   const contentType = String(request.headers['content-type'] ?? '').toLowerCase()
   if (!contentType.startsWith('application/json')) {
     throw new AppError('Request harus menggunakan application/json.', {
@@ -2148,7 +2286,7 @@ async function readJsonBody(request) {
   let size = 0
   for await (const chunk of request) {
     size += chunk.length
-    if (size > MAX_JSON_BODY_BYTES) {
+    if (size > maxBytes) {
       throw new AppError('Request body terlalu besar.', {
         code: 'request_too_large',
         statusCode: 413,

@@ -9,24 +9,24 @@ import { topologyDocumentMeta } from './topology-document-meta.js'
 import { CONNECTION_STYLES, connectionStyle } from './topology-connection-style.js'
 
 const THEME = Object.freeze({
-  background: '#f7fafb',
+  background: '#f5f5f7',
   surface: '#ffffff',
-  section: '#f1f5f7',
-  sectionBorder: '#d5e0e6',
-  lane: '#f8fbfc',
-  laneBorder: '#dbe5eb',
-  text: '#17324d',
-  secondary: '#53687b',
-  muted: '#7b8b98',
-  grid: '#e7eef2',
+  section: '#f6f6f8',
+  sectionBorder: '#d1d1d6',
+  lane: '#fafafa',
+  laneBorder: '#e5e5ea',
+  text: '#1d1d1f',
+  secondary: '#6e6e73',
+  muted: '#8e8e93',
+  grid: '#e5e5ea',
   edgeUnderlay: '#ffffff',
-  edge: '#187557',
-  selected: '#5b7eff',
-  dimmed: '#c7c5ce',
-  candidate: '#b56d24',
-  suggested: '#b56d24',
-  unresolved: '#b64a4a',
-  connected: '#187557',
+  edge: '#718096',
+  selected: '#0071e3',
+  dimmed: '#c7c7cc',
+  candidate: '#a27a4d',
+  suggested: '#a27a4d',
+  unresolved: '#c94b4b',
+  connected: '#4d9669',
 })
 
 export function getTopologySelectionRoute(layout, selectedAssetId) {
@@ -108,6 +108,31 @@ export function renderTopologyDiagramSvg({
   const selectionRoute = getTopologySelectionRoute(layout, selectedAssetId)
   const selectionPathIds = new Set(selectionRoute.edgeIds)
   const selectionPathNodes = new Set([...directNodes, ...selectionRoute.nodeIds])
+  const selectedJunction = ['junction-peer', 'junction-extended']
+    .includes(nodesById.get(selectedAssetId)?.diagramClass)
+  const revealedEndpointIds = new Set()
+  if (selectedJunction) {
+    const descendantsByParent = new Map()
+    nodes.forEach((node) => {
+      const parentId = node.parentId ?? node.layoutParentId
+      if (!parentId) return
+      if (!descendantsByParent.has(parentId)) descendantsByParent.set(parentId, [])
+      descendantsByParent.get(parentId).push(node)
+    })
+    const queue = [selectedAssetId]
+    const visited = new Set(queue)
+    while (queue.length) {
+      for (const child of descendantsByParent.get(queue.shift()) ?? []) {
+        if (visited.has(child.id)) continue
+        visited.add(child.id)
+        if (child.diagramClass === 'endpoint') revealedEndpointIds.add(child.id)
+        queue.push(child.id)
+      }
+    }
+    directNodes.forEach((id) => {
+      if (nodesById.get(id)?.diagramClass === 'endpoint') revealedEndpointIds.add(id)
+    })
+  }
   const selectedEdge = selectedEdgeId ? model.edgeById.get(selectedEdgeId) : null
   const selectedEdgeNodes = selectedEdge
     ? new Set([selectedEdge.sourceId, selectedEdge.targetId])
@@ -158,39 +183,39 @@ export function renderTopologyDiagramSvg({
         </marker>
         <style>
           .topology-bg{fill:${renderMode === 'export' ? THEME.background : 'transparent'}}
-          .topology-heading{font:700 20px Inter,ui-sans-serif,system-ui;fill:${THEME.text}}
-          .topology-meta{font:500 11px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary}}
-          .topology-summary{font:700 11px Inter,ui-sans-serif,system-ui;fill:${THEME.text}}
+          .topology-heading{font:700 20px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.text}}
+          .topology-meta{font:500 11px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.secondary}}
+          .topology-summary{font:700 11px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.text}}
           .topology-section{fill:none;stroke:none}
           .topology-region-boundary{fill:rgba(243,244,245,.16);stroke:rgba(199,197,206,.58);stroke-width:1;pointer-events:none;vector-effect:non-scaling-stroke}
-          .topology-section-title{font:800 11px Inter,ui-sans-serif,system-ui;fill:${THEME.text};letter-spacing:.08em}
-          .topology-section-count{font:600 10px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary}}
+          .topology-section-title{font:800 11px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.text};letter-spacing:.08em}
+          .topology-section-count{font:600 10px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.secondary}}
           .topology-section-divider{stroke:${THEME.sectionBorder};stroke-width:1}
-          .topology-overview-kicker{font:800 9px Inter,ui-sans-serif,system-ui;fill:${THEME.muted};letter-spacing:.1em}
+          .topology-overview-kicker{font:800 9px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.muted};letter-spacing:.1em}
           .topology-area-overview-card{cursor:pointer}
           .topology-area-overview-card rect{fill:rgba(255,255,255,.92);stroke:${THEME.sectionBorder};stroke-width:1.2}
           .topology-area-overview-card:hover rect,.topology-area-overview-card:focus rect{fill:#fff;stroke:${THEME.selected};stroke-width:1.8}
-          .topology-area-overview-name{font:800 14px Inter,ui-sans-serif,system-ui;fill:${THEME.text}}
-          .topology-area-overview-count{font:700 10px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary}}
-          .topology-area-overview-metric{font:500 10px Inter,ui-sans-serif,system-ui;fill:${THEME.muted}}
-          .topology-area-overview-action{font:800 10px Inter,ui-sans-serif,system-ui;fill:${THEME.selected}}
-          .topology-area-overview-badge{font:800 9px Inter,ui-sans-serif,system-ui;fill:#8a5d17}
+          .topology-area-overview-name{font:800 14px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.text}}
+          .topology-area-overview-count{font:700 10px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.secondary}}
+          .topology-area-overview-metric{font:500 10px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.muted}}
+          .topology-area-overview-action{font:800 10px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.selected}}
+          .topology-area-overview-badge{font:800 9px 'Inter Variable',ui-sans-serif,system-ui;fill:#8a5d17}
           .topology-area-overview-badge-bg{fill:#fff4d9;stroke:#efd8a8;stroke-width:1}
           .topology-island-boundary{fill:rgba(243,244,245,.18);stroke:rgba(199,197,206,.62);stroke-width:1;pointer-events:none;vector-effect:non-scaling-stroke}
-          .topology-island-label{font:750 10px Inter,ui-sans-serif,system-ui;fill:#77767e;letter-spacing:.06em;pointer-events:none}
-          .topology-island-root{font:700 10px Inter,ui-sans-serif,system-ui;fill:${THEME.text};pointer-events:none}
-          .topology-island-meta{font:550 9px Inter,ui-sans-serif,system-ui;fill:#77767e;pointer-events:none}
+          .topology-island-label{font:750 10px 'Inter Variable',ui-sans-serif,system-ui;fill:#77767e;letter-spacing:.06em;pointer-events:none}
+          .topology-island-root{font:700 10px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.text};pointer-events:none}
+          .topology-island-meta{font:550 9px 'Inter Variable',ui-sans-serif,system-ui;fill:#77767e;pointer-events:none}
           .topology-diagram-svg[data-semantic-level="overview"] .topology-island-boundary{fill:rgba(243,244,245,.24);stroke:rgba(199,197,206,.72);stroke-width:1}
           .topology-diagram-svg[data-semantic-level="overview"] .topology-island-label{font-size:16px;letter-spacing:.1em}
           .topology-diagram-svg[data-semantic-level="overview"] .topology-island-root{font-size:14px}
           .topology-diagram-svg[data-semantic-level="overview"] .topology-island-meta{font-size:12px}
           .topology-lane{fill:none;stroke:none}
-          .topology-lane-kicker{font:800 8px Inter,ui-sans-serif,system-ui;fill:#718492;letter-spacing:.09em}
-          .topology-lane-meta{font:600 8px Inter,ui-sans-serif,system-ui;fill:#91a0ab}
+          .topology-lane-kicker{font:800 8px 'Inter Variable',ui-sans-serif,system-ui;fill:#718492;letter-spacing:.09em}
+          .topology-lane-meta{font:600 8px 'Inter Variable',ui-sans-serif,system-ui;fill:#91a0ab}
           .topology-lane-header-line{stroke:#e2e9ee;stroke-width:1}
-          .topology-lane-title{font:750 9px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary};letter-spacing:.08em}
-          .topology-lane-root{font:600 9px Inter,ui-sans-serif,system-ui;fill:${THEME.muted}}
-          .topology-band-title{font:800 8px Inter,ui-sans-serif,system-ui;fill:${THEME.muted};letter-spacing:.09em}
+          .topology-lane-title{font:750 9px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.secondary};letter-spacing:.08em}
+          .topology-lane-root{font:600 9px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.muted}}
+          .topology-band-title{font:800 8px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.muted};letter-spacing:.09em}
           .topology-band-divider{stroke:${THEME.laneBorder};stroke-width:1;stroke-dasharray:3 5}
           .topology-mounting-group{cursor:pointer;outline:none}
           .topology-mounting-group.needs-mounting,.topology-mounting-group.unassigned{cursor:default}
@@ -204,27 +229,24 @@ export function renderTopologyDiagramSvg({
           .topology-mounting-group.selected .topology-mounting-selection,.topology-mounting-group:focus .topology-mounting-selection{opacity:1}
           .topology-mounting-header-line{stroke:rgba(113,132,146,.20);stroke-width:1;vector-effect:non-scaling-stroke;pointer-events:none}
           .topology-mounting-label-bg{fill:rgba(255,255,255,.88);stroke:rgba(113,132,146,.22);stroke-width:1}
-          .topology-mounting-label{font:700 9px Inter,ui-sans-serif,system-ui;fill:#58636c;letter-spacing:.01em;pointer-events:all;cursor:text}
-          .topology-mounting-meta{font:500 8px Inter,ui-sans-serif,system-ui;fill:#7f8b93;pointer-events:none}
-          .topology-mounting-group.excluded .topology-mounting-label{fill:#776b61}
-          .topology-mounting-group.excluded .topology-mounting-meta{fill:#95887d}
-          .topology-mounting-group.needs-mounting .topology-mounting-label{fill:#9a6700}
-          .topology-mounting-group.needs-mounting .topology-mounting-meta{fill:#805600}
-          .topology-mounting-group.unassigned .topology-mounting-label{fill:#526474}
-          .topology-mounting-group.unassigned .topology-mounting-meta{fill:#718492}
-          .topology-mounting-group.empty .topology-mounting-label{fill:#526474}
-          .topology-mounting-group.empty .topology-mounting-meta{fill:#718492}
+          .topology-mounting-label{font:620 11.5px -apple-system,BlinkMacSystemFont,'Inter Variable','Segoe UI',system-ui;fill:#fff;letter-spacing:0;pointer-events:all;cursor:text}
+          .topology-mounting-meta{font:450 9.5px -apple-system,BlinkMacSystemFont,'Inter Variable','Segoe UI',system-ui;fill:rgba(255,255,255,.88);pointer-events:none}
+          .topology-mounting-header-fill{pointer-events:none}
+          .topology-mounting-group.excluded .topology-mounting-label,.topology-mounting-group.needs-mounting .topology-mounting-label,.topology-mounting-group.unassigned .topology-mounting-label,.topology-mounting-group.empty .topology-mounting-label{fill:#fff}
+          .topology-mounting-group.excluded .topology-mounting-meta,.topology-mounting-group.needs-mounting .topology-mounting-meta,.topology-mounting-group.unassigned .topology-mounting-meta,.topology-mounting-group.empty .topology-mounting-meta{fill:rgba(255,255,255,.88)}
+          .topology-mounting-group.single-asset .topology-mounting-label{fill:#405b70}
+          .topology-mounting-group.single-asset .topology-mounting-meta{fill:#718492}
           .topology-cross-area-gateway{pointer-events:none}
           .topology-cross-area-line{stroke:#7294a7;stroke-width:1.4;stroke-dasharray:4 4}
           .topology-cross-area-marker{fill:#fff;stroke:#7294a7;stroke-width:1.3}
-          .topology-cross-area-label{font:800 8px Inter,ui-sans-serif,system-ui;fill:#557486}
+          .topology-cross-area-label{font:800 8px 'Inter Variable',ui-sans-serif,system-ui;fill:#557486}
           .topology-presentation-backbone-underlay{fill:none;stroke:#fff;stroke-width:7;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
           .topology-presentation-backbone-line{fill:none;stroke:#5d796e;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;opacity:.72;vector-effect:non-scaling-stroke;pointer-events:none}
           .topology-presentation-backbone-junction{fill:#fff;stroke:#5d796e;stroke-width:1.3;vector-effect:non-scaling-stroke;pointer-events:none}
           .topology-isolated{fill:#fbfcfd;stroke:${THEME.sectionBorder};stroke-width:1.2}
-          .topology-isolated-title{font:800 11px Inter,ui-sans-serif,system-ui;fill:${THEME.text}}
+          .topology-isolated-title{font:800 11px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.text}}
           .topology-unresolved-panel{fill:#fff7f7;stroke:#e9babe;stroke-width:1.2}
-          .topology-unresolved-label{font:750 10px Inter,ui-sans-serif,system-ui;fill:${THEME.unresolved}}
+          .topology-unresolved-label{font:750 10px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.unresolved}}
           .topology-edge-underlay{fill:none;stroke:${THEME.edgeUnderlay};stroke-width:6;stroke-linecap:round;stroke-linejoin:round}
           .topology-edge{fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
           .topology-edge.trace{stroke:${THEME.selected};stroke-width:5}
@@ -267,27 +289,27 @@ export function renderTopologyDiagramSvg({
           .topology-node-status-dot.online{fill:${THEME.connected}}
           .topology-node-status-dot.offline{fill:${THEME.unresolved}}
           .topology-device-icon{fill:${THEME.surface};stroke-width:2.2}
-          .topology-device-glyph{font:900 8px Inter,ui-sans-serif,system-ui;fill:${THEME.text};pointer-events:none}
-          .topology-node-name{font:750 11px Inter,ui-sans-serif,system-ui;fill:${THEME.text};text-anchor:middle}
-          .topology-node-type{font:500 9px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary};text-anchor:middle}
-          .topology-node-status{font:600 8px Inter,ui-sans-serif,system-ui;fill:${THEME.muted}}
+          .topology-device-glyph{font:900 8px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.text};pointer-events:none}
+          .topology-node-name{font:750 11px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.text};text-anchor:middle}
+          .topology-node-type{font:500 9px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.secondary};text-anchor:middle}
+          .topology-node-status{font:600 8px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.muted}}
           .topology-root-badge{fill:#e0f3ec;stroke:#a9d9c9;stroke-width:1}
-          .topology-root-text{font:800 7px Inter,ui-sans-serif,system-ui;fill:#17684f;letter-spacing:.06em}
-          .topology-compact-name{font:700 10px Inter,ui-sans-serif,system-ui;fill:${THEME.text}}
-          .topology-compact-type{font:500 8px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary}}
+          .topology-root-text{font:800 7px 'Inter Variable',ui-sans-serif,system-ui;fill:#17684f;letter-spacing:.06em}
+          .topology-compact-name{font:700 10px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.text}}
+          .topology-compact-type{font:500 8px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.secondary}}
           .topology-node-warning{fill:#fff7e5;stroke:${THEME.candidate};stroke-width:1.5}
-          .topology-node-warning-text{font:900 9px Inter,ui-sans-serif,system-ui;fill:${THEME.candidate};text-anchor:middle}
+          .topology-node-warning-text{font:900 9px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.candidate};text-anchor:middle}
           .topology-candidate{cursor:pointer}
           .topology-candidate-marker{fill:#fff9ed;stroke:${THEME.candidate};stroke-width:2;stroke-dasharray:4 3}
-          .topology-candidate-text{font:800 8px Inter,ui-sans-serif,system-ui;fill:${THEME.candidate}}
+          .topology-candidate-text{font:800 8px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.candidate}}
           .topology-candidate-warning{fill:#fff9ed;stroke:${THEME.candidate};stroke-width:1.5}
-          .topology-candidate-warning-text{font:900 10px Inter,ui-sans-serif,system-ui;fill:${THEME.candidate}}
-          .topology-suggested-label{font:850 8px Inter,ui-sans-serif,system-ui;fill:${THEME.suggested};text-anchor:middle}
+          .topology-candidate-warning-text{font:900 10px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.candidate}}
+          .topology-suggested-label{font:850 8px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.suggested};text-anchor:middle}
           .topology-unresolved-marker{cursor:pointer;fill:#fff;stroke:${THEME.unresolved};stroke-width:2;stroke-dasharray:4 3}
           .topology-unresolved-x{stroke:${THEME.unresolved};stroke-width:1.7}
-          .topology-legend-label{font:600 9px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary}}
-          .topology-legend-title{font:800 8px Inter,ui-sans-serif,system-ui;fill:${THEME.muted};letter-spacing:.08em}
-           .topology-disclaimer{font:500 9px Inter,ui-sans-serif,system-ui;fill:${THEME.muted}}
+          .topology-legend-label{font:600 9px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.secondary}}
+          .topology-legend-title{font:800 8px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.muted};letter-spacing:.08em}
+           .topology-disclaimer{font:500 9px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.muted}}
            .topology-node-card{fill:none;stroke:none}
            .topology-node:hover .topology-node-card,.topology-node:focus .topology-node-card,.topology-node.selected .topology-node-card,.topology-node.core .topology-node-card,.topology-node.disconnected .topology-node-card,.topology-node.suggested-only .topology-node-card{fill:none;stroke:none;stroke-width:0}
            .topology-node-hitbox{fill:transparent;stroke:none;pointer-events:all}
@@ -297,10 +319,13 @@ export function renderTopologyDiagramSvg({
            .topology-device-glyph-fill,.topology-device-led{fill:currentColor;stroke:none}
            .topology-rack-glyph .topology-device-glyph,.topology-distribution-glyph .topology-device-glyph,.topology-switch-glyph .topology-device-glyph{stroke:${THEME.secondary}}
            .topology-endpoint-glyph .topology-device-icon{fill:${THEME.surface};stroke-width:1.8}
-           .topology-node-name{font:700 10px Inter,ui-sans-serif,system-ui;fill:${THEME.text};text-anchor:middle;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round}
-           .topology-node-type{font:500 8px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary};text-anchor:middle;paint-order:stroke;stroke:#fff;stroke-width:3px}
-           .topology-node[data-label-detail="true"] .topology-node-name,.topology-node[data-label-detail="true"] .topology-node-type{opacity:0}
+           .topology-node-name{font:620 11px -apple-system,BlinkMacSystemFont,'Inter Variable','Segoe UI',system-ui;fill:${THEME.text};text-anchor:middle;stroke:none}
+           .topology-node-type{font:450 9px -apple-system,BlinkMacSystemFont,'Inter Variable','Segoe UI',system-ui;fill:${THEME.secondary};text-anchor:middle;stroke:none}
+           .topology-node[data-label-detail="true"] .topology-node-name,.topology-node[data-label-detail="true"] .topology-node-type{opacity:0;pointer-events:none}
            .topology-node[data-label-detail="true"]:hover .topology-node-name,.topology-node[data-label-detail="true"]:focus .topology-node-name,.topology-node[data-label-detail="true"].selected .topology-node-name,.topology-node[data-label-detail="true"].hovered .topology-node-name,.topology-node[data-label-detail="true"]:hover .topology-node-type,.topology-node[data-label-detail="true"]:focus .topology-node-type,.topology-node[data-label-detail="true"].selected .topology-node-type,.topology-node[data-label-detail="true"].hovered .topology-node-type{opacity:1}
+           .topology-diagram-svg[data-render-mode="interactive"][data-semantic-level="overview"] .topology-mounting-meta{opacity:0}
+           .topology-diagram-svg[data-render-mode="interactive"]:is([data-semantic-level="detail"],[data-semantic-level="overview"]) .topology-node:not([data-label-detail="true"]) .topology-node-type{opacity:0}
+           .topology-diagram-svg[data-render-mode="interactive"]:is([data-semantic-level="detail"],[data-semantic-level="overview"]) .topology-node:not([data-label-detail="true"]):is(:hover,:focus,.selected,.hovered) .topology-node-type{opacity:1}
            .topology-node.selected .topology-device-icon,.topology-node:focus .topology-device-icon{stroke:${THEME.selected};stroke-width:2.8}
            .topology-node.selected-path .topology-device-icon{stroke:${THEME.selected};stroke-width:2.5}
            .topology-node.selected .topology-device-glyph,.topology-node.selected .topology-device-glyph-fill,.topology-node.selected .topology-device-led,.topology-node.selected-path .topology-device-glyph,.topology-node.selected-path .topology-device-glyph-fill,.topology-node.selected-path .topology-device-led{color:${THEME.selected};stroke:${THEME.selected};fill:${THEME.selected}}
@@ -315,21 +340,21 @@ export function renderTopologyDiagramSvg({
           .topology-backbone-gap-underlay{fill:none;stroke:#fff;stroke-width:6;stroke-linecap:round;stroke-linejoin:round}
           .topology-backbone-gap-line{fill:none;stroke:${THEME.candidate};stroke-width:2.8;stroke-dasharray:10 8;stroke-linecap:round;stroke-linejoin:round;opacity:.9}
           .topology-backbone-gap-target{fill:#fff8e9;stroke:${THEME.candidate};stroke-width:2;stroke-dasharray:3 2}
-          .topology-backbone-gap-label{font:800 8px Inter,ui-sans-serif,system-ui;fill:#9a691b;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round}
+          .topology-backbone-gap-label{font:800 8px 'Inter Variable',ui-sans-serif,system-ui;fill:#9a691b;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round}
           .topology-edge.trace,.topology-edge.selected,.topology-edge.selected-path{stroke:${THEME.selected};stroke-width:4.6;opacity:1}
            .topology-edge.dimmed{stroke:${THEME.dimmed};opacity:.24}
            .topology-mounting-member-halo{fill:none;stroke-width:2;stroke-dasharray:2 4;opacity:.55;vector-effect:non-scaling-stroke}
            .topology-disconnected-tray-line{stroke:${THEME.sectionBorder};stroke-width:1;stroke-dasharray:4 5}
-           .topology-disconnected-tray .topology-isolated-title{font:700 9px Inter,ui-sans-serif,system-ui;fill:${THEME.secondary}}
+           .topology-disconnected-tray .topology-isolated-title{font:700 9px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.secondary}}
            .topology-area-overview-card rect{fill:#fff;stroke:${THEME.sectionBorder};stroke-width:1}
            .topology-area-overview-card:hover rect,.topology-area-overview-card:focus rect{stroke:${THEME.selected};stroke-width:1.8}
            .facility-schematic .topology-mounting-bubble{stroke-width:1.2;rx:4;fill-opacity:.92}
            .facility-schematic .topology-mounting-group.excluded .topology-mounting-bubble{fill:#fafbfc;stroke:#b6c1cd;stroke-dasharray:6 4}
-           .facility-schematic .topology-mounting-label{font:700 11px Inter,ui-sans-serif,system-ui;fill:#405b70}
-           .facility-schematic .topology-mounting-meta{font:400 10px Inter,ui-sans-serif,system-ui;fill:#718492}
+           .facility-schematic .topology-mounting-label{font:620 11.5px -apple-system,BlinkMacSystemFont,'Inter Variable','Segoe UI',system-ui;fill:#fff}
+           .facility-schematic .topology-mounting-meta{font:450 9.5px -apple-system,BlinkMacSystemFont,'Inter Variable','Segoe UI',system-ui;fill:rgba(255,255,255,.88)}
            .facility-schematic .topology-mounting-header-line{stroke:#dde2e8;stroke-width:1}
            .facility-schematic .topology-hierarchy-divider{stroke:#aab7c2;stroke-width:1.4;stroke-dasharray:8 6;vector-effect:non-scaling-stroke}
-           .facility-schematic .topology-hierarchy-divider-label{font:800 10px Inter,ui-sans-serif,system-ui;fill:#526474;letter-spacing:.08em}
+           .facility-schematic .topology-hierarchy-divider-label{font:800 10px 'Inter Variable',ui-sans-serif,system-ui;fill:#526474;letter-spacing:.08em}
            .facility-schematic .topology-hierarchy-divider-label-secondary{fill:#a44810}
            .facility-schematic .topology-edge{stroke:#536b7d;stroke-width:1.8;opacity:1;stroke-linecap:round;stroke-linejoin:round}
           .facility-schematic .topology-edge.edge-role-backbone{stroke:#187557;stroke-width:2.6}
@@ -338,14 +363,14 @@ export function renderTopologyDiagramSvg({
           .facility-schematic .topology-edge.dimmed{stroke:#aab7c2;opacity:.2}
           .facility-schematic .topology-edge-junction{stroke:#fff;stroke-width:1.2;vector-effect:non-scaling-stroke}
            .facility-schematic .topology-edge.selected,.facility-schematic .topology-edge.selected-path{stroke:#007a55;stroke-width:3}
-           .facility-schematic .topology-schematic-card{fill:#fff;stroke:#bcc6d0;stroke-width:1.3;filter:url(#topology-card-shadow)}
-           .facility-schematic .schematic-core .topology-schematic-card{fill:#e6f3ed;stroke:#5b8b79;stroke-width:2.4}
-           .facility-schematic .schematic-junction .topology-schematic-card{fill:#edf4fb;stroke:#6c91b2}
-           .facility-schematic .schematic-endpoint .topology-schematic-card{fill:#fff6e8;stroke:#c08a4d}
-           .facility-schematic .core .topology-schematic-card{fill:#edf5f2;stroke:#6a9585;stroke-width:1.5}
-           .facility-schematic .selected .topology-schematic-card,.facility-schematic .topology-node:hover .topology-schematic-card{stroke:#007a55;stroke-width:2}
-           .facility-schematic .topology-schematic-name{font:700 16px Inter,ui-sans-serif,system-ui;fill:#172b40;text-anchor:middle}
-           .facility-schematic .topology-schematic-type{font:400 12px Inter,ui-sans-serif,system-ui;fill:#43566a;text-anchor:middle}
+           .facility-schematic .topology-schematic-card{fill:#fff;stroke:#d1d1d6;stroke-width:1.2;filter:url(#topology-card-shadow)}
+           .facility-schematic .schematic-core .topology-schematic-card{fill:#f8f9fb;stroke:#a7b4c3;stroke-width:1.6}
+           .facility-schematic .schematic-junction .topology-schematic-card{fill:#fff;stroke:#bbc9d6}
+           .facility-schematic .schematic-endpoint .topology-schematic-card{fill:#fff;stroke:#d1d1d6}
+           .facility-schematic .core .topology-schematic-card{fill:#f8f9fb;stroke:#a7b4c3;stroke-width:1.5}
+           .facility-schematic .selected .topology-schematic-card,.facility-schematic .topology-node:hover .topology-schematic-card{stroke:#0071e3;stroke-width:2}
+           .facility-schematic .topology-schematic-name{font:700 16px 'Inter Variable',ui-sans-serif,system-ui;fill:#1d1d1f;text-anchor:middle}
+           .facility-schematic .topology-schematic-type{font:400 12px 'Inter Variable',ui-sans-serif,system-ui;fill:#6e6e73;text-anchor:middle}
            .facility-schematic .topology-schematic-name,.facility-schematic .topology-schematic-type{text-anchor:start}
          </style>
       </defs>
@@ -364,6 +389,8 @@ export function renderTopologyDiagramSvg({
           selectedMountingGroupId,
           minimap,
           mountingLabelById,
+          semanticLevel: resolvedSemanticLevel,
+          renderMode,
         })
         : ''}
       ${layout.mode === 'area-overview' ? '' : renderBackboneGaps(layout, { minimap })}
@@ -401,7 +428,7 @@ export function renderTopologyDiagramSvg({
           ...node,
           dimmed: node.dimmed || (selectionActive && !node.trace && (
             selectedAssetId
-              ? !selectionPathNodes.has(node.id) && !directNodes.has(node.id) && node.id !== selectedAssetId
+              ? !selectionPathNodes.has(node.id) && !directNodes.has(node.id) && !revealedEndpointIds.has(node.id) && node.id !== selectedAssetId
               : !selectedEdgeNodes.has(node.id)
           )),
         }, {
@@ -413,6 +440,9 @@ export function renderTopologyDiagramSvg({
             || ['ft-pengapon-semarang', 'dppu-yia'].includes(context.areaKey),
           schematic,
           semanticLevel: resolvedSemanticLevel,
+          renderMode,
+          zoom,
+          revealedByJunction: revealedEndpointIds.has(node.id),
           hoveredAssetId,
           minimap,
           highlightAssetId,
@@ -535,6 +565,8 @@ function renderMountingGroups(model, layout, {
   selectedMountingGroupId = null,
   minimap = false,
   mountingLabelById = null,
+  semanticLevel = 'focus',
+  renderMode = 'interactive',
 } = {}) {
   const boxes = layout.mountingBoxes ?? []
   return boxes.map((box, index) => {
@@ -546,17 +578,15 @@ function renderMountingGroups(model, layout, {
     const hostName = shorten(customLabel || box.label || box.hostName || box.hostId, 26)
     const palette = box.kind === 'excluded'
       ? box.label?.startsWith('Indoor')
-        ? { fill: '#f7f4f9', stroke: '#c8bbd4' }
-        : { fill: '#fbf8f3', stroke: '#c9bba9' }
+        ? { fill: '#f4f1f8', stroke: '#c9bdd9', accent: '#75658e' }
+        : { fill: '#f7f5f1', stroke: '#cfc8be', accent: '#756d65' }
       : box.kind === 'needs-mounting'
-        ? { fill: '#fff9db', stroke: '#d89b00' }
+        ? { fill: '#fff3d8', stroke: '#d89b00', accent: '#99610c' }
         : box.kind === 'unassigned'
-          ? { fill: '#f8fafc', stroke: '#94a3b8' }
+          ? { fill: '#f2f4f7', stroke: '#94a3b8', accent: '#526477' }
       : box.kind === 'empty'
-        ? { fill: '#f8fafc', stroke: '#94a3b8' }
-        : layout.options?.layoutStyle === 'facility-schematic'
-          ? { fill: '#eaf3f2', stroke: '#8fb9aa' }
-          : mountingBubblePalette(box.hostId || box.id, index)
+        ? { fill: '#f2f4f7', stroke: '#94a3b8', accent: '#526477' }
+        : mountingBubblePalette(box.hostId || box.id, index)
     const label = box.kind === 'excluded'
       ? hostName.startsWith('Indoor') || hostName.startsWith('Non-tiang')
         ? hostName
@@ -569,6 +599,7 @@ function renderMountingGroups(model, layout, {
     const active = selectedMountingGroupId === box.id || box.nodeIds.includes(selectedAssetId)
     const classes = [
       'topology-mounting-group',
+      singleAsset ? 'single-asset' : '',
       box.kind === 'excluded'
         ? 'excluded'
         : box.kind === 'needs-mounting'
@@ -596,19 +627,31 @@ function renderMountingGroups(model, layout, {
     const displayLabel = box.kind === 'confirmed' && !/^Tiang\s·/i.test(label)
       ? `Tiang · ${label}`
       : label
+    const visualLabel = renderMode === 'interactive' && semanticLevel === 'overview'
+      ? shorten(box.kind === 'confirmed' ? hostName : displayLabel, 14)
+      : displayLabel
     return `<g class="${classes}"${interaction}
+      style="--frame-fill:${palette.fill};--frame-stroke:${palette.stroke};--frame-accent:${palette.accent}"
       aria-label="${escapeAttribute(`${displayLabel} · ${meta}`)}">
       <rect class="topology-mounting-selection" x="${box.x - 5}" y="${box.y - 5}"
         width="${box.width + 10}" height="${box.height + 10}" rx="17"/>
       ${singleAsset ? '' : `<rect class="topology-mounting-bubble" x="${box.x}" y="${box.y}"
-        width="${box.width}" height="${box.height}" rx="12"
+        width="${box.width}" height="${box.height}" rx="14"
+        data-frame-tone="${palette.tone ?? 'neutral'}"
         style="fill:${palette.fill};stroke:${palette.stroke}"/>
-      <line class="topology-mounting-header-line" x1="${box.x}" y1="${box.y + 44}"
-        x2="${box.x + box.width}" y2="${box.y + 44}"/>`}
+      <path class="topology-mounting-header-fill"
+        d="M ${box.x + 14} ${box.y + 1} H ${box.x + box.width - 14}
+          Q ${box.x + box.width - 1} ${box.y + 1} ${box.x + box.width - 1} ${box.y + 14}
+          V ${box.y + (layout.options?.mountingBoxHeaderHeight ?? 44)}
+          H ${box.x + 1} V ${box.y + 14}
+          Q ${box.x + 1} ${box.y + 1} ${box.x + 14} ${box.y + 1} Z"
+        fill="${palette.accent}"/>
+      <line class="topology-mounting-header-line" x1="${box.x}" y1="${box.y + (layout.options?.mountingBoxHeaderHeight ?? 44)}"
+        x2="${box.x + box.width}" y2="${box.y + (layout.options?.mountingBoxHeaderHeight ?? 44)}"/>`}
       <text class="topology-mounting-label" data-frame-label="${escapeAttribute(box.id)}"
           ${box.hostId ? 'tabindex="0" role="button" aria-label="Ganti nama frame"' : ''}
-        x="${box.x + 12}" y="${box.y + 19}">${escapeXml(displayLabel)}</text>
-      <text class="topology-mounting-meta" x="${box.x + 12}" y="${box.y + 33}">${escapeXml(meta)}</text>
+        x="${box.x + 16}" y="${box.y + 22}">${escapeXml(visualLabel)}</text>
+      <text class="topology-mounting-meta" x="${box.x + 16}" y="${box.y + 40}">${escapeXml(meta)}</text>
       ${box.mountingConflict && !minimap ? `<text class="topology-mounting-meta" x="${box.x + 12}"
         y="${box.y + box.height - 8}">Periksa konflik mounting</text>` : ''}
       <title>${escapeXml(`${displayLabel} · ${meta}`)}</title>
@@ -799,6 +842,9 @@ function renderNode(node, {
   forceEndpointLabels = false,
   schematic = false,
   semanticLevel = 'overview',
+  renderMode = 'interactive',
+  zoom = 1,
+  revealedByJunction = false,
   hoveredAssetId = null,
   minimap,
   highlightAssetId = null,
@@ -850,16 +896,23 @@ function renderNode(node, {
     || labelVisibility === 'detail'
     || (labelVisibility === 'core-peer' && isCoreOrJunction)
   const endpointLabel = forceEndpointLabels || labelVisibility === 'all'
+    || (renderMode === 'interactive' && semanticLevel !== 'focus' && labelVisibility !== 'off')
     || (labelVisibility === 'detail' && !isCoreOrJunction)
   const showType = showLabels && !minimap && !node.suppressTypeLabel
-  const detailLabel = false
+  const isCamera = node.networkFamily === 'cctv'
+    || /camera|cctv/i.test(`${node.type ?? ''} ${node.iconType ?? ''}`)
+  const keepEndpointName = Number(zoom) >= .65 || (isCamera && Number(zoom) >= .5)
+  const detailLabel = renderMode === 'interactive' && semanticLevel !== 'focus'
+    && !isCoreOrJunction && !minimap && !revealedByJunction && !keepEndpointName
   const labelDetailAttribute = detailLabel
     ? ' data-label-detail="true"'
     : ''
   const focused = selected || node.id === hoveredAssetId
-  const labelText = shorten(node.name || node.id, node.presentation === 'hub-spoke' ? 24 : 32)
+  const labelText = shorten(node.name || node.id,
+    renderMode === 'interactive' && Number(zoom) < .65 ? 10
+      : node.presentation === 'hub-spoke' ? 24 : 32)
   return `
-    <g class="${classes}" data-node-id="${escapeAttribute(node.id)}"${detailLabel ? ' data-label-detail="true"' : ''} tabindex="0" role="button"
+    <g class="${classes}" data-node-id="${escapeAttribute(node.id)}"${detailLabel ? ' data-label-detail="true"' : ''}${revealedByJunction ? ' data-revealed-by-junction="true"' : ''} tabindex="0" role="button"
       aria-label="Pilih aset ${escapeAttribute(node.id)}">
       <title>${escapeXml(describeNode(node))}</title>
       <rect class="topology-node-card topology-node-hitbox" x="${x}" y="${y}" width="${Math.max(36, width)}" height="${Math.max(36, height)}"/>
@@ -1094,15 +1147,15 @@ function renderLegend(bottom, width, showMountingPhysical, context = {}, schemat
 
 function mountingBubblePalette(hostId, fallbackIndex = 0) {
   const palettes = [
-    { fill: '#eaf3f2', stroke: '#8fb9aa' },
-    { fill: '#edf4fb', stroke: '#9db6d0' },
-    { fill: '#f2eff9', stroke: '#b2a5cf' },
-    { fill: '#faf2e7', stroke: '#d1a86d' },
+    { fill: '#dceee9', stroke: '#6cae9e', accent: '#167b73' },
+    { fill: '#e0eaf8', stroke: '#7da9db', accent: '#3974b8' },
+    { fill: '#eae4f6', stroke: '#a38bcc', accent: '#7458a9' },
+    { fill: '#f7e8d8', stroke: '#d6a671', accent: '#a95e1b' },
   ]
   const hash = [...String(hostId ?? '')].reduce((total, character) => (
     (total * 31 + character.charCodeAt(0)) >>> 0
   ), Number(fallbackIndex) || 0)
-  return palettes[hash % palettes.length]
+  return { ...palettes[hash % palettes.length], tone: String(hash % palettes.length) }
 }
 
 function candidateRoute(source, target) {

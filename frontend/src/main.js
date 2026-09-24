@@ -1,3 +1,4 @@
+import '@fontsource-variable/inter/wght.css'
 import './style.css'
 import { initializeTheme } from './theme.js'
 
@@ -14,6 +15,9 @@ if (importPreviewMatch) {
 } else if (normalizedPath === '/admin/topology-review') {
   const { renderTopologyReviewPage } = await import('./pages/admin/topology-review-page.js')
   renderTopologyReviewPage(app)
+} else if (normalizedPath === '/admin/topology-sync') {
+  const { renderTopologySyncPage } = await import('./pages/admin/topology-sync-page.js')
+  renderTopologySyncPage(app)
 } else if (normalizedPath === '/admin/datasets/import') {
   const { renderImportDatasetPage } = await import('./pages/admin/import-dataset-page.js')
   renderImportDatasetPage(app)

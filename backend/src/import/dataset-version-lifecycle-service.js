@@ -391,6 +391,24 @@ export class DatasetVersionLifecycleService {
     return toActiveTopologyDataset(resolved)
   }
 
+  async getDraftTopologyDataset(datasetVersionId) {
+    const record = await this.repository.get(datasetVersionId)
+    if (!record.datasetVersion.baseDatasetVersionId
+      || record.datasetVersion.publicationStatus !== 'unpublished') {
+      throw new AppError('Draft topologi tidak ditemukan.', {
+        code: 'topology_draft_not_found', statusCode: 404,
+      })
+    }
+    const pointer = {
+      datasetId: record.datasetVersion.datasetId,
+      branchId: record.datasetVersion.branchId,
+      datasetVersionId,
+      revision: `draft-${record.recordRevision ?? 0}`,
+      publicationProfile: record.datasetVersion.publicationProfile ?? 'map_only',
+    }
+    return { ...toActiveTopologyDataset({ record, pointer }), draft: true }
+  }
+
   async getActiveAssetDetail({
     datasetId,
     branchId,
@@ -1358,8 +1376,10 @@ function toActiveMapDataset(resolved, { siteId = null, siteBoundaries = {} } = {
     publicationProfile,
     readiness: readinessContract,
   })
+  const catalogByNodeId = new Map(catalog.map((item) => [item.nodeId, item]))
   const baseAssets = (record.assets ?? []).map((asset) => {
     const identity = identityForAsset(asset, assetIdentityMap, resolver)
+    const catalogItem = catalogByNodeId.get(asset.id)
     const sourceIcon = resolveAssetSourceIcon(asset, sourceIconIndex)
     const sourceIconUrl = sourceIcon?.resource?.resourceId
       ? `/api/dataset-versions/${encodeURIComponent(record.datasetVersion.id)}`
@@ -1369,6 +1389,9 @@ function toActiveMapDataset(resolved, { siteId = null, siteBoundaries = {} } = {
       id: asset.id,
       datasetVersionId: asset.datasetVersionId,
       layerId: asset.layerId,
+      sourceFolderPath: catalogItem?.sourceFolderPath ?? asset.sourceFolderPath ?? null,
+      locationGroupKey: catalogItem?.locationGroupKey ?? null,
+      locationGroupName: catalogItem?.locationGroupName ?? null,
       assetId: asset.assetId,
       canonicalAssetId: identity?.canonicalAssetId ?? asset.canonicalAssetId ?? asset.assetId,
       stableAssetId: identity?.stableAssetId ?? asset.stableAssetId ?? null,

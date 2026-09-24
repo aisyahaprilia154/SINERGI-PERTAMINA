@@ -22,7 +22,7 @@
   overflow: hidden;
   color: var(--topology-navy);
   background: var(--topology-warm);
-  font-family: var(--font-family-map, Inter), sans-serif;
+  font-family: var(--font-family-map, 'Inter Variable', system-ui), sans-serif;
 }
 
 .topology-body :where(button, a, input, select, [tabindex]):focus-visible {
@@ -307,7 +307,7 @@
   background: var(--topology-warm);
 }
 
-.topology-document-key { flex: 0 0 auto; padding: 8px 16px; border-top: 1px solid #d9e1e8; background: #fff; color: #34465a; font: 12px/1.5 Inter, system-ui, sans-serif; max-height: 148px; overflow: auto; }
+.topology-document-key { flex: 0 0 auto; padding: 8px 16px; border-top: 1px solid #d9e1e8; background: #fff; color: #34465a; font: 12px/1.5 'Inter Variable', system-ui, sans-serif; max-height: 148px; overflow: auto; }
 .topology-document-key summary { cursor: pointer; font-weight: 700; }
 .topology-document-key-items { display: flex; flex-wrap: wrap; gap: 4px 16px; padding-top: 4px; }
 .topology-document-key-items span { display: inline-flex; align-items: center; gap: 5px; }
@@ -1504,7 +1504,7 @@
   border-radius: 7px;
   outline: 0;
   box-shadow: 0 0 0 3px rgba(91, 126, 255, .1);
-  font: 600 12px Inter, system-ui, sans-serif;
+  font: 600 12px 'Inter Variable', system-ui, sans-serif;
 }
 
 .topology-frame-name-editor button {
@@ -1581,7 +1581,7 @@
   max-height: 220px;
   margin-top: 5px;
   overflow: auto;
-  background: #fff;
+  background: var(--topology-surface);
   border: 1px solid var(--topology-border);
   border-radius: 8px;
   box-shadow: 0 8px 20px rgba(23, 50, 77, .1);
@@ -1599,7 +1599,7 @@
   align-items: center;
   gap: 8px;
   color: var(--topology-navy);
-  background: #fff;
+  background: var(--topology-surface);
   border: 0;
   border-bottom: 1px solid var(--topology-border);
   cursor: pointer;
@@ -1612,7 +1612,7 @@
 
 .topology-relation-search-results button:hover,
 .topology-relation-search-results button:focus-visible {
-  background: #f4f7fb;
+  background: var(--topology-low);
 }
 
 .topology-relation-search-results button > span:nth-child(2) {
@@ -1884,7 +1884,7 @@
 .topology-draft-bar small { font-size: 11px; color: #aa3b31; }
 .topology-draft-bar small:empty { display: none; }
 .topology-draft-indicator { width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: #da984b; }
-.topology-draft-bar button { border: 0; border-radius: 9px; padding: 9px 14px; background: #edf1f5; color: #344b60; font: 600 12px Inter, system-ui; cursor: pointer; }
+.topology-draft-bar button { border: 0; border-radius: 9px; padding: 9px 14px; background: #edf1f5; color: #344b60; font: 600 12px 'Inter Variable', system-ui; cursor: pointer; }
 .topology-draft-bar .topology-save-button { background: #1c1c1e; color: #fff; }
 .topology-draft-bar button:disabled { opacity: .55; cursor: wait; }
 .topology-pole-picker {

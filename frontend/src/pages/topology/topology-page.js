@@ -1,6 +1,8 @@
 import '../../styles/topology-workspace.css'
+import '../../styles/topology-refinement.css'
 import { adaptActiveDatasetForTopology } from '../../adapters/active-dataset-map-adapter.js'
 import { branchNameForFacility } from '../../domain/facility-branch.js'
+import { renderLocationContextPanel } from '../../components/location-context-panel.js'
 import { stageCameraRelationReplacement } from '../../domain/camera-relation-draft.js'
 import { createSourceIconLoader } from '../../domain/source-icon-loader.js'
 import { CONNECTION_STYLES } from './topology-connection-style.js'
@@ -21,6 +23,7 @@ import { downloadSchematicPng, downloadSchematicSvg } from '../map/schematic-exp
 import { bindUserAccountMenu, renderTopNavigation } from '../map/map-page.js'
 import { bindThemeToggle } from '../../theme.js'
 import { calculateTopologyDiagramLayout } from './topology-diagram-layout.js'
+import { loadTopologyDraft } from '../../services/topology-sync-service.js'
 import { renderTopologyDiagramSvg } from './topology-diagram-svg.js'
 import { resolveTopologyDropTarget } from './topology-drop-target.js'
 import { createAssetDragFeedback } from './topology-drag-feedback.js'
@@ -29,6 +32,7 @@ import {
   anchoredZoomScrollPosition,
   computeFitZoom,
   computeReadableZoom,
+  effectiveViewportFor,
   zoomSurfaceMetrics,
 } from './topology-viewport.js'
 
@@ -71,12 +75,18 @@ export async function renderTopologyPage(container) {
   bindThemeToggle()
 
   try {
-    const payload = await loadActiveDataset({ ...requested, view: 'topology' })
+    const draftVersionId = new URLSearchParams(window.location.search).get('draftVersionId')
+    const payload = draftVersionId
+      ? await loadTopologyDraft(draftVersionId)
+      : await loadActiveDataset({ ...requested, view: 'topology' })
     const mapData = adaptActiveDatasetForTopology(payload)
     mapData.recordRevision = payload.recordRevision
     mapData.topologyFrameNames = payload.topologyFrameNames ?? {}
     mapData.topologyFrameAssignments = payload.topologyFrameAssignments ?? {}
     mapData.topologyFrames = payload.topologyFrames ?? {}
+    mapData.isDraft = payload.draft === true
+    mapData.editingRequiresDraft = payload.editingRequiresDraft === true
+    if (mapData.isDraft) mapData.activeContext.draftVersionId = draftVersionId
     persistActiveContext(mapData.activeContext)
 
     const datasetVersionId = mapData.activeContext.datasetVersionId
@@ -148,6 +158,7 @@ function mountTopologyWorkspace(container, {
     zoom: DEFAULT_ZOOM,
     sidebarCollapsed: window.matchMedia?.('(max-width: 960px)').matches ?? false,
     exportOpen: false,
+    actionsOpen: false,
     legendOpen: false,
     inspectorOpen: Boolean(selectedAssetFromUrl),
     searchResults: [],
@@ -201,11 +212,13 @@ function mountTopologyWorkspace(container, {
     componentMaxColumns: 4,
     componentPackingAspectRatio: 2.25,
     layoutStyle: 'central-backbone',
-    mountingBoxMinWidth: 196,
-    mountingBoxPadding: 20,
-    mountingBoxNodeGapX: 32,
-    mountingBoxLevelGapY: 72,
-    mountingBoxGapY: 48,
+    mountingBoxMinWidth: 248,
+    mountingBoxPadding: 24,
+    mountingBoxHeaderHeight: 52,
+    mountingBoxNodeGapX: 36,
+    mountingBoxLevelGapY: 82,
+    mountingBoxGapY: 54,
+    mountingBoxGapX: 36,
     mountingRootFrameGap: state.area === 'ft-tegal-baru' ? 64 : null,
     overview: state.area === null,
     frameAssignments: mapData.topologyFrameAssignments,
@@ -290,6 +303,10 @@ function mountTopologyWorkspace(container, {
       suppressViewportClick = false
       return
     }
+    if (state.actionsOpen && !event.target?.closest?.('[data-topology-actions-menu], [data-action="toggle-actions"]')) {
+      state.actionsOpen = false
+      updatePanelState()
+    }
     // Do not replace the SVG label between the clicks of a double-click.
     if (event.target?.closest?.('[data-frame-label]')) return
     const target = event.target?.closest?.('[data-node-id], [data-edge-id], [data-mounting-group-id]')
@@ -325,11 +342,27 @@ function mountTopologyWorkspace(container, {
     }
 
     const action = event.target?.closest?.('[data-action]')?.dataset.action
+    if (action === 'open-sync') {
+      const draftId = new URLSearchParams(window.location.search).get('draftVersionId')
+      window.location.assign(draftId
+        ? `/admin/topology-sync?draftVersionId=${encodeURIComponent(draftId)}`
+        : '/admin/topology-sync')
+      return
+    }
     if (action === 'save-diagram') return void saveDraft()
     if (action === 'cancel-diagram') return cancelDraft()
     if (action === 'add-pole-frame') return openFrameComposer()
+    if (action === 'toggle-actions') {
+      state.actionsOpen = !state.actionsOpen
+      state.exportOpen = false
+      state.legendOpen = false
+      updatePanelState()
+      return
+    }
     if (action === 'close-frame-composer') return closeFrameComposer()
     if (action === 'rename-selected-frame') {
+      state.actionsOpen = false
+      updatePanelState()
       const label = container.querySelector(`[data-frame-label="${cssEscape(state.selectedMountingGroupId)}"]`)
       if (label) openFrameNameEditor(state.selectedMountingGroupId, label)
       return
@@ -340,6 +373,7 @@ function mountTopologyWorkspace(container, {
     if (action === 'fit') return fitGraph()
     if (action === 'focus-relations') return focusRelations()
     if (action === 'toggle-remove-edge') {
+      state.actionsOpen = false
       state.removeEdgeMode = !state.removeEdgeMode
       updatePanelState()
       return
@@ -484,6 +518,7 @@ function mountTopologyWorkspace(container, {
       const openPanel = state.legendOpen ? 'legend' : state.exportOpen ? 'export' : null
       state.exportOpen = false
       state.legendOpen = false
+      state.actionsOpen = false
       updatePanelState()
       if (openPanel) container.querySelector(`[data-action="toggle-${openPanel}"]`)?.focus()
       if (dragState) cancelAssetDrag()
@@ -655,10 +690,36 @@ function mountTopologyWorkspace(container, {
     state.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Number(value) || DEFAULT_ZOOM))
   }
 
+  function graphSafeViewport(viewport) {
+    const bounds = viewport.getBoundingClientRect()
+    const visibleOverlay = (selector) => {
+      const element = container.querySelector(selector)
+      if (!element || element.hidden || getComputedStyle(element).visibility === 'hidden') return null
+      return element.getBoundingClientRect()
+    }
+    const context = visibleOverlay('.topology-context-card')
+    const actions = visibleOverlay('.topology-stitch-toolbar')
+    const navigation = visibleOverlay('.topology-canvas-navigation')
+    const overlayTop = Math.max(CANVAS_TOP_PADDING,
+      ...[context, actions].filter(Boolean).map((rect) => rect.bottom - bounds.top + 16))
+    const overlayBottom = navigation
+      ? Math.max(CANVAS_BOTTOM_PADDING, bounds.bottom - navigation.top + 12)
+      : CANVAS_BOTTOM_PADDING
+    return effectiveViewportFor({
+      viewportWidth: viewport.clientWidth,
+      viewportHeight: viewport.clientHeight,
+      paddingLeft: CANVAS_HORIZONTAL_PADDING,
+      paddingRight: CANVAS_HORIZONTAL_PADDING,
+      overlayTop,
+      overlayBottom,
+    })
+  }
+
   function fitGraph() {
     if (!layout?.width || !layout?.height) return
     const viewport = container.querySelector('[data-topology-viewport]')
     if (!viewport) return
+    const safe = graphSafeViewport(viewport)
     setZoom(computeFitZoom({
       viewportWidth: viewport.clientWidth,
       viewportHeight: viewport.clientHeight,
@@ -667,11 +728,11 @@ function mountTopologyWorkspace(container, {
       minZoom: MIN_ZOOM,
       maxZoom: 1.12,
       horizontalPadding: CANVAS_HORIZONTAL_PADDING * 2,
-      verticalPadding: CANVAS_TOP_PADDING + CANVAS_BOTTOM_PADDING,
+      verticalPadding: viewport.clientHeight - safe.height,
     }))
     renderGraph()
     updateToolbar()
-    requestAnimationFrame(() => centerGraph({ smooth: true }))
+    requestAnimationFrame(() => centerGraph({ smooth: true, wholeContent: true }))
   }
 
   function focusAssetCard(assetId) {
@@ -692,7 +753,7 @@ function mountTopologyWorkspace(container, {
     requestAnimationFrame(() => {
       const frame = container.querySelector('[data-topology-frame]')
       if (!frame) return
-      restoreViewportCenter(viewport, frame, center)
+      restoreViewportCenter(viewport, frame, center, { respectOverlays: true })
     })
   }
 
@@ -714,7 +775,7 @@ function mountTopologyWorkspace(container, {
     requestAnimationFrame(() => {
       const frame = container.querySelector('[data-topology-frame]')
       if (!frame) return
-      restoreViewportCenter(viewport, frame, center)
+      restoreViewportCenter(viewport, frame, center, { respectOverlays: true })
     })
   }
 
@@ -735,19 +796,24 @@ function mountTopologyWorkspace(container, {
     const viewport = container.querySelector('[data-topology-viewport]')
     const frame = container.querySelector('[data-topology-frame]')
     if (!viewport || !frame) return
-    setZoom(Math.min(1.12, (viewport.clientWidth - 60) / (right - left),
-      (viewport.clientHeight - 120) / (bottom - top)))
+    const safe = graphSafeViewport(viewport)
+    const fittedZoom = Math.min(1.12, safe.width / (right - left),
+      safe.height / (bottom - top))
+    setZoom(Math.max(0.5, fittedZoom))
     renderGraph()
     updateToolbar()
+    const selectedDiagram = nodes.find((node) => node.id === selected.id)?.diagram
     requestAnimationFrame(() => restoreViewportCenter(viewport, frame, {
-      x: (left + right) / 2, y: (top + bottom) / 2,
-    }))
+      x: fittedZoom < 0.5 && selectedDiagram ? selectedDiagram.centerX : (left + right) / 2,
+      y: fittedZoom < 0.5 && selectedDiagram ? selectedDiagram.centerY : (top + bottom) / 2,
+    }, { respectOverlays: true }))
   }
 
   function resetGraphViewport() {
     if (!layout?.width || !layout?.height) return
     const viewport = container.querySelector('[data-topology-viewport]')
     if (!viewport) return
+    const safe = graphSafeViewport(viewport)
     if (layout.options?.layoutStyle === 'facility-schematic') {
       setZoom(Math.max(viewport.clientWidth < 620 ? 0.7 : 0.8, Math.min(DEFAULT_ZOOM,
         (viewport.clientWidth - CANVAS_HORIZONTAL_PADDING * 2) / layout.width)))
@@ -756,7 +822,7 @@ function mountTopologyWorkspace(container, {
       requestAnimationFrame(() => centerGraph())
       return
     }
-    const readableFloor = viewport.clientWidth < 620 ? 0.75 : 0.85
+    const readableFloor = viewport.clientWidth < 620 ? 0.85 : DEFAULT_ZOOM
     setZoom(computeReadableZoom({
       viewportWidth: viewport.clientWidth,
       viewportHeight: viewport.clientHeight,
@@ -765,7 +831,7 @@ function mountTopologyWorkspace(container, {
       minZoom: readableFloor,
       maxZoom: DEFAULT_ZOOM,
       horizontalPadding: CANVAS_HORIZONTAL_PADDING * 2,
-      verticalPadding: CANVAS_TOP_PADDING + CANVAS_BOTTOM_PADDING,
+      verticalPadding: viewport.clientHeight - safe.height,
     }))
     renderGraph()
     updateToolbar()
@@ -866,6 +932,7 @@ function mountTopologyWorkspace(container, {
     const frame = container.querySelector('[data-topology-frame]')
     if (!viewport || !canvas || !frame || !layout?.width || !layout?.height) return
     const snapshot = preserveCenter ? viewportCenterSnapshot(viewport, frame) : null
+    const safe = graphSafeViewport(viewport)
     const metrics = zoomSurfaceMetrics({
       layoutWidth: layout.width,
       layoutHeight: layout.height,
@@ -873,8 +940,8 @@ function mountTopologyWorkspace(container, {
       viewportWidth: viewport.clientWidth,
       viewportHeight: viewport.clientHeight,
       horizontalPadding: viewport.clientWidth < 820 ? 16 : CANVAS_HORIZONTAL_PADDING,
-      topPadding: viewport.clientWidth < 620 ? 72 : CANVAS_TOP_PADDING,
-      bottomPadding: CANVAS_BOTTOM_PADDING,
+      topPadding: safe.top,
+      bottomPadding: viewport.clientHeight - safe.bottom,
     })
     canvas.style.width = `${metrics.width}px`
     canvas.style.height = `${metrics.height}px`
@@ -883,15 +950,45 @@ function mountTopologyWorkspace(container, {
     if (snapshot) restoreViewportCenter(viewport, frame, snapshot)
   }
 
-  function centerGraph({ smooth = false } = {}) {
+  function centerGraph({ smooth = false, wholeContent = false } = {}) {
     const viewport = container.querySelector('[data-topology-viewport]')
     const frame = container.querySelector('[data-topology-frame]')
     if (!viewport || !frame) return
-    const left = Math.max(0, numericStyle(frame.style.left, frame.offsetLeft)
-      + layout.width * state.zoom / 2 - viewport.clientWidth / 2)
+    const mountedBoxes = (layout.mountingBoxes ?? [])
+      .map(({ x, y, width, height }) => ({ x, y, width, height }))
+    const diagramBoxes = mountedBoxes.length ? mountedBoxes
+      : (layout.nodes ?? []).map(({ diagram }) => diagram).filter(Boolean)
+    const boxes = diagramBoxes.length ? diagramBoxes
+      : [{ x: 0, y: 0, width: layout.width, height: layout.height }]
+    const content = boxes.length ? {
+      left: Math.min(...boxes.map((box) => box.x)),
+      right: Math.max(...boxes.map((box) => box.x + box.width)),
+      top: Math.min(...boxes.map((box) => box.y)),
+      bottom: Math.max(...boxes.map((box) => box.y + box.height)),
+    } : { left: 0, right: layout.width, top: 0, bottom: layout.height }
+    const frameLeft = numericStyle(frame.style.left, frame.offsetLeft)
+    const frameTop = numericStyle(frame.style.top, frame.offsetTop)
+    const safe = graphSafeViewport(viewport)
+    const contentWidth = (content.right - content.left) * state.zoom
+    const left = contentWidth <= viewport.clientWidth - 64
+      ? frameLeft + (content.left + content.right) * state.zoom / 2 - viewport.clientWidth / 2
+      : frameLeft + content.left * state.zoom - 32
+    const visibleContent = boxes.filter((box) => (
+      box.x + box.width > (Math.max(0, left) - frameLeft) / state.zoom
+      && box.x < (Math.max(0, left) - frameLeft + viewport.clientWidth) / state.zoom
+    ))
+    const verticalBoxes = visibleContent.length ? visibleContent : boxes
+    const visibleTop = Math.min(...verticalBoxes.map((box) => box.y))
+    const firstRow = verticalBoxes.filter((box) => box.y <= visibleTop + 40)
+    const visibleBottom = Math.max(...firstRow.map((box) => box.y + box.height))
+    const focusY = wholeContent ? (content.top + content.bottom) / 2
+      : (visibleTop + visibleBottom) / 2
+    const targetY = wholeContent ? safe.top + safe.height / 2
+      : safe.top + safe.height * .43
+    const top = frameTop + focusY * state.zoom - targetY
     viewport.scrollTo({
-      left,
-      top: 0,
+      left: Math.max(0, Math.min(left, viewport.scrollWidth - viewport.clientWidth)),
+      top: Math.max(0, Math.min(top, viewport.scrollHeight - viewport.clientHeight)),
       behavior: smooth && !prefersReducedMotion() ? 'smooth' : 'auto',
     })
   }
@@ -905,11 +1002,14 @@ function mountTopologyWorkspace(container, {
     }
   }
 
-  function restoreViewportCenter(viewport, frame, snapshot) {
+  function restoreViewportCenter(viewport, frame, snapshot, { respectOverlays = false } = {}) {
+    const safe = respectOverlays ? graphSafeViewport(viewport) : null
+    const targetX = safe ? safe.left + safe.width / 2 : viewport.clientWidth / 2
+    const targetY = safe ? safe.top + safe.height / 2 : viewport.clientHeight / 2
     viewport.scrollLeft = Math.max(0, numericStyle(frame.style.left, frame.offsetLeft)
-      + snapshot.x * state.zoom - viewport.clientWidth / 2)
+      + snapshot.x * state.zoom - targetX)
     viewport.scrollTop = Math.max(0, numericStyle(frame.style.top, frame.offsetTop)
-      + snapshot.y * state.zoom - viewport.clientHeight / 2)
+      + snapshot.y * state.zoom - targetY)
   }
 
   function beginPan(event) {
@@ -986,33 +1086,45 @@ function mountTopologyWorkspace(container, {
       }
       dragState.feedback = createAssetDragFeedback(source, event, { reducedMotion: prefersReducedMotion() })
       dragState.autoPan = createDragAutoPan(dragState.viewport, pointer => {
-        if (dragState?.active) updateAssetDropTarget(pointer)
+        if (dragState?.active) scheduleAssetDropTarget(pointer)
       })
       source.classList.add('is-dragging')
     }
     dragState.feedback.move(event)
-    updateAssetDropTarget(event)
+    scheduleAssetDropTarget(event)
     dragState.autoPan.move(event)
+  }
+
+  function scheduleAssetDropTarget({ clientX, clientY }) {
+    if (!dragState?.active) return
+    dragState.latestPointer = { clientX, clientY }
+    if (dragState.targetFrame) return
+    dragState.targetFrame = window.requestAnimationFrame(() => {
+      if (!dragState?.active) return
+      dragState.targetFrame = 0
+      updateAssetDropTarget(dragState.latestPointer)
+    })
   }
 
   function updateAssetDropTarget(event) {
     const viewport = dragState.viewport
     const hit = document.elementFromPoint(event.clientX, event.clientY)
     const inside = hit && viewport.contains(hit)
-    const targetId = inside ? hit.closest('[data-node-id]')?.dataset.nodeId : null
-    const box = inside ? mountingGroupAtClientPoint(event.clientX, event.clientY) : null
+    const hitNode = inside ? hit.closest('[data-node-id]') : null
+    const targetId = hitNode?.dataset.nodeId
+    const box = inside ? mountingGroupAtClientPoint(hit) : null
     const drop = resolveTopologyDropTarget({ sourceId: dragState.assetId, targetId, box, model })
     dragState.drop = drop
     dragState.targetGroupId = drop.kind === 'move' ? drop.box.id : null
     dragState.feedback.target(drop.kind === 'move'
-      ? container.querySelector(`[data-mounting-group-id="${cssEscape(drop.box.id)}"]`) : null, drop.box)
-    dragState.feedback.connection(drop.kind === 'connect'
-      ? container.querySelector(`[data-node-id="${cssEscape(drop.targetId)}"]`) : null)
+      ? hit.closest('[data-mounting-group-id]') : null, drop.box)
+    dragState.feedback.connection(drop.kind === 'connect' ? hitNode : null)
     dragState.feedback.hint(drop.message, drop.kind !== 'invalid')
   }
 
   function clearAssetDrag(completed) {
     completed.autoPan?.stop()
+    if (completed.targetFrame) window.cancelAnimationFrame(completed.targetFrame)
     dragState = null
     completed.viewport.classList.remove('is-dragging-asset')
     container.querySelectorAll('.topology-node.is-dragging')
@@ -1055,10 +1167,9 @@ function mountTopologyWorkspace(container, {
     void moveAssetToFrame(completed.assetId, drop.box, completed.feedback)
   }
 
-  function mountingGroupAtClientPoint(clientX, clientY) {
+  function mountingGroupAtClientPoint(hit) {
     const frame = container.querySelector('[data-topology-frame]')
     if (!frame || !layout?.mountingBoxes) return null
-    const hit = document.elementFromPoint(clientX, clientY)
     const group = hit?.closest('[data-mounting-group-id]')
     if (!group || !frame.contains(group)) return null
     // SVG rendering can reposition frames. Use the visible group's identity,
@@ -1128,6 +1239,7 @@ function mountTopologyWorkspace(container, {
     state.removeEdgeMode = false
     state.selectedEdgeId = null
     rebuild()
+    showToast('Relasi dihapus dari draft. Gunakan Batal untuk memulihkannya sebelum disimpan.')
   }
 
   async function addRelation(sourceAssetId, targetAssetId) {
@@ -1200,6 +1312,10 @@ function mountTopologyWorkspace(container, {
 
   async function saveDraft() {
     if (!state.changes.length || state.mutationBusy) return
+    if (mapData.editingRequiresDraft && !mapData.isDraft) {
+      showToast('Buat draft dari menu Sinkronisasi data sebelum menyimpan koreksi.')
+      return
+    }
     await runMutation(async () => {
       const response = await saveTopologyDiagram({ datasetVersionId: activeContext.datasetVersionId,
         expectedRecordRevision: mapData.recordRevision,
@@ -1624,7 +1740,15 @@ function mountTopologyWorkspace(container, {
         element.textContent = value
       })
     }
-    setText('[data-topology-area-title]', areaName(state.area, mapData.locationGroups))
+    const currentAreaName = areaName(state.area, mapData.locationGroups)
+    setText('[data-topology-area-title]', currentAreaName)
+    container.querySelector('[data-topology-area-title]')?.setAttribute('title', currentAreaName)
+    const branchLabel = branchNameForFacility(
+      mapData.locationGroups.find(({ key }) => key === state.area),
+      activeContext.branchName,
+    ) || activeContext.branchId
+    setText('[data-topology-branch-title]', branchLabel)
+    container.querySelector('[data-topology-branch-title]')?.setAttribute('title', branchLabel)
     setText('[data-topology-pole-count]', `${summary.physicalMountCount ?? 0} Tiang${
       summary.emptyPhysicalMountCount ? ` · ${summary.emptyPhysicalMountCount} kosong` : ''
     }`)
@@ -1640,6 +1764,10 @@ function mountTopologyWorkspace(container, {
     }
     setHidden('[data-topology-export-panel]', !state.exportOpen)
     setHidden('[data-topology-legend]', !state.legendOpen)
+    setHidden('[data-topology-actions-menu]', !state.actionsOpen)
+    setHidden('[data-remove-mode-hint]', !state.removeEdgeMode)
+    const actionsToggle = container.querySelector('[data-action="toggle-actions"]')
+    actionsToggle?.setAttribute('aria-expanded', String(state.actionsOpen))
     const inspector = container.querySelector('.topology-stitch-inspector')
     if (inspector) inspector.hidden = !state.inspectorOpen
     const app = container.querySelector('[data-topology-app]')
@@ -1783,6 +1911,13 @@ function mountTopologyWorkspace(container, {
     if (state.selectedAssetId) params.set('selectedAssetId', state.selectedAssetId)
     else params.delete('selectedAssetId')
     window.history.replaceState(null, '', `/topology?${params.toString()}`)
+    const mapLink = container.querySelector('.top-navigation nav a[href^="/map"]')
+    if (mapLink) {
+      const mapParams = new URLSearchParams({ datasetId: activeContext.datasetId, branchId: activeContext.branchId })
+      mapParams.set('area', state.area ?? 'all')
+      if (state.selectedAssetId) mapParams.set('selectedAssetId', state.selectedAssetId)
+      mapLink.href = `/map?${mapParams.toString()}`
+    }
   }
 }
 
@@ -1843,10 +1978,12 @@ function renderTopologySidebarMarkup({ activeContext, mapData, state, summary, f
             data-topology-search-results role="listbox" aria-label="Hasil pencarian diagram" hidden></div>
         </div>
 
+        <details class="topology-sidebar-disclosure" ${window.matchMedia?.('(min-width: 961px)').matches ? 'open' : ''}>
+          <summary><span class="material-symbols-outlined" aria-hidden="true">tune</span><span>Tampilan &amp; filter</span><span class="material-symbols-outlined topology-disclosure-chevron" aria-hidden="true">expand_more</span></summary>
         <section class="topology-sidebar-filter" aria-labelledby="topology-network-filter-title">
           <header class="topology-sidebar-section-heading">
             <span id="topology-network-filter-title">Jaringan</span>
-            <small>Sorot jalur yang ingin dibaca</small>
+            <small>Sorot jalur; aset lain tetap tampil</small>
           </header>
           <div class="map-category-presets topology-family-presets" aria-label="Filter keluarga jaringan">
             <button type="button" data-family="__reset__" class="${state.selectedFamilies.size === 0 ? 'active' : ''}"
@@ -1875,6 +2012,7 @@ function renderTopologySidebarMarkup({ activeContext, mapData, state, summary, f
             </label>
           </div>
         </section>
+        </details>
 
         <div class="sidebar-list-header topology-sidebar-summary">
           <div class="selection-summary">
@@ -1895,7 +2033,7 @@ function renderTopologySidebarMarkup({ activeContext, mapData, state, summary, f
 
         <footer class="sidebar-footer topology-sidebar-footer">
           <span class="material-symbols-outlined" aria-hidden="true">info</span>
-          <p>Tarik ke perangkat untuk menghubungkan, atau ke ruang kosong frame untuk memindahkan.</p>
+          <p>Tarik aset ke perangkat untuk menghubungkan, atau ke frame untuk memindahkan.</p>
           <button type="button" class="topology-sidebar-help" data-action="help" aria-label="Bantuan diagram">
             <span class="material-symbols-outlined" aria-hidden="true">help</span>
           </button>
@@ -1912,9 +2050,13 @@ function cssEscape(value) {
 
 function renderWorkspaceShell({ activeContext, mapData, state, model }) {
   const summary = model?.summary ?? {}
+  const branchLabel = branchNameForFacility(
+    mapData.locationGroups.find(({ key }) => key === state.area),
+    activeContext.branchName,
+  ) || activeContext.branchId
   return `
     <div class="topology-stitch-app" data-topology-app>
-      ${renderTopNavigation('topology', activeContext)}
+      ${renderTopNavigation('topology', { ...activeContext, area: state.area ?? 'all' })}
       <div class="topology-stitch-shell">
         ${renderTopologySidebarMarkup({
           activeContext,
@@ -1927,24 +2069,36 @@ function renderWorkspaceShell({ activeContext, mapData, state, model }) {
           <button type="button" class="topology-sidebar-reopen" data-action="toggle-sidebar" aria-label="Buka panel diagram">
             <span class="material-symbols-outlined" aria-hidden="true">left_panel_open</span>
           </button>
+          ${renderLocationContextPanel({
+            surface: 'topology',
+            branchName: branchLabel,
+            areaName: areaName(state.area, mapData.locationGroups),
+          })}
+          ${mapData.editingRequiresDraft && !mapData.isDraft ? `<div class="topology-draft-required" role="status">
+            <span>Versi aktif hanya untuk dilihat. Buat draft untuk mengedit.</span>
+            <a href="/admin/topology-sync">Buat draft</a>
+          </div>` : ''}
+          ${mapData.isDraft ? `<div class="topology-draft-required is-draft" role="status">Draft koreksi · perubahan belum terlihat oleh pengguna umum</div>` : ''}
           <div class="topology-stitch-toolbar" role="group" aria-label="Alat diagram">
-            <div class="topology-stitch-toolbar-context">
-              <span class="topology-toolbar-symbol material-symbols-outlined" aria-hidden="true">account_tree</span>
-              <span class="topology-toolbar-context-copy"><strong data-topology-area-title>${escapeHtml(areaName(state.area, []))}</strong><span>Diagram topologi</span></span>
-            </div>
             <div class="topology-stitch-toolbar-actions">
               <div class="topology-toolbar-group topology-toolbar-edit-actions" aria-label="Edit diagram">
                 <button type="button" class="topology-stitch-toolbar-button topology-toolbar-labeled topology-toolbar-primary" data-action="add-pole-frame"
                   title="Tambah frame Indoor, Non-tiang, atau tiang" aria-label="Tambah frame"><span class="material-symbols-outlined" aria-hidden="true">add_box</span><span>Tambah frame</span></button>
-                <button type="button" class="topology-stitch-toolbar-button topology-toolbar-labeled" data-action="rename-selected-frame"
-                  title="Pilih frame terlebih dahulu" aria-label="Ubah nama frame" disabled><span class="material-symbols-outlined" aria-hidden="true">edit</span><span>Nama frame</span></button>
-                <button type="button" class="topology-stitch-toolbar-button topology-toolbar-labeled topology-remove-edge-tool"
-                  data-action="toggle-remove-edge" title="Hapus relasi dengan memilih garis" aria-label="Aktifkan mode hapus relasi"
-                  aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">link_off</span><span data-remove-edge-label>Hapus relasi</span></button>
-                <span class="topology-stitch-toolbar-divider" aria-hidden="true"></span>
                 <button type="button" class="topology-stitch-toolbar-button topology-toolbar-labeled" data-action="toggle-export" title="Ekspor diagram" aria-label="Ekspor diagram"><span class="material-symbols-outlined" aria-hidden="true">ios_share</span><span>Ekspor</span></button>
+                <button type="button" class="topology-stitch-toolbar-button topology-toolbar-labeled" data-action="toggle-actions" aria-label="Tindakan lainnya" aria-controls="topology-actions-menu" aria-expanded="false" title="Tindakan lainnya"><span class="material-symbols-outlined" aria-hidden="true">more_horiz</span><span>Lainnya</span></button>
               </div>
             </div>
+          </div>
+          <div class="topology-actions-menu" id="topology-actions-menu" data-topology-actions-menu hidden>
+            <span class="topology-actions-heading">Tindakan diagram</span>
+            <button type="button" data-action="rename-selected-frame" title="Pilih frame terlebih dahulu" disabled><span class="material-symbols-outlined" aria-hidden="true">edit</span><span>Ubah nama frame</span></button>
+            <button type="button" class="topology-remove-edge-tool" data-action="toggle-remove-edge" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">link_off</span><span data-remove-edge-label>Hapus relasi</span></button>
+            <button type="button" data-action="open-sync"><span class="material-symbols-outlined" aria-hidden="true">sync_alt</span><span>Sinkronisasi data</span></button>
+          </div>
+          <div class="topology-remove-mode-hint" data-remove-mode-hint role="status" hidden>
+            <span class="material-symbols-outlined" aria-hidden="true">link_off</span>
+            <span><strong>Mode hapus relasi</strong><small>Pilih garis yang ingin dihapus. Perubahan masih bisa dibatalkan sebelum disimpan.</small></span>
+            <button type="button" data-action="toggle-remove-edge">Selesai</button>
           </div>
           <div class="topology-stitch-viewport" data-topology-viewport tabindex="0" aria-label="Canvas diagram topologi">
             <div class="topology-stitch-canvas"><div class="topology-stitch-graph-frame" data-topology-frame></div></div>
@@ -1952,8 +2106,8 @@ function renderWorkspaceShell({ activeContext, mapData, state, model }) {
           <div class="topology-canvas-navigation" role="group" aria-label="Navigasi kanvas">
               <div class="topology-toolbar-group topology-toolbar-navigation" aria-label="Navigasi diagram">
                 <div class="topology-stitch-zoom-control"><button type="button" data-action="zoom-out" aria-label="Perkecil diagram"><span class="material-symbols-outlined" aria-hidden="true">remove</span></button><button type="button" class="topology-zoom-reset" data-action="zoom-reset" data-topology-zoom-label title="Kembalikan zoom ke 100%" aria-label="Kembalikan zoom ke 100%">${Math.round(state.zoom * 100)}%</button><button type="button" data-action="zoom-in" aria-label="Perbesar diagram"><span class="material-symbols-outlined" aria-hidden="true">add</span></button></div>
-                <button type="button" class="topology-stitch-toolbar-button topology-toolbar-navigation-button" data-action="fit" title="Pas ke layar" aria-label="Tampilkan seluruh diagram"><span class="material-symbols-outlined" aria-hidden="true">fit_screen</span><span>Pas</span></button>
-                <button type="button" class="topology-stitch-toolbar-button topology-toolbar-navigation-button" data-action="focus-relations" title="Fokus ke relasi aset terpilih" aria-label="Fokus ke relasi aset terpilih"><span class="material-symbols-outlined" aria-hidden="true">center_focus_strong</span><span>Fokus</span></button>
+                <button type="button" class="topology-stitch-toolbar-button topology-toolbar-navigation-button" data-action="fit" title="Tampilkan seluruh diagram" aria-label="Tampilkan seluruh diagram"><span class="material-symbols-outlined" aria-hidden="true">fit_screen</span><span>Semua</span></button>
+                <button type="button" class="topology-stitch-toolbar-button topology-toolbar-navigation-button" data-action="focus-relations" title="Fokus ke relasi aset terpilih" aria-label="Fokus ke relasi aset terpilih"><span class="material-symbols-outlined" aria-hidden="true">center_focus_strong</span><span>Aset</span></button>
                 <span class="topology-navigation-divider" aria-hidden="true"></span>
                 <button type="button" class="topology-stitch-toolbar-button topology-toolbar-navigation-button topology-legend-toggle"
                   data-action="toggle-legend" title="Legenda diagram" aria-label="Tampilkan legenda diagram"

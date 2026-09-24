@@ -161,6 +161,8 @@ export function createConfig(env = process.env, overrides = {}) {
     host: overrides.host ?? env.SINERGI_HOST ?? '127.0.0.1',
     dataRoot,
     storageMode,
+    topologyDraftRequired: overrides.topologyDraftRequired
+      ?? booleanFrom(env.SINERGI_TOPOLOGY_DRAFT_REQUIRED, env.NODE_ENV === 'production'),
     database: {
       databaseUrl,
       shadowDatabaseUrl: overrides.database?.shadowDatabaseUrl

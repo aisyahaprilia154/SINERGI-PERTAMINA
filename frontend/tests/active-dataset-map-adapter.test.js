@@ -6,6 +6,7 @@ import {
   adaptActiveDatasetForTopology,
   locationGroupFor,
 } from '../src/adapters/active-dataset-map-adapter.js'
+import { buildTopologyDiagramModel } from '../src/domain/topology-diagram-model.js'
 
 test('active dataset adapter preserves source coordinates and uses explicit relations only', () => {
   const payload = {
@@ -769,6 +770,66 @@ test('Point and LineString in one facility share a location group without coordi
     bounds: [110.4167, -6.9667, 110.4171, -6.9663],
   }])
   assert.deepEqual(result.networks[0].locationGroupKeys, ['ft-pengapon-semarang'])
+})
+
+test('map and topology keep confirmed relations in the same imported areas for every branch', () => {
+  for (const branchId of ['semarang', 'branch-imported-later']) {
+    const datasetVersionId = `version-${branchId}`
+    const assets = ['north-a', 'north-b', 'south-a'].map((id) => ({
+      ...asset(`node-${id}`, id, 'Infrastructure'),
+      branchId,
+      datasetVersionId,
+      layerId: 'shared-layer',
+      locationGroupKey: id.startsWith('north') ? 'new-north' : 'new-south',
+      locationGroupName: id.startsWith('north') ? 'New North' : 'New South',
+      sourceFolderPath: `/RJBT/${id.startsWith('north') ? 'New North' : 'New South'}/Devices`,
+    }))
+    const topologyGraph = {
+      datasetVersionId,
+      nodes: assets.map(({ assetId }) => ({ id: assetId, assetId })),
+      edges: [
+        { id: 'within', sourceAssetId: 'north-a', targetAssetId: 'north-b', relationStatus: 'confirmed' },
+        { id: 'across', sourceAssetId: 'north-b', targetAssetId: 'south-a', relationStatus: 'confirmed' },
+      ],
+    }
+    const payload = {
+      datasetVersion: { id: datasetVersionId, datasetId: `dataset-${branchId}`, branchId, versionName: 'Imported KMZ' },
+      layers: [{ ...layer('shared-layer', 'Devices', 'Infrastructure'), sourceFolderPath: '/RJBT/Parent Folder/Devices' }],
+      assets,
+      geometries: assets.map((item, index) => point(`point-${index}`, item.id, 110 + index * 0.001, -7)),
+      topologyGraph,
+    }
+    const map = adaptActiveDatasetForMap(payload)
+    const topology = adaptActiveDatasetForTopology(payload)
+    assert.deepEqual(
+      Object.fromEntries(map.assets.map(({ id, locationGroupKey }) => [id, locationGroupKey])),
+      Object.fromEntries(topology.assets.map(({ id, locationGroupKey }) => [id, locationGroupKey])),
+    )
+    for (const area of [null, ...map.locationGroups]) {
+      const model = buildTopologyDiagramModel({
+        assets: topology.assets,
+        graph: topology.topologyGraph,
+        locationGroups: topology.locationGroups,
+        area: area?.key ?? null,
+        branchId,
+        datasetVersionId,
+      })
+      const diagramInternalEdgeIds = [
+        ...model.edges,
+        ...(!area ? model.crossAreaEdges : []),
+      ].map(({ id }) => id).sort()
+      const scopedIds = new Set(map.assets
+        .filter(({ locationGroupKey }) => !area || locationGroupKey === area.key)
+        .map(({ id }) => id))
+      const mapInternalEdgeIds = map.topologyGraph.edges
+        .filter(({ sourceAssetId, targetAssetId }) => (
+          scopedIds.has(sourceAssetId) && scopedIds.has(targetAssetId)
+        ))
+        .map(({ id }) => id).sort()
+      assert.deepEqual(mapInternalEdgeIds, diagramInternalEdgeIds)
+      if (!area) assert.deepEqual(model.crossAreaEdges.map(({ id }) => id), ['across'])
+    }
+  }
 })
 
 function asset(id, assetId, category) {
