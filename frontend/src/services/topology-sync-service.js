@@ -10,7 +10,12 @@ async function request(path, body, { method = 'POST' } = {}) {
     ...(body ? { body: JSON.stringify(body) } : {}),
   })
   const result = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(result.error?.message ?? `Gagal (${response.status}).`)
+  if (!response.ok) {
+    const error = new Error(result.error?.message ?? `Gagal (${response.status}).`)
+    error.status = response.status
+    error.code = result.error?.code
+    throw error
+  }
   return result
 }
 
@@ -62,9 +67,15 @@ export const previewReconciliation = (datasetVersionId, envelope, passphrase) =>
   { datasetVersionId, envelope, passphrase },
 )
 export const applyReconciliation = (datasetVersionId, envelope, passphrase,
-  expectedRecordRevision, resolutions) => request(
+  expectedRecordRevision, resolutions, operationId) => request(
   '/api/admin/topology-sync/reconcile/apply',
-  { datasetVersionId, envelope, passphrase, expectedRecordRevision, resolutions },
+  { datasetVersionId, envelope, passphrase, expectedRecordRevision, resolutions,
+    operationId },
+)
+
+export const reconciliationOperation = (datasetVersionId, operationId) => request(
+  `/api/admin/topology-sync/reconcile/operation?datasetVersionId=${encodeURIComponent(datasetVersionId)}&operationId=${encodeURIComponent(operationId)}`,
+  null, { method: 'GET' },
 )
 
 export function detectSyncPackageType(envelope, filename = '') {

@@ -54,7 +54,9 @@ export class TopologySyncService {
     }
   }
 
-  async createDraft(datasetVersionId, actorId) {
+  async createDraft(datasetVersionId, actorId, {
+    draftVersionId = null, reconciliation = null,
+  } = {}) {
     const current = await this.repository.get(datasetVersionId)
     const active = await this.repository.findActive(current.datasetVersion.datasetId, {
       branchId: current.datasetVersion.branchId,
@@ -67,7 +69,7 @@ export class TopologySyncService {
     if (!current.topologySync?.id) throw new AppError('Siapkan titik sinkronisasi dulu.', {
       code: 'topology_sync_not_initialized', statusCode: 409,
     })
-    const draft = rebaseDraftRecord(current, `dv-${randomUUID()}`)
+    const draft = rebaseDraftRecord(current, draftVersionId ?? `dv-${randomUUID()}`)
     draft.datasetVersion = {
       ...draft.datasetVersion,
       id: draft.datasetVersionId,
@@ -85,6 +87,8 @@ export class TopologySyncService {
     delete draft.datasetVersion.autoActivation
     draft.datasetVersionId = draft.datasetVersion.id
     draft.recordRevision = 0
+    delete draft.topologyReconciliation
+    if (reconciliation) draft.topologyReconciliation = reconciliation
     await this.repository.create(draft)
     await this.auditLog?.record('topology.sync_draft_created', {
       actorId, datasetVersionId: draft.datasetVersion.id, outcome: 'confirmed',
@@ -270,8 +274,11 @@ export class TopologySyncService {
   }
 
   async applyReconciliation(datasetVersionId, actorId, envelope, passphrase, {
-    expectedRecordRevision, resolutions = {},
+    expectedRecordRevision, resolutions = {}, operationId = randomUUID(),
   } = {}) {
+    assertReconciliationOperationId(operationId)
+    const previous = await this.reconciliationOperation(datasetVersionId, operationId)
+    if (previous.status === 'complete') return previous
     const local = await this.repository.get(datasetVersionId)
     if (!Number.isInteger(expectedRecordRevision)
       || expectedRecordRevision !== local.recordRevision) {
@@ -290,7 +297,19 @@ export class TopologySyncService {
     if (changes.length > 200) throw new AppError('Terlalu banyak perubahan untuk satu draft.', {
       code: 'topology_sync_reconciliation_too_large', statusCode: 409,
     })
-    const draft = await this.createDraft(datasetVersionId, actorId)
+    const draft = previous.status === 'pending'
+      ? { datasetVersionId: previous.datasetVersionId }
+      : await this.createDraft(datasetVersionId, actorId, {
+        draftVersionId: `dv-${operationId}`,
+        reconciliation: { operationId, baseDatasetVersionId: datasetVersionId,
+          remoteSyncId: remote.topologySync.id, applied: changes.length },
+      })
+    if (previous.status === 'pending'
+      && previous.remoteSyncId !== remote.topologySync.id) {
+      throw new AppError('Paket untuk proses penyelarasan ini berbeda.', {
+        code: 'topology_sync_operation_mismatch', statusCode: 409,
+      })
+    }
     await this.topologyService.saveDiagram(draft.datasetVersionId, actorId, {
       changes,
       expectedRecordRevision: 0,
@@ -303,6 +322,30 @@ export class TopologySyncService {
         remoteSyncId: remote.topologySync.id, applied: changes.length },
     })
     return { ...draft, applied: changes.length }
+  }
+
+  async reconciliationOperation(datasetVersionId, operationId) {
+    assertReconciliationOperationId(operationId)
+    const draftVersionId = `dv-${operationId}`
+    let draft
+    try { draft = await this.repository.get(draftVersionId) }
+    catch (error) {
+      if (error?.code === 'dataset_version_not_found') {
+        return { datasetVersionId: draftVersionId, status: 'not_started' }
+      }
+      throw error
+    }
+    const marker = draft.topologyReconciliation
+    if (marker?.operationId !== operationId
+      || marker.baseDatasetVersionId !== datasetVersionId) {
+      throw new AppError('Identitas proses penyelarasan tidak cocok.', {
+        code: 'topology_sync_operation_mismatch', statusCode: 409,
+      })
+    }
+    return { datasetVersionId: draftVersionId,
+      status: draft.recordRevision > 0 && draft.topologySync?.id === marker.remoteSyncId
+        ? 'complete' : 'pending',
+      remoteSyncId: marker.remoteSyncId, applied: marker.applied }
   }
 
   async #validateReconciliationPackage(local, envelope, passphrase) {
@@ -425,4 +468,13 @@ function rebaseDraftRecord(record, draftId) {
   }
   draft.datasetVersionId = draftId
   return draft
+}
+
+function assertReconciliationOperationId(operationId) {
+  if (typeof operationId !== 'string'
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(operationId)) {
+    throw new AppError('ID proses penyelarasan tidak valid.', {
+      code: 'topology_sync_invalid_operation', statusCode: 400,
+    })
+  }
 }

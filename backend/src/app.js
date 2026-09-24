@@ -927,6 +927,14 @@ export function createApp({
         return sendJson(response, 200,
           await topologySyncService.importBootstrap(user.id, body.envelope, body.passphrase))
       }
+      if (request.method === 'GET'
+        && url.pathname === '/api/admin/topology-sync/reconcile/operation') {
+        requireAdministrator(request, authenticator)
+        return sendJson(response, 200,
+          await topologySyncService.reconciliationOperation(
+            url.searchParams.get('datasetVersionId'),
+            url.searchParams.get('operationId')))
+      }
       if (request.method === 'POST'
         && /^\/api\/admin\/topology-sync\/reconcile\/(preview|apply)$/.test(url.pathname)) {
         const user = requireAdministrator(request, authenticator)
@@ -939,6 +947,7 @@ export function createApp({
             body.datasetVersionId, user.id, body.envelope, body.passphrase, {
               expectedRecordRevision: body.expectedRecordRevision,
               resolutions: body.resolutions,
+              operationId: body.operationId,
             }))
       }
       const candidateActionMatch = request.method === 'POST'
