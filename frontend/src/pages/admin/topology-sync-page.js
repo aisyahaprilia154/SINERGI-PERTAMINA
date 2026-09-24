@@ -29,7 +29,8 @@ export async function renderTopologySyncPage(container) {
     draftReview: null, reviewConfirmed: false, breakingConfirmed: false,
     exportOffset: 0,
     envelope: null, filename: '', passphrase: '', exportPassphrase: '', preview: null,
-    resolutions: {}, message: '', error: '', exportError: '', exportMessage: '', busy: false,
+    resolutions: {}, message: '', error: '', exportError: '', exportMessage: '',
+    busy: false, busyAction: '',
   }
 
   function render() {
@@ -94,7 +95,7 @@ export async function renderTopologySyncPage(container) {
         </section>
         ${state.preview ? renderPreview(state) : ''}
         ${state.draftReview ? renderDraftReview(state) : ''}
-        ${state.error ? `<p class="sync-alert" role="alert">${escapeHtml(state.error)}</p>` : ''}
+        ${state.error && !state.preview ? `<p class="sync-alert" role="alert">${escapeHtml(state.error)}</p>` : ''}
         ${state.message ? `<p class="sync-success" role="status">${escapeHtml(state.message)}</p>` : ''}
       </main>`
     bind()
@@ -193,6 +194,7 @@ export async function renderTopologySyncPage(container) {
       return
     }
     state.busy = true
+    state.busyAction = action
     state.error = ''
     state.exportError = ''
     state.exportMessage = ''
@@ -273,6 +275,7 @@ export async function renderTopologySyncPage(container) {
       else state.error = error.message
     } finally {
       state.busy = false
+      state.busyAction = ''
       render()
     }
   }
@@ -303,6 +306,7 @@ function renderPreview(state) {
     ${preview.mode === 'reconciliation' ? '<p class="sync-hint">Pastikan kamu sudah mengunduh paket awal milikmu sebagai cadangan. Hasil penyelarasan akan dibuat sebagai draft dan perlu ditinjau sebelum diterbitkan.</p>' : ''}
     ${preview.changes.some(item => item.relatedConflict) ? '<p class="sync-alert" role="alert">Ada kamera yang terhubung ke dua JB berbeda. Perbaiki relasi kamera di diagram, lalu periksa paket lagi.</p>' : ''}
     ${preview.changes.some(item => item.status === 'blocked') ? '<p class="sync-alert" role="alert">Ada relasi dalam paket yang merujuk aset yang tidak tersedia di dataset ini. Periksa identitas atau relasi aset sebelum menyelaraskan.</p>' : ''}
+    ${state.busyAction === 'reconcile-apply' ? `<p class="sync-hint" role="status">Sedang membuat draft dan menyimpan ${preview.summary.ready + preview.summary.conflict} perubahan. Dataset aktif belum berubah; tunggu sampai halaman draft terbuka.</p>` : ''}
     <div class="sync-change-list">${preview.changes.map(change => `
       <div class="sync-change">
         <div><strong>${escapeHtml(labelFor(change.key))}</strong><span class="sync-badge ${change.status}">${escapeHtml(statusFor(change.status))}</span></div>
@@ -314,7 +318,8 @@ function renderPreview(state) {
         ${change.relatedConflict ? '<small>Relasi kamera ini perlu diperbaiki di diagram sebelum paket dapat diselaraskan.</small>' : ''}
         ${change.missingAssetIds?.length ? `<small>Aset tidak ditemukan: ${escapeHtml(change.missingAssetIds.join(', '))}</small>` : ''}
       </div>`).join('') || '<p>Tidak ada perubahan dalam paket ini.</p>'}</div>
-    <button type="button" class="sync-primary" data-action="${preview.mode === 'reconciliation' ? 'reconcile-apply' : 'apply'}" ${unresolved || preview.changes.some(item => item.relatedConflict || item.status === 'blocked') || state.busy ? 'disabled' : ''}>${preview.mode === 'reconciliation' ? 'Buat draft hasil penyelarasan' : 'Terapkan koreksi'}</button>
+    <button type="button" class="sync-primary" data-action="${preview.mode === 'reconciliation' ? 'reconcile-apply' : 'apply'}" ${unresolved || preview.changes.some(item => item.relatedConflict || item.status === 'blocked') || state.busy ? 'disabled' : ''}>${state.busyAction === 'reconcile-apply' ? 'Sedang menyimpan draft…' : preview.mode === 'reconciliation' ? 'Buat draft hasil penyelarasan' : 'Terapkan koreksi'}</button>
+    ${state.error ? `<p class="sync-alert" role="alert">${escapeHtml(state.error)}</p>` : ''}
   </section>`
 }
 

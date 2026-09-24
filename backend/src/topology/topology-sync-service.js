@@ -295,6 +295,7 @@ export class TopologySyncService {
       changes,
       expectedRecordRevision: 0,
       syncAdopt: structuredClone(remote.topologySync),
+      syncTolerantEdges: true,
     })
     await this.auditLog?.record('topology.sync_reconciled', {
       actorId, datasetVersionId: draft.datasetVersionId, outcome: 'confirmed',
@@ -380,6 +381,7 @@ export class TopologySyncService {
         changes,
         expectedRecordRevision,
         syncAcceptedIds: acceptedIds,
+        syncTolerantEdges: true,
       })
     }
     await this.auditLog?.record('topology.sync_imported', {
