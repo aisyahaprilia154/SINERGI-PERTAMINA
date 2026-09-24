@@ -73,6 +73,7 @@ test('paket terenkripsi mendeteksi sandi salah dan sumber berbeda', () => {
   const sender = structuredClone(shared)
   sender.topologyFrameAssignments = { 'JB-001': 'pole-group:T-002' }
   const sealed = encryptSyncPackage(createCorrectionPackage(sender), 'sandi-rahasia-panjang')
+  assert.equal(sealed.format, 'sinergi-topology-sync-v1-encrypted')
   assert.equal(decryptSyncPackage(sealed, 'sandi-rahasia-panjang').changes.length, 1)
   assert.throws(() => decryptSyncPackage(sealed, 'sandi-yang-salah-panjang'), /sandi salah/)
   const other = baseline()
@@ -158,6 +159,10 @@ test('paket awal membawa record dan sumber asli ke instalasi kosong', async t =>
   const to = new TopologySyncService({ repository: toRepo, fileStore: toStore })
   const passphrase = 'sandi-paket-awal-tim'
   const envelope = await from.exportBootstrap('dv-shared', passphrase)
+  assert.equal(envelope.format, 'sinergi-topology-bootstrap-v1-encrypted')
+  assert.equal(decryptSyncPackage({ ...envelope,
+    format: 'sinergi-topology-sync-v1-encrypted' }, passphrase).format,
+  'sinergi-topology-bootstrap-v1')
   const invalid = decryptSyncPackage(envelope, passphrase)
   invalid.record.topologySync.baselineHash = '0'.repeat(64)
   await assert.rejects(to.importBootstrap('bob',

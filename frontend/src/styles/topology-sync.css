@@ -21,7 +21,14 @@
 .sync-actions button:disabled,.sync-primary:disabled{opacity:.48;cursor:not-allowed}
 .sync-primary{background:#326992;color:#fff;border-color:#326992;margin-top:20px}
 .sync-primary:hover:not(:disabled){background:#245b84}
-.sync-hint{font-size:12px}.sync-file-name{color:#295f86;font-size:12px}
+.sync-hint{font-size:12px}
+.sync-field-title{margin:15px 0 8px;color:#465b70;font-size:13px;font-weight:650}
+.sync-card input.sync-file-input{position:absolute;width:1px;height:1px;padding:0;border:0;opacity:0;overflow:hidden}
+.sync-card label.sync-file-picker{display:flex;align-items:center;gap:10px;min-height:54px;margin:0 0 8px;padding:10px 12px;box-sizing:border-box;border:1px solid #ccd8e5;border-radius:12px;background:#fff;color:#294763;cursor:pointer}
+.sync-file-picker .material-symbols-outlined{font-size:20px;color:#50779b}
+.sync-file-picker-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sync-file-picker-action{flex:none;border-radius:9px;padding:7px 10px;background:#edf3fa;font-size:12px;font-weight:700}
+.sync-file-input:focus-visible + .sync-file-picker{outline:3px solid #6ca5d9;outline-offset:2px}
 .sync-alert,.sync-success{padding:15px 18px;border-radius:14px;font-size:13px}.sync-alert{background:#fff1f0;color:#9f3030}.sync-success{background:#eaf8f3;color:#176953}
 .sync-change-list{display:grid;gap:10px;max-height:560px;overflow:auto}
 .sync-change{padding:15px 17px;border:1px solid #e2eaf2;border-radius:15px;background:#f9fbfe}
@@ -35,7 +42,11 @@
 :root[data-theme=dark] .sync-card{background:#202a35de;border-color:#3a4755}
 :root[data-theme=dark] .sync-back,:root[data-theme=dark] .sync-dataset,:root[data-theme=dark] .sync-change{background:#263442;color:#dce8f5;border-color:#3b4e60}
 :root[data-theme=dark] .sync-card input,:root[data-theme=dark] .sync-card select{background:#1b2733;color:#eaf2fa;border-color:#4a5c6d}
+:root[data-theme=dark] .sync-card label.sync-file-picker{background:#1b2733;color:#eaf2fa;border-color:#4a5c6d}
+:root[data-theme=dark] .sync-file-picker-action{background:#304254;color:#eaf2fa}
 .topology-sync-body[data-theme=dark] .sync-card,body.dark.topology-sync-body .sync-card{background:#202a35de;border-color:#3a4755}
 .topology-sync-body[data-theme=dark] .sync-back,.topology-sync-body[data-theme=dark] .sync-dataset,.topology-sync-body[data-theme=dark] .sync-change,body.dark.topology-sync-body .sync-back,body.dark.topology-sync-body .sync-dataset,body.dark.topology-sync-body .sync-change{background:#263442;color:#dce8f5;border-color:#3b4e60}
 .topology-sync-body[data-theme=dark] .sync-card input,.topology-sync-body[data-theme=dark] .sync-card select,body.dark.topology-sync-body .sync-card input,body.dark.topology-sync-body .sync-card select{background:#1b2733;color:#eaf2fa;border-color:#4a5c6d}
+.topology-sync-body[data-theme=dark] .sync-card label.sync-file-picker,body.dark.topology-sync-body .sync-card label.sync-file-picker{background:#1b2733;color:#eaf2fa;border-color:#4a5c6d}
+.topology-sync-body[data-theme=dark] .sync-file-picker-action,body.dark.topology-sync-body .sync-file-picker-action{background:#304254;color:#eaf2fa}
 @media(max-width:580px){.sync-page{padding:24px 14px 60px}.sync-card{padding:19px;border-radius:20px}.sync-header{gap:12px}.sync-actions button{flex:1}.sync-change fieldset{flex-wrap:wrap}}
