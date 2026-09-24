@@ -64,7 +64,8 @@ const MAX_MOUNTING_BULK_DECISIONS = 200
 
 export class TopologyService {
   async saveDiagram(datasetVersionId, actorId, { changes, expectedRecordRevision,
-    correlationId, syncAcceptedIds = [], syncAdopt = null } = {}) {
+    correlationId, syncAcceptedIds = [], syncAdopt = null,
+    syncTolerantEdges = false } = {}) {
     if (!Array.isArray(changes) || (!changes.length && !syncAcceptedIds.length && !syncAdopt)
       || changes.length > 200
       || changes.some(change => !change || typeof change !== 'object' || Array.isArray(change))
@@ -133,8 +134,22 @@ export class TopologyService {
               if (error?.code !== 'topology_manual_relation_exists') throw error
             }
           } else if (['rename-frame', 'remove-edge'].includes(change.type)) {
-            await editor.editDiagram(datasetVersionId, actorId, { ...change,
-              action: change.type, expectedRecordRevision: recordRevision(draft) })
+            try {
+              await editor.editDiagram(datasetVersionId, actorId, { ...change,
+                action: change.type, expectedRecordRevision: recordRevision(draft) })
+            } catch (error) {
+              if (!(syncTolerantEdges && change.type === 'remove-edge'
+                && error?.code === 'diagram_edge_not_found')) throw error
+              const exists = (draft.topologyEdgeOverrides ?? []).some(item =>
+                item.action === 'remove' && (change.edgeKey
+                  ? item.edgeKey === change.edgeKey : item.edgeId === change.edgeId))
+              if (!exists) draft = { ...draft, topologyEdgeOverrides: [
+                ...(draft.topologyEdgeOverrides ?? []),
+                { action: 'remove', edgeId: change.edgeId ?? null,
+                  edgeKey: change.edgeKey ?? null, actorId,
+                  updatedAt: this.clock().toISOString() },
+              ] }
+            }
           } else {
             throw new AppError('Jenis perubahan diagram tidak valid.', { code: 'invalid_diagram_change', statusCode: 400 })
           }
@@ -201,7 +216,8 @@ export class TopologyService {
           details = { assetId: pole.canonicalAssetId, name: label }
         } else {
           const edge = projectFacilityRecord(record).topologyGraph?.edges
-            .find(item => item.id === edgeId || item.relationId === edgeId
+            .find(item => (edgeId != null
+              && (item.id === edgeId || item.relationId === edgeId))
               || (edgeKey && diagramEdgeKey(item) === edgeKey))
           if (!edge) throw new AppError('Garis sudah berubah. Muat ulang diagram.', { code: 'diagram_edge_not_found', statusCode: 409 })
           const override = { action: 'remove', edgeId: edge.id ?? edge.relationId,

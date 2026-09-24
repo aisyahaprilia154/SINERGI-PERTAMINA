@@ -192,6 +192,18 @@ test('relasi paket ke aset yang tidak ada ditandai sebelum draft dibuat', () => 
   })
 })
 
+test('penghapusan garis yang sudah tidak ada tetap dikirim sebagai tombstone', () => {
+  const local = baseline()
+  local.topologyGraph = { edges: [] }
+  const remote = structuredClone(local)
+  remote.topologySync.id = 'remote-sync'
+  remote.topologyEdgeOverrides = [{ action: 'remove',
+    edgeKey: '[["JB-1","JB-2"],"data","fiber",[]]' }]
+  const preview = previewIndependentBaseline(local, remote)
+  assert.equal(preview.summary.ready, 1)
+  assert.equal(diagramChangesFromPreview(preview).changes[0].type, 'remove-edge')
+})
+
 test('paket awal membawa record dan sumber asli ke instalasi kosong', async t => {
   const fromRoot = await mkdtemp(path.join(tmpdir(), 'sinergi-sync-from-'))
   const toRoot = await mkdtemp(path.join(tmpdir(), 'sinergi-sync-to-'))
@@ -453,13 +465,17 @@ test('relasi baru pada draft memakai ID versi draft dan dapat disimpan', async t
   const topologyService = new TopologyService({ repository, auditLog })
   await topologyService.saveDiagram(draft.datasetVersionId, 'editor', {
     expectedRecordRevision: 0,
+    syncTolerantEdges: true,
     changes: [{ type: 'add-relation', sourceAssetId: 'SW-PILOT-A',
-      targetAssetId: 'SW-PILOT-B' }],
+      targetAssetId: 'SW-PILOT-B' },
+    { type: 'remove-edge', edgeKey: '[["missing","other"],"data","fiber",[]]' }],
   })
   const saved = await repository.get(draft.datasetVersionId)
   assert.equal(saved.topologyInputBundle.explicitRelations.at(-1).datasetVersionId,
     draft.datasetVersionId)
   assert.equal(saved.topologyInputBundle.explicitRelations.at(-1).source, 'manual_admin')
+  assert.equal(saved.topologyEdgeOverrides.at(-1).edgeKey,
+    '[["missing","other"],"data","fiber",[]]')
   assert.equal((await repository.findActive('dataset-pilot', { branchId: 'pilot' }))
     .datasetVersion.id, fixture.datasetVersion.id)
 })
