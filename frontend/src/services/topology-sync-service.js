@@ -63,6 +63,17 @@ export function downloadSyncFile(envelope, filename) {
   const anchor = document.createElement('a')
   anchor.href = url
   anchor.download = filename
-  anchor.click()
-  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  anchor.hidden = true
+  document.body.append(anchor)
+  try {
+    anchor.click()
+  } catch (error) {
+    anchor.remove()
+    URL.revokeObjectURL(url)
+    throw error
+  }
+  window.setTimeout(() => {
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  }, 60_000)
 }
