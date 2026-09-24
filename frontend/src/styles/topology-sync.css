@@ -36,6 +36,7 @@
 .sync-change strong{font-size:13px}.sync-change small{color:#657c94;line-height:1.6;overflow-wrap:anywhere}
 .sync-badge{border-radius:99px;padding:4px 9px;font-size:11px;font-weight:700;white-space:nowrap;background:#e7f5ee;color:#286d4d}
 .sync-badge.conflict{background:#fff0da;color:#9f610e}.sync-badge.already-applied{background:#eef1f5;color:#64748b}
+.sync-badge.blocked{background:#fff1f0;color:#9f3030}
 .sync-change fieldset{display:flex;gap:18px;margin:12px 0 0;padding:0;border:0}.sync-change legend{font-size:12px;font-weight:700;color:#495f75}.sync-change fieldset label{display:flex;align-items:center;gap:5px;margin:7px 0 0}
 .topology-sync-body[data-theme=dark],body.dark.topology-sync-body{background:#10171f;color:#eff4fa}
 :root[data-theme=dark] .topology-sync-body{background:#10171f;color:#eff4fa}

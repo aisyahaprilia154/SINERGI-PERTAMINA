@@ -131,6 +131,66 @@ test('dua impor terpisah dengan aset sama membandingkan perubahan tanpa menimpa 
   assert.notEqual(assetIdentityHash(local), assetIdentityHash(remote))
 })
 
+test('dua cabang JB yang berbagi simpul tetap bisa digabung', () => {
+  const local = baseline()
+  local.topologyGraph = { nodes: [
+    { canonicalAssetId: 'JB-1', topologyRole: 'junction', assetType: 'junction box' },
+    { canonicalAssetId: 'JB-2', topologyRole: 'junction', assetType: 'junction box' },
+    { canonicalAssetId: 'RACK', topologyRole: 'root', assetType: 'server rack' },
+  ] }
+  local.topologyInputBundle.explicitRelations = [{ source: 'manual_admin',
+    sourceKey: 'manual_device_connection', sourceReference: 'JB-1',
+    targetReference: 'RACK' }]
+  const remote = structuredClone(local)
+  remote.topologySync.id = 'remote-sync'
+  remote.topologyInputBundle.explicitRelations = [{ source: 'manual_admin',
+    sourceKey: 'manual_device_connection', sourceReference: 'JB-1',
+    targetReference: 'JB-2' }]
+  const preview = previewIndependentBaseline(local, remote)
+  assert.equal(preview.summary.ready, 1)
+  assert.equal(preview.summary.conflict, 0)
+  assert.equal(preview.changes[0].relatedConflict, false)
+})
+
+test('kamera ke dua JB berbeda menampilkan relasi lokal yang benar', () => {
+  const local = baseline()
+  local.topologyGraph = { nodes: [
+    { canonicalAssetId: 'CAM-1', assetType: 'CCTV Camera' },
+    { canonicalAssetId: 'JB-1', topologyRole: 'junction', assetType: 'junction box' },
+    { canonicalAssetId: 'JB-2', topologyRole: 'junction', assetType: 'junction box' },
+  ] }
+  local.topologyInputBundle.explicitRelations = [{ source: 'manual_admin',
+    sourceKey: 'manual_device_connection', sourceReference: 'CAM-1',
+    targetReference: 'JB-1' }]
+  const remote = structuredClone(local)
+  remote.topologySync.id = 'remote-sync'
+  remote.topologyInputBundle.explicitRelations = [{ source: 'manual_admin',
+    sourceKey: 'manual_device_connection', sourceReference: 'CAM-1',
+    targetReference: 'JB-2' }]
+  const preview = previewIndependentBaseline(local, remote)
+  assert.equal(preview.summary.conflict, 1)
+  assert.equal(preview.changes[0].relatedConflict, true)
+  assert.deepEqual(preview.changes[0].local, { source: 'CAM-1', target: 'JB-1' })
+})
+
+test('relasi paket ke aset yang tidak ada ditandai sebelum draft dibuat', () => {
+  const local = baseline()
+  local.topologyGraph = { nodes: [
+    { canonicalAssetId: 'JB-1', topologyRole: 'junction', assetType: 'junction box' },
+  ] }
+  const remote = structuredClone(local)
+  remote.topologySync.id = 'remote-sync'
+  remote.topologyInputBundle.explicitRelations = [{ source: 'manual_admin',
+    sourceKey: 'manual_device_connection', sourceReference: 'JB-1',
+    targetReference: 'MISSING-JB' }]
+  const preview = previewIndependentBaseline(local, remote)
+  assert.equal(preview.summary.blocked, 1)
+  assert.deepEqual(preview.changes[0].missingAssetIds, ['MISSING-JB'])
+  assert.throws(() => diagramChangesFromPreview(preview), {
+    code: 'topology_sync_relation_asset_missing',
+  })
+})
+
 test('paket awal membawa record dan sumber asli ke instalasi kosong', async t => {
   const fromRoot = await mkdtemp(path.join(tmpdir(), 'sinergi-sync-from-'))
   const toRoot = await mkdtemp(path.join(tmpdir(), 'sinergi-sync-to-'))
