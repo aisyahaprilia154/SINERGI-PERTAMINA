@@ -9,6 +9,7 @@ import { ImportFileStore } from '../src/storage/file-store.js'
 import { TopologySyncService } from '../src/topology/topology-sync-service.js'
 import { TopologyService } from '../src/topology/topology-service.js'
 import { DatasetVersionLifecycleService } from '../src/import/dataset-version-lifecycle-service.js'
+import { normalizeAndValidateBundle } from '../src/topology/semantic-relation-engine.js'
 import {
   assetIdentityHash,
   correctionState,
@@ -301,6 +302,10 @@ test('paket awal impor independen membuat draft dengan titik bersama tanpa mengu
   fixture.datasetVersion.sourceSize = bytes.length
   fixture.datasetVersion.sourceFilename = 'same.kml'
   fixture.sourceChecksum = checksum
+  fixture.topologyInputBundle.explicitRelations = []
+  fixture.confirmedRelations = []
+  fixture.topologyCandidates = []
+  fixture.topologyGraph.edges = []
   const temp = await fileStore.createTemporaryUpload()
   await writeFile(temp, bytes)
   fixture.datasetVersion.sourceStorageKey = (await fileStore.commitOriginal(
@@ -315,8 +320,17 @@ test('paket awal impor independen membuat draft dengan titik bersama tanpa mengu
   const remote = structuredClone(local)
   remote.datasetVersion.id = 'dv-independent'
   remote.datasetVersion.syncRootDatasetVersionId = undefined
+  remote.topologyInputBundle.datasetVersion.id = 'dv-independent'
+  remote.topologyInputBundle.geometries.forEach(geometry => {
+    geometry.datasetVersionId = 'dv-independent'
+  })
   remote.topologySync = undefined
   const sender = initializeSyncRecord(remote, 'remote-sync')
+  sender.topologyInputBundle.explicitRelations.push({
+    datasetVersionId: 'dv-independent', source: 'manual_admin',
+    sourceKey: 'manual_device_connection',
+    sourceReference: 'SW-PILOT-A', targetReference: 'SW-PILOT-B',
+  })
   const envelope = encryptSyncPackage({ format: 'sinergi-topology-bootstrap-v1',
     source: sender.topologySync.source, record: sender,
     sourceFile: bytes.toString('base64') }, 'sandi-paket-awal-tim')
@@ -346,14 +360,27 @@ test('paket awal impor independen membuat draft dengan titik bersama tanpa mengu
   const preview = await service.previewReconciliation(local.datasetVersion.id,
     envelope, 'sandi-paket-awal-tim')
   assert.equal(preview.mode, 'reconciliation')
-  assert.equal(preview.summary.ready, 0)
+  assert.equal(preview.summary.ready, 1)
   const result = await service.applyReconciliation(local.datasetVersion.id, 'alice',
     envelope, 'sandi-paket-awal-tim', { expectedRecordRevision: preview.recordRevision })
   assert.equal((await repository.findActive('dataset-pilot', { branchId: 'pilot' }))
     .topologySync.id, 'local-sync')
-  assert.equal((await repository.get(result.datasetVersionId)).topologySync.id, 'remote-sync')
+  const savedDraft = await repository.get(result.datasetVersionId)
+  assert.equal(savedDraft.topologySync.id, 'remote-sync')
+  assert.equal(savedDraft.topologyInputBundle.explicitRelations.at(-1).datasetVersionId,
+    result.datasetVersionId)
   const review = await service.reviewDraft(result.datasetVersionId)
   assert.equal(review.changes[0].key, 'sync-baseline:root')
+  assert.equal(review.requiresBreakingChangeConfirmation, true)
+  await assert.rejects(service.publishDraft(result.datasetVersionId, 'reviewer',
+    review.reviewHash), { code: 'breaking_change_confirmation_required' })
+  await service.publishDraft(result.datasetVersionId, 'reviewer', review.reviewHash, {
+    confirmBreakingChanges: true,
+  })
+  const published = await repository.findActive('dataset-pilot', { branchId: 'pilot' })
+  assert.equal(published.datasetVersion.id, result.datasetVersionId)
+  assert.equal(published.topologyInputBundle.explicitRelations.at(-1).source,
+    'manual_admin')
 })
 
 test('draft tidak terlihat umum sebelum ditinjau dan publikasi dapat dibalik', async t => {
@@ -371,6 +398,14 @@ test('draft tidak terlihat umum sebelum ditinjau dan publikasi dapat dibalik', a
   const sync = new TopologySyncService({ repository, auditLog, lifecycleService })
   await sync.initialize('dv-pilot-parity', 'admin', activeBefore.recordRevision)
   const draft = await sync.createDraft('dv-pilot-parity', 'editor')
+  const draftRecord = await repository.get(draft.datasetVersionId)
+  assert.equal(draftRecord.topologyInputBundle.datasetVersion.id, draft.datasetVersionId)
+  assert.equal(draftRecord.topologyInputBundle.geometries[0].datasetVersionId,
+    draft.datasetVersionId)
+  assert.equal(draftRecord.topologyInputBundle.explicitRelations[0].datasetVersionId,
+    draft.datasetVersionId)
+  assert.equal(draftRecord.topologySync.source.datasetVersionId, 'dv-pilot-parity')
+  assert.doesNotThrow(() => normalizeAndValidateBundle(draftRecord.topologyInputBundle))
   const draftView = await lifecycleService.getDraftTopologyDataset(draft.datasetVersionId)
   assert.equal(draftView.draft, true)
   assert.equal(draftView.context.datasetVersionId, draft.datasetVersionId)
@@ -384,9 +419,47 @@ test('draft tidak terlihat umum sebelum ditinjau dan publikasi dapat dibalik', a
   await sync.publishDraft(draft.datasetVersionId, 'reviewer', review.reviewHash)
   assert.equal((await repository.findActive('dataset-pilot', { branchId: 'pilot' }))
     .datasetVersion.id, draft.datasetVersionId)
+  const secondDraft = await sync.createDraft(draft.datasetVersionId, 'editor')
+  const secondRecord = await repository.get(secondDraft.datasetVersionId)
+  assert.equal(secondRecord.topologyInputBundle.datasetVersion.id,
+    secondDraft.datasetVersionId)
+  assert.equal(secondRecord.topologyInputBundle.explicitRelations[0].datasetVersionId,
+    secondDraft.datasetVersionId)
+  assert.doesNotThrow(() => normalizeAndValidateBundle(secondRecord.topologyInputBundle))
   await lifecycleService.rollbackToPrevious('dataset-pilot', 'pilot', 'reviewer', {
     expectedActiveVersionId: draft.datasetVersionId,
   })
   assert.equal((await repository.findActive('dataset-pilot', { branchId: 'pilot' }))
     .datasetVersion.id, 'dv-pilot-parity')
+})
+
+test('relasi baru pada draft memakai ID versi draft dan dapat disimpan', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'sinergi-sync-relation-draft-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const repository = new JsonDatasetVersionRepository(path.join(root, 'dataset-versions'))
+  const fixture = JSON.parse(await readFile(new URL('./fixtures/dataset-version-pilot.json', import.meta.url)))
+  fixture.topologyInputBundle.explicitRelations = []
+  fixture.confirmedRelations = []
+  fixture.topologyCandidates = []
+  fixture.topologyGraph.edges = []
+  await repository.create(initializeSyncRecord(fixture, 'sync-relation-draft'))
+  const auditLog = { record: async () => ({ id: 'audit-test' }) }
+  const lifecycleService = new DatasetVersionLifecycleService({ repository, auditLog })
+  await lifecycleService.activate(fixture.datasetVersion.id, 'admin', {
+    publicationProfile: 'map_only', expectedActiveVersionId: null,
+  })
+  const sync = new TopologySyncService({ repository, auditLog, lifecycleService })
+  const draft = await sync.createDraft(fixture.datasetVersion.id, 'editor')
+  const topologyService = new TopologyService({ repository, auditLog })
+  await topologyService.saveDiagram(draft.datasetVersionId, 'editor', {
+    expectedRecordRevision: 0,
+    changes: [{ type: 'add-relation', sourceAssetId: 'SW-PILOT-A',
+      targetAssetId: 'SW-PILOT-B' }],
+  })
+  const saved = await repository.get(draft.datasetVersionId)
+  assert.equal(saved.topologyInputBundle.explicitRelations.at(-1).datasetVersionId,
+    draft.datasetVersionId)
+  assert.equal(saved.topologyInputBundle.explicitRelations.at(-1).source, 'manual_admin')
+  assert.equal((await repository.findActive('dataset-pilot', { branchId: 'pilot' }))
+    .datasetVersion.id, fixture.datasetVersion.id)
 })
