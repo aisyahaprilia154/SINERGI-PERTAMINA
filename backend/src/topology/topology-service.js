@@ -64,8 +64,8 @@ const MAX_MOUNTING_BULK_DECISIONS = 200
 
 export class TopologyService {
   async saveDiagram(datasetVersionId, actorId, { changes, expectedRecordRevision,
-    correlationId, syncAcceptedIds = [] } = {}) {
-    if (!Array.isArray(changes) || (!changes.length && !syncAcceptedIds.length)
+    correlationId, syncAcceptedIds = [], syncAdopt = null } = {}) {
+    if (!Array.isArray(changes) || (!changes.length && !syncAcceptedIds.length && !syncAdopt)
       || changes.length > 200
       || changes.some(change => !change || typeof change !== 'object' || Array.isArray(change))
       || !Number.isInteger(expectedRecordRevision)
@@ -151,6 +151,18 @@ export class TopologyService {
               ...(draft.topologySync.appliedChangeIds ?? []), ...syncAcceptedIds,
             ])],
           } }
+        }
+        if (syncAdopt) {
+          if (!draft.datasetVersion.baseDatasetVersionId
+            || draft.datasetVersion.publicationStatus !== 'unpublished'
+            || !syncAdopt.id || !syncAdopt.source?.datasetVersionId) {
+            throw new AppError('Titik sinkronisasi draft tidak valid.', {
+              code: 'topology_sync_invalid_adoption', statusCode: 409,
+            })
+          }
+          draft = { ...draft, topologySync: syncAdopt,
+            datasetVersion: { ...draft.datasetVersion,
+              syncRootDatasetVersionId: syncAdopt.source.datasetVersionId } }
         }
         return draft
       }, { expectedRevision: expectedRecordRevision, projectionMode: 'topology-review' })

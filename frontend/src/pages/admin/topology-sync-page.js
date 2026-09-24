@@ -2,6 +2,7 @@ import '../../styles/topology-sync.css'
 import { loadActiveDataset } from '../../services/active-dataset-service.js'
 import { getDefaultAdminToken, loadImportConfig } from '../../services/import-dataset-service.js'
 import {
+  applyReconciliation,
   applyCorrections,
   createTopologyDraft,
   downloadSyncFile,
@@ -11,6 +12,7 @@ import {
   initializeSync,
   loadDraftReview,
   previewCorrections,
+  previewReconciliation,
   publishTopologyDraft,
   syncStatus,
 } from '../../services/topology-sync-service.js'
@@ -68,7 +70,7 @@ export async function renderTopologySyncPage(container) {
         </section>
         <section class="sync-card">
           <div class="sync-card-heading"><span class="material-symbols-outlined" aria-hidden="true">sync_alt</span>
-            <div><h2>Terima paket</h2><p>Paket awal untuk instalasi kosong; paket koreksi untuk dataset yang sudah sama.</p></div></div>
+            <div><h2>Terima paket</h2><p>Paket koreksi untuk titik awal yang sama. Paket awal dari rekan bisa dipakai untuk menyelaraskan dua impor KMZ terpisah.</p></div></div>
           <label>File paket terenkripsi <input id="sync-file" type="file" accept=".json,application/json"></label>
           ${state.filename ? `<p class="sync-file-name">${escapeHtml(state.filename)}</p>` : ''}
           <label>Kata sandi paket <input id="sync-passphrase" type="password" minlength="12" autocomplete="off" placeholder="Minimal 12 karakter" value="${escapeAttribute(state.passphrase)}"></label>
@@ -76,6 +78,7 @@ export async function renderTopologySyncPage(container) {
           <div class="sync-actions">
             <button type="button" data-action="preview" ${!state.envelope || !state.datasetVersionId || state.busy ? 'disabled' : ''}>Periksa koreksi</button>
             <button type="button" data-action="bootstrap-import" ${!state.envelope || state.datasetVersionId || state.busy ? 'disabled' : ''}>Impor paket awal</button>
+            <button type="button" data-action="reconcile-preview" ${!state.envelope || !state.datasetVersionId || state.draftVersionId || state.busy ? 'disabled' : ''}>Selaraskan dari paket awal rekan</button>
           </div>
         </section>
         ${state.preview ? renderPreview(state) : ''}
@@ -167,7 +170,7 @@ export async function renderTopologySyncPage(container) {
       container.querySelector('#sync-export-passphrase')?.focus()
       return
     }
-    if (['bootstrap-import', 'preview', 'apply'].includes(action)
+    if (['bootstrap-import', 'preview', 'apply', 'reconcile-preview', 'reconcile-apply'].includes(action)
       && state.passphrase.length < 12) {
       state.error = 'Masukkan kata sandi minimal 12 karakter.'
       render()
@@ -212,6 +215,9 @@ export async function renderTopologySyncPage(container) {
       } else if (action === 'preview') {
         state.preview = await previewCorrections(id, state.envelope, state.passphrase)
         state.resolutions = {}
+      } else if (action === 'reconcile-preview') {
+        state.preview = await previewReconciliation(id, state.envelope, state.passphrase)
+        state.resolutions = {}
       } else if (action === 'review-draft') {
         state.draftReview = await loadDraftReview(id)
         state.reviewConfirmed = false
@@ -232,6 +238,14 @@ export async function renderTopologySyncPage(container) {
         state.status = result.status
         state.preview = null
         state.message = `${result.applied} koreksi diterapkan. Muat ulang diagram untuk melihat hasil.`
+      } else if (action === 'reconcile-apply') {
+        const unresolved = state.preview.changes.filter(item => item.status === 'conflict'
+          && !state.resolutions[item.id])
+        if (unresolved.length) throw new Error('Pilih hasil untuk setiap konflik dahulu.')
+        const result = await applyReconciliation(id, state.envelope, state.passphrase,
+          state.preview.recordRevision, state.resolutions)
+        window.location.assign(`/admin/topology-sync?draftVersionId=${encodeURIComponent(result.datasetVersionId)}`)
+        return
       }
     } catch (error) {
       if (exporting) state.exportError = error.message
@@ -264,7 +278,9 @@ function renderPreview(state) {
     && !state.resolutions[item.id])
   return `<section class="sync-card sync-preview">
     <div class="sync-card-heading"><span class="material-symbols-outlined" aria-hidden="true">fact_check</span>
-      <div><h2>Pratinjau koreksi</h2><p>${preview.summary.ready} baru · ${preview.summary.alreadyApplied} sudah diterima · ${preview.summary.conflict} konflik</p></div></div>
+      <div><h2>${preview.mode === 'reconciliation' ? 'Pratinjau penyelarasan' : 'Pratinjau koreksi'}</h2><p>${preview.summary.ready} baru · ${preview.summary.alreadyApplied} sudah diterima · ${preview.summary.conflict} konflik</p></div></div>
+    ${preview.mode === 'reconciliation' ? '<p class="sync-hint">Pastikan kamu sudah mengunduh paket awal milikmu sebagai cadangan. Hasil penyelarasan akan dibuat sebagai draft dan perlu ditinjau sebelum diterbitkan.</p>' : ''}
+    ${preview.changes.some(item => item.relatedConflict) ? '<p class="sync-alert" role="alert">Ada relasi yang memakai aset sama dengan relasi lokal lain. Periksa relasi tersebut di diagram sebelum menyelaraskan.</p>' : ''}
     <div class="sync-change-list">${preview.changes.map(change => `
       <div class="sync-change">
         <div><strong>${escapeHtml(labelFor(change.key))}</strong><span class="sync-badge ${change.status}">${escapeHtml(statusFor(change.status))}</span></div>
@@ -274,7 +290,7 @@ function renderPreview(state) {
           <label><input type="radio" name="resolve-${escapeAttribute(change.id)}" data-resolution="${escapeAttribute(change.id)}" value="remote" ${state.resolutions[change.id] === 'remote' ? 'checked' : ''}> Pakai paket</label>
         </fieldset>` : ''}
       </div>`).join('') || '<p>Tidak ada perubahan dalam paket ini.</p>'}</div>
-    <button type="button" class="sync-primary" data-action="apply" ${unresolved || state.busy ? 'disabled' : ''}>Terapkan koreksi</button>
+    <button type="button" class="sync-primary" data-action="${preview.mode === 'reconciliation' ? 'reconcile-apply' : 'apply'}" ${unresolved || preview.changes.some(item => item.relatedConflict) || state.busy ? 'disabled' : ''}>${preview.mode === 'reconciliation' ? 'Buat draft hasil penyelarasan' : 'Terapkan koreksi'}</button>
   </section>`
 }
 
@@ -300,6 +316,7 @@ function labelFor(key) {
     mount: 'Penempatan fisik', 'frame-assignment': 'Frame aset',
     'frame-name': 'Nama frame', frame: 'Frame baru', edge: 'Garis dihapus',
     relation: 'Relasi baru',
+    'sync-baseline': 'Titik awal sinkronisasi',
   }[kind] ?? 'Koreksi'} · ${rest.join(':')}`
 }
 

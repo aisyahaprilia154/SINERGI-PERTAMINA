@@ -7,8 +7,10 @@ import { test } from 'node:test'
 import { JsonDatasetVersionRepository } from '../src/storage/dataset-version-repository.js'
 import { ImportFileStore } from '../src/storage/file-store.js'
 import { TopologySyncService } from '../src/topology/topology-sync-service.js'
+import { TopologyService } from '../src/topology/topology-service.js'
 import { DatasetVersionLifecycleService } from '../src/import/dataset-version-lifecycle-service.js'
 import {
+  assetIdentityHash,
   correctionState,
   createCorrectionPackage,
   decryptSyncPackage,
@@ -16,6 +18,7 @@ import {
   encryptSyncPackage,
   initializeSyncRecord,
   previewCorrectionPackage,
+  previewIndependentBaseline,
 } from '../src/topology/topology-sync.js'
 
 function baseline() {
@@ -104,6 +107,27 @@ test('banyak koreksi terbagi menjadi paket atomik tanpa kehilangan perubahan', (
   assert.equal(second.changes.length, 5)
   assert.equal(second.nextOffset, null)
   assert.equal(previewCorrectionPackage(shared, second).summary.ready, 5)
+})
+
+test('dua impor terpisah dengan aset sama membandingkan perubahan tanpa menimpa lokal', () => {
+  const local = baseline()
+  local.assets = [{ canonicalAssetId: 'JB-001', type: 'Junction Box',
+    properties: { sourceFeatureId: 'feature-1' } }]
+  local.mountingOverrides = [{ assetId: 'JB-001', targetAssetId: 'T-002', action: 'assign' }]
+  const remote = structuredClone(local)
+  remote.datasetVersion.id = 'dv-independent'
+  remote.topologySync.id = 'independent-sync'
+  remote.mountingOverrides = [{ assetId: 'JB-001', targetAssetId: 'T-004', action: 'assign' }]
+  remote.topologyFrameNames = { 'T-004': 'Tiang halaman' }
+  const preview = previewIndependentBaseline(local, remote)
+  assert.equal(assetIdentityHash(local), assetIdentityHash(remote))
+  assert.equal(preview.summary.ready, 1)
+  assert.equal(preview.summary.conflict, 1)
+  assert.equal(diagramChangesFromPreview(preview, {
+    [preview.changes.find(change => change.status === 'conflict').id]: 'local',
+  }).changes.length, 1)
+  remote.assets[0].canonicalAssetId = 'JB-other'
+  assert.notEqual(assetIdentityHash(local), assetIdentityHash(remote))
 })
 
 test('paket awal membawa record dan sumber asli ke instalasi kosong', async t => {
@@ -198,6 +222,61 @@ test('paket awal hasil import dapat diaktifkan sebagai dataset lokal', async t =
   })
   assert.equal((await toRepo.findActive('dataset-pilot', { branchId: 'pilot' }))
     .topologySync.id, 'pilot-sync-id')
+})
+
+test('paket awal impor independen membuat draft dengan titik bersama tanpa mengubah aktif', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'sinergi-reconcile-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const repository = new JsonDatasetVersionRepository(path.join(root, 'dataset-versions'))
+  const fileStore = new ImportFileStore(root)
+  const bytes = Buffer.from('<kml xmlns="http://www.opengis.net/kml/2.2"><Document/></kml>')
+  const checksum = `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+  const fixture = JSON.parse(await readFile(new URL('./fixtures/dataset-version-pilot.json', import.meta.url)))
+  fixture.datasetVersion.checksum = checksum
+  fixture.datasetVersion.sourceSize = bytes.length
+  fixture.datasetVersion.sourceFilename = 'same.kml'
+  fixture.sourceChecksum = checksum
+  const temp = await fileStore.createTemporaryUpload()
+  await writeFile(temp, bytes)
+  fixture.datasetVersion.sourceStorageKey = (await fileStore.commitOriginal(
+    temp, fixture.datasetVersion.id, '.kml')).storageKey
+  const local = initializeSyncRecord(fixture, 'local-sync')
+  await repository.create(local)
+  const auditLog = { record: async () => ({ id: 'audit' }) }
+  const lifecycleService = new DatasetVersionLifecycleService({ repository, auditLog })
+  await lifecycleService.activate(local.datasetVersion.id, 'alice', {
+    expectedActiveVersionId: null, publicationProfile: 'map_only',
+  })
+  const remote = structuredClone(local)
+  remote.datasetVersion.id = 'dv-independent'
+  remote.datasetVersion.syncRootDatasetVersionId = undefined
+  remote.topologySync = undefined
+  const sender = initializeSyncRecord(remote, 'remote-sync')
+  const envelope = encryptSyncPackage({ format: 'sinergi-topology-bootstrap-v1',
+    source: sender.topologySync.source, record: sender,
+    sourceFile: bytes.toString('base64') }, 'sandi-paket-awal-tim')
+  const service = new TopologySyncService({ repository, fileStore, lifecycleService,
+    topologyService: new TopologyService({ repository, auditLog }), auditLog })
+  const incompatible = structuredClone(sender)
+  incompatible.assets[0].canonicalAssetId = 'DIFFERENT-ASSET'
+  const incompatibleEnvelope = encryptSyncPackage({ format: 'sinergi-topology-bootstrap-v1',
+    source: incompatible.topologySync.source, record: incompatible,
+    sourceFile: bytes.toString('base64') }, 'sandi-paket-awal-tim')
+  await assert.rejects(service.previewReconciliation(local.datasetVersion.id,
+    incompatibleEnvelope, 'sandi-paket-awal-tim'), {
+    code: 'topology_sync_reconciliation_source_mismatch',
+  })
+  const preview = await service.previewReconciliation(local.datasetVersion.id,
+    envelope, 'sandi-paket-awal-tim')
+  assert.equal(preview.mode, 'reconciliation')
+  assert.equal(preview.summary.ready, 0)
+  const result = await service.applyReconciliation(local.datasetVersion.id, 'alice',
+    envelope, 'sandi-paket-awal-tim', { expectedRecordRevision: preview.recordRevision })
+  assert.equal((await repository.findActive('dataset-pilot', { branchId: 'pilot' }))
+    .topologySync.id, 'local-sync')
+  assert.equal((await repository.get(result.datasetVersionId)).topologySync.id, 'remote-sync')
+  const review = await service.reviewDraft(result.datasetVersionId)
+  assert.equal(review.changes[0].key, 'sync-baseline:root')
 })
 
 test('draft tidak terlihat umum sebelum ditinjau dan publikasi dapat dibalik', async t => {

@@ -56,6 +56,15 @@ export const exportBootstrap = (datasetVersionId, passphrase) => request(
 export const importBootstrap = (envelope, passphrase) => request(
   '/api/admin/topology-sync/bootstrap/import', { envelope, passphrase },
 )
+export const previewReconciliation = (datasetVersionId, envelope, passphrase) => request(
+  '/api/admin/topology-sync/reconcile/preview',
+  { datasetVersionId, envelope, passphrase },
+)
+export const applyReconciliation = (datasetVersionId, envelope, passphrase,
+  expectedRecordRevision, resolutions) => request(
+  '/api/admin/topology-sync/reconcile/apply',
+  { datasetVersionId, envelope, passphrase, expectedRecordRevision, resolutions },
+)
 
 export function downloadSyncFile(envelope, filename) {
   const blob = new Blob([JSON.stringify(envelope)], { type: 'application/json' })

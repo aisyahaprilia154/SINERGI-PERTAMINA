@@ -841,7 +841,11 @@ export function createApp({
           }
         }
         return sendJson(response, 200, await topologyService.saveDiagram(
-          diagramEditMatch[1], user.id, { ...body, correlationId },
+          diagramEditMatch[1], user.id, {
+            changes: body.changes,
+            expectedRecordRevision: body.expectedRecordRevision,
+            correlationId,
+          },
         ))
       }
       const draftViewMatch = request.method === 'GET'
@@ -920,6 +924,20 @@ export function createApp({
           await topologySyncService.exportBootstrap(body.datasetVersionId, body.passphrase))
         return sendJson(response, 200,
           await topologySyncService.importBootstrap(user.id, body.envelope, body.passphrase))
+      }
+      if (request.method === 'POST'
+        && /^\/api\/admin\/topology-sync\/reconcile\/(preview|apply)$/.test(url.pathname)) {
+        const user = requireAdministrator(request, authenticator)
+        const body = await readJsonBody(request, 256 * 1024 * 1024)
+        if (url.pathname.endsWith('/preview')) return sendJson(response, 200,
+          await topologySyncService.previewReconciliation(
+            body.datasetVersionId, body.envelope, body.passphrase))
+        return sendJson(response, 201,
+          await topologySyncService.applyReconciliation(
+            body.datasetVersionId, user.id, body.envelope, body.passphrase, {
+              expectedRecordRevision: body.expectedRecordRevision,
+              resolutions: body.resolutions,
+            }))
       }
       const candidateActionMatch = request.method === 'POST'
         ? url.pathname.match(
