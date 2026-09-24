@@ -1,6 +1,11 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'node:crypto'
 import { gzipSync, gunzipSync } from 'node:zlib'
 import { AppError } from '../errors.js'
+import { isCamera, isJunction } from '../../../shared/camera-primary-relation.mjs'
+import {
+  buildAssetIdentityMapFromRecord,
+  createAssetIdentityResolver,
+} from '../domain/canonical-asset-identity.js'
 
 const FORMAT = 'sinergi-topology-sync-v1'
 export const BOOTSTRAP_FORMAT = 'sinergi-topology-bootstrap-v1'
@@ -149,29 +154,63 @@ export function previewIndependentBaseline(localRecord, remoteRecord) {
   const local = correctionState(localRecord)
   const remote = correctionState(remoteRecord)
   const localRelations = Object.entries(local).filter(([key]) => key.startsWith('relation:'))
+  const resolver = createAssetIdentityResolver(buildAssetIdentityMapFromRecord(localRecord))
+  const nodes = new Map([...(localRecord.assets ?? []),
+    ...(localRecord.topologyGraph?.nodes ?? []),
+    ...(localRecord.topologyInputBundle?.classifiedNodes ?? [])].flatMap(node => {
+    const id = node.canonicalAssetId ?? node.assetId ?? node.id
+    return id ? [[id, node]] : []
+  }))
+  const cameraTarget = relation => {
+    const source = nodes.get(relation.source)
+    const target = nodes.get(relation.target)
+    if (isCamera(source) && isJunction(target)) return [relation.source, relation.target]
+    if (isCamera(target) && isJunction(source)) return [relation.target, relation.source]
+    return null
+  }
   const changes = Object.keys(remote).sort().map(key => {
     const localValue = Object.hasOwn(local, key) ? local[key] : null
     const after = remote[key]
-    const relatedConflict = key.startsWith('relation:') && localRelations.some(([otherKey, value]) =>
-      otherKey !== key && [value.source, value.target].some(id =>
-        id === after.source || id === after.target))
+    const remoteCameraTarget = key.startsWith('relation:') ? cameraTarget(after) : null
+    const conflictingRelations = remoteCameraTarget ? localRelations.flatMap(([otherKey, value]) => {
+      const localCameraTarget = cameraTarget(value)
+      return otherKey !== key && localCameraTarget?.[0] === remoteCameraTarget[0]
+        && localCameraTarget[1] !== remoteCameraTarget[1] ? [value] : []
+    }) : []
+    const relatedConflict = conflictingRelations.length > 0
+    const missingAssetIds = key.startsWith('relation:') ? [after.source, after.target]
+      .filter(id => !resolver.has(id) && !nodes.has(id)) : []
     const status = same(localValue, after) ? 'already-applied'
-      : localValue === null && !relatedConflict ? 'ready' : 'conflict'
+      : missingAssetIds.length ? 'blocked'
+        : localValue === null && !relatedConflict ? 'ready' : 'conflict'
     return { id: stateHash([remoteRecord.topologySync.id, key, after]),
-      key, before: null, after, local: localValue, status, relatedConflict }
+      key, before: null, after,
+      local: relatedConflict ? conflictingRelations[0] : localValue,
+      status, relatedConflict, missingAssetIds }
   })
   return {
     recordRevision: localRecord.recordRevision ?? 0,
     changes,
+    assetNames: Object.fromEntries([...(remoteRecord.assets ?? []),
+      ...(localRecord.assets ?? [])].flatMap(asset => {
+      const id = asset.canonicalAssetId ?? asset.assetId
+      return id && asset.name ? [[id, asset.name]] : []
+    })),
     summary: {
       ready: changes.filter(item => item.status === 'ready').length,
       conflict: changes.filter(item => item.status === 'conflict').length,
+      blocked: changes.filter(item => item.status === 'blocked').length,
       alreadyApplied: changes.filter(item => item.status === 'already-applied').length,
     },
   }
 }
 
 export function diagramChangesFromPreview(preview, resolutions = {}) {
+  if (preview.changes.some(change => change.status === 'blocked')) {
+    throw new AppError('Ada relasi dalam paket yang merujuk aset tidak tersedia di dataset lokal.', {
+      code: 'topology_sync_relation_asset_missing', statusCode: 409,
+    })
+  }
   const pending = preview.changes.filter(change => (
     change.status === 'ready' || (change.status === 'conflict' && resolutions[change.id] === 'remote')
   ))

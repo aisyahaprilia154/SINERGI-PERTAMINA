@@ -289,19 +289,22 @@ function renderPreview(state) {
     && !state.resolutions[item.id])
   return `<section class="sync-card sync-preview">
     <div class="sync-card-heading"><span class="material-symbols-outlined" aria-hidden="true">fact_check</span>
-      <div><h2>${preview.mode === 'reconciliation' ? 'Pratinjau penyelarasan' : 'Pratinjau koreksi'}</h2><p>${preview.summary.ready} baru · ${preview.summary.alreadyApplied} sudah diterima · ${preview.summary.conflict} konflik</p></div></div>
+      <div><h2>${preview.mode === 'reconciliation' ? 'Pratinjau penyelarasan' : 'Pratinjau koreksi'}</h2><p>${preview.summary.ready} baru · ${preview.summary.alreadyApplied} sudah diterima · ${preview.summary.conflict} konflik${preview.summary.blocked ? ` · ${preview.summary.blocked} perlu perbaikan` : ''}</p></div></div>
     ${preview.mode === 'reconciliation' ? '<p class="sync-hint">Pastikan kamu sudah mengunduh paket awal milikmu sebagai cadangan. Hasil penyelarasan akan dibuat sebagai draft dan perlu ditinjau sebelum diterbitkan.</p>' : ''}
-    ${preview.changes.some(item => item.relatedConflict) ? '<p class="sync-alert" role="alert">Ada relasi yang memakai aset sama dengan relasi lokal lain. Periksa relasi tersebut di diagram sebelum menyelaraskan.</p>' : ''}
+    ${preview.changes.some(item => item.relatedConflict) ? '<p class="sync-alert" role="alert">Ada kamera yang terhubung ke dua JB berbeda. Perbaiki relasi kamera di diagram, lalu periksa paket lagi.</p>' : ''}
+    ${preview.changes.some(item => item.status === 'blocked') ? '<p class="sync-alert" role="alert">Ada relasi dalam paket yang merujuk aset yang tidak tersedia di dataset ini. Periksa identitas atau relasi aset sebelum menyelaraskan.</p>' : ''}
     <div class="sync-change-list">${preview.changes.map(change => `
       <div class="sync-change">
         <div><strong>${escapeHtml(labelFor(change.key))}</strong><span class="sync-badge ${change.status}">${escapeHtml(statusFor(change.status))}</span></div>
-        <small>Lokal: ${escapeHtml(valueFor(change.local))}<br>Dari paket: ${escapeHtml(valueFor(change.after))}</small>
-        ${change.status === 'conflict' ? `<fieldset><legend>Pilih hasil</legend>
+        <small>Lokal: ${escapeHtml(valueFor(change.local, preview.assetNames))}<br>Dari paket: ${escapeHtml(valueFor(change.after, preview.assetNames))}</small>
+        ${change.status === 'conflict' && !change.relatedConflict ? `<fieldset><legend>Pilih hasil</legend>
           <label><input type="radio" name="resolve-${escapeAttribute(change.id)}" data-resolution="${escapeAttribute(change.id)}" value="local" ${state.resolutions[change.id] === 'local' ? 'checked' : ''}> Simpan lokal</label>
           <label><input type="radio" name="resolve-${escapeAttribute(change.id)}" data-resolution="${escapeAttribute(change.id)}" value="remote" ${state.resolutions[change.id] === 'remote' ? 'checked' : ''}> Pakai paket</label>
         </fieldset>` : ''}
+        ${change.relatedConflict ? '<small>Relasi kamera ini perlu diperbaiki di diagram sebelum paket dapat diselaraskan.</small>' : ''}
+        ${change.missingAssetIds?.length ? `<small>Aset tidak ditemukan: ${escapeHtml(change.missingAssetIds.join(', '))}</small>` : ''}
       </div>`).join('') || '<p>Tidak ada perubahan dalam paket ini.</p>'}</div>
-    <button type="button" class="sync-primary" data-action="${preview.mode === 'reconciliation' ? 'reconcile-apply' : 'apply'}" ${unresolved || preview.changes.some(item => item.relatedConflict) || state.busy ? 'disabled' : ''}>${preview.mode === 'reconciliation' ? 'Buat draft hasil penyelarasan' : 'Terapkan koreksi'}</button>
+    <button type="button" class="sync-primary" data-action="${preview.mode === 'reconciliation' ? 'reconcile-apply' : 'apply'}" ${unresolved || preview.changes.some(item => item.relatedConflict || item.status === 'blocked') || state.busy ? 'disabled' : ''}>${preview.mode === 'reconciliation' ? 'Buat draft hasil penyelarasan' : 'Terapkan koreksi'}</button>
   </section>`
 }
 
@@ -323,24 +326,29 @@ function renderDraftReview(state) {
 
 function labelFor(key) {
   const [kind, ...rest] = key.split(':')
+  if (kind === 'relation') return 'Relasi jaringan'
   return `${{
     mount: 'Penempatan fisik', 'frame-assignment': 'Frame aset',
     'frame-name': 'Nama frame', frame: 'Frame baru', edge: 'Garis dihapus',
-    relation: 'Relasi baru',
+    relation: 'Relasi jaringan',
     'sync-baseline': 'Titik awal sinkronisasi',
   }[kind] ?? 'Koreksi'} · ${rest.join(':')}`
 }
 
 function statusFor(status) {
-  return { ready: 'Baru', 'already-applied': 'Sudah diterima', conflict: 'Konflik' }[status]
+  return { ready: 'Baru', 'already-applied': 'Sudah diterima', conflict: 'Konflik',
+    blocked: 'Perlu perbaikan' }[status]
 }
 
-function valueFor(value) {
+function valueFor(value, assetNames = {}) {
   if (value === null || value === undefined) return 'Belum diatur'
   if (typeof value === 'string') return value
   if (value.action === 'detach') return 'Dilepas dari tiang'
   if (value.targetAssetId) return value.targetAssetId
-  if (value.source && value.target) return `${value.source} ↔ ${value.target}`
+  if (value.source && value.target) {
+    const display = id => assetNames[id] ? `${assetNames[id]} (${id})` : id
+    return `${display(value.source)} ↔ ${display(value.target)}`
+  }
   if (value.edgeId) return value.edgeId
   return JSON.stringify(value)
 }
