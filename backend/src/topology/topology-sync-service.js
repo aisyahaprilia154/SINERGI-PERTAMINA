@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { AppError } from '../errors.js'
+import { compareDatasetVersions } from '../import/dataset-version-lifecycle-service.js'
 import {
   assetIdentityHash,
   correctionState,
@@ -66,10 +67,10 @@ export class TopologySyncService {
     if (!current.topologySync?.id) throw new AppError('Siapkan titik sinkronisasi dulu.', {
       code: 'topology_sync_not_initialized', statusCode: 409,
     })
-    const draft = structuredClone(current)
+    const draft = rebaseDraftRecord(current, `dv-${randomUUID()}`)
     draft.datasetVersion = {
       ...draft.datasetVersion,
-      id: `dv-${randomUUID()}`,
+      id: draft.datasetVersionId,
       versionName: `${current.datasetVersion.versionName} · Draft koreksi`,
       baseDatasetVersionId: datasetVersionId,
       syncRootDatasetVersionId: current.topologySync.source.datasetVersionId,
@@ -122,18 +123,24 @@ export class TopologySyncService {
         before: resolved.record.topologySync?.id ?? null,
         after: draft.topologySync?.id ?? null })
     }
+    const comparison = compareDatasetVersions(draft, resolved.record)
     return {
       datasetVersionId,
       baseDatasetVersionId: baseVersionId,
       expectedRecordRevision: draft.recordRevision ?? 0,
       expectedActivePointerRevision: resolved.pointer.revision,
       changes,
+      requiresBreakingChangeConfirmation:
+        comparison.summary.requiresBreakingChangeConfirmation === true,
+      highRiskChangeCount: comparison.summary.byRisk?.high ?? 0,
+      comparisonRevision: comparison.comparisonRevision,
       reviewHash: stateHash([baseVersionId, resolved.pointer.revision,
-        draft.recordRevision ?? 0, changes]),
+        draft.recordRevision ?? 0, changes, comparison.comparisonRevision]),
     }
   }
 
-  async publishDraft(datasetVersionId, actorId, reviewHash) {
+  async publishDraft(datasetVersionId, actorId, reviewHash,
+    { confirmBreakingChanges = false } = {}) {
     const review = await this.reviewDraft(datasetVersionId)
     if (!reviewHash || review.reviewHash !== reviewHash || !review.changes.length) {
       throw new AppError('Pratinjau publikasi berubah atau tidak ada koreksi.', {
@@ -146,6 +153,7 @@ export class TopologySyncService {
       expectedRecordRevision: review.expectedRecordRevision,
       expectedActivePointerRevision: review.expectedActivePointerRevision,
       publicationProfile: draft.datasetVersion.publicationProfile ?? 'map_only',
+      confirmBreakingChanges,
     })
     return { ...result, reviewedChangeCount: review.changes.length }
   }
@@ -384,4 +392,35 @@ export class TopologySyncService {
       status: await this.status(datasetVersionId),
     }
   }
+}
+
+function rebaseDraftRecord(record, draftId) {
+  const draft = structuredClone(record)
+  // The source sync identity and historical comparisons still refer to the
+  // original version. Operational projections belong to this new draft.
+  const historyKeys = new Set([
+    'topologySync', 'datasetVersionDiffs', 'topologyShadowRuns',
+    'topologyShadowArtifacts',
+  ])
+  const rebase = value => {
+    if (!value || typeof value !== 'object') return
+    if (Array.isArray(value)) {
+      value.forEach(rebase)
+      return
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (key === 'datasetVersionId' && typeof child === 'string') {
+        value[key] = draftId
+      } else if (!historyKeys.has(key)) {
+        rebase(child)
+      }
+    }
+  }
+  rebase(draft)
+  for (const bundle of [draft.topologyInputBundle,
+    draft.canonicalParser?.topologyInputBundle]) {
+    if (bundle?.datasetVersion) bundle.datasetVersion.id = draftId
+  }
+  draft.datasetVersionId = draftId
+  return draft
 }

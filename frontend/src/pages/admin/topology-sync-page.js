@@ -26,7 +26,7 @@ export async function renderTopologySyncPage(container) {
     branches: [], branchId: '', datasetVersionId: '', status: null,
     draftVersionId: new URLSearchParams(window.location.search).get('draftVersionId') ?? '',
     stagedVersionId: '',
-    draftReview: null, reviewConfirmed: false,
+    draftReview: null, reviewConfirmed: false, breakingConfirmed: false,
     exportOffset: 0,
     envelope: null, filename: '', passphrase: '', exportPassphrase: '', preview: null,
     resolutions: {}, message: '', error: '', exportError: '', exportMessage: '', busy: false,
@@ -147,6 +147,10 @@ export async function renderTopologySyncPage(container) {
       state.reviewConfirmed = event.target.checked
       render()
     })
+    container.querySelector('#sync-breaking-confirm')?.addEventListener('change', event => {
+      state.breakingConfirmed = event.target.checked
+      render()
+    })
   }
 
   async function loadBranch() {
@@ -232,9 +236,15 @@ export async function renderTopologySyncPage(container) {
       } else if (action === 'review-draft') {
         state.draftReview = await loadDraftReview(id)
         state.reviewConfirmed = false
+        state.breakingConfirmed = false
       } else if (action === 'publish-draft') {
         if (!state.reviewConfirmed) throw new Error('Tinjau dan centang persetujuan publikasi.')
-        const result = await publishTopologyDraft(id, state.draftReview.reviewHash)
+        if (state.draftReview.requiresBreakingChangeConfirmation
+          && !state.breakingConfirmed) {
+          throw new Error('Konfirmasi perubahan berisiko tinggi sebelum menerbitkan.')
+        }
+        const result = await publishTopologyDraft(id, state.draftReview.reviewHash,
+          state.breakingConfirmed)
         state.message = `${result.reviewedChangeCount} koreksi diterbitkan.`
         state.draftReview = null
         state.draftVersionId = ''
@@ -317,10 +327,13 @@ function renderDraftReview(state) {
       <div class="sync-change"><strong>${escapeHtml(labelFor(change.key))}</strong>
         <small><br>Saat ini: ${escapeHtml(valueFor(change.before))}<br>Setelah terbit: ${escapeHtml(valueFor(change.after))}</small>
       </div>`).join('') || '<p>Draft belum memiliki perubahan untuk diterbitkan.</p>'}</div>
+    ${review.requiresBreakingChangeConfirmation ? `<p class="sync-alert">Perbandingan dataset mendeteksi ${review.highRiskChangeCount} perubahan berisiko tinggi. Periksa hasil di diagram draft dan versi aktif sebelum menerbitkan.</p>
+      <label class="sync-review-check"><input id="sync-breaking-confirm" type="checkbox" ${state.breakingConfirmed ? 'checked' : ''}>
+        Saya telah memeriksa perubahan berisiko tinggi dan menyetujui publikasinya.</label>` : ''}
     <label class="sync-review-check"><input id="sync-review-confirm" type="checkbox" ${state.reviewConfirmed ? 'checked' : ''}>
       Saya sudah memeriksa perubahan ini dan ingin menerbitkannya.</label>
     <button type="button" class="sync-primary" data-action="publish-draft"
-      ${!state.reviewConfirmed || !review.changes.length || state.busy ? 'disabled' : ''}>Terbitkan versi</button>
+      ${!state.reviewConfirmed || (review.requiresBreakingChangeConfirmation && !state.breakingConfirmed) || !review.changes.length || state.busy ? 'disabled' : ''}>Terbitkan versi</button>
   </section>`
 }
 

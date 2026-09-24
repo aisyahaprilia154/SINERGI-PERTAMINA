@@ -868,7 +868,9 @@ export function createApp({
         if (request.method === 'POST' && draftReviewMatch[2] === 'publish') {
           const body = await readJsonBody(request)
           const result = await topologySyncService.publishDraft(draftReviewMatch[1],
-            user.id, body.reviewHash)
+            user.id, body.reviewHash, {
+              confirmBreakingChanges: body.confirmBreakingChanges === true,
+            })
           await queueAutonomousTopologyRegeneration({
             datasetVersionId: draftReviewMatch[1], actorId: user.id,
             reason: 'Draft koreksi topologi diterbitkan setelah peninjauan.',

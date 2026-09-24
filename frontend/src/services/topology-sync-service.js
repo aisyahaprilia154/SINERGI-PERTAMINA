@@ -29,9 +29,10 @@ export const loadDraftReview = datasetVersionId => request(
   `/api/admin/topology-sync/drafts/${encodeURIComponent(datasetVersionId)}/review`,
   null, { method: 'GET' },
 )
-export const publishTopologyDraft = (datasetVersionId, reviewHash) => request(
+export const publishTopologyDraft = (datasetVersionId, reviewHash,
+  confirmBreakingChanges = false) => request(
   `/api/admin/topology-sync/drafts/${encodeURIComponent(datasetVersionId)}/publish`,
-  { reviewHash },
+  { reviewHash, confirmBreakingChanges },
 )
 export const initializeSync = (datasetVersionId, expectedRecordRevision) => request(
   `/api/dataset-versions/${encodeURIComponent(datasetVersionId)}/topology/sync/initialize`,
