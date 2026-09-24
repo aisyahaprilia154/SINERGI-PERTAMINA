@@ -66,6 +66,15 @@ export const applyReconciliation = (datasetVersionId, envelope, passphrase,
   { datasetVersionId, envelope, passphrase, expectedRecordRevision, resolutions },
 )
 
+export function detectSyncPackageType(envelope, filename = '') {
+  if (!envelope) return null
+  if (envelope.format === 'sinergi-topology-bootstrap-v1-encrypted') return 'bootstrap'
+  if (envelope.format === 'sinergi-topology-sync-v1-encrypted') {
+    return /^sinergi-awal-/i.test(filename) ? 'bootstrap' : 'correction'
+  }
+  return 'unknown'
+}
+
 export function downloadSyncFile(envelope, filename) {
   const blob = new Blob([JSON.stringify(envelope)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)

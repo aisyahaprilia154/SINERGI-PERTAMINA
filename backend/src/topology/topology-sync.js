@@ -202,7 +202,7 @@ export function encryptSyncPackage(bundle, passphrase) {
   const cipher = createCipheriv('aes-256-gcm', key, iv)
   const ciphertext = Buffer.concat([cipher.update(gzipSync(JSON.stringify(bundle))), cipher.final()])
   return {
-    format: `${FORMAT}-encrypted`,
+    format: `${bundle.format}-encrypted`,
     salt: salt.toString('base64'),
     iv: iv.toString('base64'),
     tag: cipher.getAuthTag().toString('base64'),
@@ -212,7 +212,9 @@ export function encryptSyncPackage(bundle, passphrase) {
 
 export function decryptSyncPackage(envelope, passphrase) {
   assertPassphrase(passphrase)
-  if (envelope?.format !== `${FORMAT}-encrypted`) throw invalidPackage('Format paket tidak dikenal.')
+  if (![`${FORMAT}-encrypted`, `${BOOTSTRAP_FORMAT}-encrypted`].includes(envelope?.format)) {
+    throw invalidPackage('Format paket tidak dikenal.')
+  }
   try {
     const salt = strictBase64(envelope.salt, 16)
     const iv = strictBase64(envelope.iv, 12)

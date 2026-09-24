@@ -5,6 +5,7 @@ import {
   applyReconciliation,
   applyCorrections,
   createTopologyDraft,
+  detectSyncPackageType,
   downloadSyncFile,
   exportBootstrap,
   exportCorrections,
@@ -33,6 +34,7 @@ export async function renderTopologySyncPage(container) {
 
   function render() {
     const branch = state.branches.find(item => item.id === state.branchId)
+    const packageType = detectSyncPackageType(state.envelope, state.filename)
     container.innerHTML = `
       <main class="sync-page">
         <header class="sync-header">
@@ -71,14 +73,23 @@ export async function renderTopologySyncPage(container) {
         <section class="sync-card">
           <div class="sync-card-heading"><span class="material-symbols-outlined" aria-hidden="true">sync_alt</span>
             <div><h2>Terima paket</h2><p>Paket koreksi untuk titik awal yang sama. Paket awal dari rekan bisa dipakai untuk menyelaraskan dua impor KMZ terpisah.</p></div></div>
-          <label>File paket terenkripsi <input id="sync-file" type="file" accept=".json,application/json"></label>
-          ${state.filename ? `<p class="sync-file-name">${escapeHtml(state.filename)}</p>` : ''}
+          <p class="sync-field-title">File paket terenkripsi</p>
+          <input id="sync-file" class="sync-file-input" type="file" accept=".json,application/json" aria-describedby="sync-file-description">
+          <label for="sync-file" class="sync-file-picker"><span class="material-symbols-outlined" aria-hidden="true">upload_file</span>
+            <span class="sync-file-picker-name">${escapeHtml(state.filename || 'Pilih file paket')}</span>
+            <span class="sync-file-picker-action">${state.filename ? 'Ganti file' : 'Pilih file'}</span></label>
+          <p id="sync-file-description" class="sync-hint">${packageType === 'correction'
+            ? 'Ini paket koreksi. Gunakan “Periksa koreksi”. Untuk dua impor KMZ terpisah, minta paket awal dari rekan.'
+            : packageType === 'bootstrap'
+              ? 'Ini paket awal. Gunakan “Selaraskan dari paket awal rekan” jika dataset sudah ada.'
+              : packageType === 'unknown' ? 'Jenis paket tidak dikenal. Pilih file paket awal atau koreksi yang diunduh dari halaman ini.'
+                : 'Pilih paket koreksi atau paket awal terenkripsi dari rekan.'}</p>
           <label>Kata sandi paket <input id="sync-passphrase" type="password" minlength="12" autocomplete="off" placeholder="Minimal 12 karakter" value="${escapeAttribute(state.passphrase)}"></label>
           <p class="sync-hint">Kirim file dan kata sandinya melalui kanal berbeda. Jangan commit file paket ke Git.</p>
           <div class="sync-actions">
-            <button type="button" data-action="preview" ${!state.envelope || !state.datasetVersionId || state.busy ? 'disabled' : ''}>Periksa koreksi</button>
-            <button type="button" data-action="bootstrap-import" ${!state.envelope || state.datasetVersionId || state.busy ? 'disabled' : ''}>Impor paket awal</button>
-            <button type="button" data-action="reconcile-preview" ${!state.envelope || !state.datasetVersionId || state.draftVersionId || state.busy ? 'disabled' : ''}>Selaraskan dari paket awal rekan</button>
+            <button type="button" data-action="preview" ${packageType !== 'correction' || !state.datasetVersionId || state.busy ? 'disabled' : ''}>Periksa koreksi</button>
+            <button type="button" data-action="bootstrap-import" ${packageType !== 'bootstrap' || state.datasetVersionId || state.busy ? 'disabled' : ''}>Impor paket awal</button>
+            <button type="button" data-action="reconcile-preview" ${packageType !== 'bootstrap' || !state.datasetVersionId || state.draftVersionId || state.busy ? 'disabled' : ''}>Selaraskan dari paket awal rekan</button>
           </div>
         </section>
         ${state.preview ? renderPreview(state) : ''}
