@@ -25,8 +25,8 @@ export async function renderTopologySyncPage(container) {
     stagedVersionId: '',
     draftReview: null, reviewConfirmed: false,
     exportOffset: 0,
-    envelope: null, filename: '', passphrase: '', preview: null,
-    resolutions: {}, message: '', error: '', busy: false,
+    envelope: null, filename: '', passphrase: '', exportPassphrase: '', preview: null,
+    resolutions: {}, message: '', error: '', exportError: '', exportMessage: '', busy: false,
   }
 
   function render() {
@@ -53,9 +53,17 @@ export async function renderTopologySyncPage(container) {
             ${state.draftVersionId ? `<a class="sync-link" href="/topology?draftVersionId=${encodeURIComponent(state.draftVersionId)}">Buka diagram draft</a>
               <button type="button" data-action="review-draft">Tinjau publikasi</button>`
               : `<button type="button" data-action="create-draft" ${!state.status?.syncId || state.busy ? 'disabled' : ''}>Buat draft untuk deploy</button>`}
+          </div>
+          ${state.status?.syncId ? `<label for="sync-export-passphrase">Kata sandi untuk file unduhan
+            <input id="sync-export-passphrase" type="password" minlength="12" autocomplete="off" placeholder="Minimal 12 karakter" value="${escapeAttribute(state.exportPassphrase)}">
+          </label><p class="sync-hint">Kata sandi ini dipakai untuk mengenkripsi paket awal dan paket koreksi.</p>`
+            : '<p class="sync-hint sync-next-step">Siapkan titik awal sebelum mengunduh paket koreksi.</p>'}
+          <div class="sync-actions">
             <button type="button" data-action="bootstrap-export" ${!state.status?.syncId || state.busy ? 'disabled' : ''}>Unduh paket awal</button>
             <button type="button" data-action="export" ${!state.status?.syncId || state.busy ? 'disabled' : ''}>Unduh koreksi (${state.status?.pendingChanges ?? 0})${(state.status?.pendingChanges ?? 0) > 200 ? ` · bagian ${Math.floor(state.exportOffset / 200) + 1}` : ''}</button>
-          </div>` : ''}
+          </div>
+          ${state.exportError ? `<p class="sync-alert" role="alert">${escapeHtml(state.exportError)}</p>` : ''}
+          ${state.exportMessage ? `<p class="sync-success" role="status">${escapeHtml(state.exportMessage)}</p>` : ''}` : ''}
           ${state.stagedVersionId ? `<a class="sync-link" href="/admin/datasets/import/${encodeURIComponent(state.stagedVersionId)}/preview">Tinjau & aktifkan paket awal</a>` : ''}
         </section>
         <section class="sync-card">
@@ -85,11 +93,20 @@ export async function renderTopologySyncPage(container) {
       state.draftReview = null
       window.history.replaceState({}, '', '/admin/topology-sync')
       state.exportOffset = 0
+      state.exportError = ''
+      state.exportMessage = ''
       state.preview = null
       void loadBranch()
     })
     container.querySelector('#sync-passphrase')?.addEventListener('input', event => {
       state.passphrase = event.target.value
+    })
+    container.querySelector('#sync-export-passphrase')?.addEventListener('input', event => {
+      state.exportPassphrase = event.target.value
+      if (state.exportError) {
+        state.exportError = ''
+        container.querySelector('.sync-card .sync-alert')?.remove()
+      }
     })
     container.querySelector('#sync-file')?.addEventListener('change', async event => {
       const file = event.target.files?.[0]
@@ -143,14 +160,24 @@ export async function renderTopologySyncPage(container) {
 
   async function run(action) {
     if (state.busy) return
-    if (['bootstrap-export', 'export', 'bootstrap-import', 'preview', 'apply'].includes(action)
+    const exporting = ['bootstrap-export', 'export'].includes(action)
+    if (exporting && state.exportPassphrase.length < 12) {
+      state.exportError = 'Isi kata sandi file unduhan, minimal 12 karakter.'
+      render()
+      container.querySelector('#sync-export-passphrase')?.focus()
+      return
+    }
+    if (['bootstrap-import', 'preview', 'apply'].includes(action)
       && state.passphrase.length < 12) {
       state.error = 'Masukkan kata sandi minimal 12 karakter.'
       render()
+      container.querySelector('#sync-passphrase')?.focus()
       return
     }
     state.busy = true
     state.error = ''
+    state.exportError = ''
+    state.exportMessage = ''
     state.message = ''
     render()
     try {
@@ -163,15 +190,15 @@ export async function renderTopologySyncPage(container) {
         window.location.assign(`/admin/topology-sync?draftVersionId=${encodeURIComponent(draft.datasetVersionId)}`)
         return
       } else if (action === 'bootstrap-export') {
-        downloadSyncFile(await exportBootstrap(id, state.passphrase), `sinergi-awal-${id}.sinergi-sync.json`)
-        state.message = 'Paket awal terenkripsi berhasil diunduh.'
+        downloadSyncFile(await exportBootstrap(id, state.exportPassphrase), `sinergi-awal-${id}.sinergi-sync.json`)
+        state.exportMessage = 'Paket awal terenkripsi berhasil diunduh.'
       } else if (action === 'export') {
         const page = Math.floor(state.exportOffset / 200) + 1
-        downloadSyncFile(await exportCorrections(id, state.passphrase, state.exportOffset),
+        downloadSyncFile(await exportCorrections(id, state.exportPassphrase, state.exportOffset),
           `sinergi-koreksi-${id}-${page}.sinergi-sync.json`)
         const total = state.status?.pendingChanges ?? 0
         state.exportOffset = state.exportOffset + 200 < total ? state.exportOffset + 200 : 0
-        state.message = total > 200
+        state.exportMessage = total > 200
           ? `Bagian ${page} berhasil diunduh. Kirim semua bagian ke rekanmu.`
           : 'Paket koreksi terenkripsi berhasil diunduh.'
       } else if (action === 'bootstrap-import') {
@@ -207,7 +234,8 @@ export async function renderTopologySyncPage(container) {
         state.message = `${result.applied} koreksi diterapkan. Muat ulang diagram untuk melihat hasil.`
       }
     } catch (error) {
-      state.error = error.message
+      if (exporting) state.exportError = error.message
+      else state.error = error.message
     } finally {
       state.busy = false
       render()
