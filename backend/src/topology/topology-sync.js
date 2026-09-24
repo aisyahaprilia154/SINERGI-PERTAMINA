@@ -133,6 +133,44 @@ export function previewCorrectionPackage(record, bundle) {
   }
 }
 
+export function assetIdentityHash(record) {
+  const assets = record.assets ?? []
+  if (!Array.isArray(assets) || !assets.length) return null
+  const identities = assets.map(asset => [
+    asset.sourceFeatureId ?? asset.properties?.sourceFeatureId ?? null,
+    asset.canonicalAssetId ?? asset.assetId ?? null,
+    asset.type ?? null,
+  ])
+  if (identities.some(([feature, id]) => !feature || !id)) return null
+  return stateHash(identities.sort((a, b) => stableJson(a).localeCompare(stableJson(b))))
+}
+
+export function previewIndependentBaseline(localRecord, remoteRecord) {
+  const local = correctionState(localRecord)
+  const remote = correctionState(remoteRecord)
+  const localRelations = Object.entries(local).filter(([key]) => key.startsWith('relation:'))
+  const changes = Object.keys(remote).sort().map(key => {
+    const localValue = Object.hasOwn(local, key) ? local[key] : null
+    const after = remote[key]
+    const relatedConflict = key.startsWith('relation:') && localRelations.some(([otherKey, value]) =>
+      otherKey !== key && [value.source, value.target].some(id =>
+        id === after.source || id === after.target))
+    const status = same(localValue, after) ? 'already-applied'
+      : localValue === null && !relatedConflict ? 'ready' : 'conflict'
+    return { id: stateHash([remoteRecord.topologySync.id, key, after]),
+      key, before: null, after, local: localValue, status, relatedConflict }
+  })
+  return {
+    recordRevision: localRecord.recordRevision ?? 0,
+    changes,
+    summary: {
+      ready: changes.filter(item => item.status === 'ready').length,
+      conflict: changes.filter(item => item.status === 'conflict').length,
+      alreadyApplied: changes.filter(item => item.status === 'already-applied').length,
+    },
+  }
+}
+
 export function diagramChangesFromPreview(preview, resolutions = {}) {
   const pending = preview.changes.filter(change => (
     change.status === 'ready' || (change.status === 'conflict' && resolutions[change.id] === 'remote')
@@ -232,7 +270,7 @@ function validateBundle(record, bundle, sync) {
     })
   }
   if (bundle.syncId !== sync.id || bundle.baselineHash !== sync.baselineHash) {
-    throw new AppError('Titik awal sinkronisasi berbeda. Samakan paket awal terlebih dahulu.', {
+    throw new AppError('Titik awal sinkronisasi berbeda. Jika kedua laptop mengimpor KMZ sendiri, minta paket awal rekan lalu pilih “Selaraskan dari paket awal rekan”.', {
       code: 'topology_sync_baseline_mismatch', statusCode: 409,
     })
   }

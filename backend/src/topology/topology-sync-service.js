@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { AppError } from '../errors.js'
 import {
+  assetIdentityHash,
   correctionState,
   createCorrectionPackage,
   BOOTSTRAP_FORMAT,
@@ -11,6 +12,7 @@ import {
   encryptSyncPackage,
   initializeSyncRecord,
   previewCorrectionPackage,
+  previewIndependentBaseline,
   sourceIdentity,
   stateHash,
 } from './topology-sync.js'
@@ -115,6 +117,11 @@ export class TopologySyncService {
         const right = Object.hasOwn(after, key) ? after[key] : null
         return stateHash(left) === stateHash(right) ? [] : [{ key, before: left, after: right }]
       })
+    if (resolved.record.topologySync?.id !== draft.topologySync?.id) {
+      changes.unshift({ key: 'sync-baseline:root',
+        before: resolved.record.topologySync?.id ?? null,
+        after: draft.topologySync?.id ?? null })
+    }
     return {
       datasetVersionId,
       baseDatasetVersionId: baseVersionId,
@@ -241,6 +248,95 @@ export class TopologySyncService {
       status: 'staged',
       message: 'Paket awal diimpor. Tinjau dan aktifkan versi dataset.',
     }
+  }
+
+  async previewReconciliation(datasetVersionId, envelope, passphrase) {
+    const local = await this.repository.get(datasetVersionId)
+    const remote = await this.#validateReconciliationPackage(local, envelope, passphrase)
+    return {
+      ...previewIndependentBaseline(local, remote),
+      mode: 'reconciliation',
+      remoteSyncId: remote.topologySync.id,
+      sourceChecksum: remote.datasetVersion.checksum,
+    }
+  }
+
+  async applyReconciliation(datasetVersionId, actorId, envelope, passphrase, {
+    expectedRecordRevision, resolutions = {},
+  } = {}) {
+    const local = await this.repository.get(datasetVersionId)
+    if (!Number.isInteger(expectedRecordRevision)
+      || expectedRecordRevision !== local.recordRevision) {
+      throw new AppError('Data berubah sejak pratinjau. Periksa ulang paket.', {
+        code: 'dataset_version_stale_revision', statusCode: 409,
+      })
+    }
+    const remote = await this.#validateReconciliationPackage(local, envelope, passphrase)
+    const preview = previewIndependentBaseline(local, remote)
+    if (preview.changes.some(item => item.relatedConflict)) {
+      throw new AppError('Relasi ini sudah dipakai relasi lokal lain. Perbaiki relasi di diagram sebelum menyelaraskan.', {
+        code: 'topology_sync_relation_collision', statusCode: 409,
+      })
+    }
+    const { changes } = diagramChangesFromPreview(preview, resolutions)
+    if (changes.length > 200) throw new AppError('Terlalu banyak perubahan untuk satu draft.', {
+      code: 'topology_sync_reconciliation_too_large', statusCode: 409,
+    })
+    const draft = await this.createDraft(datasetVersionId, actorId)
+    await this.topologyService.saveDiagram(draft.datasetVersionId, actorId, {
+      changes,
+      expectedRecordRevision: 0,
+      syncAdopt: structuredClone(remote.topologySync),
+    })
+    await this.auditLog?.record('topology.sync_reconciled', {
+      actorId, datasetVersionId: draft.datasetVersionId, outcome: 'confirmed',
+      details: { baseDatasetVersionId: datasetVersionId,
+        remoteSyncId: remote.topologySync.id, applied: changes.length },
+    })
+    return { ...draft, applied: changes.length }
+  }
+
+  async #validateReconciliationPackage(local, envelope, passphrase) {
+    const bundle = decryptSyncPackage(envelope, passphrase)
+    const remote = bundle.record
+    const localVersion = local.datasetVersion
+    if (bundle.format !== BOOTSTRAP_FORMAT || !remote?.topologySync?.id
+      || stateHash(remote.topologySync.baseline) !== remote.topologySync.baselineHash
+      || JSON.stringify(sourceIdentity(remote)) !== JSON.stringify(bundle.source)
+      || JSON.stringify(remote.topologySync.source) !== JSON.stringify(bundle.source)) {
+      throw new AppError('Paket awal tidak valid.', {
+        code: 'topology_sync_invalid_package', statusCode: 400,
+      })
+    }
+    if (localVersion.baseDatasetVersionId || localVersion.publicationStatus !== 'published') {
+      throw new AppError('Penyelarasan hanya bisa dimulai dari dataset aktif.', {
+        code: 'topology_sync_reconciliation_requires_active', statusCode: 409,
+      })
+    }
+    const remoteVersion = remote.datasetVersion
+    const localIdentity = assetIdentityHash(local)
+    const remoteIdentity = assetIdentityHash(remote)
+    if (localVersion.datasetId !== remoteVersion.datasetId
+      || localVersion.branchId !== remoteVersion.branchId
+      || !localVersion.checksum || localVersion.checksum !== remoteVersion.checksum
+      || !localIdentity || localIdentity !== remoteIdentity) {
+      throw new AppError('Sumber atau identitas aset berbeda. Paket tidak dapat digabung otomatis.', {
+        code: 'topology_sync_reconciliation_source_mismatch', statusCode: 409,
+      })
+    }
+    const bytes = Buffer.from(bundle.sourceFile ?? '', 'base64')
+    if (bytes.length !== remoteVersion.sourceSize
+      || `sha256:${createHash('sha256').update(bytes).digest('hex')}` !== remoteVersion.checksum) {
+      throw new AppError('Isi sumber dalam paket awal rusak.', {
+        code: 'topology_sync_invalid_package', statusCode: 400,
+      })
+    }
+    await this.fileStore.readVerifiedOriginal({
+      storageKey: localVersion.sourceStorageKey,
+      expectedSize: localVersion.sourceSize,
+      expectedChecksum: localVersion.checksum,
+    })
+    return remote
   }
 
   async preview(datasetVersionId, envelope, passphrase) {

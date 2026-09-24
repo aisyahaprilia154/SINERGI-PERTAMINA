@@ -28,11 +28,27 @@ paket berikutnya dapat memuat koreksi yang pernah dibagikan; penerima akan
 menandainya sebagai **sudah diterima**. Bila ada lebih dari 200 perubahan,
 unduh semua bagian secara berurutan dan kirim seluruhnya.
 
-Paket koreksi mengacu pada dataset versi dan titik awal yang sama. Bila salah
-satu orang mengimpor sumber KML/KMZ baru sebagai versi lain, paket lama ditolak.
-Selesaikan pemetaan koreksi terhadap sumber baru dengan membuat titik awal
-bersama yang baru. Paket awal hanya dapat diimpor ke instalasi yang belum
-memiliki dataset aktif untuk dataset/cabang tersebut.
+Paket koreksi mengacu pada dataset versi dan titik awal yang sama. Bila kedua
+laptop telanjur mengimpor KMZ secara terpisah, jangan timpa salah satu dataset:
+
+1. **Keduanya** mengunduh paket awal masing-masing sebagai cadangan. Rekan
+   mengirim paket awal miliknya (bukan paket koreksi saja). Paket awal memuat
+   koreksi yang sudah ada sebelum titik sinkronisasi disiapkan.
+2. Pada laptop penerima, pilih paket awal rekan dan klik **Selaraskan dari
+   paket awal rekan**. Sistem memeriksa checksum KMZ serta identitas aset.
+   Sumber atau identitas berbeda ditolak tanpa mengubah data. Tinjau perubahan
+   dan pilih hasil untuk konflik.
+3. Buat draft hasil penyelarasan, buka diagram draft untuk memeriksa frame,
+   penempatan, dan garis relasi, lalu **Tinjau publikasi**. Versi aktif tetap
+   tersedia sampai draft diterbitkan. Setelah itu, kirim paket koreksi dari
+   dataset aktif yang baru ke rekan agar kedua laptop memakai titik awal sama.
+
+Relasi yang memakai aset sama dengan relasi lokal lain harus dibereskan di
+diagram dahulu; penyelarasan tidak memilih relasi secara diam-diam. Jalur ini
+hanya berlaku jika berkas KMZ dan identitas aset benar-benar sama. Bila KMZ
+berbeda, tinjau pemetaan sumber baru secara manual. Paket awal biasa hanya
+dapat diimpor ke instalasi yang belum memiliki dataset aktif untuk
+dataset/cabang tersebut.
 
 Paket memakai AES-256-GCM dengan kunci turunan `scrypt`, tetapi keamanan juga
 bergantung pada kata sandi yang kuat dan kanal pengirimannya. Nama file
