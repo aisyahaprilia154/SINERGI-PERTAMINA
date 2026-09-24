@@ -55,6 +55,9 @@ export function renderImportDatasetPage(container) {
       state.config = await loadImportConfig({ token: getDefaultAdminToken() })
       state.configStatus = 'ready'
       state.values.branchId = state.config.branches[0]?.id ?? ''
+      if (!state.config.workflow?.importModes?.includes(state.values.importMode)) {
+        state.values.importMode = 'stage_only'
+      }
     } catch (error) {
       state.configStatus = 'error'
       state.configError = error.message

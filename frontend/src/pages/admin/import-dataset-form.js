@@ -58,10 +58,11 @@ export function renderImportDatasetForm({
                 ${importMode === 'stage_only' ? 'selected' : ''}>
                 Jangan timpa — simpan sebagai versi untuk ditinjau
               </option>
-              <option value="replace_active"
+              ${(!Array.isArray(config?.workflow?.importModes)
+                || config.workflow.importModes.includes('replace_active')) ? `<option value="replace_active"
                 ${importMode === 'replace_active' ? 'selected' : ''}>
                 Timpa data aktif dan langsung gunakan
-              </option>
+              </option>` : ''}
             </select>
             <small>${importMode === 'replace_active'
               ? 'Setelah validasi berhasil, versi lama diarsipkan dan diagram topologi baru langsung ditampilkan.'

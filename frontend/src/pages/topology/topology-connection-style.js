@@ -1,12 +1,12 @@
 // One palette for every facility, SVG export, arrowhead, and legend.
 export const CONNECTION_STYLES = Object.freeze({
-  'core-core': {label: 'Server/core ↔ Server/core', color: '#7353a6'},
-  'core-jb': {label: 'Server/core ↔ JB', color: '#2864b4'},
-  'camera-core': {label: 'Server/core ↔ CCTV', color: '#087f8c'},
-  'jb-jb': {label: 'JB ↔ JB', color: '#39734d'},
-  'camera-jb': {label: 'JB ↔ CCTV', color: '#a46b13'},
-  'camera-camera': {label: 'CCTV ↔ CCTV', color: '#93617d'},
-  other: {label: 'Koneksi lainnya', color: '#687787'},
+  'core-core': {label: 'Server/core ↔ Server/core', color: '#8967c8'},
+  'core-jb': {label: 'Server/core ↔ JB', color: '#438bdf'},
+  'camera-core': {label: 'Server/core ↔ CCTV', color: '#1ba6ad'},
+  'jb-jb': {label: 'JB ↔ JB', color: '#3ba676'},
+  'camera-jb': {label: 'JB ↔ CCTV', color: '#d69331'},
+  'camera-camera': {label: 'CCTV ↔ CCTV', color: '#c577a8'},
+  other: {label: 'Koneksi lainnya', color: '#8e9aa8'},
 })
 
 function kind(node) {

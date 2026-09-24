@@ -16,7 +16,7 @@ Docker Desktop biasanya membutuhkan WSL 2 atau backend Hyper-V yang telah diakti
 
 ```powershell
 Copy-Item .env.docker.example .env.docker
-# Edit .env.docker dan ganti POSTGRES_PASSWORD sebelum dipakai bersama.
+# Edit .env.docker dan ganti POSTGRES_PASSWORD serta SINERGI_AUTH_TOKENS.
 docker compose --env-file .env.docker up --build -d
 ```
 
@@ -42,3 +42,9 @@ perubahan migration, gunakan `docker compose --env-file .env.docker run --rm mig
 
 `sinergi-postgres-data` dan `sinergi-app-data` adalah named volume. Jangan menjalankan
 `docker compose down -v` kecuali memang ingin menghapus database dan file upload lokal.
+
+Port frontend dan API hanya diikat ke `127.0.0.1`. Untuk akses jarak jauh,
+pasang reverse proxy HTTPS di depannya. Koreksi Diagram Topologi pada stack
+Docker memakai draft dan publikasi setelah peninjauan; lihat
+[alur sinkronisasi topologi](TOPOLOGY-SYNC.md). Cadangkan volume PostgreSQL
+dan volume file sumber sebagai satu pasangan yang konsisten.

@@ -56,24 +56,28 @@ export function createAssetDragFeedback(nodeElement, pointer, { reducedMotion = 
   const applyTransform = () => {
     ghost.style.transform = `translate3d(${pointerState.x - width / 2 + pointerOffset.x}px, ${pointerState.y - height / 2 + pointerOffset.y}px, 0) rotate(${rendered.rotation}deg) scale(${rendered.scale})`
   }
+  const queueRender = () => {
+    if (!disposed && !animationFrame) animationFrame = window.requestAnimationFrame(render)
+  }
   const render = () => {
+    animationFrame = 0
     if (disposed) return
     const spring = reducedMotion ? 1 : .34
     rendered.scale += (desired.scale - rendered.scale) * spring
     rendered.rotation += (desired.rotation - rendered.rotation) * spring
+    if (Math.abs(rendered.scale - desired.scale) < .002) rendered.scale = desired.scale
+    if (Math.abs(rendered.rotation - desired.rotation) < .002) rendered.rotation = desired.rotation
     applyTransform()
-    animationFrame = window.requestAnimationFrame(render)
+    if (rendered.scale !== desired.scale || rendered.rotation !== desired.rotation) queueRender()
   }
   applyTransform()
-  animationFrame = window.requestAnimationFrame(render)
+  queueRender()
 
   const restoreTarget = () => {
     if (!target) return
     target.element.classList.remove('drop-target')
-    for (const [key, value] of Object.entries(target.original)) {
-      if (value === null) target.rect.removeAttribute(key)
-      else target.rect.setAttribute(key, value)
-    }
+    ghost.style.removeProperty('--drag-target-accent')
+    target.halo.remove()
     target.slot.remove()
     target = null
   }
@@ -98,6 +102,7 @@ export function createAssetDragFeedback(nodeElement, pointer, { reducedMotion = 
       ghost.classList.toggle('is-over-device', Boolean(element))
       desired.scale = element ? .98 : target ? .98 : 1.075
       desired.rotation = 0
+      queueRender()
     },
     move(event) {
       const dx = event.clientX - pointerState.previousX
@@ -105,7 +110,7 @@ export function createAssetDragFeedback(nodeElement, pointer, { reducedMotion = 
       pointerState.x = event.clientX
       pointerState.y = event.clientY
       desired.rotation = target ? 0 : Math.max(-1.8, Math.min(1.8, dx * .03))
-      applyTransform()
+      queueRender()
     },
     target(element, box) {
       if (target?.element === element) return
@@ -113,22 +118,24 @@ export function createAssetDragFeedback(nodeElement, pointer, { reducedMotion = 
       ghost.classList.toggle('is-over-frame', Boolean(element))
       if (!element || !box) {
         desired.scale = 1.075
+        queueRender()
         return
       }
-      // Selection outlines are also rects, but they are intentionally
-      // transparent. Expand the visible frame body so the destination visibly
-      // opens up while an asset is dragged over it.
-      const frameRect = element.querySelector(
-        '.topology-mounting-bubble, .topology-mounting-frame, .topology-mounting-box, rect',
-      )
+      const frameRect = element.querySelector('.topology-mounting-bubble, .topology-mounting-selection')
       if (!frameRect) return
-      const original = Object.fromEntries(['x', 'y', 'width', 'height'].map(key => [key, frameRect.getAttribute(key)]))
-      const visibleBox = Object.fromEntries(Object.entries(original).map(([key, value]) => [key, Number(value)]))
+      const visibleBox = Object.fromEntries(['x', 'y', 'width', 'height'].map(key => [key, Number(frameRect.getAttribute(key))]))
       element.classList.add('drop-target')
-      frameRect.setAttribute('x', visibleBox.x - 8)
-      frameRect.setAttribute('y', visibleBox.y - 3)
-      frameRect.setAttribute('width', visibleBox.width + 16)
-      frameRect.setAttribute('height', visibleBox.height + 60)
+      ghost.style.setProperty('--drag-target-accent', element.style.getPropertyValue('--frame-accent'))
+      const halo = document.createElementNS(svg.namespaceURI, 'rect')
+      halo.classList.add('topology-drop-halo')
+      for (const [key, value] of Object.entries({
+        x: visibleBox.x - 8,
+        y: visibleBox.y - 8,
+        width: visibleBox.width + 16,
+        height: visibleBox.height + 62,
+        rx: 21,
+      })) halo.setAttribute(key, value)
+      element.prepend(halo)
       const slot = document.createElementNS('http://www.w3.org/2000/svg', 'g')
       slot.classList.add('topology-drop-slot')
       const outline = document.createElementNS(svg.namespaceURI, 'rect')
@@ -136,14 +143,15 @@ export function createAssetDragFeedback(nodeElement, pointer, { reducedMotion = 
         x: visibleBox.x + 16,
         y: visibleBox.y + visibleBox.height + 8,
         width: Math.max(48, visibleBox.width - 32),
-        height: 32,
+        height: 30,
         rx: 11,
       })) outline.setAttribute(key, value)
       slot.append(outline)
       element.append(slot)
-      target = { element, rect: frameRect, original, slot }
+      target = { element, halo, slot }
       desired.scale = .98
       desired.rotation = 0
+      queueRender()
     },
     async finish(destination = null) {
       const end = destination?.getBoundingClientRect()

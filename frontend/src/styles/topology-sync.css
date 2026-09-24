@@ -1,0 +1,41 @@
+.topology-sync-body{margin:0;min-height:100vh;background:#f4f7fb;color:#1b2838;font-family:Inter,system-ui,sans-serif}
+.sync-page{max-width:920px;margin:0 auto;padding:46px 22px 90px}
+.sync-header{display:flex;gap:20px;align-items:start;margin-bottom:30px}
+.sync-back{display:grid;place-items:center;width:42px;height:42px;flex:none;border-radius:14px;background:#fff;color:#314d70;text-decoration:none;font-size:25px;box-shadow:0 3px 14px #152d4610}
+.sync-eyebrow{text-transform:uppercase;letter-spacing:.12em;font-size:11px;font-weight:700;color:#71869d}
+.sync-header h1{margin:7px 0 6px;font-size:clamp(26px,4vw,36px);letter-spacing:-.04em}
+.sync-header p,.sync-card-heading p,.sync-hint{margin:0;color:#66798e;line-height:1.5}
+.sync-card{margin:18px 0;padding:26px;border:1px solid #dae3ed;border-radius:24px;background:#ffffffd9;box-shadow:0 10px 32px #273c5810;backdrop-filter:blur(18px)}
+.sync-card-heading{display:flex;align-items:center;gap:14px;margin-bottom:23px}
+.sync-card-heading>.material-symbols-outlined{display:grid;place-items:center;width:44px;height:44px;border-radius:15px;background:#e9f1fa;color:#40698d;font-size:23px}
+.sync-card h2{margin:0 0 3px;font-size:18px;letter-spacing:-.02em}
+.sync-card label{display:grid;gap:8px;margin:15px 0;color:#465b70;font-size:13px;font-weight:650}
+.sync-card select,.sync-card input[type=file],.sync-card input[type=password]{width:100%;box-sizing:border-box;border:1px solid #ccd8e5;border-radius:12px;background:#fff;color:#1b2838;padding:12px 14px;font:inherit}
+.sync-card input[type=file]{font-size:13px}
+.sync-dataset{margin:18px 0;padding:16px;border-radius:15px;background:#f3f7fb;color:#576f87;font-size:13px;line-height:1.8}
+.sync-dataset strong{color:#263d54}
+.sync-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
+.sync-actions button,.sync-primary{border:1px solid #c4d3e2;border-radius:12px;background:#fff;color:#294763;padding:11px 16px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;transition:background .18s,transform .18s,box-shadow .18s}
+.sync-link{display:inline-flex;align-items:center;border:1px solid #c4d3e2;border-radius:12px;background:#fff;color:#294763;padding:11px 16px;font-size:13px;font-weight:700;text-decoration:none}
+.sync-actions button:hover:not(:disabled),.sync-primary:hover:not(:disabled){background:#edf5fc;transform:translateY(-1px);box-shadow:0 4px 10px #25456d18}
+.sync-actions button:disabled,.sync-primary:disabled{opacity:.48;cursor:not-allowed}
+.sync-primary{background:#326992;color:#fff;border-color:#326992;margin-top:20px}
+.sync-primary:hover:not(:disabled){background:#245b84}
+.sync-hint{font-size:12px}.sync-file-name{color:#295f86;font-size:12px}
+.sync-alert,.sync-success{padding:15px 18px;border-radius:14px;font-size:13px}.sync-alert{background:#fff1f0;color:#9f3030}.sync-success{background:#eaf8f3;color:#176953}
+.sync-change-list{display:grid;gap:10px;max-height:560px;overflow:auto}
+.sync-change{padding:15px 17px;border:1px solid #e2eaf2;border-radius:15px;background:#f9fbfe}
+.sync-change>div:first-child{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:8px}
+.sync-change strong{font-size:13px}.sync-change small{color:#657c94;line-height:1.6;overflow-wrap:anywhere}
+.sync-badge{border-radius:99px;padding:4px 9px;font-size:11px;font-weight:700;white-space:nowrap;background:#e7f5ee;color:#286d4d}
+.sync-badge.conflict{background:#fff0da;color:#9f610e}.sync-badge.already-applied{background:#eef1f5;color:#64748b}
+.sync-change fieldset{display:flex;gap:18px;margin:12px 0 0;padding:0;border:0}.sync-change legend{font-size:12px;font-weight:700;color:#495f75}.sync-change fieldset label{display:flex;align-items:center;gap:5px;margin:7px 0 0}
+.topology-sync-body[data-theme=dark],body.dark.topology-sync-body{background:#10171f;color:#eff4fa}
+:root[data-theme=dark] .topology-sync-body{background:#10171f;color:#eff4fa}
+:root[data-theme=dark] .sync-card{background:#202a35de;border-color:#3a4755}
+:root[data-theme=dark] .sync-back,:root[data-theme=dark] .sync-dataset,:root[data-theme=dark] .sync-change{background:#263442;color:#dce8f5;border-color:#3b4e60}
+:root[data-theme=dark] .sync-card input,:root[data-theme=dark] .sync-card select{background:#1b2733;color:#eaf2fa;border-color:#4a5c6d}
+.topology-sync-body[data-theme=dark] .sync-card,body.dark.topology-sync-body .sync-card{background:#202a35de;border-color:#3a4755}
+.topology-sync-body[data-theme=dark] .sync-back,.topology-sync-body[data-theme=dark] .sync-dataset,.topology-sync-body[data-theme=dark] .sync-change,body.dark.topology-sync-body .sync-back,body.dark.topology-sync-body .sync-dataset,body.dark.topology-sync-body .sync-change{background:#263442;color:#dce8f5;border-color:#3b4e60}
+.topology-sync-body[data-theme=dark] .sync-card input,.topology-sync-body[data-theme=dark] .sync-card select,body.dark.topology-sync-body .sync-card input,body.dark.topology-sync-body .sync-card select{background:#1b2733;color:#eaf2fa;border-color:#4a5c6d}
+@media(max-width:580px){.sync-page{padding:24px 14px 60px}.sync-card{padding:19px;border-radius:20px}.sync-header{gap:12px}.sync-actions button{flex:1}.sync-change fieldset{flex-wrap:wrap}}

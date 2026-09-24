@@ -800,7 +800,12 @@ function createOwnerFeature({ asset, layer, geometries }) {
   const category = normalizeCategory(asset.category, asset.type, layer)
   const type = normalizeAssetType(asset.type, asset.category || category, layer, asset.name)
   const operationalStatus = readOperationalStatus(asset)
-  const locationGroup = locationGroupFor(layer?.sourceFolderPath)
+  const locationGroup = asset.locationGroupKey
+    ? {
+      locationGroupKey: asset.locationGroupKey,
+      locationGroupName: asset.locationGroupName ?? asset.locationGroupKey,
+    }
+    : locationGroupFor(asset.sourceFolderPath ?? layer?.sourceFolderPath)
   const canonicalAssetId = canonicalAssetIdFor(asset)
   return {
     id: canonicalAssetId,
@@ -833,7 +838,7 @@ function createOwnerFeature({ asset, layer, geometries }) {
       || 'Lokasi tidak tersedia',
     datasetVersionId: asset.datasetVersionId,
     layerId: asset.layerId,
-    sourceFolderPath: layer?.sourceFolderPath ?? null,
+    sourceFolderPath: asset.sourceFolderPath ?? layer?.sourceFolderPath ?? null,
     ...locationGroup,
     networkIds: [],
     geometry: geometries.map((geometry) => structuredClone(geometry)),
@@ -1050,7 +1055,12 @@ function splitGeometryRecord(geometry) {
 function toMapGeometry(geometry, bounds) {
   const owner = geometry.owner
   const category = normalizeCategory(owner?.category, owner?.type, geometry.layer)
-  const locationGroup = locationGroupFor(geometry.layer?.sourceFolderPath)
+  const locationGroup = owner?.locationGroupKey
+    ? {
+      locationGroupKey: owner.locationGroupKey,
+      locationGroupName: owner.locationGroupName ?? owner.locationGroupKey,
+    }
+    : locationGroupFor(owner?.sourceFolderPath ?? geometry.layer?.sourceFolderPath)
   const canonicalAssetId = canonicalAssetIdFor(owner)
   return {
     id: geometry.id,
@@ -1070,7 +1080,7 @@ function toMapGeometry(geometry, bounds) {
     coordinates: structuredClone(geometry.coordinates),
     displayCoordinates: projectGeometryCoordinates(geometry, bounds),
     layerId: owner?.layerId ?? geometry.layer?.id ?? null,
-    sourceFolderPath: geometry.layer?.sourceFolderPath ?? null,
+    sourceFolderPath: owner?.sourceFolderPath ?? geometry.layer?.sourceFolderPath ?? null,
     ...locationGroup,
     category,
     sourceStatus: geometry.sourceStatus,

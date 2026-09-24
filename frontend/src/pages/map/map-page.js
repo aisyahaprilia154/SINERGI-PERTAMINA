@@ -1755,6 +1755,9 @@ export function renderTopNavigation(activeView = 'map', context = null) {
     })
     : null
   if (contextParams && context.area) contextParams.set('area', context.area)
+  if (contextParams && context.draftVersionId) {
+    contextParams.set('draftVersionId', context.draftVersionId)
+  }
   const contextQuery = contextParams ? `?${contextParams}` : ''
   return `
     <header class="top-navigation${topologyNavigation ? ' topology-top-navigation' : ''}">

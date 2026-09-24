@@ -146,7 +146,7 @@
 
 .map-body .map-info-overlays {
   width: min(
-    680px,
+    420px,
     calc(
       100% - var(--map-overlay-side-inset) - var(--map-toolbar-width) -
       var(--map-overlay-inset) - var(--map-overlay-gap)
@@ -174,7 +174,7 @@
 @media (min-width: 961px) {
   .map-body .map-workspace.drawer-open .map-info-overlays {
     width: min(
-      680px,
+      420px,
       calc(
         100% - var(--map-overlay-side-inset) -
         max(
@@ -225,7 +225,7 @@
 @media (max-width: 960px) {
   .map-body .map-info-overlays {
     top: calc(var(--map-overlay-top-inset) + 60px + var(--map-overlay-gap));
-    width: calc(100% - 2 * var(--map-overlay-side-inset));
+    width: min(420px, calc(100% - 2 * var(--map-overlay-side-inset)));
   }
 }
 
@@ -1075,7 +1075,7 @@
   }
 
   .map-body .map-info-overlays {
-    width: calc(100% - 2 * var(--map-overlay-side-inset));
+    width: min(420px, calc(100% - 2 * var(--map-overlay-side-inset)));
   }
 
   .map-body .map-floating-bottom {

@@ -35,7 +35,7 @@ test('connection colors, arrowheads, selection and export legend agree in both l
       assert.ok(svg.includes(CONNECTION_STYLES[key].label))
     }
     const selected = renderTopologyDiagramSvg({model, layout, selectedEdgeId: 'jc'})
-    assert.match(selected, /data-connection-type="camera-jb"[^>]*style="stroke:#5b7eff"/)
-    assert.match(selected, /data-connection-type="core-jb"[^>]*style="stroke:#c7c5ce"/)
+    assert.match(selected, /data-connection-type="camera-jb"[^>]*style="stroke:#0071e3"/)
+    assert.match(selected, /data-connection-type="core-jb"[^>]*style="stroke:#c7c7cc"/)
   }
 })

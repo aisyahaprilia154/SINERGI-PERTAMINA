@@ -706,8 +706,6 @@ function buildPoleBackboneAreaLaneSpec({
     area,
   })
   const edgeAdjacency = buildLayoutEdgeAdjacency(connectedNodes, edges)
-  confirmedGroups.splice(0, confirmedGroups.length,
-    ...confirmedGroups.flatMap(group => splitIndependentPoleBranches(group, nodeById, edgeAdjacency)))
   const junctionGroups = buildEndpointJunctionGroups({
     confirmedGroups,
     connectedNodes,
@@ -788,7 +786,6 @@ function buildPoleBackboneAreaLaneSpec({
   const mountingBoxes = logicalGroupSpecs.map((group) => buildMountingBoxSpec({
     group,
     nodeById,
-    componentByNodeId,
     edgeAdjacency,
     settings,
   })).sort((left, right) => (
@@ -952,57 +949,11 @@ function buildPoleBackboneAreaLaneSpec({
   }
 }
 
-function splitIndependentPoleBranches(group, nodeById, adjacency) {
-  if (group.kind !== 'confirmed' || !group.hostId || group.nodeIds.length < 2) return [group]
-  const local = new Set(group.nodeIds)
-  const namedParentById = buildNamedJunctionParents(group.nodeIds
-    .map(id => nodeById.get(id)).filter(node => node
-      && ['junction-peer', 'junction-extended'].includes(node.diagramClass)), adjacency)
-  const unseen = new Set(group.nodeIds)
-  const branches = []
-  while (unseen.size) {
-    const start = [...unseen].sort()[0]
-    const queue = [start], members = []
-    while (queue.length) {
-      const id = queue.shift()
-      if (!unseen.delete(id)) continue
-      members.push(id)
-      for (const next of adjacency.get(id) ?? []) {
-        if (local.has(next.id) && unseen.has(next.id)) queue.push(next.id)
-      }
-      const namedParent = namedParentById.get(id)
-      if (local.has(namedParent) && unseen.has(namedParent)) queue.push(namedParent)
-      for (const [childId, parentId] of namedParentById) {
-        if (parentId === id && unseen.has(childId)) queue.push(childId)
-      }
-    }
-    branches.push(members.sort())
-  }
-  const withJunction = branches.filter(ids => ids.some(id =>
-    ['junction-peer', 'junction-extended'].includes(nodeById.get(id)?.diagramClass)))
-  if (withJunction.length < 2) return [group]
-  branches.sort((left, right) => {
-    const anchor = ids => ids.find(id =>
-      ['junction-peer', 'junction-extended'].includes(nodeById.get(id)?.diagramClass)) ?? ids[0]
-    return String(nodeById.get(anchor(left))?.name ?? anchor(left)).localeCompare(
-      String(nodeById.get(anchor(right))?.name ?? anchor(right)), 'id')
-  })
-  return branches.map((nodeIds, index) => ({
-    ...group,
-    id: index === 0 ? group.id : `${group.id}:branch:${nodeIds.find(id =>
-      ['junction-peer', 'junction-extended'].includes(nodeById.get(id)?.diagramClass)) ?? nodeIds[0]}`,
-    physicalGroupId: group.id,
-    nodeIds,
-    presentationInheritedNodeIds: (group.presentationInheritedNodeIds ?? [])
-      .filter(id => nodeIds.includes(id)),
-  }))
-}
-
-// Physical co-location is not logical ownership. Keep the original mounting
-// metadata, but give devices owned by an external JB a separate presentation
-// frame that the subtree packer can place under that JB.
+// Indoor and non-pole presentation groups may follow an external JB. Confirmed
+// pole groups remain one physical frame even when their network owners differ.
 function splitFramesByExternalJunction(groups, nodeById, adjacency) {
   return groups.flatMap(group => {
+    if (group.hostId && ['confirmed', 'empty'].includes(group.kind)) return [group]
     const local = new Set(group.nodeIds)
     const satellites = new Map()
     const retained = []
@@ -1050,6 +1001,11 @@ function applyFrameAssignmentsToGroups(groups, assignments = {}, nodeById) {
     presentationInheritedNodeIds: [...(group.presentationInheritedNodeIds ?? [])],
   }))
   const groupById = new Map(nextGroups.map((group) => [group.id, group]))
+  const resolveTarget = (frameId) => groupById.get(frameId) ?? nextGroups.find(group => (
+    group.hostId && ['confirmed', 'empty'].includes(group.kind)
+      && [`${group.id}:branch:`, `${group.id}:junction:`]
+        .some(prefix => String(frameId).startsWith(prefix))
+  ))
   const groupByNodeId = new Map()
   nextGroups.forEach((group) => {
     group.nodeIds.forEach((nodeId) => groupByNodeId.set(nodeId, group))
@@ -1061,7 +1017,7 @@ function applyFrameAssignmentsToGroups(groups, assignments = {}, nodeById) {
     .forEach(([assetId, frameId]) => {
       const node = nodeById.get(assetId)
       const source = groupByNodeId.get(assetId)
-      const target = groupById.get(frameId)
+      const target = resolveTarget(frameId)
       if (!node || !source || !target || source === target
         || !['confirmed', 'empty', 'excluded'].includes(target.kind)) return
 
@@ -1147,7 +1103,6 @@ function buildExcludedMountingGroupSpecs({ area, nodeIds = [], connectedNodes = 
 function buildMountingBoxSpec({
   group,
   nodeById,
-  componentByNodeId,
   edgeAdjacency,
   settings,
 }) {
@@ -1155,32 +1110,49 @@ function buildMountingBoxSpec({
   const compactEndpointLabels = group.kind === 'excluded'
     && nodes.filter(node => node.diagramClass === 'endpoint').length > 1
   const nodeIds = new Set(nodes.map(({ id }) => id))
-  const byComponent = new Map()
-  nodes.forEach((node) => {
-    const componentId = componentByNodeId.get(node.id)?.componentId ?? 'unscoped'
-    byComponent.set(componentId, [...(byComponent.get(componentId) ?? []), node])
-  })
   const junctions = nodes.filter((node) => (
     ['junction-peer', 'junction-extended'].includes(node.diagramClass)
   ))
   const namedParentById = buildNamedJunctionParents(junctions, edgeAdjacency)
+  const junctionById = new Map(junctions.map(node => [node.id, node]))
+  const localNeighbors = new Map(junctions.map(node => [node.id, new Set()]))
+  junctions.forEach((node) => {
+    for (const { id } of edgeAdjacency.get(node.id) ?? []) {
+      if (!junctionById.has(id)) continue
+      localNeighbors.get(node.id).add(id)
+      localNeighbors.get(id).add(node.id)
+    }
+  })
+  namedParentById.forEach((parentId, childId) => {
+    localNeighbors.get(parentId)?.add(childId)
+    localNeighbors.get(childId)?.add(parentId)
+  })
   const entryJunctionIds = []
-  byComponent.forEach((componentNodes) => {
-    const regularJunctions = componentNodes.filter((node) => {
-      if (node.diagramClass !== 'junction-peer') return false
-      return junctionNumberIdentity(node.name)?.childIndex == null
-    })
-    if (!regularJunctions.length) return
-    regularJunctions.sort((left, right) => (
+  const visitedJunctionIds = new Set()
+  junctions.forEach((junction) => {
+    if (visitedJunctionIds.has(junction.id)) return
+    const localBranch = []
+    const pending = [junction.id]
+    while (pending.length) {
+      const id = pending.pop()
+      if (visitedJunctionIds.has(id)) continue
+      visitedJunctionIds.add(id)
+      localBranch.push(junctionById.get(id))
+      localNeighbors.get(id)?.forEach(neighborId => pending.push(neighborId))
+    }
+    const roots = localBranch.filter(node => !namedParentById.has(node.id))
+    const regularRoots = roots.filter(node => node.diagramClass === 'junction-peer'
+      && junctionNumberIdentity(node.name)?.childIndex == null)
+    const candidates = regularRoots.length ? regularRoots : roots.length ? roots : localBranch
+    candidates.sort((left, right) => (
       externalConfirmedDegree(right.id, nodeIds, edgeAdjacency)
         - externalConfirmedDegree(left.id, nodeIds, edgeAdjacency)
       || (left.depth ?? Number.MAX_SAFE_INTEGER) - (right.depth ?? Number.MAX_SAFE_INTEGER)
       || (right.confirmedDegree ?? 0) - (left.confirmedDegree ?? 0)
       || compareNodes(left, right)
     ))
-    entryJunctionIds.push(regularJunctions[0].id)
+    entryJunctionIds.push(candidates[0].id)
   })
-  namedParentById.forEach((parentId) => entryJunctionIds.push(parentId))
   const uniqueEntryJunctionIds = [...new Set(entryJunctionIds)]
   uniqueEntryJunctionIds.sort((left, right) => compareNodes(nodeById.get(left), nodeById.get(right)))
   const levelById = new Map(uniqueEntryJunctionIds.map((id) => [id, 0]))
@@ -1214,7 +1186,7 @@ function buildMountingBoxSpec({
         ? namedParent
         : bestJunctionParent(node, nodeIds, levelById, nodeById, edgeAdjacency)
       const parentLevel = parent ? levelById.get(parent.id) ?? 0 : 0
-      levelById.set(node.id, Math.max(1, parentLevel + 1))
+      levelById.set(node.id, parent ? parentLevel + 1 : 0)
       if (parent) parentById.set(node.id, parent.id)
     })
   const maximumJunctionLevel = Math.max(0, ...junctions.map((node) => levelById.get(node.id) ?? 0))
@@ -1601,7 +1573,10 @@ function attachCrossBoxJunctionFamilies({
     if (!childBox || !parentBox || childBox.id === parentBox.id) return
     const confirmedSibling = (edgeAdjacency.get(childNodeId) ?? [])
       .some(({ id }) => id === parentNodeId)
-    if (!confirmedSibling || childBox.entryJunctionIds.length) return
+    if (!confirmedSibling || childBox.entryJunctionIds.some(entryId => (
+      entryId !== childNodeId
+      && !(edgeAdjacency.get(entryId) ?? []).some(({ id }) => id === parentNodeId)
+    ))) return
     parentCandidatesByBoxId.set(childBox.id, [
       ...(parentCandidatesByBoxId.get(childBox.id) ?? []),
       { childNodeId, parentNodeId, parentBox },

@@ -1,4 +1,5 @@
 import { branchNameForFacility } from '../../domain/facility-branch.js'
+import { renderLocationContextPanel } from '../../components/location-context-panel.js'
 
 export function renderNetworkMapCanvas(activeContext, {
   empty = false,
@@ -50,10 +51,7 @@ export function renderNetworkMapCanvas(activeContext, {
         </section>
       ` : ''}
       <div class="map-info-overlays" aria-label="Informasi konteks peta">
-        ${renderMapContextPill(activeContext, operationalReadiness, selectedArea, {
-          counts,
-          confirmedConnectionCount: displayedConfirmedConnectionCount,
-        })}
+        ${renderMapContextPill(activeContext, operationalReadiness, selectedArea)}
       </div>
       ${renderMapFloatingControls(activeContext, operationalReadiness)}
 
@@ -92,52 +90,16 @@ export function renderMapContextPill(
   activeContext,
   topologyReadiness = null,
   selectedArea = null,
-  { counts = {}, confirmedConnectionCount = 0 } = {},
 ) {
   const branchName = branchNameForFacility(
     selectedArea,
     formatBranchName(activeContext.branchName),
   )
-  const topologyStatus = 'ready'
-  const assetCount = Number(counts.assetNodeCount) || 0
-  const lineCount = Number(counts.lineCount) || 0
-  const confirmedCount = Number(confirmedConnectionCount) || 0
-  return `
-    <section class="map-context-pill" aria-label="Konteks peta aktif">
-      <span class="context-main-row">
-        <span class="context-branch context-item">
-          <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
-          <span>
-            <small>Kantor cabang</small>
-            <strong title="${escapeHtml(branchName)}">${escapeHtml(branchName)}</strong>
-          </span>
-        </span>
-        <span class="context-separator" aria-hidden="true"></span>
-        <span class="context-area context-item">
-          <small>Area</small>
-          <strong title="${escapeHtml(selectedArea?.name || 'Area aktif')}">${escapeHtml(selectedArea?.name || 'Area aktif')}</strong>
-        </span>
-        <span class="context-separator" aria-hidden="true"></span>
-        <span class="context-dataset context-item">
-          <small>Dataset aktif</small>
-          <strong>${escapeHtml(activeContext.version)}</strong>
-        </span>
-      </span>
-      <span class="context-statuses">
-        <span class="context-readonly">
-          <span class="material-symbols-outlined" aria-hidden="true">lock</span>
-          Read-only
-        </span>
-        <span class="context-topology ${topologyStatus}"
-          title="Relasi kuat pada dataset dibaca dan dikonfirmasi otomatis.">
-          ${confirmedCount > 0 ? 'Relasi otomatis' : 'Belum ada relasi'}
-        </span>
-      </span>
-      <span class="context-metrics" aria-label="Ringkasan aset dan jalur">
-        ${assetCount} aset &middot; ${lineCount} jalur &middot; ${confirmedCount} koneksi terkonfirmasi
-      </span>
-    </section>
-  `
+  return renderLocationContextPanel({
+    surface: 'map',
+    branchName,
+    areaName: selectedArea?.name || 'Area aktif',
+  })
 }
 
 export function renderMapFloatingControls(
