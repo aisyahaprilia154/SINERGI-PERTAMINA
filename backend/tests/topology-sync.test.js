@@ -373,8 +373,19 @@ test('paket awal impor independen membuat draft dengan titik bersama tanpa mengu
     envelope, 'sandi-paket-awal-tim')
   assert.equal(preview.mode, 'reconciliation')
   assert.equal(preview.summary.ready, 1)
+  const operationId = '0f53d0de-2afd-4ae6-956a-62671453aef7'
+  assert.equal((await service.reconciliationOperation(local.datasetVersion.id,
+    operationId)).status, 'not_started')
   const result = await service.applyReconciliation(local.datasetVersion.id, 'alice',
-    envelope, 'sandi-paket-awal-tim', { expectedRecordRevision: preview.recordRevision })
+    envelope, 'sandi-paket-awal-tim', { expectedRecordRevision: preview.recordRevision,
+      operationId })
+  assert.equal(result.datasetVersionId, `dv-${operationId}`)
+  assert.equal((await service.reconciliationOperation(local.datasetVersion.id,
+    operationId)).status, 'complete')
+  const repeated = await service.applyReconciliation(local.datasetVersion.id, 'alice',
+    envelope, 'sandi-paket-awal-tim', { expectedRecordRevision: preview.recordRevision,
+      operationId })
+  assert.equal(repeated.datasetVersionId, result.datasetVersionId)
   assert.equal((await repository.findActive('dataset-pilot', { branchId: 'pilot' }))
     .topologySync.id, 'local-sync')
   const savedDraft = await repository.get(result.datasetVersionId)

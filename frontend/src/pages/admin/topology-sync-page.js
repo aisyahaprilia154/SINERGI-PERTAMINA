@@ -15,6 +15,7 @@ import {
   previewCorrections,
   previewReconciliation,
   publishTopologyDraft,
+  reconciliationOperation,
   syncStatus,
 } from '../../services/topology-sync-service.js'
 import { escapeAttribute, escapeHtml } from './import-view-utils.js'
@@ -31,6 +32,7 @@ export async function renderTopologySyncPage(container) {
     envelope: null, filename: '', passphrase: '', exportPassphrase: '', preview: null,
     resolutions: {}, message: '', error: '', exportError: '', exportMessage: '',
     busy: false, busyAction: '',
+    pendingReconciliation: readPendingReconciliation(),
   }
 
   function render() {
@@ -70,6 +72,7 @@ export async function renderTopologySyncPage(container) {
           ${state.exportError ? `<p class="sync-alert" role="alert">${escapeHtml(state.exportError)}</p>` : ''}
           ${state.exportMessage ? `<p class="sync-success" role="status">${escapeHtml(state.exportMessage)}</p>` : ''}` : ''}
           ${state.stagedVersionId ? `<a class="sync-link" href="/admin/datasets/import/${encodeURIComponent(state.stagedVersionId)}/preview">Tinjau & aktifkan paket awal</a>` : ''}
+          ${state.pendingReconciliation?.datasetVersionId === state.datasetVersionId && !state.draftVersionId ? `<button type="button" data-action="resume-reconciliation" ${state.busy ? 'disabled' : ''}>Periksa hasil penyelarasan sebelumnya</button>` : ''}
         </section>
         <section class="sync-card">
           <div class="sync-card-heading"><span class="material-symbols-outlined" aria-hidden="true">sync_alt</span>
@@ -265,8 +268,38 @@ export async function renderTopologySyncPage(container) {
         const unresolved = state.preview.changes.filter(item => item.status === 'conflict'
           && !state.resolutions[item.id])
         if (unresolved.length) throw new Error('Pilih hasil untuk setiap konflik dahulu.')
-        const result = await applyReconciliation(id, state.envelope, state.passphrase,
-          state.preview.recordRevision, state.resolutions)
+        const operationId = crypto.randomUUID()
+        state.pendingReconciliation = { datasetVersionId: id, operationId }
+        savePendingReconciliation(state.pendingReconciliation)
+        let result
+        try {
+          result = await applyReconciliation(id, state.envelope, state.passphrase,
+            state.preview.recordRevision, state.resolutions, operationId)
+        } catch (error) {
+          try {
+            const saved = await reconciliationOperation(id, operationId)
+            if (saved.status === 'complete') result = saved
+          } catch { /* The original error remains actionable below. */ }
+          if (!result) {
+            if (error instanceof TypeError || error.status >= 500) {
+              result = await waitForReconciliation(id, operationId)
+            } else {
+              clearPendingReconciliation()
+              state.pendingReconciliation = null
+              throw error
+            }
+          }
+        }
+        clearPendingReconciliation()
+        state.pendingReconciliation = null
+        window.location.assign(`/admin/topology-sync?draftVersionId=${encodeURIComponent(result.datasetVersionId)}`)
+        return
+      } else if (action === 'resume-reconciliation') {
+        const pending = state.pendingReconciliation
+        const result = await waitForReconciliation(pending.datasetVersionId,
+          pending.operationId)
+        clearPendingReconciliation()
+        state.pendingReconciliation = null
         window.location.assign(`/admin/topology-sync?draftVersionId=${encodeURIComponent(result.datasetVersionId)}`)
         return
       }
@@ -290,6 +323,18 @@ export async function renderTopologySyncPage(container) {
       state.branchId = draftStatus.source?.branchId ?? state.branchId
     }
     await loadBranch()
+    if (state.pendingReconciliation
+      && state.pendingReconciliation.datasetVersionId === state.datasetVersionId) {
+      const result = await reconciliationOperation(state.datasetVersionId,
+        state.pendingReconciliation.operationId)
+      if (result.status === 'complete') {
+        clearPendingReconciliation()
+        window.location.assign(`/admin/topology-sync?draftVersionId=${encodeURIComponent(result.datasetVersionId)}`)
+        return
+      }
+      state.message = 'Penyelarasan sebelumnya sedang diperiksa. Gunakan “Periksa hasil penyelarasan sebelumnya” untuk membuka draft setelah selesai.'
+      render()
+    }
   } catch (error) {
     state.error = error.message
     render()
@@ -318,7 +363,7 @@ function renderPreview(state) {
         ${change.relatedConflict ? '<small>Relasi kamera ini perlu diperbaiki di diagram sebelum paket dapat diselaraskan.</small>' : ''}
         ${change.missingAssetIds?.length ? `<small>Aset tidak ditemukan: ${escapeHtml(change.missingAssetIds.join(', '))}</small>` : ''}
       </div>`).join('') || '<p>Tidak ada perubahan dalam paket ini.</p>'}</div>
-    <button type="button" class="sync-primary" data-action="${preview.mode === 'reconciliation' ? 'reconcile-apply' : 'apply'}" ${unresolved || preview.changes.some(item => item.relatedConflict || item.status === 'blocked') || state.busy ? 'disabled' : ''}>${state.busyAction === 'reconcile-apply' ? 'Sedang menyimpan draft…' : preview.mode === 'reconciliation' ? 'Buat draft hasil penyelarasan' : 'Terapkan koreksi'}</button>
+    <button type="button" class="sync-primary" data-action="${preview.mode === 'reconciliation' ? 'reconcile-apply' : 'apply'}" ${unresolved || preview.changes.some(item => item.relatedConflict || item.status === 'blocked') || state.busy || (preview.mode === 'reconciliation' && state.pendingReconciliation?.datasetVersionId === state.datasetVersionId) ? 'disabled' : ''}>${state.busyAction === 'reconcile-apply' ? 'Sedang menyimpan draft…' : preview.mode === 'reconciliation' ? 'Buat draft hasil penyelarasan' : 'Terapkan koreksi'}</button>
     ${state.error ? `<p class="sync-alert" role="alert">${escapeHtml(state.error)}</p>` : ''}
   </section>`
 }
@@ -369,4 +414,36 @@ function valueFor(value, assetNames = {}) {
   }
   if (value.edgeId) return value.edgeId
   return JSON.stringify(value)
+}
+
+const pendingReconciliationKey = 'sinergi-pending-reconciliation'
+
+function readPendingReconciliation() {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(pendingReconciliationKey))
+    return value?.datasetVersionId && value?.operationId ? value : null
+  } catch { return null }
+}
+
+function savePendingReconciliation(value) {
+  try { sessionStorage.setItem(pendingReconciliationKey, JSON.stringify(value)) }
+  catch { /* The current page can still recover while it remains open. */ }
+}
+
+function clearPendingReconciliation() {
+  try { sessionStorage.removeItem(pendingReconciliationKey) }
+  catch { /* Storage may be disabled by the browser. */ }
+}
+
+async function waitForReconciliation(datasetVersionId, operationId) {
+  for (let attempt = 0; attempt < 18; attempt += 1) {
+    try {
+      const result = await reconciliationOperation(datasetVersionId, operationId)
+      if (result.status === 'complete') return result
+    } catch (error) {
+      if (!(error instanceof TypeError)) throw error
+    }
+    await new Promise(resolve => window.setTimeout(resolve, 5_000))
+  }
+  throw new Error('Sambungan terputus saat penyelarasan. Proses yang sama tetap tercatat; klik “Periksa hasil penyelarasan sebelumnya” untuk melihat draft tanpa mengulang impor.')
 }
