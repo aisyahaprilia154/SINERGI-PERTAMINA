@@ -308,9 +308,19 @@ export class TopologySyncService {
         code: 'topology_sync_invalid_package', statusCode: 400,
       })
     }
-    if (localVersion.baseDatasetVersionId || localVersion.publicationStatus !== 'published') {
+    const active = await this.repository.findActive(localVersion.datasetId, {
+      branchId: localVersion.branchId,
+    })
+    if (localVersion.baseDatasetVersionId
+      || active?.datasetVersion.id !== localVersion.id) {
       throw new AppError('Penyelarasan hanya bisa dimulai dari dataset aktif.', {
         code: 'topology_sync_reconciliation_requires_active', statusCode: 409,
+      })
+    }
+    if (local.topologySync?.id === remote.topologySync.id
+      && JSON.stringify(sourceIdentity(local)) === JSON.stringify(sourceIdentity(remote))) {
+      throw new AppError('Titik awal kedua dataset sudah sama. Minta paket koreksi rekan lalu gunakan “Periksa koreksi”.', {
+        code: 'topology_sync_reconciliation_already_shared', statusCode: 409,
       })
     }
     const remoteVersion = remote.datasetVersion

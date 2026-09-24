@@ -262,6 +262,17 @@ test('paket awal impor independen membuat draft dengan titik bersama tanpa mengu
     sourceFile: bytes.toString('base64') }, 'sandi-paket-awal-tim')
   const service = new TopologySyncService({ repository, fileStore, lifecycleService,
     topologyService: new TopologyService({ repository, auditLog }), auditLog })
+  const ownRecord = await repository.get(local.datasetVersion.id)
+  const ownEnvelope = encryptSyncPackage({ format: 'sinergi-topology-bootstrap-v1',
+    source: ownRecord.topologySync.source, record: ownRecord,
+    sourceFile: bytes.toString('base64') }, 'sandi-paket-awal-tim')
+  await assert.rejects(service.previewReconciliation(local.datasetVersion.id,
+    ownEnvelope, 'sandi-paket-awal-tim'), {
+    code: 'topology_sync_reconciliation_already_shared',
+  })
+  await repository.update(local.datasetVersion.id, record => ({ ...record,
+    datasetVersion: { ...record.datasetVersion, publicationStatus: 'unpublished' },
+  }))
   const incompatible = structuredClone(sender)
   incompatible.assets[0].canonicalAssetId = 'DIFFERENT-ASSET'
   const incompatibleEnvelope = encryptSyncPackage({ format: 'sinergi-topology-bootstrap-v1',
