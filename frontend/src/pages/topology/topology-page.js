@@ -76,9 +76,22 @@ export async function renderTopologyPage(container) {
 
   try {
     const draftVersionId = new URLSearchParams(window.location.search).get('draftVersionId')
-    const payload = draftVersionId
-      ? await loadTopologyDraft(draftVersionId)
-      : await loadActiveDataset({ ...requested, view: 'topology' })
+    let payload
+    if (draftVersionId) {
+      try {
+        payload = await loadTopologyDraft(draftVersionId)
+      } catch (error) {
+        if (error.status !== 404) throw error
+        const active = await loadActiveDataset({ ...requested, view: 'topology' })
+        if (active.datasetVersion?.id !== draftVersionId) throw error
+        const url = new URL(window.location.href)
+        url.searchParams.delete('draftVersionId')
+        window.history.replaceState({}, '', url)
+        payload = active
+      }
+    } else {
+      payload = await loadActiveDataset({ ...requested, view: 'topology' })
+    }
     const mapData = adaptActiveDatasetForTopology(payload)
     mapData.recordRevision = payload.recordRevision
     mapData.topologyFrameNames = payload.topologyFrameNames ?? {}
@@ -303,6 +316,11 @@ function mountTopologyWorkspace(container, {
       suppressViewportClick = false
       return
     }
+    if (event.target?.closest?.('[data-publish-draft]') && state.changes.length) {
+      event.preventDefault()
+      showToast('Simpan perubahan ke draft sebelum menerbitkan.')
+      return
+    }
     if (state.actionsOpen && !event.target?.closest?.('[data-topology-actions-menu], [data-action="toggle-actions"]')) {
       state.actionsOpen = false
       updatePanelState()
@@ -474,6 +492,11 @@ function mountTopologyWorkspace(container, {
 
   function handleChange(event) {
     const target = event.target
+    if (target.matches('[data-asset-frame-select]')) {
+      const box = layout?.mountingBoxes?.find(item => item.id === target.value)
+      if (box && state.selectedAssetId) void moveAssetToFrame(state.selectedAssetId, box)
+      return
+    }
     if (target.matches('[data-area-filter]')) {
       state.area = target.value === 'all' ? null : target.value
       persistTopologyArea(areaStorageKey, state.area)
@@ -1182,8 +1205,13 @@ function mountTopologyWorkspace(container, {
     const node = model.nodeById.get(assetId)
     if (!node || !box) return
     const currentFrameId = mapData.topologyFrameAssignments?.[assetId] ?? null
+    const displayedFrameId = layout?.nodes?.find(item => item.id === assetId)?.mountingBoxId ?? null
+    const current = (mapData.mountingRelations ?? []).find((relation) => (
+      relation.sourceAssetId === assetId
+        && !['rejected', 'revoked'].includes(String(relation.verificationStatus).toLowerCase())
+    ))
     if (box.kind === 'excluded') {
-      if (currentFrameId === box.id) {
+      if (currentFrameId === box.id && !current && displayedFrameId === box.id) {
         void feedback?.finish()
         return
       }
@@ -1192,33 +1220,28 @@ function mountTopologyWorkspace(container, {
         [assetId]: box.id,
       }
       stageChange({ type: 'move-frame', assetId, frameId: box.id })
+      if (current) {
+        applyMutationResponse({ mountingRelations: (mapData.mountingRelations ?? [])
+          .filter(relation => relation.sourceAssetId !== assetId) })
+        stageChange({ type: 'mount', assetId, poleAssetId: null, action: 'detach' })
+      }
       rebuild()
       void feedback?.finish(container.querySelector(`[data-mounting-group-id="${cssEscape(box.id)}"]`))
       return
     }
     if (!box.hostId) return
-    const current = (mapData.mountingRelations ?? []).find((relation) => (
-      relation.sourceAssetId === assetId
-        && !['rejected', 'revoked'].includes(String(relation.verificationStatus).toLowerCase())
-    ))
     if (current?.targetAssetId === box.hostId) {
-      if (currentFrameId) {
-        const nextAssignments = { ...(mapData.topologyFrameAssignments ?? {}) }
-        delete nextAssignments[assetId]
-        mapData.topologyFrameAssignments = nextAssignments
-        stageChange({ type: 'move-frame', assetId, frameId: null })
+      if (displayedFrameId !== box.id || currentFrameId !== box.id) {
+        mapData.topologyFrameAssignments = { ...(mapData.topologyFrameAssignments ?? {}), [assetId]: box.id }
+        stageChange({ type: 'move-frame', assetId, frameId: box.id })
         rebuild()
       }
       void feedback?.finish()
       return
     }
     if (state.mutationBusy) { feedback?.cancel(); return }
-    if (currentFrameId) {
-      const nextAssignments = { ...(mapData.topologyFrameAssignments ?? {}) }
-      delete nextAssignments[assetId]
-      mapData.topologyFrameAssignments = nextAssignments
-      stageChange({ type: 'move-frame', assetId, frameId: null })
-    }
+    mapData.topologyFrameAssignments = { ...(mapData.topologyFrameAssignments ?? {}), [assetId]: box.id }
+    stageChange({ type: 'move-frame', assetId, frameId: box.id })
     const previousMounting = mapData.mountingRelations ?? []
     applyMutationResponse({ mountingRelations: [
       ...previousMounting.filter(relation => relation.sourceAssetId !== assetId),
@@ -1587,6 +1610,13 @@ function mountTopologyWorkspace(container, {
       && !relations.some(({ other }) => ['junction-peer', 'junction-extended']
         .includes(other.diagramClass))
     const online = node.connectivityStatus !== 'disconnected' && !isOfflineStatus(node.status)
+    const canMountOnPole = /junction\s*box|\bjb\b|cctv|camera|kamera/i.test(
+      `${node.type ?? ''} ${node.assetType ?? ''} ${node.name ?? ''}`)
+    const availableFrames = (layout?.mountingBoxes ?? []).filter(box =>
+      ['confirmed', 'empty', 'excluded'].includes(box.kind)
+        && (!box.areaKey || box.areaKey === node.areaKey)
+        && (canMountOnPole || box.kind === 'excluded'))
+    const displayedFrameId = layout?.nodes?.find(item => item.id === node.id)?.mountingBoxId ?? ''
     return `
       <div class="topology-stitch-inspector-head">
         <h3>Detail Perangkat</h3>
@@ -1611,6 +1641,14 @@ function mountTopologyWorkspace(container, {
         <section class="topology-stitch-inspector-card">
           <div class="topology-stitch-section-label"><span class="material-symbols-outlined" aria-hidden="true">location_on</span>Lokasi Fisik</div>
           <p>${escapeHtml(physicalLocation(node, group))}</p>
+        </section>
+        <section class="topology-stitch-inspector-section topology-frame-picker">
+          <label for="topology-asset-frame">Pindahkan ke frame</label>
+          <select id="topology-asset-frame" data-asset-frame-select ${state.mutationBusy ? 'disabled' : ''}>
+            <option value="">Pilih frame tujuan…</option>
+            ${availableFrames.map(box => `<option value="${escapeAttribute(box.id)}" ${box.id === displayedFrameId ? 'selected' : ''}>${escapeHtml(box.label || box.hostName || box.id)}</option>`).join('')}
+          </select>
+          <small>Penempatan tiang juga memperbarui mounting di Peta Aset setelah disimpan.</small>
         </section>
         <section class="topology-stitch-inspector-section">
           <label>Jalur Jaringan</label>
@@ -2078,7 +2116,10 @@ function renderWorkspaceShell({ activeContext, mapData, state, model }) {
             <span>Versi aktif hanya untuk dilihat. Buat draft untuk mengedit.</span>
             <a href="/admin/topology-sync">Buat draft</a>
           </div>` : ''}
-          ${mapData.isDraft ? `<div class="topology-draft-required is-draft" role="status">Draft koreksi · perubahan belum terlihat oleh pengguna umum</div>` : ''}
+          ${mapData.isDraft ? `<div class="topology-draft-required is-draft" role="status">
+            <span>Ini diagram draft. Simpan koreksi, lalu terbitkan agar muncul di diagram aktif.</span>
+            <a data-publish-draft href="/admin/topology-sync?draftVersionId=${encodeURIComponent(activeContext.draftVersionId || activeContext.datasetVersionId)}">Tinjau &amp; terbitkan</a>
+          </div>` : ''}
           <div class="topology-stitch-toolbar" role="group" aria-label="Alat diagram">
             <div class="topology-stitch-toolbar-actions">
               <div class="topology-toolbar-group topology-toolbar-edit-actions" aria-label="Edit diagram">
@@ -2118,7 +2159,7 @@ function renderWorkspaceShell({ activeContext, mapData, state, model }) {
           <div class="topology-draft-bar" data-draft-bar hidden role="status" aria-live="polite">
             <span class="topology-draft-indicator"></span><div><strong data-draft-count></strong><small data-draft-error></small></div>
             <button type="button" data-action="cancel-diagram">Batal</button>
-            <button type="button" class="topology-save-button" data-action="save-diagram">Simpan</button>
+            <button type="button" class="topology-save-button" data-action="save-diagram">Simpan ke draft</button>
           </div>
           <aside class="topology-legend-popover" id="topology-legend" data-topology-legend hidden>
             <header><strong>Legenda diagram</strong><button type="button" data-action="close-legend" aria-label="Tutup legenda"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></header>

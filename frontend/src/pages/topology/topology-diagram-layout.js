@@ -114,7 +114,7 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
       ['indoor', 'standalone'].includes(nodeById.get(id)?.mountingExpectation))
     const hasCustomFrames = Object.values(settings.customFrames ?? {})
       .some((frame) => frame?.areaKey === area.key)
-    const laneSpecs = usesPoleBoxes && (areaComponents.length || nonPoleIds.length || hasCustomFrames)
+    const laneSpecs = usesPoleBoxes && (area.nodeIds?.length || hasCustomFrames)
       ? [buildPoleBackboneAreaLaneSpec({
         area,
         components: areaComponents,
@@ -137,6 +137,7 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
       .filter((group) => group.areaKey === area.key)
       .flatMap((group) => group.childIds ?? []))
     const disconnectedNodes = (area.isolatedNodeIds ?? [])
+      .filter(() => !usesPoleBoxes || !laneSpecs.length)
       .filter((id) => !mountedPresentationIds.has(id))
       .filter(id => !usesPoleBoxes || !nonPoleIds.includes(id))
       .map((id) => nodeById.get(id))
@@ -642,7 +643,9 @@ function buildPoleBackboneAreaLaneSpec({
     .flatMap((group) => group.childIds ?? []))
   const nonPoleIds = (area.nodeIds ?? []).filter(id =>
     ['indoor', 'standalone'].includes(nodeById.get(id)?.mountingExpectation))
-  const connectedIds = new Set([...componentByNodeId.keys(), ...mountedPresentationIds, ...nonPoleIds])
+  // Keep isolated assets in the same area lane as the frames. Their logical
+  // connectivity remains unchanged; only their editable placement is nearby.
+  const connectedIds = new Set([...(area.nodeIds ?? []), ...componentByNodeId.keys(), ...mountedPresentationIds, ...nonPoleIds])
   const connectedNodes = [...connectedIds].map((id) => nodeById.get(id)).filter(Boolean)
   const coreNodes = connectedNodes
     .filter((node) => node.diagramClass === 'rack-root')

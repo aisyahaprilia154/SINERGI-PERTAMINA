@@ -5,7 +5,27 @@ import {
   adaptActiveDatasetForMap,
   adaptActiveDatasetForTopology,
   locationGroupFor,
+  reconcileFrameMountingAssignments,
 } from '../src/adapters/active-dataset-map-adapter.js'
+
+test('saved pole frame placements project to the same mounting list as the map', () => {
+  const assets = [
+    { id: 'pole', name: 'T-015', type: 'Tiang' },
+    { id: 'jb', name: 'JB-01', type: 'Junction Box' },
+    { id: 'camera', name: 'C-047', type: 'CCTV' },
+  ]
+  const source = [{ relationId: 'old', sourceAssetId: 'camera', targetAssetId: 'other' }]
+  const payload = { topologyFrameAssignments: { jb: 'pole-group:pole', camera: 'pole-group:pole' } }
+  const projected = reconcileFrameMountingAssignments(source, payload, assets)
+  assert.deepEqual(projected.map(({ sourceAssetId, targetAssetId }) => [sourceAssetId, targetAssetId]), [
+    ['jb', 'pole'], ['camera', 'pole'],
+  ])
+  assert.equal(source[0].targetAssetId, 'other', 'projection does not mutate source records')
+  const corrected = reconcileFrameMountingAssignments(projected, {
+    topologyFrameAssignments: { camera: 'excluded-mounting:area-a:camera' },
+  }, assets)
+  assert.equal(corrected.some(relation => relation.sourceAssetId === 'camera'), false)
+})
 import { buildTopologyDiagramModel } from '../src/domain/topology-diagram-model.js'
 
 test('active dataset adapter preserves source coordinates and uses explicit relations only', () => {

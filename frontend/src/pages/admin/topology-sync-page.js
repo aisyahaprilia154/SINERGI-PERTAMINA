@@ -30,7 +30,8 @@ export async function renderTopologySyncPage(container) {
     draftReview: null, reviewConfirmed: false, breakingConfirmed: false,
     exportOffset: 0,
     envelope: null, filename: '', passphrase: '', exportPassphrase: '', preview: null,
-    resolutions: {}, message: '', error: '', exportError: '', exportMessage: '',
+    resolutions: {}, message: '', messageIsWarning: false,
+    error: '', exportError: '', exportMessage: '',
     busy: false, busyAction: '',
     pendingReconciliation: readPendingReconciliation(),
   }
@@ -99,7 +100,7 @@ export async function renderTopologySyncPage(container) {
         ${state.preview ? renderPreview(state) : ''}
         ${state.draftReview ? renderDraftReview(state) : ''}
         ${state.error && !state.preview ? `<p class="sync-alert" role="alert">${escapeHtml(state.error)}</p>` : ''}
-        ${state.message ? `<p class="sync-success" role="status">${escapeHtml(state.message)}</p>` : ''}
+        ${state.message ? `<p class="${state.messageIsWarning ? 'sync-alert' : 'sync-success'}" role="status">${escapeHtml(state.message)}</p>` : ''}
       </main>`
     bind()
   }
@@ -167,9 +168,14 @@ export async function renderTopologySyncPage(container) {
         datasetId: branch.datasetId, branchId: branch.id,
         view: 'topology', token: getDefaultAdminToken(),
       })
-      state.datasetVersionId = payload.activeContext?.datasetVersionId
+      const activeVersionId = payload.activeContext?.datasetVersionId
         ?? payload.context?.datasetVersionId ?? payload.datasetVersion?.id ?? ''
-      if (state.draftVersionId) state.datasetVersionId = state.draftVersionId
+      if (state.draftVersionId && state.draftVersionId === activeVersionId) {
+        state.draftVersionId = ''
+        window.history.replaceState({}, '', '/admin/topology-sync')
+        state.message = 'Draft sudah terbit dan kini menjadi versi aktif.'
+      }
+      state.datasetVersionId = state.draftVersionId || activeVersionId
       if (state.datasetVersionId) {
         state.status = await syncStatus(state.datasetVersionId)
         if (state.exportOffset >= (state.status.pendingChanges ?? 0)) state.exportOffset = 0
@@ -202,6 +208,7 @@ export async function renderTopologySyncPage(container) {
     state.exportError = ''
     state.exportMessage = ''
     state.message = ''
+    state.messageIsWarning = false
     render()
     try {
       const id = state.datasetVersionId
@@ -263,7 +270,10 @@ export async function renderTopologySyncPage(container) {
           state.preview.recordRevision, state.resolutions)
         state.status = result.status
         state.preview = null
-        state.message = `${result.applied} koreksi diterapkan. Muat ulang diagram untuk melihat hasil.`
+        state.messageIsWarning = result.applied === 0
+        state.message = result.applied
+          ? `${result.applied} koreksi baru diterapkan ke dataset aktif. Muat ulang diagram untuk melihat hasil.`
+          : 'Tidak ada koreksi baru dalam paket ini. Dataset aktif tidak berubah. Jika koreksi yang dicari masih berada di draft, buka diagram draft lalu tinjau publikasinya.'
       } else if (action === 'reconcile-apply') {
         const unresolved = state.preview.changes.filter(item => item.status === 'conflict'
           && !state.resolutions[item.id])
@@ -323,6 +333,20 @@ export async function renderTopologySyncPage(container) {
       state.branchId = draftStatus.source?.branchId ?? state.branchId
     }
     await loadBranch()
+    if (state.draftVersionId) {
+      try {
+        state.draftReview = await loadDraftReview(state.draftVersionId)
+        render()
+      } catch (error) {
+        if (!['topology_sync_draft_stale', 'topology_sync_draft_invalid'].includes(error.code)) throw error
+        state.draftVersionId = ''
+        window.history.replaceState({}, '', '/admin/topology-sync')
+        await loadBranch()
+        state.message = 'Draft lama tidak dapat diterbitkan karena versi aktif sudah berubah. Buka diagram aktif untuk melihat hasil terbaru.'
+        state.messageIsWarning = true
+        render()
+      }
+    }
     if (state.pendingReconciliation
       && state.pendingReconciliation.datasetVersionId === state.datasetVersionId) {
       const result = await reconciliationOperation(state.datasetVersionId,
@@ -343,12 +367,16 @@ export async function renderTopologySyncPage(container) {
 
 function renderPreview(state) {
   const preview = state.preview
+  const allAlreadyApplied = preview.mode !== 'reconciliation'
+    && preview.changes.length > 0
+    && preview.changes.every(item => item.status === 'already-applied')
   const unresolved = preview.changes.some(item => item.status === 'conflict'
     && !state.resolutions[item.id])
   return `<section class="sync-card sync-preview">
     <div class="sync-card-heading"><span class="material-symbols-outlined" aria-hidden="true">fact_check</span>
       <div><h2>${preview.mode === 'reconciliation' ? 'Pratinjau penyelarasan' : 'Pratinjau koreksi'}</h2><p>${preview.summary.ready} baru · ${preview.summary.alreadyApplied} sudah diterima · ${preview.summary.conflict} konflik${preview.summary.blocked ? ` · ${preview.summary.blocked} perlu perbaikan` : ''}</p></div></div>
     ${preview.mode === 'reconciliation' ? '<p class="sync-hint">Pastikan kamu sudah mengunduh paket awal milikmu sebagai cadangan. Hasil penyelarasan akan dibuat sebagai draft dan perlu ditinjau sebelum diterbitkan.</p>' : ''}
+    ${allAlreadyApplied ? '<p class="sync-alert" role="status">Semua koreksi dalam file ini sudah diterima. Menerapkan file yang sama tidak akan mengubah diagram aktif. Jika hasil yang dicari ada di draft, tinjau dan terbitkan draft itu; jika belum ada, minta file koreksi terbaru.</p>' : ''}
     ${preview.changes.some(item => item.relatedConflict) ? '<p class="sync-alert" role="alert">Ada kamera yang terhubung ke dua JB berbeda. Perbaiki relasi kamera di diagram, lalu periksa paket lagi.</p>' : ''}
     ${preview.changes.some(item => item.status === 'blocked') ? '<p class="sync-alert" role="alert">Ada relasi dalam paket yang merujuk aset yang tidak tersedia di dataset ini. Periksa identitas atau relasi aset sebelum menyelaraskan.</p>' : ''}
     ${state.busyAction === 'reconcile-apply' ? `<p class="sync-hint" role="status">Sedang membuat draft dan menyimpan ${preview.summary.ready + preview.summary.conflict} perubahan. Dataset aktif belum berubah; tunggu sampai halaman draft terbuka.</p>` : ''}
@@ -363,7 +391,7 @@ function renderPreview(state) {
         ${change.relatedConflict ? '<small>Relasi kamera ini perlu diperbaiki di diagram sebelum paket dapat diselaraskan.</small>' : ''}
         ${change.missingAssetIds?.length ? `<small>Aset tidak ditemukan: ${escapeHtml(change.missingAssetIds.join(', '))}</small>` : ''}
       </div>`).join('') || '<p>Tidak ada perubahan dalam paket ini.</p>'}</div>
-    <button type="button" class="sync-primary" data-action="${preview.mode === 'reconciliation' ? 'reconcile-apply' : 'apply'}" ${unresolved || preview.changes.some(item => item.relatedConflict || item.status === 'blocked') || state.busy || (preview.mode === 'reconciliation' && state.pendingReconciliation?.datasetVersionId === state.datasetVersionId) ? 'disabled' : ''}>${state.busyAction === 'reconcile-apply' ? 'Sedang menyimpan draft…' : preview.mode === 'reconciliation' ? 'Buat draft hasil penyelarasan' : 'Terapkan koreksi'}</button>
+    <button type="button" class="sync-primary" data-action="${preview.mode === 'reconciliation' ? 'reconcile-apply' : 'apply'}" ${allAlreadyApplied || unresolved || preview.changes.some(item => item.relatedConflict || item.status === 'blocked') || state.busy || (preview.mode === 'reconciliation' && state.pendingReconciliation?.datasetVersionId === state.datasetVersionId) ? 'disabled' : ''}>${state.busyAction === 'reconcile-apply' ? 'Sedang menyimpan draft…' : preview.mode === 'reconciliation' ? 'Buat draft hasil penyelarasan' : 'Terapkan koreksi'}</button>
     ${state.error ? `<p class="sync-alert" role="alert">${escapeHtml(state.error)}</p>` : ''}
   </section>`
 }

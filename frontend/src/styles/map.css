@@ -5837,6 +5837,15 @@
     --map-safe-right: var(--space-3);
   }
 
+  /* On a snapped Windows window the drawer is a bottom sheet. Keep the
+     actions above it reachable while the asset details are open. */
+  .map-workspace.drawer-open .map-floating-top {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+
 }
 
 @media (max-width: 620px) {
@@ -6025,6 +6034,56 @@
   .map-workspace.sidebar-open .mobile-map-tabs {
     visibility: hidden;
     opacity: 0;
+    pointer-events: none;
+  }
+}
+
+/* A Windows half-screen commonly lands between the phone and desktop
+   breakpoints. The sidebar is already a bottom sheet there, so expose its
+   Map/Layers/Assets controls at those widths too. */
+@media (min-width: 621px) and (max-width: 960px) {
+  .mobile-map-tabs {
+    position: absolute;
+    right: 50%;
+    bottom: calc(20px + env(safe-area-inset-bottom));
+    z-index: 460;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(84px, 1fr));
+    gap: 2px;
+    padding: 4px;
+    transform: translateX(50%);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-floating);
+  }
+  .mobile-map-tab {
+    min-height: 44px;
+    padding: 4px 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    color: var(--color-text-secondary);
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    font-size: 12px;
+    font-weight: 650;
+  }
+  .mobile-map-tab .material-symbols-outlined { font-size: 18px; }
+  .mobile-map-tab.active {
+    color: var(--color-text-inverse);
+    background: var(--color-primary);
+  }
+  .map-workspace.sidebar-open .mobile-map-tabs {
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+@media (max-width: 960px) {
+  .map-workspace.drawer-open .mobile-map-tabs {
+    visibility: hidden;
     pointer-events: none;
   }
 }

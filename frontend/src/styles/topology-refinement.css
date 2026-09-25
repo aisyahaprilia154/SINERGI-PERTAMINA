@@ -156,8 +156,8 @@
   .topology-body #app .topology-stitch-graph-frame svg .topology-drop-slot rect { animation: none; }
   .topology-body #app .topology-stitch-graph-frame svg .topology-mounting-group.drop-target .topology-mounting-bubble { transform: none; transition: none; }
 }
-.topology-draft-required{display:flex;align-items:center;gap:12px;margin:8px 0;padding:9px 13px;border:1px solid #d7e5f2;border-radius:12px;background:#f1f7fd;color:#375a79;font-size:12px;font-weight:600}
-.topology-draft-required a{color:inherit;text-decoration:underline;font-weight:750}
+.topology-draft-required{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:8px 0;padding:9px 13px;border:1px solid #d7e5f2;border-radius:12px;background:#f1f7fd;color:#375a79;font-size:12px;font-weight:600}
+.topology-draft-required a{color:inherit;text-decoration:underline;font-weight:750;white-space:nowrap}
 .topology-draft-required.is-draft{background:#f6f0ff;border-color:#e4d5fa;color:#6b4e95}
 :root[data-theme=dark] .topology-draft-required{background:#1b2d3a;border-color:#36516a;color:#b7d7ed}
 :root[data-theme=dark] .topology-draft-required.is-draft{background:#2b2538;border-color:#57476e;color:#dcc6f6}

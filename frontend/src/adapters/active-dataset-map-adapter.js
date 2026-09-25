@@ -6,6 +6,7 @@ import {
 import { correctFacilityEdges, correctedMountingExpectation, correctAdditionalMounts } from '../../../shared/facility-corrections.mjs'
 import {
   buildPoleGroups,
+  isPoleRecord,
   ensureDppuYiaKnownMountingRelations,
   MOUNTING_RELATION_TYPE,
 } from '../domain/pole-groups.js'
@@ -142,11 +143,11 @@ export function adaptActiveDatasetForMap(payload) {
   ))
   // The presentation layer may group confirmed mounting relations, but it must
   // never turn proximity into a physical attachment that is absent from data.
-  const mountingRelations = correctAdditionalMounts(ensureDppuYiaKnownMountingRelations(
+  const mountingRelations = reconcileFrameMountingAssignments(correctAdditionalMounts(ensureDppuYiaKnownMountingRelations(
     explicitMountingRelations.filter(relation => relation.provenance === 'manual_admin'
       || !correctedMountingExpectation(assetById[relation.sourceAssetId])),
     assets,
-  ), assets)
+  ), assets), payload, assets)
   const mountingOptions = normalizeMountingOptions(
     payload.mountingOptions ?? payload.mountingCandidates,
     resolver,
@@ -353,11 +354,11 @@ export function adaptActiveDatasetForTopology(payload) {
   }).filter(({ id }) => Boolean(id))
   topologyGraph.edges = filterRemovedDiagramEdges(correctFacilityEdges(topologyGraph.edges, assets), payload.topologyEdgeOverrides)
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
-  const mountingRelations = correctAdditionalMounts(ensureDppuYiaKnownMountingRelations(normalizeMountingRelations(
+  const mountingRelations = reconcileFrameMountingAssignments(correctAdditionalMounts(ensureDppuYiaKnownMountingRelations(normalizeMountingRelations(
     payload.mountingRelations ?? [],
     resolver,
   ).filter((relation) => assetById[relation.sourceAssetId] && assetById[relation.targetAssetId]
-    && (relation.provenance === 'manual_admin' || !correctedMountingExpectation(assetById[relation.sourceAssetId]))), assets), assets)
+    && (relation.provenance === 'manual_admin' || !correctedMountingExpectation(assetById[relation.sourceAssetId]))), assets), assets), payload, assets)
   const mountingExpectations = normalizeMountingExpectations(
     payload.mountingExpectations,
     resolver,
@@ -621,6 +622,42 @@ function isConfirmedRelation(relation) {
     return relation.verificationStatus === 'confirmed'
   }
   return relation.relationStatus === undefined || relation.relationStatus === 'confirmed'
+}
+
+// Older diagram edits stored only a frame assignment. Project those explicit
+// pole placements into the same mounting list consumed by both views.
+export function reconcileFrameMountingAssignments(relations = [], payload = {}, assets = []) {
+  const assetIds = new Set(assets.map(asset => asset.id))
+  const poleIds = new Set(assets.filter(isPoleRecord).map(asset => asset.id))
+  const assignments = Object.entries(payload.topologyFrameAssignments ?? {})
+  const frames = payload.topologyFrames ?? {}
+  const result = [...relations]
+  for (const [assetId, frameId] of assignments) {
+    if (!assetIds.has(assetId)) continue
+    const frame = frames[frameId]
+    const poleId = frame?.type === 'pole'
+      ? frame.poleAssetId
+      : [...poleIds].find(id => frameId === `pole-group:${id}`
+        || String(frameId).startsWith(`pole-group:${id}:`))
+    const validPoleId = poleIds.has(poleId) && poleId !== assetId ? poleId : null
+    if (!validPoleId && !frame?.type?.match(/^(indoor|standalone)$/)
+      && !String(frameId).startsWith('excluded-mounting:')) continue
+    const matching = result.find(relation => relation.sourceAssetId === assetId
+      && relation.targetAssetId === validPoleId)
+    for (let index = result.length - 1; index >= 0; index -= 1) {
+      if (result[index].sourceAssetId === assetId) result.splice(index, 1)
+    }
+    if (matching && validPoleId) result.push(matching)
+    else if (validPoleId) result.push({
+      relationId: `frame-mounting:${assetId}->${validPoleId}`,
+      sourceAssetId: assetId,
+      targetAssetId: validPoleId,
+      relationType: MOUNTING_RELATION_TYPE,
+      verificationStatus: 'confirmed',
+      provenance: 'manual_admin',
+    })
+  }
+  return result
 }
 
 function normalizeMountingRelations(relations = [], resolver = null) {

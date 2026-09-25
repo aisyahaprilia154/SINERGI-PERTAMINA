@@ -238,6 +238,46 @@ test('diagram frame assignment can move an asset into an Indoor frame without ch
   assert.equal(model.mountingGroups.find(({ hostId }) => hostId === 'pole').childIds.includes('camera'), true)
 })
 
+test('isolated JB and CCTV remain in an editable area lane beside pole frames', () => {
+  const area = 'area-a'
+  const assets = [
+    { id: 'pole', name: 'T-015', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area },
+    { id: 'jb', name: 'JB-01', type: 'Junction Box', topologyRole: 'junction', locationGroupKey: area },
+    { id: 'camera', name: 'C-047', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: area },
+  ]
+  const model = buildTopologyDiagramModel({ assets, graph: { nodes: assets, edges: [] },
+    locationGroups: [{ key: area, name: area }] })
+  const layout = calculateTopologyDiagramLayout(model, { layoutStyle: 'central-backbone',
+    customFrames: { 'pole-group:pole': { id: 'pole-group:pole', type: 'pole',
+      poleAssetId: 'pole', areaKey: area, name: 'T-015' } } })
+  assert.ok(layout.mountingBoxes.some(box => box.hostId === 'pole'))
+  for (const id of ['jb', 'camera']) {
+    assert.ok(layout.mountingBoxes.some(box => box.nodeIds.includes(id)))
+    assert.equal(layout.nodes.filter(node => node.id === id).length, 1)
+    assert.ok(layout.nodes.find(node => node.id === id).mountingBoxId)
+  }
+})
+
+test('a second camera can join an already mounted JB without losing its logical line', () => {
+  const area = 'area-a'
+  const assets = [
+    { id: 'pole', name: 'T-015', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area },
+    { id: 'jb', name: 'JB-01', type: 'Junction Box', topologyRole: 'junction', locationGroupKey: area },
+    { id: 'camera-a', name: 'C-046', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: area },
+    { id: 'camera-b', name: 'C-047', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: area },
+  ]
+  const edges = ['camera-a', 'camera-b'].map(id => ({ id: `jb-${id}`,
+    sourceNodeId: 'jb', targetNodeId: id, relationStatus: 'confirmed' }))
+  const model = buildTopologyDiagramModel({ assets, graph: { nodes: assets, edges },
+    mountingRelations: ['jb', 'camera-a', 'camera-b'].map(sourceAssetId => ({
+      sourceAssetId, targetAssetId: 'pole', relationType: 'mounted_on',
+    })), locationGroups: [{ key: area, name: area }] })
+  const layout = calculateTopologyDiagramLayout(model, { layoutStyle: 'central-backbone' })
+  const pole = layout.mountingBoxes.find(box => box.hostId === 'pole')
+  assert.deepEqual(new Set(pole.nodeIds), new Set(['jb', 'camera-a', 'camera-b']))
+  assert.ok(layout.edges.some(edge => edge.sourceId === 'jb' && edge.targetId === 'camera-b'))
+})
+
 test('direct JB and camera share a matching Non-tiang frame while independent assets stay apart', () => {
   const area = 'branch-area'
   const assets = [

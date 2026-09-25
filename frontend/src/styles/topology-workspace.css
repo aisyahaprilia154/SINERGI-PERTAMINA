@@ -1515,6 +1515,24 @@
   background: var(--workspace-inset);
 }
 
+.topology-body #app .topology-frame-picker {
+  display: grid;
+  gap: 8px;
+}
+.topology-body #app .topology-frame-picker select {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 8px;
+  color: var(--workspace-text);
+  background: var(--workspace-surface);
+}
+.topology-body #app .topology-frame-picker small {
+  color: var(--workspace-secondary);
+}
+
 @container (max-width: 820px) {
   .topology-body #app .topology-context-card {
     top: 76px;
