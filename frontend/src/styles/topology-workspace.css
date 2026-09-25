@@ -331,6 +331,34 @@
   border-color: var(--workspace-line);
   backdrop-filter: none;
 }
+:root[data-theme="dark"] .topology-body #app .topology-stitch-inspector-head,
+:root[data-theme="dark"] .topology-body #app .topology-stitch-inspector-footer {
+  color: var(--workspace-text);
+  background: var(--workspace-surface);
+  border-color: var(--workspace-line);
+}
+:root[data-theme="dark"] .topology-body #app .topology-stitch-inspector-head h3 {
+  color: var(--workspace-text);
+}
+:root[data-theme="dark"] .topology-body #app .topology-stitch-inspector-head .topology-stitch-icon-button {
+  color: var(--workspace-secondary);
+}
+:root[data-theme="dark"] .topology-body #app .topology-stitch-inspector-head .topology-stitch-icon-button:hover {
+  color: var(--workspace-text);
+  background: var(--workspace-inset);
+}
+:root[data-theme="dark"] .topology-body #app .topology-stitch-path {
+  color: var(--workspace-secondary);
+  background: var(--workspace-inset);
+  border-color: var(--workspace-line);
+}
+:root[data-theme="dark"] .topology-body #app .topology-stitch-path span.current {
+  color: #a9d0ff;
+  background: rgba(64, 156, 255, .16);
+}
+:root[data-theme="dark"] .topology-body #app .topology-stitch-detail-link {
+  color: #a9d0ff;
+}
 .topology-body #app .topology-legend-popover {
   width: min(292px, calc(100% - 32px));
   max-height: min(460px, calc(100% - 112px));
