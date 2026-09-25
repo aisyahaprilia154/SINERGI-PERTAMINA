@@ -238,6 +238,110 @@ test('diagram save applies multiple edits with one write and one aggregate revis
     record.topologyInputBundle.classifiedNodes)
 })
 
+test('diagram save retains several dragged asset placements in one batch', async () => {
+  const bundle = mountingBundle()
+  const second = mountingNode('CAM-02', 'CCTV Camera', [110.000006, -7])
+  bundle.classifiedNodes.push(second.object)
+  bundle.geometries.push(second.geometry)
+  const record = applyArtifacts(baseRecord(bundle), generateRelationArtifacts(bundle))
+  const repository = new SerializedMemoryRepository([record])
+  const service = new TopologyService({ repository, auditLog: new MemoryAuditLog() })
+  const result = await service.saveDiagram('dv-review', 'admin-1', {
+    expectedRecordRevision: record.recordRevision ?? 0,
+    changes: [
+      { type: 'move-frame', assetId: 'CAM-01', frameId: 'pole-group:POLE-FIELD' },
+      { type: 'mount', assetId: 'CAM-01', poleAssetId: 'POLE-FIELD' },
+      { type: 'move-frame', assetId: 'CAM-02', frameId: 'pole-group:POLE-FIELD' },
+      { type: 'mount', assetId: 'CAM-02', poleAssetId: 'POLE-FIELD' },
+    ],
+  })
+  assert.equal(result.topologyFrameAssignments['CAM-01'], 'pole-group:POLE-FIELD')
+  assert.equal(result.topologyFrameAssignments['CAM-02'], 'pole-group:POLE-FIELD')
+  for (const id of ['CAM-01', 'CAM-02']) {
+    assert.equal(result.mountingRelations.find(relation => relation.sourceAssetId === id)?.targetAssetId,
+      'POLE-FIELD')
+  }
+})
+
+test('diagram save retains several dragged connections in one batch', async () => {
+  const bundle = mountingBundle()
+  for (const id of ['JB-01', 'JB-02']) {
+    const node = mountingNode(id, 'Junction Box', [110.000005, -7])
+    bundle.classifiedNodes.push(node.object)
+    bundle.geometries.push(node.geometry)
+  }
+  const record = applyArtifacts(baseRecord(bundle), generateRelationArtifacts(bundle))
+  const service = new TopologyService({
+    repository: new SerializedMemoryRepository([record]), auditLog: new MemoryAuditLog(),
+  })
+  const result = await service.saveDiagram('dv-review', 'admin-1', {
+    expectedRecordRevision: record.recordRevision ?? 0,
+    changes: [
+      { type: 'add-relation', sourceAssetId: 'CAM-01', targetAssetId: 'JB-01' },
+      { type: 'add-relation', sourceAssetId: 'JB-01', targetAssetId: 'JB-02' },
+    ],
+  })
+  for (const target of ['JB-01', 'JB-02']) {
+    assert.ok(result.graph.edges.some(edge => [edge.sourceAssetId, edge.targetAssetId].includes(target)))
+  }
+})
+
+test('diagram save retains frame moves and connections mixed in one batch', async () => {
+  const bundle = mountingBundle()
+  for (const id of ['CAM-02', 'JB-01', 'JB-02']) {
+    const node = mountingNode(id, id.startsWith('JB') ? 'Junction Box' : 'CCTV Camera',
+      [110.000006, -7])
+    bundle.classifiedNodes.push(node.object)
+    bundle.geometries.push(node.geometry)
+  }
+  const record = applyArtifacts(baseRecord(bundle), generateRelationArtifacts(bundle))
+  const service = new TopologyService({
+    repository: new SerializedMemoryRepository([record]), auditLog: new MemoryAuditLog(),
+  })
+  const result = await service.saveDiagram('dv-review', 'admin-1', {
+    expectedRecordRevision: record.recordRevision ?? 0,
+    changes: [
+      { type: 'move-frame', assetId: 'CAM-01', frameId: 'pole-group:POLE-FIELD' },
+      { type: 'mount', assetId: 'CAM-01', poleAssetId: 'POLE-FIELD' },
+      { type: 'add-relation', sourceAssetId: 'CAM-01', targetAssetId: 'JB-01' },
+      { type: 'move-frame', assetId: 'CAM-02', frameId: 'pole-group:POLE-FIELD' },
+      { type: 'mount', assetId: 'CAM-02', poleAssetId: 'POLE-FIELD' },
+      { type: 'add-relation', sourceAssetId: 'CAM-02', targetAssetId: 'JB-02' },
+    ],
+  })
+  for (const [camera, jb] of [['CAM-01', 'JB-01'], ['CAM-02', 'JB-02']]) {
+    assert.equal(result.topologyFrameAssignments[camera], 'pole-group:POLE-FIELD')
+    assert.equal(result.mountingRelations.find(relation => relation.sourceAssetId === camera)?.targetAssetId,
+      'POLE-FIELD')
+    assert.ok(result.graph.edges.some(edge => [edge.sourceAssetId, edge.targetAssetId].includes(camera)
+      && [edge.sourceAssetId, edge.targetAssetId].includes(jb)))
+  }
+})
+
+test('diagram save places a non-mountable device in a pole frame beside a connection', async () => {
+  const bundle = mountingBundle()
+  for (const [id, type] of [['SERVER-01', 'Server'], ['JB-01', 'Junction Box']]) {
+    const node = mountingNode(id, type, [110.000006, -7])
+    bundle.classifiedNodes.push(node.object)
+    bundle.geometries.push(node.geometry)
+  }
+  const record = applyArtifacts(baseRecord(bundle), generateRelationArtifacts(bundle))
+  const service = new TopologyService({
+    repository: new SerializedMemoryRepository([record]), auditLog: new MemoryAuditLog(),
+  })
+  const result = await service.saveDiagram('dv-review', 'admin-1', {
+    expectedRecordRevision: record.recordRevision ?? 0,
+    changes: [
+      { type: 'move-frame', assetId: 'SERVER-01', frameId: 'pole-group:POLE-FIELD' },
+      { type: 'add-relation', sourceAssetId: 'SERVER-01', targetAssetId: 'JB-01' },
+    ],
+  })
+  assert.equal(result.topologyFrameAssignments['SERVER-01'], 'pole-group:POLE-FIELD')
+  assert.equal(result.mountingRelations.some(relation => relation.sourceAssetId === 'SERVER-01'), false)
+  assert.ok(result.graph.edges.some(edge => [edge.sourceAssetId, edge.targetAssetId]
+    .includes('SERVER-01') && [edge.sourceAssetId, edge.targetAssetId].includes('JB-01')))
+})
+
 test('draft replaces a camera JB relation atomically while retaining source evidence', async () => {
   const bundle = mountingBundle()
   for (const id of ['JB-OLD', 'JB-NEW']) {

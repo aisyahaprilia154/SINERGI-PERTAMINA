@@ -26,6 +26,7 @@ import { calculateTopologyDiagramLayout } from './topology-diagram-layout.js'
 import { loadTopologyDraft } from '../../services/topology-sync-service.js'
 import { renderTopologyDiagramSvg } from './topology-diagram-svg.js'
 import { resolveTopologyDropTarget } from './topology-drop-target.js'
+import { frameMoveAssetIds } from './topology-frame-descendants.js'
 import { createAssetDragFeedback } from './topology-drag-feedback.js'
 import { createDragAutoPan } from './topology-drag-auto-pan.js'
 import {
@@ -304,6 +305,12 @@ function mountTopologyWorkspace(container, {
     viewport?.addEventListener('pointerup', endPan)
     viewport?.addEventListener('pointercancel', endPan)
     viewport?.addEventListener('lostpointercapture', endPan)
+    const tray = container.querySelector('[data-topology-tray]')
+    tray?.addEventListener('pointerdown', beginTrayAssetDrag)
+    tray?.addEventListener('pointermove', movePan)
+    tray?.addEventListener('pointerup', endPan)
+    tray?.addEventListener('pointercancel', endPan)
+    tray?.addEventListener('lostpointercapture', endPan)
 
     if (viewport && typeof ResizeObserver === 'function') {
       const resizeObserver = new ResizeObserver(() => syncGraphSurface({ preserveCenter: true }))
@@ -1068,6 +1075,24 @@ function mountTopologyWorkspace(container, {
     viewport.classList.add('is-panning')
   }
 
+  function beginTrayAssetDrag(event) {
+    if (event.button !== 0 || state.mutationBusy || dragState || panState) return
+    const item = event.target.closest('[data-tray-asset]')
+    if (!item || !model?.nodeById.has(item.dataset.trayAsset)) return
+    item.setPointerCapture(event.pointerId)
+    dragState = {
+      viewport: container.querySelector('[data-topology-viewport]'),
+      captureElement: item,
+      pointerId: event.pointerId,
+      assetId: item.dataset.trayAsset,
+      startX: event.clientX,
+      startY: event.clientY,
+      distance: 0,
+      active: false,
+      targetGroupId: null,
+    }
+  }
+
   function movePan(event) {
     if (dragState && event.pointerId === dragState.pointerId) {
       moveAssetDrag(event)
@@ -1101,7 +1126,7 @@ function mountTopologyWorkspace(container, {
     event.preventDefault()
     if (!dragState.active) {
       dragState.active = true
-      event.currentTarget.classList.add('is-dragging-asset')
+      dragState.viewport.classList.add('is-dragging-asset')
       const source = container.querySelector(`[data-node-id="${cssEscape(dragState.assetId)}"]`)
       if (!source) {
         cancelAssetDrag()
@@ -1203,52 +1228,45 @@ function mountTopologyWorkspace(container, {
 
   async function moveAssetToFrame(assetId, box, feedback = null) {
     const node = model.nodeById.get(assetId)
-    if (!node || !box) return
-    const currentFrameId = mapData.topologyFrameAssignments?.[assetId] ?? null
-    const displayedFrameId = layout?.nodes?.find(item => item.id === assetId)?.mountingBoxId ?? null
-    const current = (mapData.mountingRelations ?? []).find((relation) => (
-      relation.sourceAssetId === assetId
-        && !['rejected', 'revoked'].includes(String(relation.verificationStatus).toLowerCase())
-    ))
-    if (box.kind === 'excluded') {
-      if (currentFrameId === box.id && !current && displayedFrameId === box.id) {
-        void feedback?.finish()
-        return
+    if (!node || !box || state.mutationBusy) { feedback?.cancel(); return }
+    if (box.kind !== 'excluded' && !box.hostId) { feedback?.cancel(); return }
+    const source = layout?.nodes?.find(item => item.id === assetId)
+    const assetIds = ['junction-peer', 'junction-extended'].includes(source?.diagramClass)
+      ? frameMoveAssetIds(layout.nodes, assetId)
+      : [assetId]
+    const assignments = { ...(mapData.topologyFrameAssignments ?? {}) }
+    let relations = [...(mapData.mountingRelations ?? [])]
+    let changed = false
+    let mountingChanged = false
+    for (const id of assetIds) {
+      const member = model.nodeById.get(id)
+      if (!member) continue
+      const displayedFrameId = layout?.nodes?.find(item => item.id === id)?.mountingBoxId ?? null
+      if (assignments[id] !== box.id || displayedFrameId !== box.id) {
+        assignments[id] = box.id
+        stageChange({ type: 'move-frame', assetId: id, frameId: box.id })
+        changed = true
       }
-      mapData.topologyFrameAssignments = {
-        ...(mapData.topologyFrameAssignments ?? {}),
-        [assetId]: box.id,
+      const current = relations.find(relation => relation.sourceAssetId === id
+        && !['rejected', 'revoked'].includes(String(relation.verificationStatus).toLowerCase()))
+      if (box.kind === 'excluded' && current) {
+        relations = relations.filter(relation => relation.sourceAssetId !== id)
+        stageChange({ type: 'mount', assetId: id, poleAssetId: null, action: 'detach' })
+        mountingChanged = true
+      } else if (box.kind !== 'excluded' && canMountAssetOnPole(member)
+        && current?.targetAssetId !== box.hostId) {
+        relations = [
+          ...relations.filter(relation => relation.sourceAssetId !== id),
+          { sourceAssetId: id, targetAssetId: box.hostId, relationType: 'mounted_on',
+            verificationStatus: 'confirmed', provenance: 'manual_admin' },
+        ]
+        stageChange({ type: 'mount', assetId: id, poleAssetId: box.hostId })
+        mountingChanged = true
       }
-      stageChange({ type: 'move-frame', assetId, frameId: box.id })
-      if (current) {
-        applyMutationResponse({ mountingRelations: (mapData.mountingRelations ?? [])
-          .filter(relation => relation.sourceAssetId !== assetId) })
-        stageChange({ type: 'mount', assetId, poleAssetId: null, action: 'detach' })
-      }
-      rebuild()
-      void feedback?.finish(container.querySelector(`[data-mounting-group-id="${cssEscape(box.id)}"]`))
-      return
     }
-    if (!box.hostId) return
-    if (current?.targetAssetId === box.hostId) {
-      if (displayedFrameId !== box.id || currentFrameId !== box.id) {
-        mapData.topologyFrameAssignments = { ...(mapData.topologyFrameAssignments ?? {}), [assetId]: box.id }
-        stageChange({ type: 'move-frame', assetId, frameId: box.id })
-        rebuild()
-      }
-      void feedback?.finish()
-      return
-    }
-    if (state.mutationBusy) { feedback?.cancel(); return }
-    mapData.topologyFrameAssignments = { ...(mapData.topologyFrameAssignments ?? {}), [assetId]: box.id }
-    stageChange({ type: 'move-frame', assetId, frameId: box.id })
-    const previousMounting = mapData.mountingRelations ?? []
-    applyMutationResponse({ mountingRelations: [
-      ...previousMounting.filter(relation => relation.sourceAssetId !== assetId),
-      { sourceAssetId: assetId, targetAssetId: box.hostId, relationType: 'mounted_on', verificationStatus: 'confirmed', provenance: 'manual_admin' },
-    ] })
-    stageChange({ type: 'mount', assetId, poleAssetId: box.hostId })
-    rebuild()
+    mapData.topologyFrameAssignments = assignments
+    if (mountingChanged) applyMutationResponse({ mountingRelations: relations })
+    if (changed || mountingChanged) rebuild()
     void feedback?.finish(container.querySelector(`[data-mounting-group-id="${cssEscape(box.id)}"]`))
   }
 
@@ -1610,12 +1628,9 @@ function mountTopologyWorkspace(container, {
       && !relations.some(({ other }) => ['junction-peer', 'junction-extended']
         .includes(other.diagramClass))
     const online = node.connectivityStatus !== 'disconnected' && !isOfflineStatus(node.status)
-    const canMountOnPole = /junction\s*box|\bjb\b|cctv|camera|kamera/i.test(
-      `${node.type ?? ''} ${node.assetType ?? ''} ${node.name ?? ''}`)
     const availableFrames = (layout?.mountingBoxes ?? []).filter(box =>
       ['confirmed', 'empty', 'excluded'].includes(box.kind)
-        && (!box.areaKey || box.areaKey === node.areaKey)
-        && (canMountOnPole || box.kind === 'excluded'))
+        && (!box.areaKey || box.areaKey === node.areaKey))
     const displayedFrameId = layout?.nodes?.find(item => item.id === node.id)?.mountingBoxId ?? ''
     return `
       <div class="topology-stitch-inspector-head">
@@ -1648,7 +1663,12 @@ function mountTopologyWorkspace(container, {
             <option value="">Pilih frame tujuan…</option>
             ${availableFrames.map(box => `<option value="${escapeAttribute(box.id)}" ${box.id === displayedFrameId ? 'selected' : ''}>${escapeHtml(box.label || box.hostName || box.id)}</option>`).join('')}
           </select>
-          <small>Penempatan tiang juga memperbarui mounting di Peta Aset setelah disimpan.</small>
+          <small>${canMountAssetOnPole(node)
+            ? 'Penempatan tiang juga memperbarui mounting di Peta Aset setelah disimpan.'
+            : 'Aset ini ditempatkan dalam frame diagram tanpa mengubah mounting fisik.'}</small>
+          ${['junction-peer', 'junction-extended'].includes(node.diagramClass)
+            ? '<small>Turunan di frame yang sama ikut pindah. Setelahnya, tiap aset dapat dipindahkan sendiri.</small>'
+            : ''}
         </section>
         <section class="topology-stitch-inspector-section">
           <label>Jalur Jaringan</label>
@@ -1740,7 +1760,7 @@ function mountTopologyWorkspace(container, {
     tray.innerHTML = `
       <div class="topology-stitch-tray-title"><span class="material-symbols-outlined" aria-hidden="true">link_off</span><span>Belum terhubung</span><strong>${isolated.length}</strong></div>
       <div class="topology-stitch-tray-list">
-        ${isolated.map((node) => `<button type="button" class="topology-stitch-tray-item" data-tray-asset="${escapeAttribute(node.id)}" title="Fokus ke ${escapeAttribute(node.name || node.id)}"><span class="topology-stitch-tray-icon"><span class="material-symbols-outlined" aria-hidden="true">${iconForNode(node)}</span></span><span>${escapeHtml(node.name || node.id)}</span></button>`).join('')}
+        ${isolated.map((node) => `<button type="button" class="topology-stitch-tray-item" data-tray-asset="${escapeAttribute(node.id)}" title="Klik untuk memilih, atau tarik ke frame: ${escapeAttribute(node.name || node.id)}"><span class="topology-stitch-tray-icon"><span class="material-symbols-outlined" aria-hidden="true">${iconForNode(node)}</span></span><span>${escapeHtml(node.name || node.id)}</span></button>`).join('')}
       </div>
     `
   }
@@ -2084,6 +2104,12 @@ function renderTopologySidebarMarkup({ activeContext, mapData, state, summary, f
 function cssEscape(value) {
   if (globalThis.CSS?.escape) return globalThis.CSS.escape(String(value))
   return String(value).replace(/[^a-zA-Z0-9_-]/g, (character) => `\\${character}`)
+}
+
+function canMountAssetOnPole(node) {
+  const identity = `${node?.type ?? ''} ${node?.assetType ?? ''} ${node?.name ?? ''}`
+  return !/\btiang\b|\bpole\b|\bpylon\b/i.test(identity)
+    && /junction\s*box|\bjb\b|cctv|camera|kamera/i.test(identity)
 }
 
 function renderWorkspaceShell({ activeContext, mapData, state, model }) {

@@ -388,6 +388,12 @@ export async function renderMapPage(container) {
   }
 
   function syncMap() {
+    const physicalGroup = poleGroups.find(({ assetIds = [] }) => (
+      assetIds.includes(selection.selectedAssetId)
+    ))
+    const physicalRelatedIds = physicalGroup
+      ? physicalGroup.assetIds.filter((id) => id !== selection.selectedAssetId)
+      : []
     const connectedNodeIds = selection.selectedAssetId
       ? getConnectedAssets(relationGraph, selection.selectedAssetId)
         .map(({ targetAssetId }) => targetAssetId)
@@ -395,7 +401,8 @@ export async function renderMapPage(container) {
     canvasApi.setState({
       selectedNetworkIds: selection.selectedNetworkIds,
       selectedAssetId: selection.selectedAssetId,
-      connectedNodeIds,
+      connectedNodeIds: [...new Set([...connectedNodeIds, ...physicalRelatedIds])],
+      physicalRelatedIds,
       dimOthers: state.dimOthers,
       showCctvCoverage: state.showCctvCoverage,
     })
