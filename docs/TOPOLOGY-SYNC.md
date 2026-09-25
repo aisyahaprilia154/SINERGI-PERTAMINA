@@ -5,6 +5,15 @@ lokasi fisik, frame, dan relasi diagram berada di backend. KML yang diekspor
 dari Peta Aset hanya cocok sebagai data geografis; ia tidak membawa seluruh
 koreksi diagram.
 
+`git pull` hanya memperbarui aplikasi. Pada dua instalasi lokal, dataset aktif
+masing-masing tetap tersimpan di backend laptopnya. Setelah menerbitkan koreksi,
+pengirim perlu mengunduh **paket koreksi terbaru** dari versi aktif dan
+mengirimnya secara privat. Penerima menarik kode terbaru, lalu memilih
+**Periksa koreksi** dan **Terapkan koreksi** pada paket itu. Jika kedua laptop
+belum berbagi titik sinkronisasi yang sama, gunakan paket awal dan alur
+penyelarasan di bawah terlebih dahulu. Jika keduanya memakai satu server dan
+database yang sama, koreksi aktif sudah sama tanpa bertukar file.
+
 ## Dua laptop tanpa server bersama
 
 1. Pilih satu dataset aktif yang akan menjadi titik awal. Di
