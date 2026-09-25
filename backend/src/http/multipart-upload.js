@@ -71,6 +71,7 @@ function consumeMultipart(request, { temporaryPath, maxFileSize }) {
         'datasetId',
         'versionName',
         'versionNote',
+        'importMode',
         'officialSourceConfirmed',
       ].includes(name)) {
         fields[name] = value

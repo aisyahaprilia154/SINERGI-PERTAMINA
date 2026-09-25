@@ -1,9 +1,12 @@
+import { OPERATIONAL_NETWORK_COLORS } from '../../domain/network-colors.js'
+
 export const SCHEMATIC_CATEGORY_STYLES = {
   cctv: { color: '#9698f4', label: 'CCTV' },
-  'fiber-optic': { color: '#70cfb5', label: 'Fiber optic' },
+  'fiber-optic': { color: OPERATIONAL_NETWORK_COLORS['fiber-optic'], label: 'Fiber optic' },
+  power: { color: OPERATIONAL_NETWORK_COLORS.power, label: 'Power PLN' },
   peripheral: { color: '#a88af3', label: 'Peripheral' },
-  infrastructure: { color: '#efc363', label: 'Infrastruktur' },
-  lan: { color: '#aeb8c5', label: 'LAN' },
+  infrastructure: { color: OPERATIONAL_NETWORK_COLORS.infrastructure, label: 'Infrastruktur' },
+  lan: { color: OPERATIONAL_NETWORK_COLORS.lan, label: 'LAN' },
 }
 
 export const SCHEMATIC_THEME = {

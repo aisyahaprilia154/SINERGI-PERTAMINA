@@ -32,6 +32,23 @@ test('map projection keeps geometry-first camera termination over conflicting la
   assert.deepEqual(edges.map(({ id }) => id), ['edge:cam22-jb08'])
 })
 
+test('old graph projection keeps only the camera JB on the same confirmed pole', () => {
+  const nodes = [
+    { id: 'CAM-22', assetType: 'CCTV' },
+    { id: 'JB-03', assetType: 'Junction Box' },
+    { id: 'JB-08', assetType: 'Junction Box' },
+  ]
+  const edges = [
+    { id: 'wrong', sourceAssetId: 'CAM-22', targetAssetId: 'JB-03', relationSource: 'spatial_inference' },
+    { id: 'right', sourceAssetId: 'CAM-22', targetAssetId: 'JB-08', relationSource: 'spatial_inference' },
+  ]
+  const mountingRelations = ['CAM-22', 'JB-08'].map(sourceAssetId => ({
+    sourceAssetId, targetAssetId: 'T-10', verificationStatus: 'confirmed',
+  }))
+  assert.deepEqual(filterConflictingCameraEdges(edges, nodes, { mountingRelations })
+    .map(edge => edge.id), ['right'])
+})
+
 test('DPPU YIA projection removes the documented JB-08 to JB-09.1 false positive only', () => {
   const assets = [
     { id: 'jb08', name: 'JB-CCTV-08-WP', locationGroupKey: 'dppu-yia' },

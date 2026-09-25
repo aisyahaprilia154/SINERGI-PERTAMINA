@@ -12,6 +12,7 @@ export function renderImportDatasetForm({
   const branches = config?.branches ?? []
   const selectedBranch = branches.find((branch) => branch.id === values.branchId)
     ?? branches[0]
+  const importMode = values.importMode ?? 'stage_only'
   return `
     <form class="import-dataset-form" id="import-dataset-form" novalidate>
       <section class="import-form-card" aria-labelledby="import-form-title">
@@ -47,7 +48,25 @@ export function renderImportDatasetForm({
                 ${escapeHtml(selectedBranch?.datasetId ?? 'Dataset belum dikonfigurasi')}
               </option>
             </select>
-            <small>Version baru dibuat tanpa mengganti dataset aktif.</small>
+            <small>Hasil import selalu disimpan sebagai versi baru dan dapat dipulihkan.</small>
+          </label>
+
+          <label class="admin-field admin-field-wide">
+            <span>Setelah import <i>Wajib</i></span>
+            <select name="importMode" ${disabled ? 'disabled' : ''}>
+              <option value="stage_only"
+                ${importMode === 'stage_only' ? 'selected' : ''}>
+                Jangan timpa — simpan sebagai versi untuk ditinjau
+              </option>
+              ${(!Array.isArray(config?.workflow?.importModes)
+                || config.workflow.importModes.includes('replace_active')) ? `<option value="replace_active"
+                ${importMode === 'replace_active' ? 'selected' : ''}>
+                Timpa data aktif dan langsung gunakan
+              </option>` : ''}
+            </select>
+            <small>${importMode === 'replace_active'
+              ? 'Setelah validasi berhasil, versi lama diarsipkan dan diagram topologi baru langsung ditampilkan.'
+              : 'Data aktif dan diagram yang sekarang tetap digunakan sampai versi baru diaktifkan manual.'}</small>
           </label>
 
           <label class="admin-field">

@@ -131,12 +131,14 @@ export function zoomSurfaceMetrics({
   const top = Math.max(0, Number(topPadding) || 0)
   const bottom = Math.max(0, Number(bottomPadding) || 0)
   const width = Math.max(Number(viewportWidth) || 0, scaledWidth + side * 2)
+  const viewportHeightValue = Math.max(0, Number(viewportHeight) || 0)
+  const frameTop = Math.max(top, (viewportHeightValue - scaledHeight) / 2)
 
   return {
     width: Math.ceil(width),
-    height: Math.ceil(Math.max(Number(viewportHeight) || 0, scaledHeight + top + bottom)),
+    height: Math.ceil(Math.max(viewportHeightValue, scaledHeight + frameTop + bottom)),
     frameLeft: Math.max(side, (width - scaledWidth) / 2),
-    frameTop: top,
+    frameTop,
   }
 }
 

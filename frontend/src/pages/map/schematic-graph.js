@@ -448,6 +448,7 @@ function deduplicateEvidenceEdges(edges) {
 function networkFamilyLabel(value) {
   const normalized = String(value || '').toLowerCase()
   if (normalized === 'fiber_optic') return 'Fiber Optic'
+  if (normalized === 'power') return 'Power PLN'
   if (normalized === 'lan') return 'LAN'
   if (normalized === 'cctv') return 'CCTV'
   return 'Relasi topologi'
@@ -543,6 +544,7 @@ function resolveCategory(asset, networks) {
   if (source.includes('fiber') || source.includes('otb')) return 'fiber-optic'
   if (source.includes('printer') || source.includes('peripheral')) return 'peripheral'
   if (source.includes('lan')) return 'lan'
+  if (source.includes('power') || source.includes('pln') || source.includes('listrik')) return 'power'
 
   const networkTypes = networks
     .filter((network) => network.nodeIds?.includes(asset.id))
@@ -552,6 +554,7 @@ function resolveCategory(asset, networks) {
   if (networkTypes.includes('cctv')) return 'cctv'
   if (networkTypes.includes('fiber')) return 'fiber-optic'
   if (networkTypes.includes('lan')) return 'lan'
+  if (networkTypes.includes('power')) return 'power'
   return 'infrastructure'
 }
 

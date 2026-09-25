@@ -1,22 +1,44 @@
 import { resolveTopologyReadiness } from '../domain/topology-readiness.js'
-import { correctFacilityEdges, correctedMountingExpectation } from '../../../shared/facility-corrections.mjs'
+import {
+  OPERATIONAL_NETWORK_COLORS,
+  OPERATIONAL_NETWORK_SOFT_COLORS,
+} from '../domain/network-colors.js'
+import { correctFacilityEdges, correctedMountingExpectation, correctAdditionalMounts } from '../../../shared/facility-corrections.mjs'
 import {
   buildPoleGroups,
+  isPoleRecord,
   ensureDppuYiaKnownMountingRelations,
   MOUNTING_RELATION_TYPE,
 } from '../domain/pole-groups.js'
 import {
-  filterConflictingCameraEdges,
+  resolveCameraEdges,
   filterDppuYiaPresentationEdges,
 } from '../domain/device-edge-policy.js'
 
 const CATEGORY_STYLE = Object.freeze({
   cctv: { color: '#9698f4', softColor: '#f1f1fe', type: 'CCTV', order: 1 },
   'cctv-cable': { color: '#9698f4', softColor: '#f1f1fe', type: 'CCTV cable', order: 2 },
-  'fiber-optic': { color: '#70cfb5', softColor: '#edf8f5', type: 'Fiber optic', order: 3 },
-  lan: { color: '#aeb8c5', softColor: '#f1f3f5', type: 'LAN', order: 4 },
-  infrastructure: { color: '#efc363', softColor: '#fcf6e8', type: 'Infrastructure', order: 5 },
-  peripheral: { color: '#a88af3', softColor: '#f5f1fe', type: 'Peripheral', order: 6 },
+  'fiber-optic': {
+    color: OPERATIONAL_NETWORK_COLORS['fiber-optic'],
+    softColor: OPERATIONAL_NETWORK_SOFT_COLORS['fiber-optic'],
+    type: 'Fiber optic', order: 3,
+  },
+  lan: {
+    color: OPERATIONAL_NETWORK_COLORS.lan,
+    softColor: OPERATIONAL_NETWORK_SOFT_COLORS.lan,
+    type: 'LAN', order: 4,
+  },
+  power: {
+    color: OPERATIONAL_NETWORK_COLORS.power,
+    softColor: OPERATIONAL_NETWORK_SOFT_COLORS.power,
+    type: 'Power PLN', order: 5,
+  },
+  infrastructure: {
+    color: OPERATIONAL_NETWORK_COLORS.infrastructure,
+    softColor: OPERATIONAL_NETWORK_SOFT_COLORS.infrastructure,
+    type: 'Infrastructure', order: 6,
+  },
+  peripheral: { color: '#a88af3', softColor: '#f5f1fe', type: 'Peripheral', order: 7 },
   unmapped: { color: '#aeb8c5', softColor: '#f1f3f5', type: 'Belum terpetakan', order: 99 },
 })
 
@@ -61,7 +83,10 @@ export function adaptActiveDatasetForMap(payload) {
   ))
   const bounds = positionBounds(visibleGeometryParts.flatMap(extractPositions))
   const allMapGeometries = geometryParts.map((geometry) => toMapGeometry(geometry, bounds))
-  const geometries = allMapGeometries.filter(({ sourceStatus }) => sourceStatus === 'visible')
+  const hiddenOperationalCableNodeIds = tegalC17RedundantCableNodeIds(payload.assets, layerById)
+  const geometries = allMapGeometries.filter(({ sourceStatus, sourceNodeId }) => (
+    sourceStatus === 'visible' && !hiddenOperationalCableNodeIds.has(sourceNodeId)
+  ))
   const geometriesByOwner = groupBy(allMapGeometries, 'sourceNodeId')
 
   const exportAssets = payload.assets.map((asset) => createOwnerFeature({
@@ -87,7 +112,7 @@ export function adaptActiveDatasetForMap(payload) {
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
   const validNodeIds = new Set(assets.map(({ id }) => id))
   const topologyGraph = confirmedTopologyProjection(payload)
-  topologyGraph.edges = correctFacilityEdges(topologyGraph.edges, assets)
+  topologyGraph.edges = filterRemovedDiagramEdges(correctFacilityEdges(topologyGraph.edges, assets), payload.topologyEdgeOverrides)
   const resolver = createFrontendIdentityResolver(payload)
   const topologyReadiness = resolveTopologyReadiness({
     topologyReadiness: payload.topologyReadiness,
@@ -118,10 +143,11 @@ export function adaptActiveDatasetForMap(payload) {
   ))
   // The presentation layer may group confirmed mounting relations, but it must
   // never turn proximity into a physical attachment that is absent from data.
-  const mountingRelations = ensureDppuYiaKnownMountingRelations(
-    explicitMountingRelations.filter(relation => !correctedMountingExpectation(assetById[relation.sourceAssetId])),
+  const mountingRelations = reconcileFrameMountingAssignments(correctAdditionalMounts(ensureDppuYiaKnownMountingRelations(
+    explicitMountingRelations.filter(relation => relation.provenance === 'manual_admin'
+      || !correctedMountingExpectation(assetById[relation.sourceAssetId])),
     assets,
-  )
+  ), assets), payload, assets)
   const mountingOptions = normalizeMountingOptions(
     payload.mountingOptions ?? payload.mountingCandidates,
     resolver,
@@ -190,7 +216,7 @@ export function adaptActiveDatasetForMap(payload) {
     asset.mountedAssetIds = mountingRelations
       .filter((relation) => relation.targetAssetId === asset.id)
       .map((relation) => relation.sourceAssetId)
-    asset.mountingExpectation = correctedMountingExpectation(asset)
+    asset.mountingExpectation = mountingRelations.some(relation => relation.sourceAssetId === asset.id && relation.provenance === 'manual_admin') ? 'pole' : correctedMountingExpectation(asset)
       ?? expectationByAssetId.get(asset.id)?.expectation ?? 'unknown'
     asset.mountingReview = mountingReviewByAssetId.get(asset.id) ?? null
   })
@@ -256,6 +282,8 @@ export function adaptActiveDatasetForMap(payload) {
     mountingExpectations,
     mountingReviewItems,
     mountingSummary: structuredClone(payload.mountingSummary ?? null),
+    topologyFrameAssignments: structuredClone(payload.topologyFrameAssignments ?? {}),
+    topologyFrames: structuredClone(payload.topologyFrames ?? {}),
     poleGroups,
     topologySummary: structuredClone(payload.topologySummary ?? {}),
     topologyReadiness,
@@ -324,13 +352,13 @@ export function adaptActiveDatasetForTopology(payload) {
       location: asset.location ?? asset.locationText ?? location.locationGroupName,
     }
   }).filter(({ id }) => Boolean(id))
-  topologyGraph.edges = correctFacilityEdges(topologyGraph.edges, assets)
+  topologyGraph.edges = filterRemovedDiagramEdges(correctFacilityEdges(topologyGraph.edges, assets), payload.topologyEdgeOverrides)
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
-  const mountingRelations = ensureDppuYiaKnownMountingRelations(normalizeMountingRelations(
+  const mountingRelations = reconcileFrameMountingAssignments(correctAdditionalMounts(ensureDppuYiaKnownMountingRelations(normalizeMountingRelations(
     payload.mountingRelations ?? [],
     resolver,
   ).filter((relation) => assetById[relation.sourceAssetId] && assetById[relation.targetAssetId]
-    && !correctedMountingExpectation(assetById[relation.sourceAssetId])), assets)
+    && (relation.provenance === 'manual_admin' || !correctedMountingExpectation(assetById[relation.sourceAssetId]))), assets), assets), payload, assets)
   const mountingExpectations = normalizeMountingExpectations(
     payload.mountingExpectations,
     resolver,
@@ -348,7 +376,7 @@ export function adaptActiveDatasetForTopology(payload) {
     item,
   ]))
   assets.forEach((asset) => {
-    asset.mountingExpectation = correctedMountingExpectation(asset)
+    asset.mountingExpectation = mountingRelations.some(relation => relation.sourceAssetId === asset.id && relation.provenance === 'manual_admin') ? 'pole' : correctedMountingExpectation(asset)
       ?? expectationByAssetId.get(asset.id)?.expectation ?? 'unknown'
     asset.mountingReview = mountingReviewByAssetId.get(asset.id) ?? null
   })
@@ -410,6 +438,8 @@ export function adaptActiveDatasetForTopology(payload) {
     mountingExpectations,
     mountingReviewItems,
     mountingSummary: structuredClone(payload.mountingSummary ?? null),
+    topologyFrameAssignments: structuredClone(payload.topologyFrameAssignments ?? {}),
+    topologyFrames: structuredClone(payload.topologyFrames ?? {}),
     poleGroups,
     topologySummary: structuredClone(payload.topologySummary ?? {}),
     topologyReadiness,
@@ -438,6 +468,11 @@ function confirmedTopologyProjection(payload) {
   // from the operational map.
   const source = payload.topologyGraph
   const resolver = createFrontendIdentityResolver(payload)
+  const mountingRelations = (payload.mountingRelations ?? []).flatMap(relation => {
+    const sourceAssetId = resolver.resolve(relation.sourceAssetId)
+    const targetAssetId = resolver.resolve(relation.targetAssetId)
+    return sourceAssetId && targetAssetId ? [{ ...relation, sourceAssetId, targetAssetId }] : []
+  })
   if (source && Array.isArray(source.nodes) && Array.isArray(source.edges)) {
     const unresolvedNodes = []
     const nodes = source.nodes.flatMap((node) => {
@@ -457,8 +492,7 @@ function confirmedTopologyProjection(payload) {
     })
     const nodeIds = new Set(nodes.map(({ id }) => id))
     const unresolvedEdges = []
-    const edges = filterDppuYiaPresentationEdges(
-      filterConflictingCameraEdges(source.edges.flatMap((edge) => {
+    const cameraResolution = resolveCameraEdges(source.edges.flatMap((edge) => {
         if (!isConfirmedRelation(edge) || edge.relationType === MOUNTING_RELATION_TYPE) return []
         const originalSource = edge.sourceAssetId ?? edge.sourceNodeId
         const originalTarget = edge.targetAssetId ?? edge.targetNodeId
@@ -484,13 +518,14 @@ function confirmedTopologyProjection(payload) {
           canonicalSourceAssetId: sourceAssetId,
           canonicalTargetAssetId: targetAssetId,
         }]
-      }), nodes),
-      payload.assets,
-    )
+      }), nodes, { mountingRelations })
+    const edges = filterDppuYiaPresentationEdges(cameraResolution.edges, payload.assets)
     return {
       ...structuredClone(source),
       nodes,
       edges,
+      cameraRelationReview: cameraResolution.suppressedEdges.filter(item =>
+        item.reason === 'camera_primary_requires_review'),
       identityResolution: {
         unresolvedNodeCount: unresolvedNodes.length,
         unresolvedEdgeCount: unresolvedEdges.length,
@@ -511,8 +546,7 @@ function confirmedTopologyProjection(payload) {
     sourceName: asset.name,
   }))
   const validIds = new Set(nodes.map(({ id }) => id))
-  const edges = filterDppuYiaPresentationEdges(
-    filterConflictingCameraEdges((payload.relations ?? [])
+  const cameraResolution = resolveCameraEdges((payload.relations ?? [])
       .filter((relation) => (
         relation?.relationType !== MOUNTING_RELATION_TYPE
         &&
@@ -532,13 +566,14 @@ function confirmedTopologyProjection(payload) {
         targetNodeId: resolver.resolve(relation.targetAssetId),
         verificationStatus: 'confirmed',
         relationStatus: 'confirmed',
-      })), nodes),
-    payload.assets,
-  )
+      })), nodes, { mountingRelations })
+  const edges = filterDppuYiaPresentationEdges(cameraResolution.edges, payload.assets)
   return {
     datasetVersionId: payload.datasetVersion.id,
     nodes,
     edges,
+    cameraRelationReview: cameraResolution.suppressedEdges.filter(item =>
+      item.reason === 'camera_primary_requires_review'),
     components: [],
     degreeByNode: {},
     isolatedNodeIds: [],
@@ -587,6 +622,42 @@ function isConfirmedRelation(relation) {
     return relation.verificationStatus === 'confirmed'
   }
   return relation.relationStatus === undefined || relation.relationStatus === 'confirmed'
+}
+
+// Older diagram edits stored only a frame assignment. Project those explicit
+// pole placements into the same mounting list consumed by both views.
+export function reconcileFrameMountingAssignments(relations = [], payload = {}, assets = []) {
+  const assetIds = new Set(assets.map(asset => asset.id))
+  const poleIds = new Set(assets.filter(isPoleRecord).map(asset => asset.id))
+  const assignments = Object.entries(payload.topologyFrameAssignments ?? {})
+  const frames = payload.topologyFrames ?? {}
+  const result = [...relations]
+  for (const [assetId, frameId] of assignments) {
+    if (!assetIds.has(assetId)) continue
+    const frame = frames[frameId]
+    const poleId = frame?.type === 'pole'
+      ? frame.poleAssetId
+      : [...poleIds].find(id => frameId === `pole-group:${id}`
+        || String(frameId).startsWith(`pole-group:${id}:`))
+    const validPoleId = poleIds.has(poleId) && poleId !== assetId ? poleId : null
+    if (!validPoleId && !frame?.type?.match(/^(indoor|standalone)$/)
+      && !String(frameId).startsWith('excluded-mounting:')) continue
+    const matching = result.find(relation => relation.sourceAssetId === assetId
+      && relation.targetAssetId === validPoleId)
+    for (let index = result.length - 1; index >= 0; index -= 1) {
+      if (result[index].sourceAssetId === assetId) result.splice(index, 1)
+    }
+    if (matching && validPoleId) result.push(matching)
+    else if (validPoleId) result.push({
+      relationId: `frame-mounting:${assetId}->${validPoleId}`,
+      sourceAssetId: assetId,
+      targetAssetId: validPoleId,
+      relationType: MOUNTING_RELATION_TYPE,
+      verificationStatus: 'confirmed',
+      provenance: 'manual_admin',
+    })
+  }
+  return result
 }
 
 function normalizeMountingRelations(relations = [], resolver = null) {
@@ -764,9 +835,14 @@ export function adaptActiveAssetDetail(payload, mapAsset) {
 
 function createOwnerFeature({ asset, layer, geometries }) {
   const category = normalizeCategory(asset.category, asset.type, layer)
-  const type = normalizeAssetType(asset.type, asset.category || category, layer)
+  const type = normalizeAssetType(asset.type, asset.category || category, layer, asset.name)
   const operationalStatus = readOperationalStatus(asset)
-  const locationGroup = locationGroupFor(layer?.sourceFolderPath)
+  const locationGroup = asset.locationGroupKey
+    ? {
+      locationGroupKey: asset.locationGroupKey,
+      locationGroupName: asset.locationGroupName ?? asset.locationGroupKey,
+    }
+    : locationGroupFor(asset.sourceFolderPath ?? layer?.sourceFolderPath)
   const canonicalAssetId = canonicalAssetIdFor(asset)
   return {
     id: canonicalAssetId,
@@ -799,11 +875,30 @@ function createOwnerFeature({ asset, layer, geometries }) {
       || 'Lokasi tidak tersedia',
     datasetVersionId: asset.datasetVersionId,
     layerId: asset.layerId,
-    sourceFolderPath: layer?.sourceFolderPath ?? null,
+    sourceFolderPath: asset.sourceFolderPath ?? layer?.sourceFolderPath ?? null,
     ...locationGroup,
     networkIds: [],
     geometry: geometries.map((geometry) => structuredClone(geometry)),
   }
+}
+
+function tegalC17RedundantCableNodeIds(assets, layerById) {
+  const inTegalBaru = (asset) => locationGroupFor(
+    layerById.get(asset.layerId)?.sourceFolderPath,
+  ).locationGroupKey === 'ft-tegal-baru'
+  const hasPreferredJunction = assets.some((asset) => (
+    inTegalBaru(asset) && /^JB-0*1\.2$/i.test(String(asset.name ?? '').trim())
+  ))
+  if (!hasPreferredJunction) return new Set()
+  // The original KMZ line is retained in exportAssets. Hide only its redundant
+  // map stroke so the operational C-17 → JB-01.2 connection stays readable.
+  return new Set(assets.filter((asset) => (
+    inTegalBaru(asset)
+      && /\bJB-0*1(?![.\d])\b/i.test(String(asset.name ?? ''))
+      && /\bC-0*17\b/i.test(String(asset.name ?? ''))
+      && /jalur|cable|kabel/i.test(String(asset.name ?? ''))
+      && /\/cable\//i.test(layerById.get(asset.layerId)?.sourceFolderPath ?? '')
+  )).map((asset) => asset.id))
 }
 
 function createMapNode(owner) {
@@ -997,7 +1092,12 @@ function splitGeometryRecord(geometry) {
 function toMapGeometry(geometry, bounds) {
   const owner = geometry.owner
   const category = normalizeCategory(owner?.category, owner?.type, geometry.layer)
-  const locationGroup = locationGroupFor(geometry.layer?.sourceFolderPath)
+  const locationGroup = owner?.locationGroupKey
+    ? {
+      locationGroupKey: owner.locationGroupKey,
+      locationGroupName: owner.locationGroupName ?? owner.locationGroupKey,
+    }
+    : locationGroupFor(owner?.sourceFolderPath ?? geometry.layer?.sourceFolderPath)
   const canonicalAssetId = canonicalAssetIdFor(owner)
   return {
     id: geometry.id,
@@ -1017,7 +1117,7 @@ function toMapGeometry(geometry, bounds) {
     coordinates: structuredClone(geometry.coordinates),
     displayCoordinates: projectGeometryCoordinates(geometry, bounds),
     layerId: owner?.layerId ?? geometry.layer?.id ?? null,
-    sourceFolderPath: geometry.layer?.sourceFolderPath ?? null,
+    sourceFolderPath: owner?.sourceFolderPath ?? geometry.layer?.sourceFolderPath ?? null,
     ...locationGroup,
     category,
     sourceStatus: geometry.sourceStatus,
@@ -1143,10 +1243,12 @@ function normalizeCategory(category, type, layer) {
   return styleFor(key).type
 }
 
-function normalizeAssetType(type, category, layer) {
+function normalizeAssetType(type, category, layer, name = '') {
   const source = `${type || ''} ${category || ''} ${layer?.name || ''} `
     + `${layer?.sourceFolderPath || ''}`
   const value = source.toLowerCase()
+  if (/(^|\s)(tiang|pole|pylon)(\s|$)/.test(value)
+    || /^t[-_ ]?(?:\d+|tower)\b/i.test(String(name).trim())) return 'Tiang'
   if (value.includes('junction') || /\bjb\b/.test(value)) return 'Junction box'
   if (value.includes('core') && value.includes('switch')) return 'Core switch'
   if (value.includes('distribution') && value.includes('switch')) return 'Distribution switch'
@@ -1172,12 +1274,14 @@ function categoryKey(...values) {
     return 'fiber-optic'
   }
   if (value.includes('lan') || value.includes('utp')) return 'lan'
+  if (value.includes('power') || value.includes('pln') || value.includes('listrik')) return 'power'
   if (value.includes('peripheral') || value.includes('printer')
     || value.includes('access point') || /\bap\b/.test(value)) return 'peripheral'
   if (value.includes('infrastructure') || value.includes('switch')
     || value.includes('server') || value.includes('rack') || value.includes('otb')
     || value.includes('core') || value.includes('router') || value.includes('power')
-    || value.includes('tiang') || value.includes('stp')) return 'infrastructure'
+    || value.includes('tiang') || value.includes('pole') || value.includes('pylon')
+    || value.includes('stp')) return 'infrastructure'
   return 'unmapped'
 }
 
@@ -1193,6 +1297,7 @@ function networkName(key) {
     lan: 'Jaringan LAN',
     peripheral: 'Jaringan Peripheral',
     infrastructure: 'Jaringan Infrastruktur',
+    power: 'Jaringan Power PLN',
     unmapped: 'Belum terpetakan',
   }[key] ?? 'Belum terpetakan'
 }
@@ -1394,3 +1499,4 @@ function formatName(value) {
     .replace(/[-_]+/g, ' ')
     .replace(/\b\w/g, (character) => character.toUpperCase())
 }
+import { filterRemovedDiagramEdges } from '../../../shared/topology-edge-overrides.mjs'

@@ -4,6 +4,7 @@ import {
   loadImportStatus,
   uploadDataset,
 } from '../../services/import-dataset-service.js'
+import { patraNiagaLogoMarkup } from '../brand-logo.js'
 import { renderImportDatasetForm } from './import-dataset-form.js'
 import { validateImportFile } from './import-dataset-state.js'
 import { renderImportProgress } from './import-progress.js'
@@ -22,6 +23,7 @@ export function renderImportDatasetPage(container) {
     phase: 'idle',
     values: {
       branchId: '',
+      importMode: 'stage_only',
       versionName: createDefaultVersionName(),
       versionNote: '',
       officialSourceConfirmed: false,
@@ -53,6 +55,9 @@ export function renderImportDatasetPage(container) {
       state.config = await loadImportConfig({ token: getDefaultAdminToken() })
       state.configStatus = 'ready'
       state.values.branchId = state.config.branches[0]?.id ?? ''
+      if (!state.config.workflow?.importModes?.includes(state.values.importMode)) {
+        state.values.importMode = 'stage_only'
+      }
     } catch (error) {
       state.configStatus = 'error'
       state.configError = error.message
@@ -73,6 +78,10 @@ export function renderImportDatasetPage(container) {
     form?.addEventListener('submit', handleSubmit)
     form?.querySelector('[name="branchId"]')?.addEventListener('change', (event) => {
       state.values.branchId = event.target.value
+      render()
+    })
+    form?.querySelector('[name="importMode"]')?.addEventListener('change', (event) => {
+      state.values.importMode = event.target.value
       render()
     })
     form?.querySelector('[name="versionName"]')?.addEventListener('input', (event) => {
@@ -133,6 +142,13 @@ export function renderImportDatasetPage(container) {
         )
       }
     })
+    container.querySelector('.open-topology-result')?.addEventListener('click', () => {
+      const version = state.backendStatus?.datasetVersion
+      if (!version?.datasetId) return
+      const query = new URLSearchParams({ datasetId: version.datasetId })
+      if (version.branchId) query.set('branchId', version.branchId)
+      window.location.assign(`/topology?${query}`)
+    })
     container.querySelector('.issue-filter')?.addEventListener('change', (event) => {
       state.issueFilter = event.target.value
       render()
@@ -188,6 +204,7 @@ export function renderImportDatasetPage(container) {
         fields: {
           branchId: state.values.branchId,
           datasetId: branch?.datasetId,
+          importMode: state.values.importMode,
           versionName: state.values.versionName,
           versionNote: state.values.versionNote,
           officialSourceConfirmed: state.values.officialSourceConfirmed,
@@ -226,11 +243,27 @@ export function renderImportDatasetPage(container) {
           signal: state.controller.signal,
         })
         state.backendStatus = status
-        if (['valid', 'invalid'].includes(status.datasetVersion.status)) {
-          state.phase = status.datasetVersion.status === 'valid' ? 'success' : 'invalid'
+        if (status.datasetVersion.status === 'active') {
+          state.phase = 'success'
           stopElapsedTimer()
           render()
           return
+        }
+        if (status.datasetVersion.status === 'invalid') {
+          state.phase = 'invalid'
+          stopElapsedTimer()
+          render()
+          return
+        }
+        if (status.datasetVersion.status === 'valid') {
+          const waitingForAutomaticActivation = status.datasetVersion.importMode === 'replace_active'
+            && status.autoActivation?.status !== 'failed'
+          if (!waitingForAutomaticActivation) {
+            state.phase = 'success'
+            stopElapsedTimer()
+            render()
+            return
+          }
         }
         render()
         await delay(500, state.controller.signal)
@@ -290,6 +323,7 @@ export function renderImportDatasetPage(container) {
     state.issueFilter = 'all'
     state.values.versionName = createDefaultVersionName()
     state.values.versionNote = ''
+    state.values.importMode = 'stage_only'
     state.values.officialSourceConfirmed = false
     render()
   }
@@ -297,6 +331,7 @@ export function renderImportDatasetPage(container) {
   function readFormValues(form) {
     const data = new FormData(form)
     state.values.branchId = String(data.get('branchId') ?? state.values.branchId)
+    state.values.importMode = String(data.get('importMode') ?? 'stage_only')
     state.values.versionName = String(data.get('versionName') ?? '').trim()
     state.values.versionNote = String(data.get('versionNote') ?? '').trim()
     state.values.officialSourceConfirmed = data.get('officialSourceConfirmed') === 'on'
@@ -328,7 +363,7 @@ function renderShell(state) {
               <span>Import dataset</span>
             </nav>
             <h1>Import Dataset KML/KMZ</h1>
-            <p>Buat dataset version baru untuk diperiksa sebelum aktivasi.</p>
+            <p>Import data dan bentuk diagram topologi secara otomatis.</p>
           </div>
           ${renderImportStatusBadge(
             state.configStatus === 'loading' ? 'loading' : state.phase,
@@ -344,9 +379,8 @@ function renderShell(state) {
 function renderAdminHeader() {
   return `
     <header class="admin-app-header">
-      <a class="brand-lockup" href="/map" aria-label="SINERGI">
-        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span class="brand-name">SINERGI</span>
+      <a class="brand-lockup" href="/map" aria-label="SINERGI — Pertamina Patra Niaga">
+        ${patraNiagaLogoMarkup()}
       </a>
       <span class="admin-area-label">Administrasi dataset</span>
       <nav aria-label="Navigasi admin">
@@ -426,7 +460,31 @@ function renderContent(state) {
 
 function renderCompletedState(state) {
   const status = state.backendStatus
+  const active = status.datasetVersion?.status === 'active'
+  const autoActivationFailed = status.autoActivation?.status === 'failed'
+  const topology = status.topology ?? {}
   return `
+    ${autoActivationFailed ? `
+      <section class="admin-error-state" role="alert">
+        <span class="material-symbols-outlined" aria-hidden="true">warning</span>
+        <div>
+          <strong>Data berhasil diproses, tetapi belum mengganti data aktif</strong>
+          <p>${escapeHtml(status.autoActivation.message || 'Aktivasi otomatis gagal. Buka preview untuk meninjau dan mengaktifkan versi ini.')}</p>
+        </div>
+      </section>
+    ` : ''}
+    ${topology.generated ? `
+      <p class="activation-ready-note" role="status">
+        <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
+        <span><strong>Diagram topologi otomatis sudah dibuat.</strong><br>
+          ${Number(topology.nodeCount || 0).toLocaleString('id-ID')} aset dan
+          ${Number(topology.edgeCount || 0).toLocaleString('id-ID')} relasi terkonfirmasi.
+          ${active
+            ? 'Diagram ini sekarang menggunakan data hasil import.'
+            : 'Data aktif belum berubah; aktifkan versi ini dari preview bila sudah siap.'}
+        </span>
+      </p>
+    ` : ''}
     ${renderImportSummary({
       datasetVersion: status.datasetVersion,
       validation: status.validation,
@@ -448,6 +506,12 @@ function renderCompletedState(state) {
         <span class="material-symbols-outlined" aria-hidden="true">preview</span>
         Lihat preview
       </button>
+      ${active ? `
+        <button class="button primary open-topology-result" type="button">
+          <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
+          Buka diagram topologi
+        </button>
+      ` : ''}
     </div>
     ${state.reportOpen ? renderValidationReport(state) : ''}
   `

@@ -5,6 +5,7 @@ import { validateStyleMin } from '@maplibre/maplibre-gl-style-spec'
 import {
   BASEMAP_LOAD_TIMEOUT_MS,
   createBaseStyle,
+  applyBaseStyleTheme,
   isBasemapError,
   isBasemapLoadedEvent,
 } from '../src/pages/map/maplibre-basemap.js'
@@ -30,6 +31,28 @@ test('MapLibre map class does not shadow the native Map collection', async () =>
     source.indexOf('syncSources()') < source.indexOf('addOperationalLayers(map)'),
     'GeoJSON data must be synchronized before optional operational layers are added',
   )
+})
+
+test('operational network lines render without a visible casing', async () => {
+  const mapSource = await readFile(
+    new URL('../src/pages/map/maplibre-map.js', import.meta.url),
+    'utf8',
+  )
+  const canvasSource = await readFile(
+    new URL('../src/pages/map/map-canvas.js', import.meta.url),
+    'utf8',
+  )
+  const flatMapSource = await readFile(
+    new URL('../src/pages/map/flat-network-map.js', import.meta.url),
+    'utf8',
+  )
+
+  assert.doesNotMatch(mapSource, /id: 'cable-lines-casing'/)
+  assert.doesNotMatch(mapSource, /id: 'asset-relations-casing'/)
+  assert.doesNotMatch(mapSource, /drawProjectedLine\(context, map, entry, 'casing'\)/)
+  assert.doesNotMatch(mapSource, /drawProjectedLine\(context, map, entry, 'focus-glow'\)/)
+  assert.doesNotMatch(canvasSource, /strokeCanvasPath\(points, colors\.surface/)
+  assert.doesNotMatch(flatMapSource, /stroke="#07101b"/)
 })
 
 test('Vite leaves MapLibre out of dependency optimization so its worker URL stays valid', async () => {
@@ -154,7 +177,8 @@ test('MapLibre basemap is environment-configured and operational data is fail-sa
   assert.doesNotMatch(source, /map\.on\('load', initializeOperationalLayers\)/)
   assert.match(source, /BASEMAP_LOAD_TIMEOUT_MS/)
   assert.match(source, /buildAdaptiveAssetLayout/)
-  assert.match(source, /map\.on\('move', scheduleAdaptiveMarkers\)/)
+  assert.match(source, /map\.on\('move', scheduleMarkerTransform\)/)
+  assert.match(source, /map\.on\('moveend', scheduleAdaptiveMarkers\)/)
   assert.match(source, /setDeclutterEnabled\(enabled\)/)
   assert.match(source, /drawKmlLineOverlay/)
   assert.match(source, /map-kml-line-overlay/)
@@ -196,6 +220,12 @@ test('fallback and vector basemap styles are valid and use a visible neutral can
     vectorTiles: 'https://tiles.openfreemap.org/planet',
     attribution: 'Imagery test',
   })
+  const darkStyle = createBaseStyle({
+    imageryTiles: '',
+    vectorTiles: 'https://tiles.openfreemap.org/planet',
+    attribution: '',
+    darkMode: true,
+  })
 
   assert.deepEqual(validateStyleMin(fallbackStyle), [])
   assert.deepEqual(validateStyleMin(vectorStyle), [])
@@ -223,6 +253,7 @@ test('fallback and vector basemap styles are valid and use a visible neutral can
       ?.layout?.visibility,
     'none',
   )
+  assert.equal(fieldStyle.sources['satellite-imagery']?.maxzoom, 18)
   assert.equal(
     fallbackStyle.layers.find(({ id }) => id === 'safe-background')
       ?.paint?.['background-color'],
@@ -234,10 +265,40 @@ test('fallback and vector basemap styles are valid and use a visible neutral can
     '#a9dff0',
   )
   assert.equal(
+    darkStyle.layers.find(({ id }) => id === 'safe-background')
+      ?.paint?.['background-color'],
+    '#171719',
+  )
+  assert.equal(
+    darkStyle.layers.find(({ id }) => id === 'basemap-road-labels')
+      ?.paint?.['text-color'],
+    '#e5e5ea',
+  )
+  assert.equal(
     fieldStyle.layers.find(({ id }) => id === 'basemap-roads')
       ?.paint?.['line-color']?.[0],
     'match',
   )
+})
+
+test('basemap theme can be updated without rebuilding operational layers', () => {
+  const paintUpdates = []
+  const map = {
+    getLayer: (id) => id === 'safe-background' || id === 'basemap-road-labels',
+    setPaintProperty: (id, property, value) => paintUpdates.push({ id, property, value }),
+  }
+
+  applyBaseStyleTheme(map, {
+    darkMode: true,
+    vectorTiles: 'https://tiles.openfreemap.org/planet',
+  })
+
+  assert.ok(paintUpdates.some(({ id, property, value }) => (
+    id === 'safe-background' && property === 'background-color' && value === '#171719'
+  )))
+  assert.ok(paintUpdates.some(({ id, property, value }) => (
+    id === 'basemap-road-labels' && property === 'text-color' && value === '#e5e5ea'
+  )))
 })
 
 test('basemap errors are recognized from source ids and remote resource URLs', () => {

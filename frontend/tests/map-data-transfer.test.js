@@ -118,18 +118,43 @@ test('map data transfer dialog exposes direct import and complete export choices
   assert.match(html, /Diagram Topologi/)
 })
 
-test('map context and toolbar present compact professional map actions', () => {
-  const context = renderMapContextPill(activeContext, null, { name: 'Booster Kutawinangun' }, {
-    counts: { assetNodeCount: 98, lineCount: 62 },
-    confirmedConnectionCount: 62,
+test('map import exposes replace and review-only modes with explicit consequences', () => {
+  const html = renderMapDataTransferDialog({
+    activeContext,
+    assets,
+    networks: [],
+    selectedNetworkIds: new Set(),
+    state: {
+      mode: 'import',
+      configStatus: 'ready',
+      config: { limits: { maxFileSize: 50 * 1024 * 1024 } },
+      file: { name: 'jaringan.kmz', size: 2048 },
+      fileValidation: { valid: true, typeLabel: 'KMZ archive' },
+      versionName: 'Import jaringan',
+      importMode: 'replace_active',
+      officialSourceConfirmed: true,
+      phase: 'idle',
+      error: null,
+    },
   })
+
+  assert.match(html, /name="mapImportMode"/)
+  assert.match(html, /Timpa data aktif dan langsung tampilkan/)
+  assert.match(html, /Jangan timpa — simpan untuk ditinjau/)
+  assert.match(html, /peta serta diagram dimuat ulang/)
+  assert.match(html, /Import dan tampilkan di peta/)
+})
+
+test('map context and toolbar present compact professional map actions', () => {
+  const context = renderMapContextPill(activeContext, null, { name: 'Booster Kutawinangun' })
   const controls = renderMapFloatingControls()
 
-  assert.match(context, />Semarang</)
+  assert.match(context, />Kebumen</)
   assert.doesNotMatch(context, />Kantor Cabang Semarang</)
   assert.match(context, />Area</)
   assert.match(context, />Booster Kutawinangun</)
-  assert.match(context, /98 aset &middot; 62 jalur &middot; 62 koneksi terkonfirmasi/)
+  assert.equal((context.match(/<small>/g) ?? []).length, 2)
+  assert.doesNotMatch(context, /Dataset aktif|Read-only|Relasi otomatis|koneksi terkonfirmasi|context-metrics/)
   assert.doesNotMatch(context, /PETA KERJA/)
   assert.match(controls, /class="tool-button import-toggle map-action-ghost"/)
   assert.match(controls, /aria-label="Import" title="Import data peta"/)

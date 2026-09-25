@@ -160,6 +160,20 @@ export class PostgresDatasetVersionRepository {
     return this.#getWithExecutor(this.pool, id)
   }
 
+  async getActiveReadRevision({ datasetId, branchId } = {}) {
+    assertDatasetContext(datasetId)
+    const result = await this.pool.query(
+      `SELECT p.*, v.xmin::text AS storage_revision
+       FROM dataset_active_pointers p
+       JOIN dataset_versions v ON v.id = p.dataset_version_id
+       WHERE p.dataset_id = $1 AND ($2::text IS NULL OR p.branch_id = $2)
+       ORDER BY p.branch_id`,
+      [datasetId, branchId ?? null],
+    )
+    // Legacy or ambiguous publication must still use the validated read path.
+    return result.rows?.length === 1 ? JSON.stringify(result.rows[0]) : null
+  }
+
   async list() {
     return this.#listWithExecutor(this.pool)
   }
@@ -652,6 +666,10 @@ function topologyReviewPayloadPatch(record) {
     'topologyRelationHistory',
     'topologyRuns',
     'topologyMutationReceipts',
+    'topologyFrameNames',
+    'topologyFrameAssignments',
+    'topologyFrames',
+    'topologyEdgeOverrides',
     'relations',
     'mountingRelations',
     'mountingCandidates',

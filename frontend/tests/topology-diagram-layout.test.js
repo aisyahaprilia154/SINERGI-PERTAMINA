@@ -6,6 +6,625 @@ import {
   createTopologyDiagramLayoutCacheKey,
 } from '../src/pages/topology/topology-diagram-layout.js'
 
+function assertEdgesAvoidOtherFrames(layout) {
+  for (const edge of layout.edges) {
+    for (const box of layout.mountingBoxes.filter(box =>
+      !box.nodeIds.includes(edge.sourceId) && !box.nodeIds.includes(edge.targetId))) {
+      for (let index = 1; index < edge.routePoints.length; index++) {
+        const from = edge.routePoints[index - 1], to = edge.routePoints[index]
+        const crossesVertical = from.x === to.x && from.x > box.x + 1
+          && from.x < box.x + box.width - 1
+          && Math.max(from.y, to.y) > box.y + 1
+          && Math.min(from.y, to.y) < box.y + box.height - 1
+        const crossesHorizontal = from.y === to.y && from.y > box.y + 1
+          && from.y < box.y + box.height - 1
+          && Math.max(from.x, to.x) > box.x + 1
+          && Math.min(from.x, to.x) < box.x + box.width - 1
+        assert.equal(crossesVertical || crossesHorizontal, false,
+          `edge ${edge.id} must avoid ${box.label}`)
+      }
+    }
+  }
+}
+
+function assertEdgesAvoidOtherNodes(layout) {
+  for (const edge of layout.edges) {
+    for (const node of layout.nodes.filter(node =>
+      node.id !== edge.sourceId && node.id !== edge.targetId)) {
+      const box = node.diagram
+      for (let index = 1; index < edge.routePoints.length; index++) {
+        const from = edge.routePoints[index - 1], to = edge.routePoints[index]
+        const vertical = from.x === to.x && from.x > box.x + 1
+          && from.x < box.x + box.width - 1
+          && Math.max(from.y, to.y) > box.y + 1
+          && Math.min(from.y, to.y) < box.y + box.height - 1
+        const horizontal = from.y === to.y && from.y > box.y + 1
+          && from.y < box.y + box.height - 1
+          && Math.max(from.x, to.x) > box.x + 1
+          && Math.min(from.x, to.x) < box.x + box.width - 1
+        assert.equal(vertical || horizontal, false,
+          `edge ${edge.id} must avoid node ${node.name}`)
+      }
+    }
+  }
+}
+
+test('camera frames stay in their JB subtree across facilities and pole layouts', () => {
+  for (const expectation of ['indoor', 'standalone']) {
+  for (const area of ['ft-tegal-baru', 'dppu-yia', 'ft-pengapon-semarang', 'another-facility']) {
+    const assets = [
+      ['server', 'Server', 'Server Rack', 'core'],
+      ['jb1', 'JB-01', 'Junction Box', 'junction'],
+      ['jb2', 'JB-02', 'Junction Box', 'junction'],
+      ['ext', 'JB-02.2', 'Extended', 'junction_extended'],
+      ['p1', 'T-001', 'Pole', 'physical_mount'],
+      ['p2', 'T-002', 'Pole', 'physical_mount'],
+      ['pe', 'T-003', 'Pole', 'physical_mount'],
+      ['c8', 'C-08', 'CCTV', 'endpoint'],
+      ['c9', 'C-09', 'CCTV', 'endpoint'],
+      ['ce', 'Extended camera', 'CCTV', 'endpoint'],
+    ].map(([id, name, type, topologyRole]) => ({id, name, type, topologyRole,
+      locationGroupKey: area,
+      ...(topologyRole === 'endpoint' ? {mountingExpectation: expectation} : {}),
+    }))
+    const edges = [['server', 'jb1'], ['server', 'jb2'], ['jb2', 'ext'],
+      ['jb1', 'c8'], ['jb1', 'c9'], ['ext', 'ce']].map(([sourceNodeId, targetNodeId]) => ({
+      id: `${sourceNodeId}-${targetNodeId}`, sourceNodeId, targetNodeId, relationStatus: 'confirmed',
+    }))
+    const model = buildTopologyDiagramModel({assets, roots: ['server'],
+      graph: {nodes: assets, edges}, locationGroups: [{key: area, name: area}],
+      mountingRelations: [['jb1', 'p1'], ['jb2', 'p2'], ['ext', 'pe']]
+        .map(([sourceAssetId, targetAssetId]) => ({sourceAssetId, targetAssetId, relationType: 'mounted_on'})),
+    })
+    for (const layoutStyle of ['central-backbone', 'compound-poles', 'facility-schematic']) {
+      const layout = calculateTopologyDiagramLayout(model, {layoutStyle})
+      const frame = id => layout.mountingBoxes.find(box => box.nodeIds.includes(id))
+      assert.equal(frame('c8').id, frame('c9').id, 'indoor siblings share their own frame')
+      assert.equal(layout.nodes.find(node => node.id === 'c8').suppressTypeLabel, true)
+      for (const [child, parent] of [['c8', 'jb1'], ['c9', 'jb1'], ['ce', 'ext']]) {
+        const childFrame = frame(child), parentFrame = frame(parent)
+        assert.notEqual(childFrame.id, parentFrame.id, 'network grouping does not imply pole mounting')
+        assert.equal(childFrame.layoutParentBoxId, parentFrame.id)
+        assert.equal(childFrame.layoutParentNodeId, parent)
+        assert.ok(childFrame.y >= parentFrame.y + parentFrame.height)
+        assert.ok(childFrame.x >= parentFrame.treeX)
+        assert.ok(childFrame.x + childFrame.width <= parentFrame.treeX + parentFrame.treeWidth)
+      }
+      assert.ok(frame('c8').x + frame('c8').width <= frame('jb2').treeX,
+        'the JB-01 family is kept together before the next JB family')
+      assert.equal(layout.nodes.length, 7, 'every network asset is rendered exactly once')
+      assert.equal(layout.edges.length, edges.length, 'grouping does not invent network connections')
+    }
+  }
+  }
+})
+
+test('indoor cameras linked to both JB-02 and its extensions stay below their specific JB', () => {
+  const area = 'ft-tegal-baru'
+  const assets = [
+    ['server', 'Server', 'Server Rack', 'core'],
+    ['jb2', 'JB-02', 'Junction Box', 'junction'],
+    ['jb22', 'JB-02.2', 'Junction Box', 'junction_extended'],
+    ['jb23', 'JB-02.3', 'Junction Box', 'junction_extended'],
+    ['jb24', 'JB-02.4', 'Junction Box', 'junction_extended'],
+    ['pole', 'T-04', 'Pole', 'physical_mount'],
+    ['c-base', 'C-08', 'CCTV', 'endpoint'],
+    ['c14', 'C-14', 'CCTV', 'endpoint'],
+    ['c-other', 'C-11', 'CCTV', 'endpoint'],
+    ['c09', 'C-09', 'CCTV', 'endpoint'],
+  ].map(([id, name, type, topologyRole]) => ({ id, name, type, topologyRole,
+    locationGroupKey: area,
+    ...(topologyRole === 'endpoint' ? { mountingExpectation: 'indoor' } : {}),
+  }))
+  const connections = [['server', 'jb2'], ['jb2', 'jb22'], ['jb2', 'jb23'], ['jb2', 'jb24'],
+    ['jb2', 'c-base'], ['jb2', 'c14'], ['jb22', 'c14'],
+    ['jb23', 'c-other'], ['jb2', 'c09'], ['jb24', 'c09']]
+  const edges = connections.map(([sourceNodeId, targetNodeId]) => ({
+    id: `${sourceNodeId}-${targetNodeId}`, sourceNodeId, targetNodeId,
+    relationStatus: 'confirmed',
+  }))
+  const model = buildTopologyDiagramModel({ assets, roots: ['server'],
+    graph: { nodes: assets, edges }, locationGroups: [{ key: area, name: area }],
+    mountingRelations: ['jb2', 'jb22', 'jb23', 'jb24'].map(sourceAssetId => ({
+      sourceAssetId, targetAssetId: 'pole', relationType: 'mounted_on',
+    })) })
+
+  for (const layoutStyle of ['central-backbone', 'compound-poles', 'facility-schematic']) {
+    const layout = calculateTopologyDiagramLayout(model, { layoutStyle })
+    const frame = id => layout.mountingBoxes.find(box => box.nodeIds.includes(id))
+    for (const [cameraId, junctionId] of [['c14', 'jb22'], ['c09', 'jb24']]) {
+      const camera = frame(cameraId), junction = frame(junctionId)
+      assert.ok(camera && junction)
+      assert.equal(camera.layoutParentBoxId, junction.id)
+      assert.equal(camera.layoutParentNodeId, junctionId)
+      assert.ok(camera.y >= junction.y + junction.height)
+      assert.ok(camera.x >= junction.treeX)
+      assert.ok(camera.x + camera.width <= junction.treeX + junction.treeWidth)
+      assert.equal(layout.nodes.filter(node => node.id === cameraId).length, 1)
+      const cameraCenter = layout.nodes.find(node => node.id === cameraId).diagram.centerX
+      const junctionCenter = layout.nodes.find(node => node.id === junctionId).diagram.centerX
+      if (layoutStyle !== 'facility-schematic') {
+        assert.ok(Math.abs(cameraCenter - junctionCenter) <= camera.width / 2,
+          `${layoutStyle}: ${cameraId} stays beneath the ${junctionId} branch`)
+      }
+    }
+    const rowCounts = new Map()
+    for (const id of ['c-base', 'c14', 'c-other', 'c09']) {
+      const y = frame(id).y
+      rowCounts.set(y, (rowCounts.get(y) ?? 0) + 1)
+    }
+    assert.deepEqual([...rowCounts.values()].sort(), [2, 2],
+      'four indoor frames form a compact two-by-two grid')
+    assert.equal(layout.edges.length, edges.length)
+    if (layoutStyle === 'central-backbone') assertEdgesAvoidOtherFrames(layout)
+    for (let left = 0; left < layout.mountingBoxes.length; left++) {
+      for (let right = left + 1; right < layout.mountingBoxes.length; right++) {
+        const a = layout.mountingBoxes[left], b = layout.mountingBoxes[right]
+        assert.ok(a.x + a.width <= b.x || b.x + b.width <= a.x
+          || a.y + a.height <= b.y || b.y + b.height <= a.y,
+        'sibling frames do not overlap other frames')
+      }
+    }
+  }
+})
+
+test('branch root frames keep one tier and equal gaps despite a wider child subtree', () => {
+  const area = 'branch-area'
+  const assets = [
+    { id: 'server', name: 'Server', type: 'Server Rack', topologyRole: 'core', locationGroupKey: area },
+    ...Array.from({ length: 6 }, (_, index) => ({ id: `jb-${index}`, name: `JB-${index + 1}`,
+      type: 'Junction Box', topologyRole: 'junction', locationGroupKey: area })),
+    ...Array.from({ length: 6 }, (_, index) => ({ id: `pole-${index}`, name: `T-${index + 1}`,
+      type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area })),
+    { id: 'indoor', name: 'Indoor camera', type: 'CCTV', topologyRole: 'endpoint',
+      mountingExpectation: 'indoor', locationGroupKey: area },
+    { id: 'standalone', name: 'Standalone camera', type: 'CCTV', topologyRole: 'endpoint',
+      mountingExpectation: 'standalone', locationGroupKey: area },
+  ]
+  const edges = [
+    ...Array.from({ length: 6 }, (_, index) => ({ id: `server-jb-${index}`,
+      sourceNodeId: 'server', targetNodeId: `jb-${index}`, relationStatus: 'confirmed' })),
+    ...['indoor', 'standalone'].map(id => ({ id: `jb-0-${id}`,
+      sourceNodeId: 'jb-0', targetNodeId: id, relationStatus: 'confirmed' })),
+  ]
+  const mountingRelations = Array.from({ length: 6 }, (_, index) => ({
+    sourceAssetId: `jb-${index}`, targetAssetId: `pole-${index}`, relationType: 'mounted_on',
+  }))
+  const model = buildTopologyDiagramModel({ assets, graph: { nodes: assets, edges },
+    mountingRelations, locationGroups: [{ key: area, name: area }] })
+  const baseline = calculateTopologyDiagramLayout(model)
+  const layout = calculateTopologyDiagramLayout(model, { mountingRootFrameGap: 64 })
+  const roots = layout.mountingBoxes.filter(box => !box.layoutParentBoxId)
+    .sort((left, right) => left.x - right.x)
+  assert.ok(layout.width < baseline.width)
+  assert.equal(new Set(roots.map(box => box.y)).size, 1)
+  assert.deepEqual(roots.slice(1).map((box, index) => (
+    box.x - roots[index].x - roots[index].width
+  )), Array(5).fill(64))
+  assert.equal(layout.nodes.length, 9)
+  assert.equal(layout.edges.length, edges.length)
+  assertEdgesAvoidOtherFrames(layout)
+})
+
+test('diagram frame assignment can move an asset into an Indoor frame without changing mounting evidence', () => {
+  const area = 'area-a'
+  const assets = [
+    { id: 'server', name: 'Server', type: 'Server Rack', topologyRole: 'core', locationGroupKey: area },
+    { id: 'pole', name: 'T-01', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area },
+    { id: 'camera', name: 'CAM-01', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: area,
+      mountingExpectation: 'pole' },
+    { id: 'indoor', name: 'DC-01', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: area,
+      mountingExpectation: 'indoor' },
+  ]
+  const model = buildTopologyDiagramModel({
+    assets,
+    graph: { nodes: assets, edges: [] },
+    mountingRelations: [{ sourceAssetId: 'camera', targetAssetId: 'pole', relationType: 'mounted_on' }],
+    locationGroups: [{ key: area, name: area }],
+  })
+  const baseline = calculateTopologyDiagramLayout(model)
+  const indoorFrame = baseline.mountingBoxes.find(box => box.kind === 'excluded')
+  const poleFrame = baseline.mountingBoxes.find(box => box.hostId === 'pole')
+  assert.ok(indoorFrame)
+  assert.ok(poleFrame)
+
+  const moved = calculateTopologyDiagramLayout(model, {
+    frameAssignments: { camera: indoorFrame.id },
+  })
+  const movedIndoorFrame = moved.mountingBoxes.find(({ id }) => id === indoorFrame.id)
+  const movedPoleFrame = moved.mountingBoxes.find(({ id }) => id === poleFrame.id)
+  assert.ok(movedIndoorFrame.nodeIds.includes('camera'))
+  assert.equal(movedPoleFrame.nodeIds.includes('camera'), false)
+  assert.equal(model.mountingGroups.find(({ hostId }) => hostId === 'pole').childIds.includes('camera'), true)
+})
+
+test('isolated JB and CCTV remain in an editable area lane beside pole frames', () => {
+  const area = 'area-a'
+  const assets = [
+    { id: 'pole', name: 'T-015', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area },
+    { id: 'jb', name: 'JB-01', type: 'Junction Box', topologyRole: 'junction', locationGroupKey: area },
+    { id: 'camera', name: 'C-047', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: area },
+  ]
+  const model = buildTopologyDiagramModel({ assets, graph: { nodes: assets, edges: [] },
+    locationGroups: [{ key: area, name: area }] })
+  const layout = calculateTopologyDiagramLayout(model, { layoutStyle: 'central-backbone',
+    customFrames: { 'pole-group:pole': { id: 'pole-group:pole', type: 'pole',
+      poleAssetId: 'pole', areaKey: area, name: 'T-015' } } })
+  assert.ok(layout.mountingBoxes.some(box => box.hostId === 'pole'))
+  for (const id of ['jb', 'camera']) {
+    assert.ok(layout.mountingBoxes.some(box => box.nodeIds.includes(id)))
+    assert.equal(layout.nodes.filter(node => node.id === id).length, 1)
+    assert.ok(layout.nodes.find(node => node.id === id).mountingBoxId)
+  }
+})
+
+test('a second camera can join an already mounted JB without losing its logical line', () => {
+  const area = 'area-a'
+  const assets = [
+    { id: 'pole', name: 'T-015', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area },
+    { id: 'jb', name: 'JB-01', type: 'Junction Box', topologyRole: 'junction', locationGroupKey: area },
+    { id: 'camera-a', name: 'C-046', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: area },
+    { id: 'camera-b', name: 'C-047', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: area },
+  ]
+  const edges = ['camera-a', 'camera-b'].map(id => ({ id: `jb-${id}`,
+    sourceNodeId: 'jb', targetNodeId: id, relationStatus: 'confirmed' }))
+  const model = buildTopologyDiagramModel({ assets, graph: { nodes: assets, edges },
+    mountingRelations: ['jb', 'camera-a', 'camera-b'].map(sourceAssetId => ({
+      sourceAssetId, targetAssetId: 'pole', relationType: 'mounted_on',
+    })), locationGroups: [{ key: area, name: area }] })
+  const layout = calculateTopologyDiagramLayout(model, { layoutStyle: 'central-backbone' })
+  const pole = layout.mountingBoxes.find(box => box.hostId === 'pole')
+  assert.deepEqual(new Set(pole.nodeIds), new Set(['jb', 'camera-a', 'camera-b']))
+  assert.ok(layout.edges.some(edge => edge.sourceId === 'jb' && edge.targetId === 'camera-b'))
+})
+
+test('direct JB and camera share a matching Non-tiang frame while independent assets stay apart', () => {
+  const area = 'branch-area'
+  const assets = [
+    { id: 'server', name: 'Server', type: 'Server Rack', topologyRole: 'core', locationGroupKey: area },
+    { id: 'jb', name: 'JB-10.1', type: 'Junction Box', topologyRole: 'junction',
+      mountingExpectation: 'standalone', locationGroupKey: area },
+    { id: 'camera', name: 'C-34', type: 'CCTV', topologyRole: 'endpoint',
+      mountingExpectation: 'standalone', locationGroupKey: area },
+    { id: 'other', name: 'C-35', type: 'CCTV', topologyRole: 'endpoint',
+      mountingExpectation: 'standalone', locationGroupKey: area },
+    { id: 'indoor', name: 'C-36', type: 'CCTV', topologyRole: 'endpoint',
+      mountingExpectation: 'indoor', locationGroupKey: area },
+  ]
+  const edges = [
+    { id: 'server-jb', sourceNodeId: 'server', targetNodeId: 'jb', relationStatus: 'confirmed' },
+    { id: 'jb-camera', sourceNodeId: 'jb', targetNodeId: 'camera', relationStatus: 'confirmed' },
+    { id: 'jb-indoor', sourceNodeId: 'jb', targetNodeId: 'indoor', relationStatus: 'confirmed' },
+  ]
+  const model = buildTopologyDiagramModel({ assets, graph: { nodes: assets, edges },
+    roots: ['server'], locationGroups: [{ key: area, name: area }] })
+  const layout = calculateTopologyDiagramLayout(model)
+  const frame = id => layout.mountingBoxes.find(box => box.nodeIds.includes(id))
+  assert.equal(frame('jb').id, frame('camera').id)
+  assert.notEqual(frame('jb').id, frame('other').id)
+  assert.notEqual(frame('jb').id, frame('indoor').id)
+  const moved = calculateTopologyDiagramLayout(model, {
+    frameAssignments: { camera: frame('other').id },
+  })
+  assert.equal(moved.mountingBoxes.find(box => box.nodeIds.includes('camera')).id, frame('other').id)
+})
+
+test('independent network branches mounted on one pole share its physical frame', () => {
+  const area = 'branch-area'
+  const assets = [
+    { id: 'server', name: 'Server', type: 'Server Rack', topologyRole: 'core', locationGroupKey: area },
+    { id: 'pole', name: 'T-10', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area },
+    ...['a', 'b'].flatMap(suffix => [
+      { id: `jb-${suffix}`, name: `JB-${suffix}`, type: 'Junction Box', topologyRole: 'junction',
+        mountingExpectation: 'pole', locationGroupKey: area },
+      { id: `cam-${suffix}`, name: `Cam-${suffix}`, type: 'CCTV', topologyRole: 'endpoint',
+        mountingExpectation: 'pole', locationGroupKey: area },
+    ]),
+  ]
+  const edges = ['a', 'b'].flatMap(suffix => [
+    { id: `server-${suffix}`, sourceNodeId: 'server', targetNodeId: `jb-${suffix}`, relationStatus: 'confirmed' },
+    { id: `branch-${suffix}`, sourceNodeId: `jb-${suffix}`, targetNodeId: `cam-${suffix}`, relationStatus: 'confirmed' },
+  ])
+  const mountingRelations = ['jb-a', 'cam-a', 'jb-b', 'cam-b'].map(sourceAssetId => ({
+    sourceAssetId, targetAssetId: 'pole', relationType: 'mounted_on', verificationStatus: 'confirmed',
+  }))
+  const model = buildTopologyDiagramModel({ assets, graph: { nodes: assets, edges },
+    roots: ['server'], mountingRelations, locationGroups: [{ key: area, name: area }] })
+  const layout = calculateTopologyDiagramLayout(model)
+  const frame = id => layout.mountingBoxes.find(box => box.nodeIds.includes(id))
+  assert.equal(frame('jb-a').id, frame('cam-a').id)
+  assert.equal(frame('jb-b').id, frame('cam-b').id)
+  assert.equal(frame('jb-a').id, frame('jb-b').id)
+  assert.equal(frame('jb-a').id, 'pole-group:pole')
+  assert.deepEqual(new Set(frame('jb-a').nodeIds), new Set(['jb-a', 'cam-a', 'jb-b', 'cam-b']))
+  assert.equal(layout.mountingBoxes.filter(box => box.hostId === 'pole').length, 1)
+  assert.equal(new Set(layout.nodes.map(node => node.id)).size, layout.nodes.length)
+  assert.equal(layout.edges.length, edges.length)
+  assert.deepEqual(calculateTopologyDiagramLayout(model).mountingBoxes.map(box => box.id),
+    layout.mountingBoxes.map(box => box.id))
+})
+
+for (const [targetPoleName, existingJbName] of [
+  ['T-002', 'JB-002-EXP'],
+  ['T-004', 'JB-004-EXP'],
+]) test(`moving JB-001 to ${targetPoleName} aligns independent JBs after reload`, () => {
+  const area = 'area-a'
+  const assets = [
+    ['core', 'Server', 'Server Rack', 'core'],
+    ['pole-1', 'T-001', 'Pole', 'physical_mount'],
+    ['pole-2', targetPoleName, 'Pole', 'physical_mount'],
+    ['jb-1', 'JB-001', 'Junction Box', 'junction'],
+    ['jb-2', existingJbName, 'Junction Box', 'junction_extended'],
+    ['cam-9', 'C-009-Fix', 'CCTV', 'endpoint'],
+    ['cam-14', 'C-014-Fix', 'CCTV', 'endpoint'],
+    ['cam-31', 'C-031-Fix', 'CCTV', 'endpoint'],
+    ['cam-32', 'C-032', 'CCTV', 'endpoint'],
+    ['indoor', 'C-Indoor', 'CCTV', 'endpoint'],
+  ].map(([id, name, type, topologyRole]) => ({
+    id, name, type, topologyRole, locationGroupKey: area,
+    ...(id === 'indoor' ? { mountingExpectation: 'indoor' } : {}),
+  }))
+  const edges = [
+    ['core', 'jb-1'], ['core', 'jb-2'], ['jb-1', 'cam-9'],
+    ['jb-2', 'cam-14'], ['jb-2', 'cam-31'], ['jb-2', 'cam-32'], ['jb-2', 'indoor'],
+  ].map(([sourceNodeId, targetNodeId]) => ({
+    id: `${sourceNodeId}-${targetNodeId}`, sourceNodeId, targetNodeId, relationStatus: 'confirmed',
+  }))
+  const initialMounts = [
+    ['jb-1', 'pole-1'], ['cam-9', 'pole-1'],
+    ['jb-2', 'pole-2'], ['cam-14', 'pole-2'], ['cam-31', 'pole-2'], ['cam-32', 'pole-2'],
+  ].map(([sourceAssetId, targetAssetId]) => ({
+    sourceAssetId, targetAssetId, relationType: 'mounted_on', verificationStatus: 'confirmed',
+  }))
+  const build = mountingRelations => buildTopologyDiagramModel({
+    assets, graph: { nodes: assets, edges }, roots: ['core'], mountingRelations,
+    locationGroups: [{ key: area, name: area }], area,
+  })
+  const initial = calculateTopologyDiagramLayout(build(initialMounts))
+  assert.deepEqual(new Set(initial.mountingBoxes.find(box => box.hostId === 'pole-1').nodeIds),
+    new Set(['jb-1', 'cam-9']))
+
+  const savedMounts = initialMounts.map(relation => relation.sourceAssetId === 'jb-1'
+    ? { ...relation, targetAssetId: 'pole-2', provenance: 'manual_admin' } : relation)
+  for (const mountingRelations of [savedMounts, structuredClone(savedMounts)]) {
+    const layout = calculateTopologyDiagramLayout(build(mountingRelations))
+    const poleOne = layout.mountingBoxes.filter(box => box.hostId === 'pole-1')
+    const poleTwo = layout.mountingBoxes.filter(box => box.hostId === 'pole-2')
+    assert.equal(poleOne.length, 1)
+    assert.equal(poleTwo.length, 1)
+    assert.deepEqual(poleOne[0].nodeIds, ['cam-9'])
+    assert.deepEqual(new Set(poleTwo[0].nodeIds),
+      new Set(['jb-1', 'jb-2', 'cam-14', 'cam-31', 'cam-32']))
+    const byId = new Map(layout.nodes.map(node => [node.id, node]))
+    assert.equal(byId.get('jb-1').rowIndex, 0)
+    assert.equal(byId.get('jb-2').rowIndex, 0)
+    assert.equal(byId.get('jb-1').diagram.y, byId.get('jb-2').diagram.y)
+    for (const cameraId of ['cam-14', 'cam-31', 'cam-32']) {
+      assert.equal(byId.get(cameraId).layoutParentId, 'jb-2')
+      assert.ok(byId.get(cameraId).diagram.y > byId.get('jb-2').diagram.y)
+    }
+    assert.equal(byId.get('cam-9').mountingBoxId, poleOne[0].id)
+    assert.ok(layout.edges.some(edge => [edge.sourceId, edge.targetId].includes('jb-1')
+      && [edge.sourceId, edge.targetId].includes('cam-9')))
+    assert.equal(layout.mountingBoxes.find(box => box.nodeIds.includes('indoor')).kind, 'excluded')
+    assert.equal(new Set(layout.nodes.map(node => node.id)).size, layout.nodes.length)
+    assert.equal(layout.edges.length, edges.length)
+    for (let left = 0; left < poleTwo[0].nodes.length; left++) {
+      for (let right = left + 1; right < poleTwo[0].nodes.length; right++) {
+        const a = poleTwo[0].nodes[left].diagram, b = poleTwo[0].nodes[right].diagram
+        assert.equal(a.x < b.x + b.width && a.x + a.width > b.x
+          && a.y < b.y + b.height && a.y + a.height > b.y, false)
+      }
+    }
+    for (let left = 0; left < layout.mountingBoxes.length; left++) {
+      for (let right = left + 1; right < layout.mountingBoxes.length; right++) {
+        const a = layout.mountingBoxes[left], b = layout.mountingBoxes[right]
+        assert.equal(a.x < b.x + b.width && a.x + a.width > b.x
+          && a.y < b.y + b.height && a.y + a.height > b.y, false)
+      }
+    }
+  }
+})
+
+test('confirmed JB-to-JB relation inside one pole keeps the child below its parent', () => {
+  const area = 'pole-branch'
+  const assets = [
+    { id: 'pole', name: 'T-002', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area },
+    { id: 'parent', name: 'JB-001', type: 'Junction Box', topologyRole: 'junction', locationGroupKey: area },
+    { id: 'child', name: 'JB-002-EXP', type: 'Junction Box', topologyRole: 'junction_extended', locationGroupKey: area },
+    { id: 'camera', name: 'C-014', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: area },
+  ]
+  const edges = [
+    { id: 'parent-child', sourceNodeId: 'parent', targetNodeId: 'child', relationStatus: 'confirmed' },
+    { id: 'child-camera', sourceNodeId: 'child', targetNodeId: 'camera', relationStatus: 'confirmed' },
+  ]
+  const model = buildTopologyDiagramModel({
+    assets, graph: { nodes: assets, edges }, roots: ['parent'],
+    mountingRelations: ['parent', 'child', 'camera'].map(sourceAssetId => ({
+      sourceAssetId, targetAssetId: 'pole', relationType: 'mounted_on', verificationStatus: 'confirmed',
+    })),
+    locationGroups: [{ key: area, name: area }], area,
+  })
+  const layout = calculateTopologyDiagramLayout(model)
+  const frame = layout.mountingBoxes.find(box => box.hostId === 'pole')
+  const byId = new Map(layout.nodes.map(node => [node.id, node]))
+  assert.equal(layout.mountingBoxes.filter(box => box.hostId === 'pole').length, 1)
+  assert.deepEqual(new Set(frame.nodeIds), new Set(['parent', 'child', 'camera']))
+  assert.equal(byId.get('parent').rowIndex, 0)
+  assert.equal(byId.get('child').rowIndex, 1)
+  assert.equal(byId.get('child').layoutParentId, 'parent')
+  assert.equal(byId.get('camera').layoutParentId, 'child')
+  assert.ok(byId.get('camera').diagram.y > byId.get('child').diagram.y)
+  assert.equal(layout.edges.length, edges.length)
+})
+
+test('legacy branch and satellite frame assignments resolve to the canonical pole frame', () => {
+  const area = 'area-a'
+  const assets = [
+    { id: 'pole-1', name: 'T-001', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area },
+    { id: 'pole-2', name: 'T-002', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area },
+    { id: 'jb-1', name: 'JB-001', type: 'Junction Box', topologyRole: 'junction', locationGroupKey: area },
+    { id: 'cam-9', name: 'C-009', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: area },
+    { id: 'jb-2', name: 'JB-002', type: 'Junction Box', topologyRole: 'junction', locationGroupKey: area },
+  ]
+  const model = buildTopologyDiagramModel({
+    assets, graph: { nodes: assets, edges: [
+      { id: 'jb-camera', sourceNodeId: 'jb-1', targetNodeId: 'cam-9', relationStatus: 'confirmed' },
+    ] },
+    mountingRelations: ['jb-1', 'cam-9'].map(sourceAssetId => ({
+      sourceAssetId, targetAssetId: 'pole-1', relationType: 'mounted_on',
+    })),
+    locationGroups: [{ key: area, name: area }], area,
+  })
+  const layout = calculateTopologyDiagramLayout(model, { frameAssignments: {
+    'jb-1': 'pole-group:pole-2:branch:jb-1',
+    'cam-9': 'pole-group:pole-2:junction:jb-1',
+  } })
+  assert.deepEqual(new Set(layout.mountingBoxes.find(box => box.id === 'pole-group:pole-2').nodeIds),
+    new Set(['jb-1', 'cam-9']))
+  assert.equal(layout.mountingBoxes.filter(box => box.hostId === 'pole-2').length, 1)
+  assert.deepEqual(model.mountingGroups.find(group => group.hostId === 'pole-1').childIds,
+    ['cam-9', 'jb-1'])
+})
+
+test('custom Non-tiang frame aligns sibling JBs with their camera columns', () => {
+  for (const count of [3, 4, 5]) {
+    const area = 'branch-area'
+    const frameId = `excluded-mounting:${area}:custom:siblings`
+    const extensions = Array.from({length: count}, (_, index) => `jb-${index + 2}`)
+    const cameras = Array.from({length: count}, (_, index) => `camera-${index + 2}`)
+    const assets = [
+      {id: 'server', name: 'Server', type: 'Server Rack', topologyRole: 'core', locationGroupKey: area},
+      {id: 'pole', name: 'T-04', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area},
+      {id: 'base', name: 'JB-02', type: 'Junction Box', topologyRole: 'junction', locationGroupKey: area},
+      ...extensions.map((id, index) => ({id, name: `JB-02.${index + 2}`,
+        type: 'Junction Box', topologyRole: 'junction_extended', locationGroupKey: area})),
+      ...cameras.map((id, index) => ({id, name: `C-${index + 14}`,
+        type: 'CCTV', topologyRole: 'endpoint', mountingExpectation: 'indoor', locationGroupKey: area})),
+    ]
+    const edges = [
+      {id: 'server-base', sourceNodeId: 'server', targetNodeId: 'base', relationStatus: 'confirmed'},
+      ...extensions.flatMap((id, index) => [
+        {id: `base-${id}`, sourceNodeId: 'base', targetNodeId: id, relationStatus: 'confirmed'},
+        {id: `${id}-${cameras[index]}`, sourceNodeId: id,
+          targetNodeId: cameras[index], relationStatus: 'confirmed'},
+      ]),
+    ]
+    const model = buildTopologyDiagramModel({assets, graph: {nodes: assets, edges},
+      mountingRelations: [{sourceAssetId: 'base', targetAssetId: 'pole', relationType: 'mounted_on'}],
+      locationGroups: [{key: area, name: area}]})
+    const options = {mountingRootFrameGap: 64,
+      frameAssignments: Object.fromEntries(extensions.map(id => [id, frameId])),
+      customFrames: {[frameId]: {id: frameId, type: 'non-pole', areaKey: area, name: 'Non-tiang'}}}
+    const layout = calculateTopologyDiagramLayout(model, options)
+    const frame = layout.mountingBoxes.find(box => box.id === frameId)
+    const pole = layout.mountingBoxes.find(box => box.hostId === 'pole')
+    assert.equal(frame.layoutParentBoxId, pole.id)
+    assert.ok(frame.y >= pole.y + pole.height)
+    assert.equal(frame.siblingJunctionGrid, true)
+    assert.equal(frame.nodes.length, count)
+    const junctions = extensions.map(id => layout.nodes.find(node => node.id === id))
+    const cameraFrames = cameras.map(id => layout.mountingBoxes.find(box => box.nodeIds.includes(id)))
+    for (let index = 0; index < count; index++) {
+      assert.equal(cameraFrames[index].layoutParentBoxId, frame.id)
+      assert.equal(cameraFrames[index].layoutParentNodeId, extensions[index])
+      assert.equal(cameraFrames[index].x + cameraFrames[index].width / 2,
+        junctions[index].diagram.centerX)
+      assert.ok(cameraFrames[index].y >= frame.y + frame.height)
+    }
+    assert.deepEqual(junctions.slice(0, 3).map(node => node.diagram.centerY),
+      Array(3).fill(junctions[0].diagram.centerY))
+    if (count > 3) assert.ok(junctions[3].diagram.centerY > junctions[0].diagram.centerY)
+    assert.equal(layout.edges.length, edges.length)
+    assert.equal(layout.nodes.length, assets.length - 1)
+    const rebuilt = calculateTopologyDiagramLayout(model, options)
+    assert.deepEqual(rebuilt.mountingBoxes.map(box => [box.id, box.x, box.y, box.width, box.height]),
+      layout.mountingBoxes.map(box => [box.id, box.x, box.y, box.width, box.height]))
+    const otherAreaLayout = calculateTopologyDiagramLayout(model,
+      {...options, mountingRootFrameGap: null})
+    const otherAreaFrame = otherAreaLayout.mountingBoxes.find(box => box.id === frameId)
+    assert.equal(otherAreaFrame.siblingJunctionGrid, true)
+    assertEdgesAvoidOtherFrames(otherAreaLayout)
+    assertEdgesAvoidOtherNodes(otherAreaLayout)
+    assert.equal(model.edges.length, edges.length)
+    assert.equal(model.mountingGroups.find(group => group.hostId === 'pole').childIds.includes('base'), true)
+    assertEdgesAvoidOtherFrames(layout)
+    assertEdgesAvoidOtherNodes(layout)
+    for (let left = 0; left < layout.mountingBoxes.length; left++) {
+      for (let right = left + 1; right < layout.mountingBoxes.length; right++) {
+        const a = layout.mountingBoxes[left], b = layout.mountingBoxes[right]
+        assert.ok(a.x + a.width <= b.x || b.x + b.width <= a.x
+          || a.y + a.height <= b.y || b.y + b.height <= a.y)
+      }
+    }
+  }
+})
+
+test('custom Indoor and selected empty-pole frames stay visible before assets are dropped into them', () => {
+  const area = 'area-a'
+  const assets = [
+    { id: 'server', name: 'Server', type: 'Server Rack', topologyRole: 'core', locationGroupKey: area },
+    { id: 'pole-empty', name: 'Tiang 02', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area },
+  ]
+  const model = buildTopologyDiagramModel({ assets,
+    graph: { nodes: assets, edges: [] },
+    locationGroups: [{ key: area, name: 'Area A' }],
+  })
+  const indoorId = `excluded-mounting:${area}:custom:frame-1`
+  const poleId = 'pole-group:pole-empty'
+  const layout = calculateTopologyDiagramLayout(model, { customFrames: {
+    [indoorId]: { id: indoorId, type: 'indoor', areaKey: area, name: 'Indoor' },
+    [poleId]: { id: poleId, type: 'pole', areaKey: area, poleAssetId: 'pole-empty', name: 'Tiang 02' },
+  } })
+
+  const indoor = layout.mountingBoxes.find(({ id }) => id === indoorId)
+  const pole = layout.mountingBoxes.find(({ id }) => id === poleId)
+  assert.equal(indoor?.kind, 'excluded')
+  assert.deepEqual(indoor?.nodeIds, [])
+  assert.equal(pole?.kind, 'empty')
+  assert.equal(pole?.hostId, 'pole-empty')
+})
+
+test('a camera stays in its physical pole frame even when its network owner is elsewhere', () => {
+  for (const area of ['booster-kutawinangun', 'dppu-yia', 'ft-tegal-baru', 'unlisted-facility']) {
+    for (const extended of [false, true]) {
+      const assets = [
+        ['root', 'Server', 'Server Rack', 'core'],
+        ['owner', extended ? 'JB-02.2' : 'JB-02', 'Junction Box', extended ? 'junction_extended' : 'junction'],
+        ['other', 'JB-06', 'Junction Box', 'junction'],
+        ['camera', 'Cam-13', 'CCTV', 'endpoint'],
+        ['local', 'Cam-16', 'CCTV', 'endpoint'],
+        ['pole', 'T-08', 'Pole', 'physical_mount'],
+      ].map(([id, name, type, topologyRole]) => ({id, name, type, topologyRole, locationGroupKey: area}))
+      const edges = [['root', 'owner'], ['root', 'other'], ['camera', 'owner'], ['other', 'local']]
+        .map(([sourceNodeId, targetNodeId]) => ({id: `${sourceNodeId}:${targetNodeId}`,
+          sourceNodeId, targetNodeId, relationStatus: 'confirmed'}))
+      const mounts = ['other', 'camera', 'local'].map(sourceAssetId => ({
+        sourceAssetId, targetAssetId: 'pole', relationType: 'mounted_on', verificationStatus: 'confirmed',
+      }))
+      const model = buildTopologyDiagramModel({assets, roots: ['root'], graph: {nodes: assets, edges},
+        mountingRelations: mounts, locationGroups: [{key: area, name: area}]})
+      const before = JSON.stringify(model.mountingGroups)
+      for (const layoutStyle of ['central-backbone', 'compound-poles', 'facility-schematic']) {
+        const layout = calculateTopologyDiagramLayout(model, {layoutStyle})
+        const frame = id => layout.mountingBoxes.find(box => box.nodeIds.includes(id))
+        assert.equal(frame('camera').id, frame('other').id)
+        assert.notEqual(frame('camera').id, frame('owner').id)
+        assert.equal(layout.mountingBoxes.filter(box => box.hostId === 'pole').length, 1)
+        assert.equal(frame('camera').hostId, 'pole', 'physical mounting is preserved separately')
+        assert.equal(frame('local').id, frame('other').id)
+        assert.equal(layout.nodes.filter(node => node.id === 'camera').length, 1)
+        assert.ok(layout.edges.some(edge => (
+          [edge.sourceId, edge.targetId].includes('camera')
+            && [edge.sourceId, edge.targetId].includes('owner')
+        )))
+        assert.equal(layout.edges.length, edges.length)
+        assert.equal(JSON.stringify(model.mountingGroups), before)
+      }
+    }
+  }
+})
+
 function fixture() {
   const assets = [
     { id: 'root', name: 'Core', type: 'Core Router', topologyRole: 'core', locationGroupKey: 'area-a' },
@@ -57,7 +676,7 @@ test('layout is top-down, orthogonal, bounded, and does not overlap nodes', () =
   assert.equal(layout.sections.length, 1)
   assert.equal(layout.unresolvedMarkers.length, 1)
   assert.equal(layout.sections[0].lanes[0].presentation, 'pole-backbone')
-  assert.equal(layout.mountingBoxes.length, 1)
+  assert.equal(layout.mountingBoxes.length, 2)
   assert.equal(layout.mountingBoxes[0].kind, 'needs-mounting')
   assert.equal(layout.mountingBoxes[0].label, 'Perlu mounting')
 
@@ -93,7 +712,7 @@ test('layout is top-down, orthogonal, bounded, and does not overlap nodes', () =
 
   for (const edge of layout.edges) {
     assert.ok(edge.routePoints.length >= 2)
-    assert.ok(edge.routePoints.length <= 4, 'edge routes through whitespace between hierarchy rows')
+    assert.ok(edge.routePoints.length <= 5, 'edge uses hierarchy whitespace or the outer frame gutter')
     for (let index = 1; index < edge.routePoints.length; index += 1) {
       const previous = edge.routePoints[index - 1]
       const current = edge.routePoints[index]
@@ -432,6 +1051,7 @@ test('confirmed extension poles form child boxes below their numbered parent pol
     // though the source type/profile presents it as a regular junction.
     { id: 'child-11', name: 'JB-011.1-exp', type: 'JB Rekomendasi', topologyRole: 'junction', locationGroupKey: 'area-a' },
     { id: 'cam-1', name: 'C-019', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: 'area-a' },
+    { id: 'local-cam', name: 'C-001', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: 'area-a' },
     { id: 'cam-11', name: 'C-037', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: 'area-a' },
   ]
   const edges = [
@@ -440,6 +1060,7 @@ test('confirmed extension poles form child boxes below their numbered parent pol
     ['base-child-1', 'base-1', 'child-1'],
     ['base-child-11', 'base-11', 'child-11'],
     ['child-cam-1', 'child-1', 'cam-1'],
+    ['base-local-cam', 'base-1', 'local-cam'],
     ['child-cam-11', 'child-11', 'cam-11'],
   ].map(([id, sourceNodeId, targetNodeId]) => ({
     id, sourceNodeId, targetNodeId, relationStatus: 'confirmed',
@@ -449,6 +1070,7 @@ test('confirmed extension poles form child boxes below their numbered parent pol
     ['mount-base-11', 'base-11', 'pole-11'],
     ['mount-child-1', 'child-1', 'pole-19'],
     ['mount-cam-1', 'cam-1', 'pole-19'],
+    ['mount-local-cam', 'local-cam', 'pole-1'],
     ['mount-child-11', 'child-11', 'pole-21'],
     ['mount-cam-11', 'cam-11', 'pole-21'],
   ].map(([id, sourceAssetId, targetAssetId]) => ({
@@ -485,13 +1107,26 @@ test('confirmed extension poles form child boxes below their numbered parent pol
     assert.ok(byId.get(childId).diagram.y > byId.get(baseId).diagram.y)
     const route = layout.edges.find(({ id }) => id === edgeId).routePoints
     assert.deepEqual(route[0], {
-      x: byId.get(baseId).diagram.centerX,
-      y: byId.get(baseId).diagram.bottomY,
+      x: byId.get(baseId).diagram.centerX + (baseId === 'base-1' ? 22 : 0),
+      y: byId.get(baseId).diagram.centerY + (baseId === 'base-1' ? 0 : 19),
     })
     assert.deepEqual(route.at(-1), {
       x: byId.get(childId).diagram.centerX,
-      y: byId.get(childId).diagram.topY,
+      y: byId.get(childId).diagram.centerY - 19,
     })
+    if (baseId === 'base-1') assert.ok(route[1].x > parentBox.x + parentBox.width,
+      'downstream cable uses the outer gutter instead of crossing local devices')
+    for (let index = 1; index < route.length; index++) {
+      const a = route[index - 1], b = route[index]
+      assert.ok(a.x === b.x || a.y === b.y, 'every cable segment is orthogonal')
+      const camera = byId.get('local-cam').diagram
+      const crosses = a.x === b.x
+        ? a.x > camera.x && a.x < camera.x + camera.width
+          && Math.max(a.y, b.y) > camera.y && Math.min(a.y, b.y) < camera.y + camera.height + 28
+        : a.y > camera.y && a.y < camera.y + camera.height + 28
+          && Math.max(a.x, b.x) > camera.x && Math.min(a.x, b.x) < camera.x + camera.width
+      assert.equal(crosses, false, 'downstream cable avoids the local camera and its label')
+    }
   }
   assert.equal(boxes.get('pole-group:pole-1').y, boxes.get('pole-group:pole-11').y)
 })
@@ -593,7 +1228,11 @@ test('DPPU YIA orders poles and preserves cross-pole JB parent families', () => 
   )), false)
   assert.deepEqual(new Set(boxes.get('T-007').nodeIds), new Set(['jb-152', 'bc-41', 'dc-39']))
   assert.deepEqual(new Set(boxes.get('T-008').nodeIds), new Set(['jb-151', 'bc-37', 'bc-38']))
-  assert.deepEqual(new Set(boxes.get('Area non-tiang/indoor').nodeIds), new Set(['jb-15', 'dc-40']))
+  const jb15Frame = layout.mountingBoxes.find(box => box.nodeIds.includes('jb-15'))
+  const dc40Frame = layout.mountingBoxes.find(box => box.nodeIds.includes('dc-40'))
+  assert.notEqual(jb15Frame.id, dc40Frame.id)
+  assert.equal(dc40Frame.layoutParentBoxId, jb15Frame.id)
+  assert.ok(dc40Frame.y > jb15Frame.y)
   assert.equal(new Set(layout.nodes.map(({ id }) => id)).size, layout.nodes.length)
   assert.equal(layout.edges.length, graphEdges.length)
 })

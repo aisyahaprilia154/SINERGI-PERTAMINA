@@ -1,3 +1,6 @@
+import { OPERATIONAL_NETWORK_COLORS } from '../../domain/network-colors.js'
+import { normalizeSearchText, searchMatchScore } from '../../domain/search-normalization.js'
+
 const DEFAULT_WIDTH = 1840
 const MIN_HEIGHT = 980
 const MAX_HEIGHT = 1640
@@ -5,9 +8,10 @@ const PADDING = 86
 
 const FAMILY_COLORS = Object.freeze({
   cctv: '#9698f4',
-  'fiber-optic': '#2fd2a8',
-  lan: '#42b9ed',
-  infrastructure: '#efc363',
+  'fiber-optic': OPERATIONAL_NETWORK_COLORS['fiber-optic'],
+  power: OPERATIONAL_NETWORK_COLORS.power,
+  lan: OPERATIONAL_NETWORK_COLORS.lan,
+  infrastructure: OPERATIONAL_NETWORK_COLORS.infrastructure,
   peripheral: '#a88af3',
   unmapped: '#94a3b8',
 })
@@ -55,7 +59,7 @@ export function createSpatialTopologyLayout({
     padding: PADDING,
   })
   const selectedCategories = new Set(state.selectedCategories ?? [])
-  const search = String(state.search ?? '').trim().toLowerCase()
+  const search = normalizeSearchText(state.search)
   const confirmedGeometryIds = new Set((graph.edges ?? []).flatMap((edge) => (
     edge.verificationStatus === 'confirmed' ? edge.sourceGeometryIds ?? [] : []
   )))
@@ -344,6 +348,7 @@ function familyKey(...values) {
   if (/cctv|camera|kamera|nvr|junction/.test(value)) return 'cctv'
   if (/fiber|fibre|\bfo\b/.test(value)) return 'fiber-optic'
   if (/\blan\b|utp/.test(value)) return 'lan'
+  if (/power|pln|listrik/.test(value)) return 'power'
   if (/printer|peripheral|access point|\bap\b/.test(value)) return 'peripheral'
   if (/switch|router|server|rack|otb|core|infra|power|tiang/.test(value)) {
     return 'infrastructure'
@@ -353,7 +358,7 @@ function familyKey(...values) {
 
 function isDimmed({ family, searchable, selectedCategories, search }) {
   return (selectedCategories.size > 0 && !selectedCategories.has(family))
-    || (search && !String(searchable).toLowerCase().includes(search))
+    || (search && searchMatchScore([searchable], search) === 0)
 }
 
 function coordinateKey(coordinate) {

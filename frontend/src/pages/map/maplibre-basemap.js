@@ -2,19 +2,73 @@
 // A slow but successful tile must not be reported as an unavailable basemap.
 export const BASEMAP_LOAD_TIMEOUT_MS = 25_000
 export const BASEMAP_RETRY_DELAYS_MS = Object.freeze([600, 1_800])
+// ArcGIS World Imagery returns a placeholder tile above this level for many
+// locations. Keeping the map zoomable beyond it lets MapLibre overzoom the
+// last real image instead of showing the provider's "not yet available" tile.
+export const DEFAULT_IMAGERY_MAX_ZOOM = 18
 
-export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
+function basemapPalette(darkMode) {
+  if (!darkMode) return {
+    background: '#f7f6f1',
+    landcover: ['#e4eee0', '#eaf1e3', '#f1f2eb'],
+    landuse: ['#f7f5ef', '#f2efe7', '#f5f1e9', '#e8f1e2', '#e8eee1', '#f5f0e6', '#f5eeeb', '#f6f4ee'],
+    boundary: '#aaa9a3',
+    water: '#a9dff0',
+    buildingShadow: '#777a78',
+    buildings: ['#eeece6', '#e1e0da', '#d8d8d2'],
+    buildingOutline: '#bfc1be',
+    label: '#62635f',
+    labelSecondary: '#696b68',
+    labelMuted: '#7d7e7a',
+    labelHalo: '#fbfaf6',
+    waterway: '#96d4e8',
+    roadCasing: ['#a8abad', '#afb2b2', '#babbb9', '#cacbc7', '#d2d2cd', '#d9d8d2', '#ddddd7', '#deddd6', '#d8d6ce', '#d9d8d2'],
+    roads: ['#d0d2d2', '#d5d6d5', '#dcddda', '#eeede8', '#f6f4ee', '#fbfaf6', '#fbfaf6', '#f0eee7', '#ebe8de', '#faf9f5'],
+    rail: '#8e9292',
+  }
+  return {
+    background: '#171719',
+    landcover: ['#243027', '#283229', '#202225'],
+    landuse: ['#242426', '#292827', '#282528', '#202b23', '#252b26', '#292722', '#2b2425', '#232326'],
+    boundary: '#6b6b72',
+    water: '#173b4d',
+    buildingShadow: '#09090a',
+    buildings: ['#29292c', '#323236', '#3a3a3f'],
+    buildingOutline: '#5b5b62',
+    label: '#e5e5ea',
+    labelSecondary: '#d1d1d6',
+    labelMuted: '#b8b8be',
+    labelHalo: '#171719',
+    waterway: '#3f8cad',
+    roadCasing: ['#151517', '#171719', '#19191b', '#1b1b1d', '#1d1d1f', '#1f1f21', '#202022', '#202022', '#1e1e20', '#1f1f21'],
+    roads: ['#4a4a50', '#48484e', '#46464c', '#424248', '#3e3e44', '#39393f', '#39393f', '#35353a', '#323237', '#37373c'],
+    rail: '#77777e',
+  }
+}
+
+export function createBaseStyle({
+  imageryTiles,
+  vectorTiles,
+  attribution,
+  imageryMaxZoom = DEFAULT_IMAGERY_MAX_ZOOM,
+  darkMode = false,
+}) {
+  const palette = basemapPalette(darkMode)
   const sources = {}
   const layers = [{
     id: 'safe-background',
     type: 'background',
-    paint: { 'background-color': '#f7f6f1' },
+    paint: { 'background-color': palette.background },
   }]
   if (imageryTiles) {
+    const sourceMaxZoom = Number.isFinite(Number(imageryMaxZoom))
+      ? Math.min(22, Math.max(0, Number(imageryMaxZoom)))
+      : DEFAULT_IMAGERY_MAX_ZOOM
     sources['satellite-imagery'] = {
       type: 'raster',
       tiles: [imageryTiles],
       tileSize: 256,
+      maxzoom: sourceMaxZoom,
       ...(attribution ? { attribution } : {}),
     }
     layers.push({
@@ -26,9 +80,10 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
       },
       paint: {
         'raster-opacity': 1,
-        'raster-saturation': -0.08,
-        'raster-contrast': 0.12,
-        'raster-brightness-min': 0.08,
+        'raster-saturation': darkMode ? -0.34 : -0.08,
+        'raster-contrast': darkMode ? 0.18 : 0.12,
+        'raster-brightness-min': darkMode ? 0.02 : 0.08,
+        'raster-brightness-max': darkMode ? 0.58 : 1,
       },
     })
   }
@@ -48,9 +103,9 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
           'fill-color': [
             'match',
             ['get', 'class'],
-            'wood', '#e4eee0',
-            'grass', '#eaf1e3',
-            '#f1f2eb',
+            'wood', palette.landcover[0],
+            'grass', palette.landcover[1],
+            palette.landcover[2],
           ],
           'fill-opacity': 0.82,
         },
@@ -64,14 +119,14 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
           'fill-color': [
             'match',
             ['get', 'class'],
-            'residential', '#f7f5ef',
-            'industrial', '#f2efe7',
-            'commercial', '#f5f1e9',
-            'park', '#e8f1e2',
-            'cemetery', '#e8eee1',
-            'school', '#f5f0e6',
-            'hospital', '#f5eeeb',
-            '#f6f4ee',
+            'residential', palette.landuse[0],
+            'industrial', palette.landuse[1],
+            'commercial', palette.landuse[2],
+            'park', palette.landuse[3],
+            'cemetery', palette.landuse[4],
+            'school', palette.landuse[5],
+            'hospital', palette.landuse[6],
+            palette.landuse[7],
           ],
           'fill-opacity': 0.9,
         },
@@ -84,7 +139,7 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
         minzoom: 7,
         filter: ['in', ['get', 'admin_level'], ['literal', [2, 4, 6]]],
         paint: {
-          'line-color': '#aaa9a3',
+          'line-color': palette.boundary,
           'line-width': [
             'interpolate', ['linear'], ['zoom'],
             7, 0.45,
@@ -99,7 +154,7 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
         type: 'fill',
         source: 'openfreemap',
         'source-layer': 'water',
-        paint: { 'fill-color': '#a9dff0', 'fill-opacity': 1 },
+        paint: { 'fill-color': palette.water, 'fill-opacity': 1 },
       },
       {
         id: 'basemap-building-shadows',
@@ -108,7 +163,7 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
         'source-layer': 'building',
         minzoom: 14,
         paint: {
-          'fill-color': '#777a78',
+          'fill-color': palette.buildingShadow,
           'fill-opacity': [
             'interpolate', ['linear'], ['zoom'],
             14, 0.08,
@@ -127,11 +182,11 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
         paint: {
           'fill-color': [
             'interpolate', ['linear'], ['zoom'],
-            14, '#eeece6',
-            17, '#e1e0da',
-            20, '#d8d8d2',
+            14, palette.buildings[0],
+            17, palette.buildings[1],
+            20, palette.buildings[2],
           ],
-          'fill-outline-color': '#bfc1be',
+          'fill-outline-color': palette.buildingOutline,
           'fill-opacity': [
             'interpolate', ['linear'], ['zoom'],
             14, 0.78,
@@ -154,8 +209,8 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
           'text-padding': 3,
         },
         paint: {
-          'text-color': '#62635f',
-          'text-halo-color': '#fbfaf6',
+          'text-color': palette.label,
+          'text-halo-color': palette.labelHalo,
           'text-halo-width': 1.4,
         },
       },
@@ -167,7 +222,7 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
         minzoom: 11,
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-color': '#96d4e8',
+          'line-color': palette.waterway,
           'line-width': [
             'interpolate', ['linear'], ['zoom'],
             11, 0.7,
@@ -187,16 +242,16 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
           'line-color': [
             'match',
             ['get', 'class'],
-            'motorway', '#a8abad',
-            'trunk', '#afb2b2',
-            'primary', '#babbb9',
-            'secondary', '#cacbc7',
-            'tertiary', '#d2d2cd',
-            'minor', '#d9d8d2',
-            'service', '#ddddd7',
-            'path', '#deddd6',
-            'track', '#d8d6ce',
-            '#d9d8d2',
+            'motorway', palette.roadCasing[0],
+            'trunk', palette.roadCasing[1],
+            'primary', palette.roadCasing[2],
+            'secondary', palette.roadCasing[3],
+            'tertiary', palette.roadCasing[4],
+            'minor', palette.roadCasing[5],
+            'service', palette.roadCasing[6],
+            'path', palette.roadCasing[7],
+            'track', palette.roadCasing[8],
+            palette.roadCasing[9],
           ],
           'line-width': [
             'interpolate', ['linear'], ['zoom'],
@@ -248,16 +303,16 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
           'line-color': [
             'match',
             ['get', 'class'],
-            'motorway', '#d0d2d2',
-            'trunk', '#d5d6d5',
-            'primary', '#dcddda',
-            'secondary', '#eeede8',
-            'tertiary', '#f6f4ee',
-            'minor', '#fbfaf6',
-            'service', '#fbfaf6',
-            'path', '#f0eee7',
-            'track', '#ebe8de',
-            '#faf9f5',
+            'motorway', palette.roads[0],
+            'trunk', palette.roads[1],
+            'primary', palette.roads[2],
+            'secondary', palette.roads[3],
+            'tertiary', palette.roads[4],
+            'minor', palette.roads[5],
+            'service', palette.roads[6],
+            'path', palette.roads[7],
+            'track', palette.roads[8],
+            palette.roads[9],
           ],
           'line-width': [
             'interpolate', ['linear'], ['zoom'],
@@ -300,7 +355,7 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
         minzoom: 11,
         filter: ['==', ['get', 'class'], 'rail'],
         paint: {
-          'line-color': '#8e9292',
+          'line-color': palette.rail,
           'line-width': [
             'interpolate', ['linear'], ['zoom'],
             11, 0.7,
@@ -331,8 +386,8 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
           'text-max-angle': 35,
         },
         paint: {
-          'text-color': '#5e605e',
-          'text-halo-color': '#fbfaf6',
+          'text-color': palette.label,
+          'text-halo-color': palette.labelHalo,
           'text-halo-width': 1.8,
         },
       },
@@ -355,8 +410,8 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
           'text-transform': 'uppercase',
         },
         paint: {
-          'text-color': '#696b68',
-          'text-halo-color': '#fbfaf6',
+          'text-color': palette.labelSecondary,
+          'text-halo-color': palette.labelHalo,
           'text-halo-width': 1.8,
         },
       },
@@ -376,8 +431,8 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
           'text-max-width': 10,
         },
         paint: {
-          'text-color': '#686a67',
-          'text-halo-color': '#fbfaf6',
+          'text-color': palette.labelSecondary,
+          'text-halo-color': palette.labelHalo,
           'text-halo-width': 1.5,
         },
       },
@@ -394,8 +449,8 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
           'text-size': 9,
         },
         paint: {
-          'text-color': '#7d7e7a',
-          'text-halo-color': '#fbfaf6',
+          'text-color': palette.labelMuted,
+          'text-halo-color': palette.labelHalo,
           'text-halo-width': 1.2,
         },
       },
@@ -407,6 +462,26 @@ export function createBaseStyle({ imageryTiles, vectorTiles, attribution }) {
     sources,
     layers,
   }
+}
+
+export function applyBaseStyleTheme(map, {
+  darkMode = false,
+  imageryTiles = '',
+  vectorTiles = '',
+} = {}) {
+  if (!map || typeof map.getLayer !== 'function' || typeof map.setPaintProperty !== 'function') return
+  const themedStyle = createBaseStyle({
+    imageryTiles,
+    vectorTiles,
+    attribution: '',
+    darkMode,
+  })
+  themedStyle.layers.forEach(({ id, paint = {} }) => {
+    if (!map.getLayer(id)) return
+    Object.entries(paint).forEach(([property, value]) => {
+      map.setPaintProperty(id, property, value)
+    })
+  })
 }
 
 export function isBasemapError(event) {

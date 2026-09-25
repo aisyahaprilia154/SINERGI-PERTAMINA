@@ -66,9 +66,11 @@ export function uploadDataset({
         reject(createApiError(body, request.status))
       }
     })
-    request.addEventListener('error', () => reject(
-      new Error('Tidak dapat terhubung ke service import.'),
-    ))
+    request.addEventListener('error', () => reject(new Error(
+      request.status === 0
+        ? 'Koneksi terputus saat upload. File mungkin sudah diterima server; periksa daftar versi sebelum mengupload ulang.'
+        : 'Tidak dapat terhubung ke service import.',
+    )))
     request.addEventListener('abort', () => {
       const error = new Error('Upload dibatalkan.')
       error.name = 'AbortError'

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { correctedMountingExpectation } from '../../../shared/facility-corrections.mjs'
+import { correctedMountingExpectation, correctAdditionalMounts } from '../../../shared/facility-corrections.mjs'
+import { MAX_AUTOMATIC_MOUNTING_DISTANCE_METERS } from '../../../shared/mounting-policy.mjs'
 
 export const MOUNTING_RELATION_TYPE = 'mounted_on'
 // Keep the mounting edge compatible with the topology engine's existing
@@ -17,7 +18,7 @@ export const MOUNTING_EXPECTATIONS = Object.freeze([
 export const DEFAULT_MOUNTING_CONFIG = Object.freeze({
   // KMZ points for a pole, camera, and junction box are commonly drawn a few
   // metres apart even though they describe one physical installation.
-  mountingSearchRadiusMeters: 25,
+  mountingSearchRadiusMeters: MAX_AUTOMATIC_MOUNTING_DISTANCE_METERS,
   // A matching asset number is stronger evidence than coordinates alone, but
   // remains bounded so similarly named assets in another location are ignored.
   mountingIdentityRadiusMeters: 10,
@@ -66,11 +67,11 @@ export function generateMountingArtifacts(topologyInputBundle, {
   mountableNodes.forEach((asset) => {
     let expectation = expectations.byAsset.get(asset.id)
     const facilityExpectation = correctedMountingExpectation(asset)
-    if (facilityExpectation) {
+    if (facilityExpectation && !overrides.byAsset.has(asset.id)) {
       expectations.byAsset.set(asset.id, createMountingExpectation({
         assetId: asset.id, expectation: facilityExpectation,
         provenance: 'facility_topology_correction', updatedAt: generatedAt,
-        reason: 'Koreksi pemasangan FT Tegal Baru dari pengguna.',
+        reason: 'Koreksi pemasangan fasilitas dari pengguna.',
       }))
       return
     }
@@ -202,7 +203,7 @@ export function generateMountingArtifacts(topologyInputBundle, {
     }
   })
 
-  const normalizedRelations = deduplicateRelations(relations)
+  const normalizedRelations = deduplicateRelations(correctAdditionalMounts(relations, nodes))
   const normalizedCandidates = candidates.sort(compareMountingCandidates)
   const normalizedOptions = options.sort(compareMountingOptions)
   const normalizedExpectations = mountableNodes.map(({ id }) => (
@@ -840,10 +841,10 @@ function compareMountingOptions(left, right) {
 
 function normalizeConfig(config) {
   return {
-    mountingSearchRadiusMeters: positiveNumber(
+    mountingSearchRadiusMeters: Math.min(MAX_AUTOMATIC_MOUNTING_DISTANCE_METERS, positiveNumber(
       config.maxAutoDistanceMeters ?? config.mountingSearchRadiusMeters,
       DEFAULT_MOUNTING_CONFIG.mountingSearchRadiusMeters,
-    ),
+    )),
     mountingIdentityRadiusMeters: positiveNumber(
       config.mountingIdentityRadiusMeters,
       DEFAULT_MOUNTING_CONFIG.mountingIdentityRadiusMeters,

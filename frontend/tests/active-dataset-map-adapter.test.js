@@ -5,7 +5,28 @@ import {
   adaptActiveDatasetForMap,
   adaptActiveDatasetForTopology,
   locationGroupFor,
+  reconcileFrameMountingAssignments,
 } from '../src/adapters/active-dataset-map-adapter.js'
+
+test('saved pole frame placements project to the same mounting list as the map', () => {
+  const assets = [
+    { id: 'pole', name: 'T-015', type: 'Tiang' },
+    { id: 'jb', name: 'JB-01', type: 'Junction Box' },
+    { id: 'camera', name: 'C-047', type: 'CCTV' },
+  ]
+  const source = [{ relationId: 'old', sourceAssetId: 'camera', targetAssetId: 'other' }]
+  const payload = { topologyFrameAssignments: { jb: 'pole-group:pole', camera: 'pole-group:pole' } }
+  const projected = reconcileFrameMountingAssignments(source, payload, assets)
+  assert.deepEqual(projected.map(({ sourceAssetId, targetAssetId }) => [sourceAssetId, targetAssetId]), [
+    ['jb', 'pole'], ['camera', 'pole'],
+  ])
+  assert.equal(source[0].targetAssetId, 'other', 'projection does not mutate source records')
+  const corrected = reconcileFrameMountingAssignments(projected, {
+    topologyFrameAssignments: { camera: 'excluded-mounting:area-a:camera' },
+  }, assets)
+  assert.equal(corrected.some(relation => relation.sourceAssetId === 'camera'), false)
+})
+import { buildTopologyDiagramModel } from '../src/domain/topology-diagram-model.js'
 
 test('active dataset adapter preserves source coordinates and uses explicit relations only', () => {
   const payload = {
@@ -266,6 +287,30 @@ test('LineString remains geometry and never becomes a map node', () => {
   assert.equal(result.counts.lineCount, 1)
 })
 
+test('FT Tegal Baru hides the redundant C-17 to JB-01 map stroke but retains KMZ export', () => {
+  const payload = activePayload({
+    layers: [{ ...layer('tegal-cable', 'Cable', 'LAN'),
+      sourceFolderPath: '/RJBT/FT Tegal Baru/Cable/UTP' },
+    { ...layer('tegal-jb', 'Junction Box', 'Infrastructure'),
+      sourceFolderPath: '/RJBT/FT Tegal Baru/Junction Box/Extended' }],
+    assets: [{ ...asset('cable-old', 'CABLE-OLD', 'LAN'),
+      name: 'Jalur JB-01 - C-17', layerId: 'tegal-cable', type: 'Cable' },
+    { ...asset('cable-other', 'CABLE-OTHER', 'LAN'),
+      name: 'Jalur JB-01 - C-18', layerId: 'tegal-cable', type: 'Cable' },
+    { ...asset('jb-preferred', 'JB-01.2', 'Infrastructure'),
+      name: 'JB-01.2', layerId: 'tegal-jb', type: 'Junction Box' }],
+    geometries: [{ id: 'old-line', assetNodeId: 'cable-old',
+      geometryType: 'line_string', coordinates: [[109, -6], [109.001, -6]] },
+    { id: 'other-line', assetNodeId: 'cable-other',
+      geometryType: 'line_string', coordinates: [[109, -6], [109.002, -6]] },
+    point('preferred-point', 'jb-preferred', 109.001, -6)],
+  })
+  const result = adaptActiveDatasetForMap(payload)
+  assert.equal(result.geometries.some(({ id }) => id === 'old-line'), false)
+  assert.equal(result.geometries.some(({ id }) => id === 'other-line'), true)
+  assert.equal(result.exportAssets.find(({ id }) => id === 'CABLE-OLD').geometry[0].id, 'old-line')
+})
+
 test('active adapter exposes confirmed endpoint topology for map and diagram consumers', () => {
   const payload = activePayload({
     layers: [layer('layer-lan', 'LAN', 'LAN')],
@@ -310,6 +355,26 @@ test('active adapter exposes confirmed endpoint topology for map and diagram con
   assert.equal(result.topologyGraph.edges[0].relationSource, 'spatial_inference')
   assert.deepEqual(result.networks[0].edges, [['SW-A', 'AP-B']])
   assert.equal(result.assets.find(({ id }) => id === 'SW-A').relationCount, 1)
+})
+
+test('ambiguous old camera edges are hidden and surfaced for relation review', () => {
+  const payload = activePayload({
+    assets: [
+      { ...asset('camera-node', 'CAM-22', 'CCTV'), type: 'CCTV Camera' },
+      { ...asset('jb-a-node', 'JB-03', 'CCTV'), type: 'Junction Box' },
+      { ...asset('jb-b-node', 'JB-08', 'CCTV'), type: 'Junction Box' },
+    ],
+    relations: [
+      { id: 'edge-a', sourceAssetId: 'CAM-22', targetAssetId: 'JB-03',
+        relationType: 'connected-to', verificationStatus: 'confirmed', relationSource: 'spatial_inference' },
+      { id: 'edge-b', sourceAssetId: 'CAM-22', targetAssetId: 'JB-08',
+        relationType: 'connected-to', verificationStatus: 'confirmed', relationSource: 'spatial_inference' },
+    ],
+  })
+  const result = adaptActiveDatasetForTopology(payload)
+  assert.deepEqual(result.topologyGraph.edges, [])
+  assert.equal(result.topologyGraph.cameraRelationReview.length, 2)
+  assert.equal(result.topologyGraph.cameraRelationReview[0].cameraAssetId, 'CAM-22')
 })
 
 test('Polygon remains geometry and never becomes a map node', () => {
@@ -725,6 +790,66 @@ test('Point and LineString in one facility share a location group without coordi
     bounds: [110.4167, -6.9667, 110.4171, -6.9663],
   }])
   assert.deepEqual(result.networks[0].locationGroupKeys, ['ft-pengapon-semarang'])
+})
+
+test('map and topology keep confirmed relations in the same imported areas for every branch', () => {
+  for (const branchId of ['semarang', 'branch-imported-later']) {
+    const datasetVersionId = `version-${branchId}`
+    const assets = ['north-a', 'north-b', 'south-a'].map((id) => ({
+      ...asset(`node-${id}`, id, 'Infrastructure'),
+      branchId,
+      datasetVersionId,
+      layerId: 'shared-layer',
+      locationGroupKey: id.startsWith('north') ? 'new-north' : 'new-south',
+      locationGroupName: id.startsWith('north') ? 'New North' : 'New South',
+      sourceFolderPath: `/RJBT/${id.startsWith('north') ? 'New North' : 'New South'}/Devices`,
+    }))
+    const topologyGraph = {
+      datasetVersionId,
+      nodes: assets.map(({ assetId }) => ({ id: assetId, assetId })),
+      edges: [
+        { id: 'within', sourceAssetId: 'north-a', targetAssetId: 'north-b', relationStatus: 'confirmed' },
+        { id: 'across', sourceAssetId: 'north-b', targetAssetId: 'south-a', relationStatus: 'confirmed' },
+      ],
+    }
+    const payload = {
+      datasetVersion: { id: datasetVersionId, datasetId: `dataset-${branchId}`, branchId, versionName: 'Imported KMZ' },
+      layers: [{ ...layer('shared-layer', 'Devices', 'Infrastructure'), sourceFolderPath: '/RJBT/Parent Folder/Devices' }],
+      assets,
+      geometries: assets.map((item, index) => point(`point-${index}`, item.id, 110 + index * 0.001, -7)),
+      topologyGraph,
+    }
+    const map = adaptActiveDatasetForMap(payload)
+    const topology = adaptActiveDatasetForTopology(payload)
+    assert.deepEqual(
+      Object.fromEntries(map.assets.map(({ id, locationGroupKey }) => [id, locationGroupKey])),
+      Object.fromEntries(topology.assets.map(({ id, locationGroupKey }) => [id, locationGroupKey])),
+    )
+    for (const area of [null, ...map.locationGroups]) {
+      const model = buildTopologyDiagramModel({
+        assets: topology.assets,
+        graph: topology.topologyGraph,
+        locationGroups: topology.locationGroups,
+        area: area?.key ?? null,
+        branchId,
+        datasetVersionId,
+      })
+      const diagramInternalEdgeIds = [
+        ...model.edges,
+        ...(!area ? model.crossAreaEdges : []),
+      ].map(({ id }) => id).sort()
+      const scopedIds = new Set(map.assets
+        .filter(({ locationGroupKey }) => !area || locationGroupKey === area.key)
+        .map(({ id }) => id))
+      const mapInternalEdgeIds = map.topologyGraph.edges
+        .filter(({ sourceAssetId, targetAssetId }) => (
+          scopedIds.has(sourceAssetId) && scopedIds.has(targetAssetId)
+        ))
+        .map(({ id }) => id).sort()
+      assert.deepEqual(mapInternalEdgeIds, diagramInternalEdgeIds)
+      if (!area) assert.deepEqual(model.crossAreaEdges.map(({ id }) => id), ['across'])
+    }
+  }
 })
 
 function asset(id, assetId, category) {

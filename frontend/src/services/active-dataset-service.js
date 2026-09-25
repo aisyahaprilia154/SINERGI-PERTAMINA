@@ -7,6 +7,14 @@ export function getDefaultMapToken() {
     || getDefaultAdminToken()
 }
 
+export async function saveTopologyDiagram({ datasetVersionId, changes, expectedRecordRevision,
+  token = getDefaultMapToken(), signal, apiBase = '' } = {}) {
+  if (!datasetVersionId) throw new TypeError('Dataset version wajib tersedia.')
+  return topologyRequest(`${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}/topology/diagram`, {
+    token, signal, method: 'POST', body: { changes, expectedRecordRevision },
+  })
+}
+
 export async function loadActiveDataset({
   datasetId,
   branchId,
@@ -773,6 +781,7 @@ export async function reviewMountingBulk({
 
 export async function revokeTopologyRelation({
   relationId,
+  datasetVersionId,
   reason,
   expectedGraphRevision,
   expectedCandidateRevision,
@@ -788,6 +797,7 @@ export async function revokeTopologyRelation({
       signal,
       method: 'POST',
       body: {
+        ...(datasetVersionId !== undefined ? { datasetVersionId } : {}),
         reason,
         ...(expectedGraphRevision !== undefined ? { expectedGraphRevision } : {}),
         ...(expectedCandidateRevision !== undefined ? { expectedCandidateRevision } : {}),

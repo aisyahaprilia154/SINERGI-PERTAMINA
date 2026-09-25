@@ -3,6 +3,8 @@ const DEFAULT_VIEWPORT = Object.freeze({
   height: Number.POSITIVE_INFINITY,
 })
 
+const AUTO_LABEL_ZOOM = 18
+
 export function buildAdaptiveAssetLayout(items = [], {
   zoom = 18,
   viewport = DEFAULT_VIEWPORT,
@@ -20,7 +22,7 @@ export function buildAdaptiveAssetLayout(items = [], {
   groups.forEach((group) => {
     const ranked = [...group].sort(compareItems)
     const focused = ranked
-      .filter(({ selected, networkFocused }) => selected || networkFocused)
+      .filter(({ selected, networkFocused, physicalRelated }) => selected || networkFocused || physicalRelated)
       .slice(0, 4)
     if (enabled && ranked.length > 8) {
       const focusedIds = new Set(focused.map(({ id }) => id))
@@ -42,6 +44,7 @@ export function buildAdaptiveAssetLayout(items = [], {
             anchorPoint: item.point,
             displaced,
             showLabel: true,
+            autoLabel: false,
           })
           if (displaced) {
             leaders.push({
@@ -65,7 +68,7 @@ export function buildAdaptiveAssetLayout(items = [], {
     }
 
     const mustExpand = zoom >= 17
-      || ranked.some(({ selected, networkFocused }) => selected || networkFocused)
+      || ranked.some(({ selected, networkFocused, physicalRelated }) => selected || networkFocused || physicalRelated)
 
     if (enabled && ranked.length > 1 && !mustExpand) {
       markers.push(createClusterMarker(ranked))
@@ -80,6 +83,8 @@ export function buildAdaptiveAssetLayout(items = [], {
     ranked.forEach((item, index) => {
       const point = displayPoints[index]
       const displaced = distance(item.point, point) > 7
+      const explicitLabel = Boolean(item.selected || item.physicalRelated || (item.isCoreNode && zoom >= 19.5))
+      const autoLabel = !explicitLabel && shouldShowAutoLabel(item, zoom)
       const marker = {
         ...item,
         key: `asset:${item.id}`,
@@ -87,7 +92,8 @@ export function buildAdaptiveAssetLayout(items = [], {
         point,
         anchorPoint: item.point,
         displaced,
-        showLabel: Boolean(item.selected || (item.isCoreNode && zoom >= 19.5)),
+        showLabel: explicitLabel || autoLabel,
+        autoLabel,
       }
       markers.push(marker)
       if (displaced) {
@@ -244,13 +250,28 @@ function avoidLabelCollisions(markers) {
 }
 
 function labelBox(marker) {
-  const labelWidth = Math.min(116, 38 + String(marker.label || marker.id).length * 6)
+  const labelWidth = Math.min(116, 38 + compactLabel(marker.label || marker.id).length * 6)
   return {
     left: marker.point.x - 15,
     right: marker.point.x + labelWidth,
     top: marker.point.y - 17,
     bottom: marker.point.y + 17,
   }
+}
+
+function shouldShowAutoLabel(item, zoom) {
+  if (zoom < AUTO_LABEL_ZOOM) return false
+  const identity = `${item?.type || ''} ${item?.category || ''} ${item?.label || ''}`
+    .toLowerCase()
+  if (/cable|kabel|fiber|fibre|optic|\blan\b|\butp\b|infrastructure|infrastruktur/.test(identity)) {
+    return false
+  }
+  return /cctv|camera|kamera|junction|\bjb\b|tiang|pole|tower|server|nvr|switch|router/.test(identity)
+}
+
+function compactLabel(value) {
+  const label = String(value ?? '').trim()
+  return label.length > 18 ? `${label.slice(0, 17)}…` : label
 }
 
 function boxesOverlap(left, right) {

@@ -80,6 +80,18 @@ export class JsonDatasetVersionRepository {
     return null
   }
 
+  async getActiveReadRevision({ datasetId } = {}) {
+    assertDatasetContext(datasetId)
+    const pointer = await this.#readActivePointer(datasetId)
+    // Legacy publication has no atomic pointer; use the uncached read path.
+    if (!pointer) return null
+    const info = await stat(this.#pathFor(pointer.datasetVersionId), { bigint: true })
+      .catch(error => { if (error.code === 'ENOENT') return null; throw error })
+    if (!info) return null
+    return JSON.stringify([pointer, String(info.ino), String(info.size),
+      String(info.mtimeNs), String(info.ctimeNs)])
+  }
+
   /**
    * The pointer is the sole publication boundary for map, inventory, relation,
    * detail, and export consumers. Version status fields are descriptive only.
@@ -140,8 +152,11 @@ export class JsonDatasetVersionRepository {
     archiveReason = 'superseded',
     validateTarget,
   }) {
-    const initialTarget = await this.get(datasetVersionId)
+    let initialTarget = await this.get(datasetVersionId)
     const { datasetId, branchId } = initialTarget.datasetVersion
+    // Do not retain a second full aggregate while the target is re-read under
+    // the activation lock. Production JSON aggregates can exceed 150 MB.
+    initialTarget = null
     return this.#withActivationLock(datasetId, async () => {
       // Re-read and re-validate after acquiring the lock to prevent TOCTOU.
       const target = await this.get(datasetVersionId)
@@ -167,7 +182,7 @@ export class JsonDatasetVersionRepository {
           targetRevision,
         )
       }
-      await validateTarget(structuredClone(target))
+      await validateTarget(target)
 
       const resolved = await this.resolveActiveVersion({
         datasetId,
@@ -213,17 +228,13 @@ export class JsonDatasetVersionRepository {
         })
       }
 
-      const datasetRecords = (await this.list()).filter((record) => (
-        record.datasetVersion.datasetId === datasetId
-        && record.datasetVersion.branchId === branchId
-      ))
-      const recordsToArchive = uniqueRecords([
-        ...datasetRecords.filter((record) => (
-          record.datasetVersion.status === 'active'
-          && record.datasetVersion.id !== datasetVersionId
-        )),
-        ...(previous && previous.datasetVersion.id !== datasetVersionId ? [previous] : []),
-      ])
+      // The active pointer is the publication boundary. Loading every historic
+      // aggregate here multiplied memory usage by the complete import history
+      // and could terminate the process during a large KMZ activation.
+      const recordsToArchive = previous
+        && previous.datasetVersion.id !== datasetVersionId
+        ? [previous]
+        : []
       const snapshots = new Map([
         [target.datasetVersion.id, target],
         ...recordsToArchive.map((record) => [record.datasetVersion.id, record]),
@@ -242,7 +253,7 @@ export class JsonDatasetVersionRepository {
               archivedBy: actorId,
               archiveReason,
             },
-          }))
+          })), { projectionMode: 'topology-review' }
         )))
         const activated = await this.update(datasetVersionId, (current) => ({
           ...current,
@@ -255,7 +266,7 @@ export class JsonDatasetVersionRepository {
             ...(publicationProfile ? { publicationProfile } : {}),
             archiveReason: null,
           },
-        }))
+        }), { projectionMode: 'topology-review' })
 
         await this.activationHooks.beforePointerCommit?.({
           datasetId,
@@ -312,7 +323,7 @@ export class JsonDatasetVersionRepository {
     })
   }
 
-  async update(id, updater, { expectedRevision } = {}) {
+  async update(id, updater, { expectedRevision, projectionMode = 'full' } = {}) {
     assertSafeId(id)
     return this.#withRecordLock(id, async () => {
       const current = await this.get(id)
@@ -321,7 +332,8 @@ export class JsonDatasetVersionRepository {
         throw staleRecordRevision(id, expectedRevision, currentRevision)
       }
       const next = typeof updater === 'function'
-        ? await updater(structuredClone(current))
+        // get() already returns an exclusively owned parsed record.
+        ? await updater(current)
         : { ...current, ...updater }
       const normalized = {
         ...next,
@@ -329,9 +341,11 @@ export class JsonDatasetVersionRepository {
       }
       const target = this.#pathFor(id)
       const temporary = `${target}.${crypto.randomUUID()}.tmp`
-      await writeFile(temporary, JSON.stringify(normalized, null, 2), 'utf8')
+      await writeFile(temporary, JSON.stringify(normalized), 'utf8')
       await rename(temporary, target)
-      return structuredClone(normalized)
+      // Like the PostgreSQL adapter, review callers can consume this owned
+      // draft directly; no repository cache retains it after the atomic write.
+      return projectionMode === 'topology-review' ? normalized : structuredClone(normalized)
     })
   }
 

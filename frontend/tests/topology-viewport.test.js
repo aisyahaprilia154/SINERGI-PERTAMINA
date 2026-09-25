@@ -85,6 +85,20 @@ test('zoom surface grows with the scaled diagram so no edge is clipped', () => {
   })
 })
 
+test('short diagrams sit in the middle of the available canvas', () => {
+  const metrics = zoomSurfaceMetrics({
+    layoutWidth: 600,
+    layoutHeight: 300,
+    zoom: 1,
+    viewportWidth: 1200,
+    viewportHeight: 800,
+    topPadding: 24,
+    bottomPadding: 30,
+  })
+  assert.equal(metrics.frameTop, 250)
+  assert.equal(metrics.frameLeft, 300)
+})
+
 test('zoom keeps the same graph coordinate below the pointer', () => {
   assert.deepEqual(anchoredZoomScrollPosition({
     scrollLeft: 400,

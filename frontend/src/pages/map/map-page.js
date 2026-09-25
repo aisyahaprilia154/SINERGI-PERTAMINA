@@ -13,6 +13,7 @@ import {
   setMountingRelation,
 } from '../../services/active-dataset-service.js'
 import { renderAssetDetailDrawer } from './asset-detail-drawer.js'
+import { patraNiagaLogoMarkup } from '../brand-logo.js'
 import { createMapLibreSurface } from './maplibre-map.js'
 import { renderNetworkMapCanvas } from './map-surface.js'
 import { renderNetworkList as renderNetworkSidebarList, renderNetworkSidebar } from './network-sidebar.js'
@@ -34,6 +35,9 @@ import {
   getConnectedAssets,
 } from './network-tracing.js'
 import { openMapDataTransferDialog } from './map-data-transfer-dialog.js'
+import { searchMatchScore } from '../../domain/search-normalization.js'
+import { branchNameForFacility } from '../../domain/facility-branch.js'
+import { bindThemeToggle } from '../../theme.js'
 
 export async function renderMapPage(container) {
   document.title = 'Peta Jaringan — SINERGI'
@@ -195,6 +199,8 @@ export async function renderMapPage(container) {
     topologyGraph,
   })
   const assetDetailCache = new Map()
+  const pendingAssetDetails = new Map()
+  let assetPrefetchTimer = null
   let assetDetailRequest = 0
   const state = {
     assetDetailStatus: 'ready',
@@ -267,6 +273,7 @@ export async function renderMapPage(container) {
     overlays: resolvedOverlays,
     candidates: [],
     onSelectAsset: handleAssetSelect,
+    onHoverAsset: prefetchAssetDetail,
     onSelectNetwork: handleNetworkSelect,
     onBasemapStatus: updateBasemapStatus,
     onLayoutStatus: updateLayoutStatus,
@@ -381,6 +388,12 @@ export async function renderMapPage(container) {
   }
 
   function syncMap() {
+    const physicalGroup = poleGroups.find(({ assetIds = [] }) => (
+      assetIds.includes(selection.selectedAssetId)
+    ))
+    const physicalRelatedIds = physicalGroup
+      ? physicalGroup.assetIds.filter((id) => id !== selection.selectedAssetId)
+      : []
     const connectedNodeIds = selection.selectedAssetId
       ? getConnectedAssets(relationGraph, selection.selectedAssetId)
         .map(({ targetAssetId }) => targetAssetId)
@@ -388,7 +401,8 @@ export async function renderMapPage(container) {
     canvasApi.setState({
       selectedNetworkIds: selection.selectedNetworkIds,
       selectedAssetId: selection.selectedAssetId,
-      connectedNodeIds,
+      connectedNodeIds: [...new Set([...connectedNodeIds, ...physicalRelatedIds])],
+      physicalRelatedIds,
       dimOthers: state.dimOthers,
       showCctvCoverage: state.showCctvCoverage,
     })
@@ -431,6 +445,7 @@ export async function renderMapPage(container) {
   }
 
   function handleAssetSelect(assetId) {
+    if (assetPrefetchTimer !== null) window.clearTimeout(assetPrefetchTimer)
     const previousAssetId = selection.selectedAssetId
     selection.selectAsset(assetId)
     state.assetDetailStatus = assetDetailCache.has(assetId) ? 'ready' : 'loading'
@@ -467,6 +482,22 @@ export async function renderMapPage(container) {
       return
     }
     const asset = assetDetailCache.get(mapAsset.id) ?? mapAsset
+    if (state.assetDetailStatus === 'error') {
+      drawer.innerHTML = renderAssetDetailDrawer({
+        status: state.assetDetailStatus,
+        errorMessage: state.assetDetailError,
+        asset,
+      })
+      drawer.classList.add('open')
+      drawer.setAttribute('aria-hidden', 'false')
+      workspace.classList.add('drawer-open')
+      invalidateMapAfterPanelChange(drawer)
+      drawer.querySelector('.close-drawer')?.addEventListener('click', closeAssetDrawer)
+      drawer.querySelector('.retry-asset-detail')?.addEventListener('click', () => {
+        loadAssetDetail(selection.selectedAssetId, { force: true })
+      })
+      return
+    }
     const assetId = mapAsset.id
     const mountingAssetRelations = mergeMountingRelations([
       mountingRelations,
@@ -545,7 +576,10 @@ export async function renderMapPage(container) {
       mountingActionError: state.mountingActionError,
       mountingSearch: state.mountingSearch,
       mountingControlsAvailable: topologyReadiness.capabilities?.editAssetMounting === true,
-      activeContext,
+      activeContext: {
+        ...activeContext,
+        branchName: branchNameForFacility(selectedArea, activeContext.branchName),
+      },
       showAdditionalMetadata: state.showAdditionalMetadata,
       diagramAvailable,
       topologySummary,
@@ -828,18 +862,9 @@ export async function renderMapPage(container) {
     const requestId = ++assetDetailRequest
     state.assetDetailStatus = 'loading'
     state.assetDetailError = null
-    renderDrawer()
+    if (force) renderDrawer()
     try {
-      const detailPayload = await loadActiveAssetDetail({
-        datasetId: activeContext.datasetId,
-        branchId: activeContext.branchId,
-        assetId,
-      })
-      if (detailPayload.activePointer?.revision !== activeContext.activePointerRevision) {
-        throw new Error(
-          'Dataset aktif berubah saat detail dimuat. Muat ulang peta untuk menggunakan versi terbaru.',
-        )
-      }
+      const detailPayload = await fetchAssetDetail(assetId, { force })
       assetDetailCache.set(assetId, adaptActiveAssetDetail(detailPayload, mapAsset))
       if (requestId !== assetDetailRequest || selection.selectedAssetId !== assetId) return
       state.assetDetailStatus = 'ready'
@@ -850,6 +875,40 @@ export async function renderMapPage(container) {
       state.assetDetailError = error.message
     }
     renderDrawer()
+  }
+
+  function fetchAssetDetail(assetId, { force = false } = {}) {
+    if (!force && pendingAssetDetails.has(assetId)) return pendingAssetDetails.get(assetId)
+    const request = loadActiveAssetDetail({
+      datasetId: activeContext.datasetId,
+      branchId: activeContext.branchId,
+      assetId,
+    }).then((detailPayload) => {
+      if (detailPayload.activePointer?.revision !== activeContext.activePointerRevision) {
+        throw new Error(
+          'Dataset aktif berubah saat detail dimuat. Muat ulang peta untuk menggunakan versi terbaru.',
+        )
+      }
+      return detailPayload
+    }).finally(() => {
+      if (pendingAssetDetails.get(assetId) === request) pendingAssetDetails.delete(assetId)
+    })
+    pendingAssetDetails.set(assetId, request)
+    return request
+  }
+
+  function prefetchAssetDetail(assetId) {
+    if (!assetById[assetId] || assetDetailCache.has(assetId)
+      || pendingAssetDetails.has(assetId)) return
+    if (assetPrefetchTimer !== null) window.clearTimeout(assetPrefetchTimer)
+    assetPrefetchTimer = window.setTimeout(() => {
+      assetPrefetchTimer = null
+      if (pendingAssetDetails.size > 1) return
+      void fetchAssetDetail(assetId).then((payload) => {
+        assetDetailCache.set(assetId, adaptActiveAssetDetail(payload, assetById[assetId]))
+        if (assetDetailCache.size > 32) assetDetailCache.delete(assetDetailCache.keys().next().value)
+      }).catch(() => {})
+    }, 250)
   }
 
   function toggleNetworkFocus(networkId) {
@@ -875,7 +934,10 @@ export async function renderMapPage(container) {
 
   function openDataTransfer(initialMode = 'import') {
     openMapDataTransferDialog({
-      activeContext,
+      activeContext: {
+        ...activeContext,
+        branchName: branchNameForFacility(selectedArea, activeContext.branchName),
+      },
       assets: exportAssets,
       networks,
       selectedNetworkIds: selection.selectedNetworkIds,
@@ -1296,6 +1358,7 @@ function renderDatasetState(container, {
 let userAccountMenuInteractionsBound = false
 
 export function bindUserAccountMenu() {
+  bindThemeToggle()
   if (userAccountMenuInteractionsBound || typeof document === 'undefined') return
   userAccountMenuInteractionsBound = true
 
@@ -1357,32 +1420,36 @@ function closeUserAccountMenus() {
 }
 
 export function findAssetMatches(assets, query, limit = 8) {
-  const normalizedQuery = String(query ?? '').trim().toLocaleLowerCase('id')
-  if (normalizedQuery.length < 2) return []
+  const normalizedQuery = String(query ?? '').trim()
+  if (!normalizedQuery.replace(/[^\p{L}\p{N}]/gu, '').length) return []
 
   return assets
     .map((asset, index) => {
       const fields = [
         asset.id,
+        asset.assetId,
+        asset.canonicalAssetId,
         asset.name,
+        asset.sourceName,
         asset.location,
+        asset.locationGroupName,
+        asset.locationGroupKey,
         asset.hostname,
         asset.type,
         asset.category,
-      ].map((value) => String(value ?? '').toLocaleLowerCase('id'))
-      const exact = fields.some((value) => value === normalizedQuery)
-      const startsWith = fields.some((value) => value.startsWith(normalizedQuery))
-      const includes = fields.some((value) => value.includes(normalizedQuery))
-      if (!includes) return null
+        asset.sourceFolderPath,
+      ]
+      const score = searchMatchScore(fields, normalizedQuery)
+      if (!score) return null
       return {
         asset,
         index,
-        score: exact ? 0 : startsWith ? 1 : 2,
+        score,
       }
     })
     .filter(Boolean)
     .sort((left, right) => (
-      left.score - right.score
+      right.score - left.score
       || String(left.asset.name || left.asset.id).localeCompare(
         String(right.asset.name || right.asset.id),
         'id',
@@ -1678,6 +1745,7 @@ function networkMatchesPreset(network, preset) {
   const source = `${network.category ?? ''} ${network.type ?? ''} ${network.name ?? ''}`.toLowerCase()
   if (preset === 'cctv') return /cctv|camera|kamera|nvr|junction/.test(source)
   if (preset === 'fiber') return /fiber|fibre|\bfo\b|otb/.test(source)
+  if (preset === 'power') return /power|pln|listrik/.test(source)
   if (preset === 'lan') return /\blan\b|utp/.test(source)
   if (preset === 'infrastructure') {
     return /infrastructure|switch|server|router|rack|peripheral|printer|access point/.test(source)
@@ -1694,12 +1762,14 @@ export function renderTopNavigation(activeView = 'map', context = null) {
     })
     : null
   if (contextParams && context.area) contextParams.set('area', context.area)
+  if (contextParams && context.draftVersionId) {
+    contextParams.set('draftVersionId', context.draftVersionId)
+  }
   const contextQuery = contextParams ? `?${contextParams}` : ''
   return `
     <header class="top-navigation${topologyNavigation ? ' topology-top-navigation' : ''}">
-      <a class="brand-lockup nav-brand" href="/" aria-label="SINERGI">
-        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span><strong>SINERGI</strong><small>Asset Network</small></span>
+      <a class="brand-lockup nav-brand" href="/" aria-label="SINERGI — Pertamina Patra Niaga">
+        ${patraNiagaLogoMarkup()}
       </a>
       <nav aria-label="Navigasi utama">
         <a href="/map${contextQuery}" class="${activeView === 'map' ? 'active' : ''}">
@@ -1710,6 +1780,10 @@ export function renderTopNavigation(activeView = 'map', context = null) {
         </a>
       </nav>
       <div class="nav-actions">
+        <button class="icon-button theme-toggle" type="button" data-theme-toggle
+          aria-label="Aktifkan mode gelap" aria-pressed="false" title="Mode gelap">
+          <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
+        </button>
         <button class="icon-button" type="button" aria-label="Bantuan">
           <span class="material-symbols-outlined" aria-hidden="true">help</span>
         </button>

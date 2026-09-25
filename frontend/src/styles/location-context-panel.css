@@ -1,0 +1,139 @@
+.map-body .map-context-pill.location-context-panel,
+.topology-body #app .topology-context-card.location-context-panel {
+  --context-glass: rgba(255, 255, 255, .84);
+  --context-edge: rgba(255, 255, 255, .78);
+  --context-icon-bg: rgba(10, 132, 255, .10);
+  --context-icon-color: var(--ui-primary);
+  box-sizing: border-box;
+  min-height: 0;
+  padding: 12px 16px;
+  display: block;
+  color: var(--ui-ink);
+  background: var(--context-glass);
+  border: 1px solid var(--context-edge);
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(22, 40, 58, .09), 0 1px 3px rgba(22, 40, 58, .06);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(18px) saturate(140%);
+}
+
+.map-body .location-context-fields,
+.topology-body #app .location-context-fields {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, .46fr) minmax(0, .54fr);
+  align-items: center;
+}
+
+.map-body .location-context-item,
+.topology-body #app .location-context-item {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.map-body .location-context-item + .location-context-item,
+.topology-body #app .location-context-item + .location-context-item {
+  margin-left: 2px;
+  padding-left: 14px;
+  border-left: 1px solid var(--ui-line);
+}
+
+.map-body .location-context-icon,
+.topology-body #app .location-context-icon {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  display: grid;
+  place-items: center;
+  color: var(--context-icon-color);
+  background: var(--context-icon-bg);
+  border-radius: 10px;
+  font-size: 18px;
+}
+
+.map-body .location-context-copy,
+.topology-body #app .location-context-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.map-body .location-context-copy small,
+.topology-body #app .location-context-copy small {
+  color: var(--ui-text);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.map-body .location-context-copy strong,
+.topology-body #app .location-context-copy strong {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--ui-ink);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-theme="dark"] .map-body .map-context-pill.location-context-panel,
+:root[data-theme="dark"] .topology-body #app .topology-context-card.location-context-panel {
+  --context-glass: rgba(28, 28, 30, .82);
+  --context-edge: rgba(255, 255, 255, .16);
+  --context-icon-bg: rgba(120, 183, 230, .16);
+  --context-icon-color: var(--ui-accent);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .26), 0 1px 3px rgba(0, 0, 0, .18);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .map-body .map-context-pill.location-context-panel,
+  .topology-body #app .topology-context-card.location-context-panel {
+    background: var(--ui-surface);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .map-body .map-context-pill.location-context-panel,
+  .topology-body #app .topology-context-card.location-context-panel {
+    background: var(--ui-surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (max-width: 620px) {
+  .map-body .map-context-pill.location-context-panel,
+  .topology-body #app .topology-context-card.location-context-panel {
+    padding: 10px 12px;
+  }
+
+  .map-body .location-context-item,
+  .topology-body #app .location-context-item {
+    gap: 7px;
+  }
+
+  .map-body .location-context-item + .location-context-item,
+  .topology-body #app .location-context-item + .location-context-item {
+    padding-left: 9px;
+  }
+
+  .map-body .location-context-icon,
+  .topology-body #app .location-context-icon {
+    width: 28px;
+    height: 28px;
+    flex-basis: 28px;
+    border-radius: 9px;
+    font-size: 17px;
+  }
+
+  .map-body .location-context-copy strong,
+  .topology-body #app .location-context-copy strong {
+    font-size: 14px;
+  }
+}

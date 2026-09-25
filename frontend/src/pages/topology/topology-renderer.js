@@ -1,8 +1,11 @@
+import { OPERATIONAL_NETWORK_COLORS } from '../../domain/network-colors.js'
+
 const CATEGORY_COLORS = Object.freeze({
   cctv: '#6f6de8',
-  'fiber-optic': '#26a985',
-  lan: '#708196',
-  infrastructure: '#c58722',
+  'fiber-optic': OPERATIONAL_NETWORK_COLORS['fiber-optic'],
+  power: OPERATIONAL_NETWORK_COLORS.power,
+  lan: OPERATIONAL_NETWORK_COLORS.lan,
+  infrastructure: OPERATIONAL_NETWORK_COLORS.infrastructure,
   peripheral: '#8a65d8',
   unmapped: '#7b8794',
 })
@@ -304,6 +307,7 @@ function nodeGlyph(family) {
   return {
     cctv: 'C',
     'fiber-optic': 'F',
+    power: 'P',
     lan: 'L',
     infrastructure: 'I',
     peripheral: 'P',
@@ -315,6 +319,7 @@ function categoryLabel(family) {
   return {
     cctv: 'CCTV',
     'fiber-optic': 'Fiber optic',
+    power: 'Power PLN',
     lan: 'LAN',
     infrastructure: 'Infrastruktur',
     peripheral: 'Peripheral',

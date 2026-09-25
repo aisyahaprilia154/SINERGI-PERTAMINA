@@ -6,6 +6,7 @@ import {
   calculateSchematicFitScale,
   MIN_SCHEMATIC_ZOOM,
 } from './schematic-viewport.js'
+import { searchMatchScore } from '../../domain/search-normalization.js'
 
 export function openSchematicDialog({
   diagrams,
@@ -618,15 +619,17 @@ function renderDiagramState(graph) {
 }
 
 function renderSearchResults({ query, nodes, container }) {
-  const normalized = String(query || '').trim().toLowerCase()
+  const normalized = String(query || '').trim()
   if (!normalized) {
     container.hidden = true
     container.innerHTML = ''
     return
   }
-  const matches = nodes.filter((node) => (
-    `${node.id} ${node.name} ${node.type}`.toLowerCase().includes(normalized)
-  )).slice(0, 8)
+  const matches = nodes.filter((node) => searchMatchScore([
+    node.id,
+    node.name,
+    node.type,
+  ], normalized) > 0).slice(0, 8)
   container.innerHTML = matches.length
     ? matches.map((node) => `
       <button type="button" role="option" data-search-asset-id="${escapeHtml(node.id)}"

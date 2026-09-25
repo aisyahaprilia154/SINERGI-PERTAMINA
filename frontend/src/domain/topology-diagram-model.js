@@ -1,3 +1,6 @@
+import { OPERATIONAL_NETWORK_COLORS } from './network-colors.js'
+import { normalizeSearchText, searchMatchScore } from './search-normalization.js'
+
 const NETWORK_FAMILY_ORDER = Object.freeze([
   'cctv',
   'fiber-optic',
@@ -13,7 +16,7 @@ const NETWORK_FAMILY_LABELS = Object.freeze({
   cctv: 'CCTV',
   'fiber-optic': 'Fiber optic',
   utp: 'UTP',
-  power: 'Power',
+  power: 'Power PLN',
   lan: 'LAN',
   infrastructure: 'Infrastruktur',
   peripheral: 'Peripheral',
@@ -22,11 +25,11 @@ const NETWORK_FAMILY_LABELS = Object.freeze({
 
 const NETWORK_FAMILY_COLORS = Object.freeze({
   cctv: '#5367d8',
-  'fiber-optic': '#0b9b79',
-  utp: '#2d7cc4',
-  power: '#c0801d',
-  lan: '#6f8295',
-  infrastructure: '#9b6b18',
+  'fiber-optic': OPERATIONAL_NETWORK_COLORS['fiber-optic'],
+  utp: OPERATIONAL_NETWORK_COLORS.lan,
+  power: OPERATIONAL_NETWORK_COLORS.power,
+  lan: OPERATIONAL_NETWORK_COLORS.lan,
+  infrastructure: OPERATIONAL_NETWORK_COLORS.infrastructure,
   peripheral: '#7957bd',
   unmapped: '#7e8b98',
 })
@@ -626,6 +629,7 @@ export function getTopologyDiagramSearchResults(model, query, limit = 12) {
       return {
         kind: 'edge',
         id: edge.id,
+        assetId: source?.id ?? target?.id ?? null,
         label: edge.sourceGeometryId || edge.relationId || edge.id,
         typeLabel: 'Relasi terkonfirmasi',
         area: source?.areaName || target?.areaName || source?.areaKey || 'Area belum tersedia',
@@ -648,6 +652,7 @@ export function getTopologyDiagramSearchResults(model, query, limit = 12) {
       return {
         kind: 'mounting',
         id: group.id,
+        assetId: hostId,
         label: hostName,
         detail: `${group.hostType || 'Tiang'} · ${group.childCount ?? group.childIds?.length ?? 0} aset terpasang`,
         score,
@@ -699,7 +704,7 @@ export function normalizeNetworkFamily(value) {
     return 'fiber-optic'
   }
   if (source.includes('utp') || source.includes('ethernet')) return 'utp'
-  if (source.includes('power') || source.includes('listrik')) return 'power'
+  if (source.includes('power') || source.includes('pln') || source.includes('listrik')) return 'power'
   if (source.includes('cctv') || source.includes('camera')) return 'cctv'
   if (source === 'lan' || source.includes('lan')) return 'lan'
   if (source.includes('peripheral') || source.includes('printer') || source.includes('access-point')) {
@@ -1387,27 +1392,26 @@ function matchesSearch(asset, graphNode, query) {
 }
 
 function searchScore(value, normalized) {
-  const haystack = [
+  return searchMatchScore([
     value?.id,
     value?.assetId,
     value?.canonicalAssetId,
     value?.name,
+    value?.sourceName,
     value?.type,
     value?.assetType,
     value?.location,
     value?.locationGroupName,
+    value?.locationGroupKey,
     value?.hostname,
     value?.hostName,
+    value?.sourceFolderPath,
     value?.provenance,
-  ].filter(Boolean).join(' ').toLowerCase()
-  if (!haystack.includes(normalized)) return 0
-  if (String(value?.id ?? '').toLowerCase() === normalized) return 100
-  if (String(value?.name ?? '').toLowerCase().startsWith(normalized)) return 80
-  return haystack.startsWith(normalized) ? 60 : 40
+  ], normalized)
 }
 
 function normalizeSearch(value) {
-  return String(value ?? '').trim().toLowerCase()
+  return normalizeSearchText(value)
 }
 
 function shouldDimNode(node, { search, selectedFamilies }) {

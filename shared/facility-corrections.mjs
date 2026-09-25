@@ -1,5 +1,7 @@
 // User-confirmed facility facts. Shared by regeneration and existing map projections.
-export const FACILITY_CORRECTION_VERSION = 'ft-tegal-baru/2026-09-14'
+import {additionalRelations, additionalExpectation, additionalConflict} from './additional-facility-facts.mjs'
+export {correctAdditionalMounts} from './additional-facility-facts.mjs'
+export const FACILITY_CORRECTION_VERSION = 'facilities/2026-09-23-tegal-c17-jb012-v2'
 export function assetCode(asset) {
   return String(asset?.sourceName ?? asset?.name ?? '').trim().toUpperCase()
     .replace(/^(C|JB|T)-0+(\d)/, '$1-$2')
@@ -14,7 +16,7 @@ const indoor = new Set(['C-8', 'C-9', 'C-10', 'C-11', 'C-12', 'C-13', 'C-15', 'C
 const standalone = new Set(['JB-8', 'JB-8.3', 'JB-9.1', 'C-33', 'JB-10.1', 'C-34',
   'JB-13-EXP', 'C-37', 'C-38', 'C-39', 'C-40', 'JB-14', 'C-44', 'C-45', 'C-46'])
 export function correctedMountingExpectation(asset) {
-  if (!isTegalBaru(asset)) return null
+  if (!isTegalBaru(asset)) return additionalExpectation(asset)
   const code = assetCode(asset)
   return indoor.has(code) ? 'indoor' : standalone.has(code) ? 'standalone' : null
 }
@@ -30,6 +32,7 @@ export function facilityRelations(assets = []) {
   const resolve = code => index.get(code)?.length === 1 ? index.get(code)[0] : null
   const id = a => a.canonicalAssetId ?? a.assetId ?? a.id
   return [['SERVER', 'JB-1'], ['SERVER', 'JB-14'], ['C-8', 'JB-1'],
+    ['C-17', 'JB-1.2'],
     ['C-13', 'JB-2'], ['JB-2', 'JB-4'], ['C-31', 'JB-9'], ['C-32', 'JB-10-EXP']]
     .flatMap(([s, t]) => {
       const source = resolve(s), target = resolve(t)
@@ -39,20 +42,24 @@ export function facilityRelations(assets = []) {
         relationType: 'connected-to', relationKind: 'device_edge',
         direction: 'undirected', verificationStatus: 'confirmed',
         provenance: 'facility_topology_correction', traversable: true }]
-    })
+    }).concat(additionalRelations(assets))
 }
 export function conflictsWithFacilityRelation(edge, assets) {
   return facilityConflictPredicate(assets)(edge)
 }
 export function facilityConflictPredicate(assets) {
   const relations = facilityRelations(assets)
-  if (!relations.length) return () => false
   const byId = new Map(assets.map(a => [a.canonicalAssetId ?? a.assetId ?? a.id, a]))
   return edge => {
+  // Keep the verified branch baseline, while allowing a later explicit admin
+  // edit to replace only the exact relation the administrator touched.
+  if ((edge.manualConfirmation && edge.manualConfirmation.actorId !== 'facility-correction-policy')
+    || (edge.provenance === 'manual_admin' && edge.verifiedBy !== 'facility-correction-policy')) return false
+  if (additionalConflict(edge, byId)) return true
   const source = edge.sourceAssetId ?? edge.sourceNodeId ?? edge.sourcePathAssetId
   const target = edge.targetAssetId ?? edge.targetNodeId
   return relations.some(r => {
-    if (!/^C-/.test(assetCode(byId.get(r.sourceAssetId)))) return false
+    if (!/^(C|BC|DC|CAM)-/i.test(assetCode(byId.get(r.sourceAssetId)))) return false
     const other = source === r.sourceAssetId ? target : target === r.sourceAssetId ? source : null
     return other && other !== r.targetAssetId && /^JB-/.test(assetCode(byId.get(other)))
   })
@@ -75,17 +82,16 @@ export function correctFacilityEdges(edges = [], assets = []) {
 export function correctFacilityBundle(input) {
   const nodes = input?.classifiedNodes ?? []
   const relations = facilityRelations(nodes)
-  if (!relations.length) return input
   const ids = new Set(relations.map(r => r.id))
   return { ...input, explicitRelations: [
     ...(input.explicitRelations ?? []).filter(r => !ids.has(r.explicitRelationEvidenceId)
-      && !conflictsWithFacilityRelation({sourceAssetId: r.sourceReference, targetAssetId: r.targetReference}, nodes)),
+      && !conflictsWithFacilityRelation({...r, sourceAssetId: r.sourceReference, targetAssetId: r.targetReference}, nodes)),
     ...relations.map(r => ({ ...r, explicitRelationEvidenceId: r.id,
       datasetVersionId: input.datasetVersion?.id, siteId: input.site,
       sourceReference: r.sourceAssetId, targetReference: r.targetAssetId,
       source: 'manual_admin', manualConfirmation: {
         actorId: 'facility-correction-policy', reviewedAt: '2026-09-14T00:00:00.000Z',
-        reason: 'Relasi dikonfirmasi pengguna untuk FT Tegal Baru.',
+        reason: 'Relasi fasilitas dikonfirmasi pengguna; mengungguli inferensi otomatis.',
       }, evidence: [] })),
   ] }
 }

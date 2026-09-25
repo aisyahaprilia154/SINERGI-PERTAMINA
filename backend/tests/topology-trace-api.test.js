@@ -2,6 +2,67 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createApp } from '../src/app.js'
 
+test('diagram batch API requires administrator and forwards one revision-guarded draft', async t => {
+  let role = 'Viewer'
+  const calls = []
+  const app = createApp({
+    authenticator: { authenticate: () => ({ id: 'user-1', role }) },
+    auditLog: { record: async () => ({ id: 'audit-denied' }) },
+    topologyService: { saveDiagram: async (...args) => { calls.push(args); return { recordRevision: 8 } } },
+  })
+  await new Promise(resolve => app.listen(0, '127.0.0.1', resolve))
+  t.after(() => { app.closeAllConnections(); app.close() })
+  const url = `http://127.0.0.1:${app.address().port}/api/dataset-versions/dv-1/topology/diagram`
+  const body = { expectedRecordRevision: 7, changes: [{ type: 'rename-frame', assetId: 'pole', name: 'Gate' }] }
+  const request = { method: 'POST', headers: { authorization: 'Bearer test',
+    'content-type': 'application/json', 'x-correlation-id': 'diagram-batch-test' }, body: JSON.stringify(body) }
+  assert.equal((await fetch(url, request)).status, 403)
+  assert.equal(calls.length, 0)
+  role = 'Administrator'
+  const response = await fetch(url, request)
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { recordRevision: 8 })
+  assert.deepEqual(calls, [['dv-1', 'user-1', { ...body, correlationId: 'diagram-batch-test' }]])
+})
+
+test('production diagram API refuses edits to the published version', async t => {
+  const calls = []
+  const app = createApp({
+    config: { topologyDraftRequired: true },
+    authenticator: { authenticate: () => ({ id: 'admin', role: 'Administrator' }) },
+    repository: { get: async id => ({ datasetVersion: id === 'dv-draft'
+      ? { baseDatasetVersionId: 'dv-active', publicationStatus: 'unpublished' }
+      : { publicationStatus: 'published' } }) },
+    topologyService: {
+      saveDiagram: async (...args) => { calls.push(args); return { recordRevision: 2 } },
+      setMountingRelation: async (...args) => { calls.push(args); return {} },
+      createDeviceRelation: async (...args) => { calls.push(args); return {} },
+    },
+  })
+  await new Promise(resolve => app.listen(0, '127.0.0.1', resolve))
+  t.after(() => { app.closeAllConnections(); app.close() })
+  const send = id => fetch(`http://127.0.0.1:${app.address().port}`
+    + `/api/dataset-versions/${id}/topology/diagram`, {
+    method: 'POST', headers: { authorization: 'Bearer test',
+      'content-type': 'application/json' },
+    body: JSON.stringify({ expectedRecordRevision: 1,
+      changes: [{ type: 'rename-frame', assetId: 'pole', name: 'Gate' }] }),
+  })
+  assert.equal((await send('dv-active')).status, 409)
+  assert.equal(calls.length, 0)
+  assert.equal((await send('dv-draft')).status, 200)
+  assert.equal(calls.length, 1)
+  for (const endpoint of ['mounting-relations', 'relations']) {
+    const response = await fetch(`http://127.0.0.1:${app.address().port}`
+      + `/api/dataset-versions/dv-active/topology/${endpoint}`, {
+      method: 'POST', headers: { authorization: 'Bearer test',
+        'content-type': 'application/json' }, body: '{}',
+    })
+    assert.equal(response.status, 409)
+  }
+  assert.equal(calls.length, 1)
+})
+
 test('topology trace API authenticates a viewer and forwards the graph revision contract', async (t) => {
   const calls = []
   const app = createApp({
