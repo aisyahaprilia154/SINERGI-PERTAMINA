@@ -22,7 +22,7 @@ export function buildAdaptiveAssetLayout(items = [], {
   groups.forEach((group) => {
     const ranked = [...group].sort(compareItems)
     const focused = ranked
-      .filter(({ selected, networkFocused }) => selected || networkFocused)
+      .filter(({ selected, networkFocused, physicalRelated }) => selected || networkFocused || physicalRelated)
       .slice(0, 4)
     if (enabled && ranked.length > 8) {
       const focusedIds = new Set(focused.map(({ id }) => id))
@@ -68,7 +68,7 @@ export function buildAdaptiveAssetLayout(items = [], {
     }
 
     const mustExpand = zoom >= 17
-      || ranked.some(({ selected, networkFocused }) => selected || networkFocused)
+      || ranked.some(({ selected, networkFocused, physicalRelated }) => selected || networkFocused || physicalRelated)
 
     if (enabled && ranked.length > 1 && !mustExpand) {
       markers.push(createClusterMarker(ranked))
@@ -83,7 +83,7 @@ export function buildAdaptiveAssetLayout(items = [], {
     ranked.forEach((item, index) => {
       const point = displayPoints[index]
       const displaced = distance(item.point, point) > 7
-      const explicitLabel = Boolean(item.selected || (item.isCoreNode && zoom >= 19.5))
+      const explicitLabel = Boolean(item.selected || item.physicalRelated || (item.isCoreNode && zoom >= 19.5))
       const autoLabel = !explicitLabel && shouldShowAutoLabel(item, zoom)
       const marker = {
         ...item,

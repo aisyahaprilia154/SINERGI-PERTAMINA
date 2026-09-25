@@ -639,6 +639,7 @@
 }
 
 .topology-stitch-tray-item {
+  touch-action: none;
   padding: 0;
   display: flex;
   flex-direction: column;

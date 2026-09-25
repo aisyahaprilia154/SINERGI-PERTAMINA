@@ -325,7 +325,12 @@
 .topology-body #app .topology-stitch-export-panel { left: auto; right: 16px; top: 132px; }
 .topology-body #app .topology-stitch-app.topology-sidebar-collapsed .topology-stitch-export-panel { left: auto; }
 .topology-body #app .topology-stitch-panel-head { border-radius: 12px 12px 0 0; background: var(--workspace-surface); }
-.topology-body #app .topology-stitch-inspector { background: var(--workspace-surface); border-color: var(--workspace-line); backdrop-filter: none; }
+.topology-body #app .topology-stitch-inspector {
+  z-index: 50;
+  background: var(--workspace-surface);
+  border-color: var(--workspace-line);
+  backdrop-filter: none;
+}
 .topology-body #app .topology-legend-popover {
   width: min(292px, calc(100% - 32px));
   max-height: min(460px, calc(100% - 112px));
@@ -1368,10 +1373,6 @@
     z-index: 29;
     background: rgba(0, 0, 0, .22);
   }
-  .topology-body #app .topology-stitch-app:not(.topology-sidebar-collapsed) .topology-canvas-navigation {
-    visibility: hidden;
-    pointer-events: none;
-  }
 }
 @media (max-width: 620px) {
   .topology-body #app .topology-stitch-toolbar { min-height: 52px; }
@@ -1552,9 +1553,12 @@
   }
 }
 @media (max-width: 960px) {
-  .topology-body #app .topology-stitch-app:not(.topology-sidebar-collapsed) :is(.topology-context-card, .topology-stitch-toolbar) {
+  .topology-body #app .topology-stitch-app:not(.topology-sidebar-collapsed) .topology-context-card {
     visibility: hidden;
     pointer-events: none;
+  }
+  .topology-body #app .topology-stitch-toolbar {
+    z-index: 31;
   }
 }
 @media (max-width: 620px) {
@@ -1572,6 +1576,14 @@
   .topology-body #app .topology-remove-mode-hint { top: 146px; }
   .topology-body #app .topology-stitch-export-panel { top: 212px; right: 12px; }
   .topology-body #app .topology-stitch-app:has(.topology-stitch-inspector:not([hidden])) :is(.topology-context-card, .topology-stitch-toolbar, .topology-canvas-navigation) {
+    visibility: hidden;
+    pointer-events: none;
+  }
+  .topology-body #app .topology-stitch-app:not(.topology-sidebar-collapsed) .topology-stitch-toolbar {
+    visibility: hidden;
+    pointer-events: none;
+  }
+  .topology-body #app .topology-stitch-app:not(.topology-sidebar-collapsed) .topology-canvas-navigation {
     visibility: hidden;
     pointer-events: none;
   }

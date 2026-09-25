@@ -84,6 +84,7 @@ export function createMapLibreSurface(element, {
       .map(({ id }) => id)),
     selectedAssetId: null,
     connectedNodeIds: [],
+    physicalRelatedIds: [],
     selectedCandidateId: null,
     dimOthers: true,
     isolateSelectedCandidate: false,
@@ -459,12 +460,14 @@ export function createMapLibreSurface(element, {
           icon: iconForAsset(asset),
           sourceIconUrl: asset.sourceIconUrl || null,
           sourceIconDataUrl: sourceIconLoader.dataByUrl.get(asset.sourceIconUrl) ?? null,
-          active,
+          active: active || asset.id === state.selectedAssetId
+            || state.physicalRelatedIds.includes(asset.id),
           focusContext,
           networkFocused,
           candidateEndpoint: focusedAssetIds.has(asset.id),
           candidateContext: Boolean(selectedCandidate && !focusedAssetIds.has(asset.id)),
           selected: asset.id === state.selectedAssetId,
+          physicalRelated: state.physicalRelatedIds.includes(asset.id),
           isCoreNode: asset.isCoreNode,
           isPole: isPoleAsset(asset),
         }
@@ -1162,6 +1165,7 @@ function renderAdaptiveAssetMarker(marker) {
     marker.showLabel ? 'show-label' : '',
     marker.autoLabel ? 'auto-label' : '',
     marker.selected ? 'selected' : '',
+    marker.physicalRelated ? 'physical-related' : '',
     marker.displaced ? 'displaced' : '',
     marker.networkFocused ? 'network-focused' : '',
     marker.focusContext ? 'focus-context' : '',
@@ -1345,6 +1349,7 @@ function buildFeatureCollections({
     && selectedCandidateGeometryIds.size,
   )
   const connectedIds = new Set(state.connectedNodeIds)
+  const physicalRelatedIds = new Set(state.physicalRelatedIds)
   const collections = {
     points: [],
     lines: [],
@@ -1408,7 +1413,7 @@ function buildFeatureCollections({
             ? 0.16
             : focusContext ? 0.32 : 1,
       selected: geometry.assetId === state.selectedAssetId,
-      connected: connectedIds.has(geometry.assetId),
+      connected: connectedIds.has(geometry.assetId) || physicalRelatedIds.has(geometry.assetId),
       highlighted,
       focused,
       focusContext,

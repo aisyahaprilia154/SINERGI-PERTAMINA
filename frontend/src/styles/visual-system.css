@@ -1155,6 +1155,22 @@
   box-shadow: 0 0 0 2px #fff, 0 0 0 4px color-mix(in srgb, var(--marker-color) 72%, transparent), 0 8px 18px rgba(15, 23, 42, .22);
 }
 
+.map-body .map-adaptive-asset.physical-related {
+  z-index: 4;
+  opacity: 1;
+  background: #17324d;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 5px #f5aa35, 0 7px 20px rgba(15, 23, 42, .28);
+}
+
+.map-body .map-adaptive-asset.physical-related .map-adaptive-asset-name {
+  max-width: 116px;
+  margin-left: 2px;
+  padding-right: 7px;
+  opacity: 1;
+}
+
+.map-body .map-adaptive-asset.selected { z-index: 6; }
+
 .topology-body .topology-stitch-toolbar {
   background: rgba(255, 255, 255, .78);
   border-radius: 17px;
@@ -3315,6 +3331,48 @@
   border-color: var(--ui-line);
 }
 
+:root[data-theme="dark"] .map-body .network-list {
+  background: #28282b;
+  border-color: rgba(255, 255, 255, .16);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .12);
+}
+
+:root[data-theme="dark"] .map-body .network-item,
+:root[data-theme="dark"] .map-body .network-item.selected {
+  background: transparent;
+}
+
+:root[data-theme="dark"] .map-body .network-item:hover,
+:root[data-theme="dark"] .map-body .network-item:focus-within,
+:root[data-theme="dark"] .map-body .network-item.selected:hover,
+:root[data-theme="dark"] .map-body .network-item.selected:focus-within {
+  background: #363639;
+  border-color: transparent;
+}
+
+:root[data-theme="dark"] .map-body .network-item.focused {
+  background: #293849;
+  box-shadow: inset 3px 0 0 var(--ui-accent);
+}
+
+:root[data-theme="dark"] .map-body .network-copy strong {
+  color: #f5f5f7;
+}
+
+:root[data-theme="dark"] .map-body .network-copy small {
+  color: #b2b2ba;
+}
+
+:root[data-theme="dark"] .map-body .network-icon-action {
+  color: #a4a4ad;
+}
+
+:root[data-theme="dark"] .map-body .network-icon-action:hover,
+:root[data-theme="dark"] .map-body .network-icon-action:focus-visible {
+  color: #f5f5f7;
+  background: #45454a;
+}
+
 /* Floating map UI */
 :root[data-theme="dark"] .map-body .map-context-pill,
 :root[data-theme="dark"] .map-body .map-action-group,
@@ -3418,6 +3476,16 @@
 :root[data-theme="dark"] .map-body .asset-drawer .asset-properties dt,
 :root[data-theme="dark"] .map-body .asset-drawer .read-only-note,
 :root[data-theme="dark"] .map-body .asset-drawer .count-badge {
+  color: #a1a1aa;
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .mounting-asset-list strong,
+:root[data-theme="dark"] .map-body .asset-drawer .mounting-candidate-list strong {
+  color: #e5e5ea;
+}
+
+:root[data-theme="dark"] .map-body .asset-drawer .mounting-asset-list small,
+:root[data-theme="dark"] .map-body .asset-drawer .mounting-candidate-list small {
   color: #a1a1aa;
 }
 
