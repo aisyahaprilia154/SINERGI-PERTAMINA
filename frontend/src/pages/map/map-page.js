@@ -10,6 +10,7 @@ import {
   loadActiveOverlays,
   loadDatasetProjection,
   revokeTopologyRelation,
+  saveTopologyDiagram,
   setMountingRelation,
 } from '../../services/active-dataset-service.js'
 import {
@@ -59,6 +60,7 @@ export async function renderMapPage(container) {
   try {
     const payload = await loadActiveDataset(requestedContext)
     mapData = adaptActiveDatasetForMap(payload)
+    mapData.recordRevision = payload.recordRevision
     window.sessionStorage.setItem('sinergiActiveDatasetId', mapData.activeContext.datasetId)
     window.sessionStorage.setItem('sinergiActiveBranchId', mapData.activeContext.branchId)
   } catch (error) {
@@ -222,6 +224,7 @@ export async function renderMapPage(container) {
     dataError: null,
     relationEditorOpen: false,
     relationReplaceId: null,
+    relationReplaceEdgeId: null,
     relationSearch: '',
     relationStatus: 'idle',
     relationError: null,
@@ -653,6 +656,7 @@ export async function renderMapPage(container) {
       const closePicker = state.relationEditorOpen && !state.relationReplaceId
       state.relationEditorOpen = !closePicker
       state.relationReplaceId = null
+      state.relationReplaceEdgeId = null
       state.relationSearch = ''
       state.relationError = null
       renderDrawer()
@@ -661,9 +665,12 @@ export async function renderMapPage(container) {
     drawer.querySelectorAll('[data-replace-relation]').forEach((button) => {
       button.addEventListener('click', () => {
         const relationId = button.dataset.replaceRelation || null
-        const closePicker = state.relationEditorOpen && state.relationReplaceId === relationId
+        const edgeId = relationId ? null : button.dataset.replaceEdge || null
+        const replaceKey = relationId || edgeId
+        const closePicker = state.relationEditorOpen && state.relationReplaceId === replaceKey
         state.relationEditorOpen = !closePicker
-        state.relationReplaceId = closePicker ? null : relationId
+        state.relationReplaceId = closePicker ? null : replaceKey
+        state.relationReplaceEdgeId = closePicker ? null : edgeId
         state.relationSearch = ''
         state.relationError = null
         renderDrawer()
@@ -672,7 +679,11 @@ export async function renderMapPage(container) {
     })
     drawer.querySelectorAll('[data-remove-relation]').forEach((button) => {
       button.addEventListener('click', () => {
-        void removeAssetRelation(button.dataset.removeRelation)
+        const relationId = button.dataset.removeRelation || null
+        void removeAssetRelation(
+          relationId,
+          relationId ? null : button.dataset.removeEdge || null,
+        )
       })
     })
     drawer.querySelector('[data-relation-search]')?.addEventListener('input', (event) => {
@@ -691,7 +702,12 @@ export async function renderMapPage(container) {
     drawer.querySelector('[data-relation-search-results]')?.addEventListener('click', (event) => {
       const targetButton = event.target.closest('[data-relation-target]')
       if (!targetButton || !event.currentTarget.contains(targetButton)) return
-      saveAssetRelation(asset.id, targetButton.dataset.relationTarget, state.relationReplaceId)
+      saveAssetRelation(
+        asset.id,
+        targetButton.dataset.relationTarget,
+        state.relationReplaceId,
+        state.relationReplaceEdgeId,
+      )
     })
     drawer.querySelectorAll('[data-connected-asset]').forEach((button) => {
       button.addEventListener('click', () => handleAssetSelect(button.dataset.connectedAsset))
@@ -738,6 +754,7 @@ export async function renderMapPage(container) {
           ? 'Penyesuaian pemasangan aset dari Detail Aset.'
           : 'Aset dilepaskan dari tiang melalui Detail Aset.',
       })
+      mapData.recordRevision = response.recordRevision ?? mapData.recordRevision
       applyMountingProjection(response)
       state.mountingActionStatus = 'success'
       state.showMountingCandidates = false
@@ -798,13 +815,48 @@ export async function renderMapPage(container) {
     canvasApi.setPoleGroups?.(poleGroups)
   }
 
-  async function saveAssetRelation(sourceAssetId, targetAssetId, replaceRelationId = null) {
+  async function saveAssetRelation(
+    sourceAssetId,
+    targetAssetId,
+    replaceRelationId = null,
+    replaceEdgeId = null,
+  ) {
     if (!sourceAssetId || !targetAssetId || sourceAssetId === targetAssetId) return
     state.relationStatus = 'saving'
     state.relationError = null
     renderDrawer()
     let rollbackGraph = topologyGraph
     try {
+      if (replaceEdgeId) {
+        const response = await saveTopologyDiagram({
+          datasetVersionId: activeContext.datasetVersionId,
+          expectedRecordRevision: mapData.recordRevision,
+          changes: [
+            { type: 'remove-edge', edgeId: replaceEdgeId },
+            { type: 'add-relation', sourceAssetId, targetAssetId },
+          ],
+        })
+        if (!response?.graph || !Array.isArray(response.graph.edges)) {
+          throw new Error('Graph relasi terbaru tidak tersedia dari server.')
+        }
+        topologyGraph = response.graph
+        mapData.recordRevision = response.recordRevision ?? mapData.recordRevision
+        relationGraph = buildExplicitRelationGraph({
+          networks,
+          assetIds: validIds.assetIds,
+          topologyGraph,
+        })
+        canvasApi.setTopologyGraph(topologyGraph)
+        state.relationStatus = 'saved'
+        state.relationEditorOpen = false
+        state.relationReplaceId = null
+        state.relationReplaceEdgeId = null
+        state.relationSearch = ''
+        renderDrawer()
+        syncMap()
+        return
+      }
+
       let expectedGraphRevision = topologyGraph.graphRevision ?? undefined
       if (replaceRelationId) {
         const revoked = await revokeTopologyRelation({
@@ -814,6 +866,7 @@ export async function renderMapPage(container) {
         })
         if (revoked?.graph && Array.isArray(revoked.graph.edges)) {
           topologyGraph = revoked.graph
+          mapData.recordRevision = revoked.recordRevision ?? mapData.recordRevision
           expectedGraphRevision = topologyGraph.graphRevision ?? undefined
           relationGraph = buildExplicitRelationGraph({
             networks,
@@ -879,6 +932,7 @@ export async function renderMapPage(container) {
         throw new Error('Graph relasi terbaru tidak tersedia dari server.')
       }
       topologyGraph = nextGraph
+      mapData.recordRevision = response.recordRevision ?? mapData.recordRevision
       relationGraph = buildExplicitRelationGraph({
         networks,
         assetIds: validIds.assetIds,
@@ -888,6 +942,7 @@ export async function renderMapPage(container) {
       state.relationStatus = 'saved'
       state.relationEditorOpen = false
       state.relationReplaceId = null
+      state.relationReplaceEdgeId = null
       state.relationSearch = ''
       renderDrawer()
       syncMap()
@@ -906,23 +961,30 @@ export async function renderMapPage(container) {
     }
   }
 
-  async function removeAssetRelation(relationId) {
-    if (!relationId || ['saving', 'removing'].includes(state.relationStatus)) return
+  async function removeAssetRelation(relationId, edgeId = null) {
+    if ((!relationId && !edgeId) || ['saving', 'removing'].includes(state.relationStatus)) return
     const sourceAssetId = selection.selectedAssetId
     state.relationStatus = 'removing'
     state.relationError = null
     renderDrawer()
     try {
-      const response = await revokeTopologyRelation({
-        relationId,
-        datasetVersionId: activeContext.datasetVersionId,
-        reason: 'Hubungan dihapus dari Detail aset.',
-        expectedGraphRevision: topologyGraph.graphRevision ?? undefined,
-      })
+      const response = edgeId
+        ? await saveTopologyDiagram({
+          datasetVersionId: activeContext.datasetVersionId,
+          expectedRecordRevision: mapData.recordRevision,
+          changes: [{ type: 'remove-edge', edgeId }],
+        })
+        : await revokeTopologyRelation({
+          relationId,
+          datasetVersionId: activeContext.datasetVersionId,
+          reason: 'Hubungan dihapus dari Detail aset.',
+          expectedGraphRevision: topologyGraph.graphRevision ?? undefined,
+        })
       if (!response?.graph || !Array.isArray(response.graph.edges)) {
         throw new Error('Graph relasi terbaru tidak tersedia dari server.')
       }
       topologyGraph = response.graph
+      mapData.recordRevision = response.recordRevision ?? mapData.recordRevision
       relationGraph = buildExplicitRelationGraph({
         networks,
         assetIds: validIds.assetIds,
@@ -933,6 +995,7 @@ export async function renderMapPage(container) {
         state.relationStatus = 'removed'
         state.relationEditorOpen = false
         state.relationReplaceId = null
+        state.relationReplaceEdgeId = null
         state.relationSearch = ''
         renderDrawer()
       }

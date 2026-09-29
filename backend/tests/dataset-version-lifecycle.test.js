@@ -101,6 +101,7 @@ test('atomic activation archives the previous version and publishes one shared p
     }])
     assert.equal(active.assets[0].datasetVersionId, 'version-new')
     assert.equal(mapView.mapView, true)
+    assert.equal(mapView.recordRevision, topologyView.recordRevision)
     assert.equal(mapView.activePointer.revision, result.activePointer.revision)
     assert.equal(mapView.assets[0].assetId, 'ASSET-version-new')
     assert.equal(mapView.assets[0].sourceFeatureId, 'source-feature-version-new')

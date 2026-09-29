@@ -2312,3 +2312,18 @@
     pointer-events: none;
   }
 }
+
+/* The reopen control floats above the map at every viewport size. */
+:root[data-theme="dark"] .map-body .sidebar-reopen {
+  color: var(--app-accent);
+  background: var(--app-glass-raised);
+  border-color: var(--app-glass-border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
+}
+
+:root[data-theme="dark"] .map-body .sidebar-reopen:hover,
+:root[data-theme="dark"] .map-body .sidebar-reopen:focus-visible {
+  color: var(--app-ink);
+  background: color-mix(in srgb, var(--app-accent) 18%, var(--app-glass-raised));
+  border-color: color-mix(in srgb, var(--app-accent) 48%, var(--app-glass-border));
+}

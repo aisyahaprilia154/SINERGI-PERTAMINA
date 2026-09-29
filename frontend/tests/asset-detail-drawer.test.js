@@ -139,7 +139,7 @@ test('drawer renders searchable relation targets and replacement actions', () =>
     connectedAssets: [{
       asset: { id: 'jb-01', name: 'JB-01', type: 'Junction box' },
       network,
-      relation: { id: 'rel-01' },
+      relation: { id: null, edgeId: 'edge-01' },
     }],
     activeContext,
     relationOptions: [{
@@ -159,9 +159,9 @@ test('drawer renders searchable relation targets and replacement actions', () =>
   assert.match(html, /Ganti relasi dengan JB-02/)
   assert.match(html, />swap_horiz<\/span>/)
   assert.doesNotMatch(html, /data-save-relation|Simpan hubungan/)
-  assert.match(html, /data-replace-relation="rel-01"/)
-  assert.match(html, /data-remove-relation="rel-01"/)
-  assert.ok(html.indexOf('data-remove-relation="rel-01"') > html.indexOf('data-replace-relation="rel-01"'))
+  assert.match(html, /data-replace-relation=""[\s\S]*?data-replace-edge="edge-01"/)
+  assert.match(html, /data-remove-relation=""[\s\S]*?data-remove-edge="edge-01"/)
+  assert.ok(html.indexOf('data-remove-edge="edge-01"') > html.indexOf('data-replace-edge="edge-01"'))
   assert.match(html, /aria-label="Hapus relasi dengan JB-01"[\s\S]*?>\s*<span class="material-symbols-outlined" aria-hidden="true">close<\/span>/)
 })
 
