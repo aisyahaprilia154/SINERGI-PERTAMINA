@@ -109,7 +109,21 @@ export class TopologyService {
                 action: change.action ?? (change.poleAssetId ? 'assign' : 'detach'), reason })
           } else if (change.type === 'move-frame') {
             const device = resolveManualDevice(draft, change.assetId, 'assetId')
-            const frameId = normalizeDiagramFrameReference(change.frameId)
+            let frameId = normalizeDiagramFrameReference(change.frameId)
+            if (frameId?.startsWith('pole-group:')) {
+              const poleId = frameId.slice('pole-group:'.length)
+              const pole = resolveManualDevice(draft, poleId, 'frameId')
+              assertPoleAsset(pole)
+              await editor.setMountingRelation(datasetVersionId, actorId,
+                { assetId: device.canonicalAssetId, poleAssetId: pole.canonicalAssetId,
+                  action: 'assign', reason })
+              frameId = `pole-group:${pole.canonicalAssetId}`
+            } else if (frameId?.startsWith('excluded-mounting:')
+              && isMountableNode(device.object) && !isPoleNode(device.object)) {
+              await editor.setMountingRelation(datasetVersionId, actorId,
+                { assetId: device.canonicalAssetId, poleAssetId: null,
+                  action: 'detach', reason })
+            }
             const assignments = { ...(draft.topologyFrameAssignments ?? {}) }
             if (frameId) assignments[device.canonicalAssetId] = frameId
             else delete assignments[device.canonicalAssetId]
@@ -125,21 +139,29 @@ export class TopologyService {
               [frame.id]: frame,
             } }
           } else if (change.type === 'add-relation') {
+            await editor.createDeviceRelation(datasetVersionId, actorId,
+              { sourceAssetId: change.sourceAssetId, targetAssetId: change.targetAssetId, reason })
+          } else if (['rename-frame', 'remove-edge', 'remove-relation'].includes(change.type)) {
             try {
-              await editor.createDeviceRelation(datasetVersionId, actorId,
-                { sourceAssetId: change.sourceAssetId, targetAssetId: change.targetAssetId, reason })
+              const relationEdge = change.type === 'remove-relation'
+                ? projectFacilityRecord(draft).topologyGraph?.edges.find(item => (
+                  [item.sourceAssetId, item.targetAssetId].includes(change.sourceAssetId)
+                  && [item.sourceAssetId, item.targetAssetId].includes(change.targetAssetId)
+                )) : null
+              if (change.type === 'remove-relation' && !relationEdge) {
+                throw new AppError('Relasi yang akan dihapus tidak ditemukan. Muat ulang diagram.', {
+                  code: 'diagram_edge_not_found', statusCode: 409,
+                })
+              }
+              await editor.editDiagram(datasetVersionId, actorId, {
+                ...change, edgeId: relationEdge?.id ?? change.edgeId,
+                action: change.type === 'remove-relation' ? 'remove-edge' : change.type,
+                expectedRecordRevision: recordRevision(draft),
+              })
             } catch (error) {
-              // A draft can contain a pair already confirmed by imported KMZ
-              // evidence. Keep the rest of the atomic batch saveable.
-              if (error?.code !== 'topology_manual_relation_exists') throw error
-            }
-          } else if (['rename-frame', 'remove-edge'].includes(change.type)) {
-            try {
-              await editor.editDiagram(datasetVersionId, actorId, { ...change,
-                action: change.type, expectedRecordRevision: recordRevision(draft) })
-            } catch (error) {
-              if (!(syncTolerantEdges && change.type === 'remove-edge'
+              if (!(syncTolerantEdges && ['remove-edge', 'remove-relation'].includes(change.type)
                 && error?.code === 'diagram_edge_not_found')) throw error
+              if (change.type === 'remove-relation') continue
               const exists = (draft.topologyEdgeOverrides ?? []).some(item =>
                 item.action === 'remove' && (change.edgeKey
                   ? item.edgeKey === change.edgeKey : item.edgeId === change.edgeId))
@@ -179,7 +201,7 @@ export class TopologyService {
             datasetVersion: { ...draft.datasetVersion,
               syncRootDatasetVersionId: syncAdopt.source.datasetVersionId } }
         }
-        return draft
+        return pruneEmptyTopologyFrames(draft)
       }, { expectedRevision: expectedRecordRevision, projectionMode: 'topology-review' })
       await auditLog.record('topology.diagram_saved', { actorId, datasetVersionId,
         correlationId, outcome: 'confirmed', details: { changes, auditEventId: batchAuditId } })
@@ -223,7 +245,36 @@ export class TopologyService {
           const override = { action: 'remove', edgeId: edge.id ?? edge.relationId,
             sourceAssetId: edge.sourceAssetId, targetAssetId: edge.targetAssetId,
             edgeKey: diagramEdgeKey(edge), actorId, updatedAt: this.clock().toISOString() }
+          const otherEdges = (record.topologyGraph?.edges ?? []).filter(item =>
+            item.id !== edge.id)
+          const usedRelationIds = new Set(otherEdges.flatMap(item => item.sourceRelationIds ?? []))
+          const removedRelationIds = new Set((edge.sourceRelationIds ?? [])
+            .filter(id => !usedRelationIds.has(id)))
+          const usedCandidateIds = new Set(otherEdges.flatMap(item =>
+            item.candidateIds ?? (item.candidateId ? [item.candidateId] : [])))
+          const removedCandidateIds = new Set((edge.candidateIds
+            ?? (edge.candidateId ? [edge.candidateId] : []))
+            .filter(id => !usedCandidateIds.has(id)))
+          const removedEvidenceIds = new Set((record.topologyCandidates ?? [])
+            .filter(item => removedCandidateIds.has(item.candidateId))
+            .map(item => item.explicitRelationEvidenceId).filter(Boolean))
+          for (const candidate of record.topologyCandidates ?? []) {
+            if (!removedCandidateIds.has(candidate.candidateId)) {
+              removedEvidenceIds.delete(candidate.explicitRelationEvidenceId)
+            }
+          }
+          const keepRelation = item => !removedRelationIds.has(item.relationId)
+            && !removedCandidateIds.has(item.candidateId)
           next = applyDiagramOverrides({ ...record,
+            topologyInputBundle: removedEvidenceIds.size ? {
+              ...record.topologyInputBundle,
+              explicitRelations: (record.topologyInputBundle?.explicitRelations ?? [])
+                .filter(item => !removedEvidenceIds.has(item.explicitRelationEvidenceId)),
+            } : record.topologyInputBundle,
+            topologyCandidates: (record.topologyCandidates ?? [])
+              .filter(item => !removedCandidateIds.has(item.candidateId)),
+            confirmedRelations: (record.confirmedRelations ?? []).filter(keepRelation),
+            relations: (record.relations ?? []).filter(keepRelation),
             topologyEdgeOverrides: [...(record.topologyEdgeOverrides ?? []), override] })
           details = override
         }
@@ -5065,6 +5116,15 @@ function normalizeDiagramFrameReference(value) {
     })
   }
   return normalized
+}
+
+function pruneEmptyTopologyFrames(record) {
+  const frames = record.topologyFrames ?? {}
+  const occupiedIds = new Set(Object.values(record.topologyFrameAssignments ?? {}))
+  const retained = Object.fromEntries(Object.entries(frames)
+    .filter(([frameId]) => occupiedIds.has(frameId)))
+  return Object.keys(retained).length === Object.keys(frames).length
+    ? record : { ...record, topologyFrames: retained }
 }
 
 function normalizeCustomTopologyFrame(value) {

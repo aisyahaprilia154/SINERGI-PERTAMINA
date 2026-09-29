@@ -206,7 +206,7 @@ test('branch root frames keep one tier and equal gaps despite a wider child subt
   assertEdgesAvoidOtherFrames(layout)
 })
 
-test('diagram frame assignment can move an asset into an Indoor frame without changing mounting evidence', () => {
+test('an Indoor frame assignment cannot override stored pole mounting', () => {
   const area = 'area-a'
   const assets = [
     { id: 'server', name: 'Server', type: 'Server Rack', topologyRole: 'core', locationGroupKey: area },
@@ -233,8 +233,8 @@ test('diagram frame assignment can move an asset into an Indoor frame without ch
   })
   const movedIndoorFrame = moved.mountingBoxes.find(({ id }) => id === indoorFrame.id)
   const movedPoleFrame = moved.mountingBoxes.find(({ id }) => id === poleFrame.id)
-  assert.ok(movedIndoorFrame.nodeIds.includes('camera'))
-  assert.equal(movedPoleFrame.nodeIds.includes('camera'), false)
+  assert.equal(movedIndoorFrame.nodeIds.includes('camera'), false)
+  assert.equal(movedPoleFrame.nodeIds.includes('camera'), true)
   assert.equal(model.mountingGroups.find(({ hostId }) => hostId === 'pole').childIds.includes('camera'), true)
 })
 
@@ -458,7 +458,25 @@ test('confirmed JB-to-JB relation inside one pole keeps the child below its pare
   assert.equal(layout.edges.length, edges.length)
 })
 
-test('legacy branch and satellite frame assignments resolve to the canonical pole frame', () => {
+test('JB numbering alone does not create a network line or parent hierarchy', () => {
+  const area = 'area-a'
+  const assets = [
+    { id: 'pole', name: 'T-01', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area },
+    { id: 'parent', name: 'JB 11', type: 'Junction Box', topologyRole: 'junction', locationGroupKey: area },
+    { id: 'child', name: 'JB 11.1', type: 'Junction Box', topologyRole: 'junction_extended',
+      locationGroupKey: area, layoutParentId: 'parent' },
+  ]
+  const model = buildTopologyDiagramModel({ assets, graph: { nodes: assets, edges: [] },
+    mountingRelations: ['parent', 'child'].map(sourceAssetId => ({
+      sourceAssetId, targetAssetId: 'pole', relationType: 'mounted_on',
+    })), locationGroups: [{ key: area, name: area }], area })
+  const layout = calculateTopologyDiagramLayout(model)
+  assert.equal(model.nodeById.get('child').layoutParentId, null)
+  assert.equal(layout.edges.length, 0)
+  assert.notEqual(layout.nodes.find(node => node.id === 'child').layoutParentId, 'parent')
+})
+
+test('legacy pole frame assignments cannot override stored mounting', () => {
   const area = 'area-a'
   const assets = [
     { id: 'pole-1', name: 'T-001', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area },
@@ -481,6 +499,8 @@ test('legacy branch and satellite frame assignments resolve to the canonical pol
     'cam-9': 'pole-group:pole-2:junction:jb-1',
   } })
   assert.deepEqual(new Set(layout.mountingBoxes.find(box => box.id === 'pole-group:pole-2').nodeIds),
+    new Set())
+  assert.deepEqual(new Set(layout.mountingBoxes.find(box => box.id === 'pole-group:pole-1').nodeIds),
     new Set(['jb-1', 'cam-9']))
   assert.equal(layout.mountingBoxes.filter(box => box.hostId === 'pole-2').length, 1)
   assert.deepEqual(model.mountingGroups.find(group => group.hostId === 'pole-1').childIds,
@@ -583,6 +603,34 @@ test('custom Indoor and selected empty-pole frames stay visible before assets ar
   assert.deepEqual(indoor?.nodeIds, [])
   assert.equal(pole?.kind, 'empty')
   assert.equal(pole?.hostId, 'pole-empty')
+})
+
+test('generated empty AUTO pole frames do not occupy diagram space', () => {
+  const area = 'area-a'
+  const emptyId = 'AUTO-007734B664CBEB6C412ABF58'
+  const usedId = 'AUTO-020E63BADB88C81A3E605E1A'
+  const assets = [
+    { id: 'server', name: 'Server', type: 'Server Rack', topologyRole: 'core', locationGroupKey: area },
+    { id: emptyId, name: emptyId, type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area },
+    { id: usedId, name: usedId, type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area },
+    { id: 'named-pole', name: 'Tiang 02', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: area },
+    { id: 'camera', name: 'Cam-01', type: 'CCTV', topologyRole: 'endpoint', locationGroupKey: area },
+  ]
+  const model = buildTopologyDiagramModel({
+    assets,
+    graph: { nodes: assets, edges: [] },
+    mountingRelations: [{
+      sourceAssetId: 'camera', targetAssetId: usedId,
+      relationType: 'mounted_on', verificationStatus: 'confirmed',
+    }],
+    locationGroups: [{ key: area, name: 'Area A' }],
+  })
+  const layout = calculateTopologyDiagramLayout(model)
+
+  assert.equal(layout.mountingBoxes.some(({ hostId }) => hostId === emptyId), false)
+  assert.equal(layout.mountingBoxes.some(({ hostId, nodeIds }) => (
+    hostId === usedId && nodeIds.includes('camera'))), true)
+  assert.equal(layout.mountingBoxes.some(({ hostId }) => hostId === 'named-pole'), true)
 })
 
 test('a camera stays in its physical pole frame even when its network owner is elsewhere', () => {
@@ -888,7 +936,7 @@ test('duplicate persisted component IDs do not drop topology lanes or pole group
   assert.equal(layout.nodes.filter(({ id }) => ['jb-a', 'cam-a', 'jb-b', 'cam-b'].includes(id)).length, 4)
 })
 
-test('endpoint cameras stay inside the connected JB or pole scope', () => {
+test('endpoint cameras keep network links without inheriting a JB pole mounting', () => {
   const assets = [
     { id: 'server', name: 'Server', type: 'Server Rack', topologyRole: 'core', locationGroupKey: 'area-a' },
     { id: 'pole-1', name: 'Tiang 01', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: 'area-a' },
@@ -921,9 +969,10 @@ test('endpoint cameras stay inside the connected JB or pole scope', () => {
   const boxes = new Map(layout.mountingBoxes.map((box) => [box.id, box]))
 
   const poleBox = boxes.get('pole-group:pole-1')
-  assert.deepEqual(new Set(poleBox.nodeIds), new Set(['jb-1', 'cam-1']))
-  assert.equal(byId.get('cam-1').mountingBoxId, poleBox.id)
+  assert.deepEqual(new Set(poleBox.nodeIds), new Set(['jb-1']))
+  assert.notEqual(byId.get('cam-1').mountingBoxId, poleBox.id)
   assert.equal(byId.get('cam-1').mountingRelationStatus, 'needs-mounting')
+  assert.ok(layout.edges.some(({ id }) => id === 'jb-1-cam-1'))
 
   const jbBox = [...boxes.values()].find((box) => box.label === 'JB-02')
   assert.ok(jbBox)
@@ -941,7 +990,7 @@ test('endpoint cameras stay inside the connected JB or pole scope', () => {
     .every((node) => byId.get('server').diagram.y < node.diagram.y))
 })
 
-test('numbered JB extensions stay below their matching base JB', () => {
+test('numbered JB extensions use confirmed edges and independent pole mounting', () => {
   const assets = [
     { id: 'core', name: 'Rack', type: 'Server Rack', topologyRole: 'core', locationGroupKey: 'area-a' },
     { id: 'pole-11', name: 'T-011', type: 'Pole', topologyRole: 'physical_mount', locationGroupKey: 'area-a' },
@@ -972,8 +1021,7 @@ test('numbered JB extensions stay below their matching base JB', () => {
     ['base-17-child', 'base-17', 'child-17'],
     ['base-18-child', 'base-18', 'child-18'],
     ['base-19-child', 'base-19', 'child-19-1'],
-    // The source graph may connect this extension through another confirmed
-    // route. Its number still supplies the presentation parent only.
+    // The extension is connected to the core, not its similarly named base.
     ['core-19-2', 'core', 'child-19-2'],
   ].map(([id, sourceNodeId, targetNodeId]) => ({
     id, sourceNodeId, targetNodeId, relationStatus: 'confirmed',
@@ -1013,13 +1061,14 @@ test('numbered JB extensions stay below their matching base JB', () => {
     ['child-17', 'base-17'],
     ['child-18', 'base-18'],
     ['child-19-1', 'base-19'],
-    ['child-19-2', 'base-19'],
   ]) {
-    assert.equal(byId.get(childId).rowIndex, 1)
-    assert.equal(byId.get(childId).layoutParentId, parentId)
-    assert.ok(byId.get(childId).diagram.y > byId.get(parentId).diagram.y)
-    assert.equal(byId.get(childId).mountingBoxId, byId.get(parentId).mountingBoxId)
+    assert.ok(layout.edges.some(edge => [edge.sourceId, edge.targetId].includes(childId)
+      && [edge.sourceId, edge.targetId].includes(parentId)))
   }
+  assert.ok(layout.edges.some(edge => [edge.sourceId, edge.targetId].includes('child-19-2')
+    && [edge.sourceId, edge.targetId].includes('core')))
+  assert.equal(layout.edges.some(edge => [edge.sourceId, edge.targetId].includes('child-19-2')
+    && [edge.sourceId, edge.targetId].includes('base-19')), false)
   assert.equal(byId.get('base-11').mountingRelationStatus, 'confirmed')
   assert.equal(byId.get('child-11').mountingRelationStatus, 'needs-mounting')
   assert.equal(byId.get('base-17').mountingRelationStatus, 'needs-mounting')
@@ -1031,10 +1080,6 @@ test('numbered JB extensions stay below their matching base JB', () => {
   assert.ok(byId.get('base-15').diagram.x < byId.get('base-17').diagram.x)
   assert.ok(byId.get('base-17').diagram.x < byId.get('base-18').diagram.x)
   assert.ok(byId.get('base-18').diagram.x < byId.get('base-19').diagram.x)
-  assert.ok(byId.get('child-11').diagram.x < byId.get('child-15').diagram.x)
-  assert.ok(byId.get('child-15').diagram.x < byId.get('child-17').diagram.x)
-  assert.ok(byId.get('child-17').diagram.x < byId.get('child-18').diagram.x)
-  assert.ok(byId.get('child-18').diagram.x < byId.get('child-19-1').diagram.x)
 })
 
 test('confirmed extension poles form child boxes below their numbered parent poles', () => {

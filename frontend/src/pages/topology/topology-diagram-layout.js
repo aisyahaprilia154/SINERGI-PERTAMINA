@@ -702,12 +702,6 @@ function buildPoleBackboneAreaLaneSpec({
         mountingConflict: false,
       }))
     : []
-  attachNamedJunctionFamiliesToMountingGroups({
-    confirmedGroups,
-    connectedNodes,
-    assignedNodeIds,
-    area,
-  })
   const edgeAdjacency = buildLayoutEdgeAdjacency(connectedNodes, edges)
   const junctionGroups = buildEndpointJunctionGroups({
     confirmedGroups,
@@ -785,7 +779,14 @@ function buildPoleBackboneAreaLaneSpec({
     splitFramesByExternalJunction(groupSpecs, nodeById, edgeAdjacency),
     frameAssignments,
     nodeById,
-  )
+    mountingGroups,
+  ).filter((group) => (
+    group.kind !== 'empty'
+    || group.nodeIds.length > 0
+    || group.custom
+    || customFrames?.[group.id]
+    || !/^AUTO-[A-F0-9]{12,}$/i.test(String(group.hostName || group.hostId || '').trim())
+  ))
   const mountingBoxes = logicalGroupSpecs.map((group) => buildMountingBoxSpec({
     group,
     nodeById,
@@ -911,22 +912,16 @@ function buildPoleBackboneAreaLaneSpec({
       mountingRole: 'core',
     }))
   })
-  // The rack/server is the presentation parent for every top-level asset
-  // group in the area. This keeps disconnected JB islands and direct devices
-  // (such as an indoor camera connected to the server) visually below the
-  // server without inventing additional operational graph edges.
+  const boxNodes = mountingBoxes.flatMap((box) => box.nodes)
   const presentationRootId = placedCoreNodes[0]?.id ?? null
   if (presentationRootId) {
-    mountingBoxes.forEach((box) => {
-      box.nodes
-        .filter((node) => !node.parentId && !node.layoutParentId)
-        .forEach((node) => {
-          node.parentId = presentationRootId
-          node.layoutParentId = presentationRootId
-        })
-    })
+    boxNodes.filter(node => !node.parentId && !node.layoutParentId
+      && (edgeAdjacency.get(node.id) ?? []).some(({ id }) => id === presentationRootId))
+      .forEach(node => {
+        node.parentId = presentationRootId
+        node.layoutParentId = presentationRootId
+      })
   }
-  const boxNodes = mountingBoxes.flatMap((box) => box.nodes)
   const laneHeight = Math.max(
     coreY + coreHeight + settings.hubPadding,
     boxesY + mountingBoxTree.height + settings.hubPadding,
@@ -989,10 +984,7 @@ function splitFramesByExternalJunction(groups, nodeById, adjacency) {
   })
 }
 
-// Diagram moves are presentation overrides. They intentionally do not rewrite
-// mountingRelations: an administrator may want to show an asset inside an
-// Indoor/Non-tiang frame while the physical mounting evidence stays intact.
-function applyFrameAssignmentsToGroups(groups, assignments = {}, nodeById) {
+function applyFrameAssignmentsToGroups(groups, assignments = {}, nodeById, mountingGroups = []) {
   const entries = assignments instanceof Map
     ? [...assignments.entries()]
     : Object.entries(assignments ?? {})
@@ -1004,6 +996,8 @@ function applyFrameAssignmentsToGroups(groups, assignments = {}, nodeById) {
     presentationInheritedNodeIds: [...(group.presentationInheritedNodeIds ?? [])],
   }))
   const groupById = new Map(nextGroups.map((group) => [group.id, group]))
+  const poleByAssetId = new Map(mountingGroups.flatMap(group =>
+    (group.childIds ?? []).map(id => [id, group.hostId])))
   const resolveTarget = (frameId) => groupById.get(frameId) ?? nextGroups.find(group => (
     group.hostId && ['confirmed', 'empty'].includes(group.kind)
       && [`${group.id}:branch:`, `${group.id}:junction:`]
@@ -1023,6 +1017,8 @@ function applyFrameAssignmentsToGroups(groups, assignments = {}, nodeById) {
       const target = resolveTarget(frameId)
       if (!node || !source || !target || source === target
         || !['confirmed', 'empty', 'excluded'].includes(target.kind)) return
+      if (target.hostId ? poleByAssetId.get(assetId) !== target.hostId
+        : poleByAssetId.has(assetId)) return
 
       source.nodeIds = source.nodeIds.filter((id) => id !== assetId)
       source.presentationInheritedNodeIds = source.presentationInheritedNodeIds
@@ -1125,10 +1121,6 @@ function buildMountingBoxSpec({
       localNeighbors.get(node.id).add(id)
       localNeighbors.get(id).add(node.id)
     }
-  })
-  namedParentById.forEach((parentId, childId) => {
-    localNeighbors.get(parentId)?.add(childId)
-    localNeighbors.get(childId)?.add(parentId)
   })
   const entryJunctionIds = []
   const visitedJunctionIds = new Set()
@@ -1438,6 +1430,8 @@ function buildEndpointJunctionGroups({
       return group
     })
   ;[...junctionGroupById.entries()].forEach(([junctionId, group]) => {
+    // A network neighbor never inherits its JB's physical pole placement.
+    if (group.hostId) return
     const endpointIds = (edgeAdjacency.get(junctionId) ?? [])
       .map(({ id }) => connectedNodeById.get(id))
       .filter((node) => node?.diagramClass === 'endpoint')
@@ -1498,7 +1492,7 @@ function buildNamedJunctionParents(junctions, adjacency) {
         - Number(left.diagramClass === 'junction-peer')
       || compareNodes(left, right)
     ))[0]
-    if (parent) parentById.set(node.id, parent.id)
+    if (parent && adjacentIds.has(parent.id)) parentById.set(node.id, parent.id)
   })
   return parentById
 }

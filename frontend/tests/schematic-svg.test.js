@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { calculateSchematicLayout } from '../src/pages/map/schematic-layout.js'
 import { renderSchematicSvg } from '../src/pages/map/schematic-svg.js'
+import { JUNCTION_BOX_ICON_URL } from '../src/domain/junction-box-icon.js'
 
 const graph = {
   status: 'ready',
@@ -101,6 +102,17 @@ test('SVG renderer uses the preloaded source icon from the KMZ style when availa
 
   assert.match(svg, /class="node-source-icon"/)
   assert.match(svg, /data:image\/png;base64,Y2FtZXJh/)
+})
+
+test('schematic JB node uses the shared cabinet icon', () => {
+  const layout = calculateSchematicLayout(graph)
+  const svg = renderSchematicSvg({
+    graph,
+    layout,
+    context: { branchName: 'Semarang', version: 'v14' },
+    sourceIconDataByUrl: new Map([[JUNCTION_BOX_ICON_URL, 'data:image/png;base64,amItY2FiaW5ldA==']]),
+  })
+  assert.match(svg, /data:image\/png;base64,amItY2FiaW5ldA==/)
 })
 
 test('SVG renderer draws a neutral physical mounting group around its assets', () => {

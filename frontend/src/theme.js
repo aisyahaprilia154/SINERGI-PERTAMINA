@@ -56,6 +56,12 @@ export function applyTheme(preference = readThemePreference(), { persist = false
     : undefined
 
   if (typeof document !== 'undefined') {
+    if (previousTheme && previousTheme !== theme) {
+      document.documentElement.classList.add('theme-switching')
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        document.documentElement.classList.remove('theme-switching')
+      }))
+    }
     document.documentElement.dataset.theme = theme
     document.documentElement.style.colorScheme = theme
   }

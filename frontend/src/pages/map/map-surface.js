@@ -1,5 +1,6 @@
 import { branchNameForFacility } from '../../domain/facility-branch.js'
 import { renderLocationContextPanel } from '../../components/location-context-panel.js'
+import { JUNCTION_BOX_ICON_URL } from '../../domain/junction-box-icon.js'
 
 export function renderNetworkMapCanvas(activeContext, {
   empty = false,
@@ -35,7 +36,7 @@ export function renderNetworkMapCanvas(activeContext, {
           </span>
         </span>
         <span class="basemap-status-metrics">
-          ${Number(counts.assetNodeCount) || 0} aset &middot; ${Number(counts.lineCount) || 0} jalur &middot; ${displayedConfirmedConnectionCount} koneksi terkonfirmasi
+          ${Number(counts.assetNodeCount) || 0} aset di ${escapeHtml(selectedArea?.name || 'dataset aktif')} &middot; ${Number(counts.lineCount) || 0} jalur &middot; ${displayedConfirmedConnectionCount} koneksi
         </span>
         <span class="map-sr-only">Peta dasar <b class="basemap-availability">memuat</b>,
           mode <b class="basemap-mode-label">Jalan &amp; bangunan</b>.</span>
@@ -50,6 +51,14 @@ export function renderNetworkMapCanvas(activeContext, {
             : 'Pilih atau aktifkan dataset yang memiliki Point, LineString, atau Polygon valid.'}</p>
         </section>
       ` : ''}
+      <section class="map-hidden-layers-empty" hidden role="status" aria-live="polite">
+        <span class="material-symbols-outlined" aria-hidden="true">layers_clear</span>
+        <strong>Semua jaringan disembunyikan</strong>
+        <p>Basemap saja yang tampil. Tampilkan jaringan untuk melihat aset dan jalurnya.</p>
+        <button class="button secondary" type="button" data-show-networks>
+          Tampilkan jaringan
+        </button>
+      </section>
       <div class="map-info-overlays" aria-label="Informasi konteks peta">
         ${renderMapContextPill(activeContext, operationalReadiness, selectedArea)}
       </div>
@@ -132,16 +141,21 @@ export function renderMapFloatingControls(
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
           <span>Diagram Topologi</span>
         </button>
-        <button class="tool-button import-toggle map-action-ghost" type="button"
-          aria-label="Import" title="Import data peta">
-          <span class="material-symbols-outlined" aria-hidden="true">upload_file</span>
-          <span>Import</span>
-        </button>
-        <button class="tool-button export-toggle map-action-ghost" type="button"
-          aria-label="Export" title="Export data peta">
-          <span class="material-symbols-outlined" aria-hidden="true">download</span>
-          <span>Export</span>
-        </button>
+        <details class="map-data-actions">
+          <summary aria-label="Aksi data peta" title="Aksi data peta">
+            <span class="material-symbols-outlined" aria-hidden="true">more_horiz</span>
+          </summary>
+          <div class="map-data-actions-menu">
+            <button class="tool-button import-toggle" type="button" aria-label="Import data peta">
+              <span class="material-symbols-outlined" aria-hidden="true">upload_file</span>
+              <span>Import data</span>
+            </button>
+            <button class="tool-button export-toggle" type="button" aria-label="Export data peta">
+              <span class="material-symbols-outlined" aria-hidden="true">download</span>
+              <span>Export data</span>
+            </button>
+          </div>
+        </details>
       </div>
     </div>
 
@@ -205,7 +219,7 @@ function renderMapLegend() {
       <section>
         <small>Bentuk aset</small>
         <span><i class="legend-shape circle"></i>CCTV</span>
-        <span><i class="legend-shape diamond"></i>Junction Box</span>
+        <span><img class="legend-junction-icon" src="${JUNCTION_BOX_ICON_URL}" alt="" aria-hidden="true">Junction Box</span>
         <span><i class="legend-shape square"></i>Switch</span>
         <span><i class="legend-shape rectangle"></i>NVR / Server</span>
         <span><i class="legend-shape hexagon"></i>OTB</span>

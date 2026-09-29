@@ -45,6 +45,7 @@ const BROWSER_VIEWPORTS = [
   { width: 1280, height: 720 },
   { width: 1440, height: 900 },
   { width: 1024, height: 768 },
+  { width: 768, height: 900 },
   { width: 390, height: 844 },
 ]
 
@@ -55,22 +56,23 @@ for (const [name, componentCount] of [
   for (const viewport of BROWSER_VIEWPORTS) {
     test(`${name} fit geometry stays inside ${viewport.width}x${viewport.height}`, () => {
       const model = networkFixture(componentCount, name)
-      const layout = calculateTopologyDiagramLayout(model)
+      const compact = viewport.width <= 960
+      const layout = calculateTopologyDiagramLayout(model, {
+        mountingRootColumns: compact ? viewport.width <= 620 ? 3 : 5 : null,
+      })
       const fitZoom = computeFitZoom({
         viewportWidth: viewport.width,
         viewportHeight: viewport.height,
         layoutWidth: layout.width,
         layoutHeight: layout.height,
-        minZoom: .12,
+        minZoom: compact ? .001 : .12,
         maxZoom: 1,
         horizontalPadding: 0,
         verticalPadding: 0,
       })
 
-      // A long per-JB topology remains horizontally scrollable on a narrow
-      // viewport once the readable zoom floor is reached.
-      assert.ok(layout.width * fitZoom <= viewport.width + .01 || fitZoom === .12)
-      assert.ok(layout.height * fitZoom <= viewport.height + .01)
+      assert.ok(layout.width * fitZoom <= viewport.width + .01 || (!compact && fitZoom === .12))
+      assert.ok(layout.height * fitZoom <= viewport.height + .01 || (!compact && fitZoom === .12))
       assert.equal(layout.nodes.length, model.nodes.length)
       assert.equal(layout.sections[0].componentCount, componentCount)
     })

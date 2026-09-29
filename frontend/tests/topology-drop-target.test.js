@@ -13,10 +13,15 @@ test('dropping on a device creates a connection instead of moving to its frame',
   assert.equal(resolve({ targetId: 'b' }).kind, 'connect')
   assert.equal(resolve({ targetId: 'b' }).targetId, 'b')
 })
-test('self and duplicate targets never fall through to a frame move', () => {
+test('self and duplicate targets in the same frame never become a frame move', () => {
   assert.equal(resolve({ targetId: 'a' }).kind, 'invalid')
   const connected = { ...model, adjacency: new Map([['a', [{ id: 'b' }]]]) }
-  assert.equal(resolve({ targetId: 'b', model: connected }).kind, 'invalid')
+  assert.equal(resolve({ targetId: 'b', model: connected, sourceFrameId: 'frame' }).kind, 'invalid')
+})
+test('dropping on an already connected device in another frame moves to that frame', () => {
+  const connected = { ...model, adjacency: new Map([['a', [{ id: 'b' }]]]) }
+  assert.equal(resolve({ targetId: 'b', model: connected, sourceFrameId: 'other-frame' }).kind,
+    'move')
 })
 test('empty frame space keeps the placement behavior', () => {
   assert.equal(resolve().kind, 'move')
