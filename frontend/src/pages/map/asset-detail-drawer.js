@@ -130,15 +130,17 @@ export function renderAssetDetailDrawer({
                     </span>
                     <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
                   </button>
-                  ${relation?.id ? `
+                  ${relation?.id || relation?.edgeId ? `
                     <button class="relation-action-button relation-replace-button" type="button"
                       data-replace-relation="${escapeAttribute(relation.id)}"
+                      data-replace-edge="${escapeAttribute(relation.edgeId)}"
                       aria-label="Ganti relasi dengan ${escapeAttribute(displayAssetName(connectedAsset))}"
                       title="Ganti relasi" ${relationBusy ? 'disabled' : ''}>
                       <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
                     </button>
                     <button class="relation-action-button relation-remove-button" type="button"
                       data-remove-relation="${escapeAttribute(relation.id)}"
+                      data-remove-edge="${escapeAttribute(relation.edgeId)}"
                       aria-label="Hapus relasi dengan ${escapeAttribute(displayAssetName(connectedAsset))}"
                       title="Hapus relasi" ${relationBusy ? 'disabled' : ''}>
                       <span class="material-symbols-outlined" aria-hidden="true">close</span>
