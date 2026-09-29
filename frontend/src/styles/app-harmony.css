@@ -916,12 +916,10 @@
 .map-body .asset-drawer .mounting-current,
 .map-body .asset-drawer .relation-list.mounting-asset-list,
 .map-body .asset-drawer .relation-list.mounting-candidate-list,
-.map-body .asset-drawer .drawer-relation-editor,
 .map-body .asset-drawer .mounting-search-field,
 :root[data-theme="dark"] .map-body .asset-drawer .mounting-current,
 :root[data-theme="dark"] .map-body .asset-drawer .relation-list.mounting-asset-list,
 :root[data-theme="dark"] .map-body .asset-drawer .relation-list.mounting-candidate-list,
-:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-editor,
 :root[data-theme="dark"] .map-body .asset-drawer .mounting-search-field {
   background: var(--app-glass-control);
   border: 1px solid var(--app-glass-border);
@@ -962,13 +960,97 @@
 }
 
 .map-body .asset-drawer .mounting-actions .button,
-.map-body .asset-drawer .drawer-relation-editor select,
-:root[data-theme="dark"] .map-body .asset-drawer .mounting-actions .button,
-:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-editor select {
+:root[data-theme="dark"] .map-body .asset-drawer .mounting-actions .button {
   color: var(--app-ink);
   background: var(--app-glass-control);
   border: 1px solid var(--app-glass-border);
   border-radius: 10px;
+}
+
+.map-body .asset-drawer .drawer-relation-editor,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-editor {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.map-body .asset-drawer .drawer-relation-search,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search {
+  width: 100%;
+  min-height: 42px;
+  height: 42px;
+  flex-basis: 42px;
+  padding: 0 12px;
+  background: var(--app-glass-control);
+  border: 1px solid var(--app-glass-border);
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.map-body .asset-drawer .drawer-relation-search:focus-within,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search:focus-within {
+  border-color: var(--app-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent) 16%, transparent);
+}
+
+.map-body .asset-drawer .drawer-relation-search-results,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search-results {
+  background: var(--app-glass-raised);
+  border-color: var(--app-glass-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, .1);
+}
+
+.map-body .asset-drawer .drawer-relation-search-results button,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search-results button {
+  color: var(--app-ink);
+  background: transparent;
+  border-bottom-color: var(--app-glass-border);
+}
+
+.map-body .asset-drawer .drawer-relation-search-results button:hover,
+.map-body .asset-drawer .drawer-relation-search-results button:focus-visible,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search-results button:hover,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search-results button:focus-visible {
+  background: var(--app-glass-control);
+}
+
+.map-body .asset-drawer .drawer-relation-search-results button:focus-visible,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search-results button:focus-visible {
+  outline-color: var(--app-accent);
+}
+
+.map-body .asset-drawer .drawer-relation-search-results strong,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search-results strong {
+  color: var(--app-ink);
+}
+
+.map-body .asset-drawer .drawer-relation-search-results small,
+.map-body .asset-drawer .drawer-relation-search-results p,
+.map-body .asset-drawer .drawer-relation-editor > small,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search-results small,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search-results p,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-editor > small {
+  color: var(--app-muted);
+}
+
+.map-body .asset-drawer .drawer-relation-search-results .relation-icon,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search-results .relation-icon {
+  color: var(--app-accent);
+  background: var(--app-glass-control);
+  border-radius: 9px;
+}
+
+.map-body .asset-drawer .drawer-relation-search-results .relation-icon-image,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search-results .relation-icon-image {
+  padding: 3px;
+  object-fit: contain;
+}
+
+.map-body .asset-drawer .drawer-relation-search-results > button > .material-symbols-outlined,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search-results > button > .material-symbols-outlined {
+  color: var(--app-accent);
 }
 
 .map-body .asset-drawer .drawer-actions,
