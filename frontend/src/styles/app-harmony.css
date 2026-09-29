@@ -2327,3 +2327,221 @@
   background: color-mix(in srgb, var(--app-accent) 18%, var(--app-glass-raised));
   border-color: color-mix(in srgb, var(--app-accent) 48%, var(--app-glass-border));
 }
+
+/* Map controls use the same glass material as the rest of the workspace. */
+.map-body .map-action-group,
+.map-body .map-data-actions-menu,
+.map-body .map-secondary-controls,
+.map-body .zoom-controls {
+  color: var(--app-ink);
+  background: var(--app-glass);
+  border: 1px solid var(--app-glass-border);
+  box-shadow: var(--app-glass-shadow);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  backdrop-filter: blur(22px) saturate(150%);
+}
+
+.map-body .map-action-group { border-radius: 16px; }
+.map-body .map-secondary-controls,
+.map-body .zoom-controls,
+.map-body .map-data-actions-menu { border-radius: 16px; }
+
+.map-body .zoom-controls button,
+.map-body .map-secondary-controls .icon-button,
+.map-body .map-data-actions summary {
+  color: var(--app-accent);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.map-body .zoom-controls button + button {
+  border-top: 1px solid var(--app-glass-border);
+}
+
+.map-body .map-secondary-controls > .icon-button + .icon-button {
+  border-left: 1px solid var(--app-glass-border);
+}
+
+.map-body .map-action-group .tool-button:not(.map-action-primary),
+.map-body .map-data-actions-menu .tool-button {
+  color: var(--app-ink);
+  background: transparent;
+  border-color: transparent;
+}
+
+.map-body .map-data-actions-menu .tool-button .material-symbols-outlined {
+  color: var(--app-accent);
+}
+
+.map-body .zoom-controls button:hover,
+.map-body .map-secondary-controls .icon-button:hover,
+.map-body .map-data-actions summary:hover,
+.map-body .map-data-actions[open] summary,
+.map-body .map-action-group .tool-button:not(.map-action-primary):hover,
+.map-body .map-data-actions-menu .tool-button:hover {
+  color: var(--app-ink);
+  background: color-mix(in srgb, var(--app-accent) 10%, var(--app-glass-raised));
+}
+
+.map-body .zoom-controls button:focus-visible,
+.map-body .map-secondary-controls .icon-button:focus-visible,
+.map-body .map-data-actions summary:focus-visible,
+.map-body .map-action-group .tool-button:focus-visible,
+.map-body .map-data-actions-menu .tool-button:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid color-mix(in srgb, var(--app-accent) 58%, transparent);
+  outline-offset: -2px;
+}
+
+:root[data-theme="dark"] .map-body .map-action-group,
+:root[data-theme="dark"] .map-body .map-data-actions-menu,
+:root[data-theme="dark"] .map-body .map-secondary-controls,
+:root[data-theme="dark"] .map-body .zoom-controls {
+  color: var(--app-ink);
+  background: var(--app-glass-raised);
+  border-color: var(--app-glass-border);
+  box-shadow: var(--app-glass-shadow);
+}
+
+:root[data-theme="dark"] .map-body .zoom-controls button,
+:root[data-theme="dark"] .map-body .map-secondary-controls .icon-button,
+:root[data-theme="dark"] .map-body .map-data-actions summary {
+  color: var(--app-accent);
+}
+
+/* Keep the standalone sidebar toggle in the same control family as the map toolbar. */
+.map-body .sidebar-reopen {
+  width: 40px;
+  height: 40px;
+  color: var(--app-accent);
+  background: var(--app-glass);
+  border: 1px solid var(--app-glass-border);
+  border-radius: 12px;
+  box-shadow: var(--app-glass-shadow);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  backdrop-filter: blur(22px) saturate(150%);
+}
+
+.map-body .sidebar-reopen .material-symbols-outlined,
+.map-body .map-secondary-controls .icon-button .material-symbols-outlined,
+.map-body .zoom-controls .material-symbols-outlined {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.map-body .sidebar-reopen:hover,
+.map-body .sidebar-reopen:focus-visible {
+  color: var(--app-ink);
+  background: color-mix(in srgb, var(--app-accent) 10%, var(--app-glass-raised));
+  border-color: color-mix(in srgb, var(--app-accent) 38%, var(--app-glass-border));
+}
+
+:root[data-theme="dark"] .map-body .sidebar-reopen,
+:root[data-theme="dark"] .map-body .map-secondary-controls,
+:root[data-theme="dark"] .map-body .zoom-controls {
+  background: var(--app-glass-raised);
+  border-color: var(--app-glass-border);
+}
+
+/* Membership rows share the quiet, inset rhythm of the asset relation list. */
+.map-body .asset-drawer .connected-networks button {
+  min-height: 54px;
+  padding: 7px 8px;
+  grid-template-columns: 32px minmax(0, 1fr) 20px;
+  gap: 10px;
+  color: var(--app-ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--app-glass-border);
+  border-radius: 10px;
+}
+
+.map-body .asset-drawer .connected-networks button:last-child {
+  border-bottom: 0;
+}
+
+.map-body .asset-drawer .connected-networks button:hover,
+.map-body .asset-drawer .connected-networks button:focus-visible {
+  background: var(--app-glass-control);
+  border-color: transparent;
+  outline: none;
+}
+
+.map-body .asset-drawer .connected-networks button:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--app-accent) 45%, transparent);
+}
+
+.map-body .asset-drawer .connected-networks .connected-network-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  color: var(--network-indicator);
+  background: color-mix(in srgb, var(--network-indicator) 13%, var(--app-glass-control));
+  border-radius: 10px;
+  font-size: 18px;
+}
+
+.map-body .asset-drawer .connected-networks button .material-symbols-outlined:last-child {
+  color: var(--app-muted);
+}
+
+.map-body .asset-drawer .connected-networks button strong {
+  color: var(--app-ink);
+  font-size: var(--font-size-caption);
+}
+
+.map-body .asset-drawer .connected-networks button small {
+  color: var(--app-muted);
+}
+
+/* The diagram relation search matches the same field used to add map relations. */
+.map-body .asset-drawer .drawer-relation-search,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search,
+.topology-body #app .topology-stitch-inspector .topology-stitch-search-field {
+  box-sizing: border-box;
+  width: 100%;
+  height: 42px;
+  min-height: 42px;
+  flex: 0 0 42px;
+  margin: 0;
+  padding: 0 12px;
+  gap: 8px;
+  color: var(--app-muted);
+  background: var(--app-glass-control);
+  border: 1px solid var(--app-glass-border);
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.map-body .asset-drawer .drawer-relation-search:focus-within,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search:focus-within,
+.topology-body #app .topology-stitch-inspector .topology-stitch-search-field:focus-within {
+  border-color: var(--app-accent);
+  outline: 0;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent) 16%, transparent);
+}
+
+.map-body .asset-drawer .drawer-relation-search > .material-symbols-outlined,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search > .material-symbols-outlined,
+.topology-body #app .topology-stitch-inspector .topology-stitch-search-field > .material-symbols-outlined {
+  color: var(--app-muted);
+  font-size: 19px;
+}
+
+.map-body .asset-drawer .drawer-relation-search:focus-within > .material-symbols-outlined,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search:focus-within > .material-symbols-outlined,
+.topology-body #app .topology-stitch-inspector .topology-stitch-search-field:focus-within > .material-symbols-outlined {
+  color: var(--app-accent);
+}
+
+.map-body .asset-drawer .drawer-relation-search input,
+:root[data-theme="dark"] .map-body .asset-drawer .drawer-relation-search input,
+.topology-body #app .topology-stitch-inspector .topology-stitch-search-field input {
+  height: 100%;
+  color: var(--app-ink);
+  font-size: var(--font-size-body);
+  line-height: 1.4;
+}

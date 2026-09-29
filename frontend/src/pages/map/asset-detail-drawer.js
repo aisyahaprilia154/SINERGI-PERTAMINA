@@ -173,10 +173,11 @@ export function renderAssetDetailDrawer({
         </div>
         ${assetNetworks.map((network) => `
           <button type="button" data-focus-network="${escapeAttribute(network.id)}">
-            <i style="--network-indicator:${escapeAttribute(network.color)}" aria-hidden="true"></i>
+            <span class="connected-network-icon material-symbols-outlined"
+              style="--network-indicator:${escapeAttribute(network.color)}" aria-hidden="true">${connectedNetworkIcon(network.type)}</span>
             <span>
-              <strong>${escapeHtml(network.shortName || network.name)}</strong>
-              <small>${escapeHtml(network.type)}</small>
+              <strong>${escapeHtml(networkDisplayName(network))}</strong>
+              ${networkDisplayType(network) ? `<small>${escapeHtml(networkDisplayType(network))}</small>` : ''}
             </span>
             <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
           </button>
@@ -339,7 +340,7 @@ function renderMountingSection({
         <span class="relation-icon material-symbols-outlined" aria-hidden="true">location_on</span>
         <span>
           <strong>${escapeHtml(candidate.targetAssetName || candidate.targetAssetId)}</strong>
-          <small>${escapeHtml(candidate.targetAssetId)} · ${formatDistance(candidate.distanceMeters)}</small>
+          <small>${escapeHtml(mountingCandidateMetadata(candidate))}</small>
         </span>
         <span class="material-symbols-outlined" aria-hidden="true">add</span>
       </button>
@@ -365,9 +366,9 @@ function renderMountingSection({
         <div class="mounting-assignment mounting-current-row">
           ${mountedOnAsset ? `
             <button type="button" class="mounting-current" data-connected-asset="${escapeAttribute(mountedOnAsset.id)}"
-              title="${escapeAttribute(`${assignedLabel} · ${mountedOnAsset.id}`)}">
+              title="${escapeAttribute(mountedOnAssetTooltip(assignedLabel, mountedOnAsset.id))}">
               <span class="relation-icon material-symbols-outlined" aria-hidden="true">location_on</span>
-              <span><strong>${escapeHtml(assignedLabel)}</strong><small>${escapeHtml(mountedOnAsset.id)}</small></span>
+              <span><strong>${escapeHtml(assignedLabel)}</strong><small>${escapeHtml(mountingAssetSubtitle(mountedOnAsset.id))}</small></span>
               <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
             </button>
           ` : `<p class="drawer-inline-empty">Belum ada tiang yang ditetapkan.</p>`}
@@ -395,7 +396,7 @@ function renderMountingSection({
                 <li>
                   <button type="button" data-connected-asset="${escapeAttribute(mountedAsset.id)}">
                     ${renderRelationAssetIcon(mountedAsset)}
-                    <span><strong>${escapeHtml(displayAssetName(mountedAsset))}</strong><small>${escapeHtml(mountedAsset.id)}</small></span>
+                    <span><strong>${escapeHtml(displayAssetName(mountedAsset))}</strong><small>${escapeHtml(mountingAssetSubtitle(mountedAsset.id))}</small></span>
                     <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
                   </button>
                 </li>
@@ -574,10 +575,10 @@ function getAssetCategory(asset, assetNetworks) {
 }
 
 function assetIcon(type = '') {
-  const normalizedType = type.toLowerCase()
+  const normalizedType = String(type ?? '').toLocaleLowerCase('id')
+  if (/cctv|camera|kamera/.test(normalizedType)) return 'videocam'
   if (normalizedType.includes('switch')) return 'router'
   if (normalizedType.includes('junction')) return 'hub'
-  if (normalizedType === 'cctv') return 'videocam'
   if (normalizedType === 'server' || normalizedType === 'nvr') return 'dns'
   if (normalizedType === 'otb') return 'settings_input_component'
   if (normalizedType === 'access point') return 'wifi'
@@ -588,7 +589,46 @@ function assetIcon(type = '') {
 function renderRelationAssetIcon(asset) {
   return isJunctionBoxAsset(asset)
     ? `<img class="relation-icon relation-icon-image" src="${JUNCTION_BOX_ICON_URL}" alt="" aria-hidden="true">`
-    : `<span class="relation-icon material-symbols-outlined" aria-hidden="true">${assetIcon(asset.type)}</span>`
+    : `<span class="relation-icon material-symbols-outlined" aria-hidden="true">${assetIcon(`${asset?.type || ''} ${asset?.category || ''}`)}</span>`
+}
+
+function networkDisplayName(network = {}) {
+  return network.shortName || network.name || network.type || 'Jaringan aset'
+}
+
+function networkDisplayType(network = {}) {
+  const type = String(network.type || '').trim()
+  return type && type.toLocaleLowerCase('id') !== String(networkDisplayName(network)).trim().toLocaleLowerCase('id')
+    ? type
+    : ''
+}
+
+function connectedNetworkIcon(type = '') {
+  const normalizedType = String(type ?? '').toLocaleLowerCase('id')
+  if (/cctv|camera|kamera/.test(normalizedType)) return 'videocam'
+  if (/fiber|optic/.test(normalizedType)) return 'settings_ethernet'
+  if (/power|pln|listrik/.test(normalizedType)) return 'bolt'
+  if (/lan/.test(normalizedType)) return 'hub'
+  return 'device_hub'
+}
+
+function isGeneratedAssetId(value) {
+  return /^AUTO[-_]/i.test(String(value ?? '').trim())
+}
+
+function mountingAssetSubtitle(assetId) {
+  return isGeneratedAssetId(assetId) ? 'Relasi terkonfirmasi' : String(assetId ?? '').trim()
+}
+
+function mountingCandidateMetadata(candidate = {}) {
+  const distance = formatDistance(candidate.distanceMeters)
+  return isGeneratedAssetId(candidate.targetAssetId)
+    ? distance
+    : `${candidate.targetAssetId} · ${distance}`
+}
+
+function mountedOnAssetTooltip(name, assetId) {
+  return isGeneratedAssetId(assetId) ? name : `${name} · ${assetId}`
 }
 
 function isMountableAsset(asset) {
