@@ -662,7 +662,9 @@ function renderMountingGroups(model, layout, {
         fill="${palette.accent}"/>
       <line class="topology-mounting-header-line" x1="${box.x}" y1="${box.y + (layout.options?.mountingBoxHeaderHeight ?? 44)}"
         x2="${box.x + box.width}" y2="${box.y + (layout.options?.mountingBoxHeaderHeight ?? 44)}"/>`}
-      <text class="topology-mounting-label" x="${box.x + 16}" y="${box.y + 22}">${escapeXml(visualLabel)}</text>
+      <text class="topology-mounting-label" data-frame-label="${escapeAttribute(box.id)}"
+          ${box.hostId ? 'tabindex="0" role="button" aria-label="Ganti nama frame"' : ''}
+        x="${box.x + 16}" y="${box.y + 22}">${escapeXml(visualLabel)}</text>
       <text class="topology-mounting-meta" x="${box.x + 16}" y="${box.y + 40}">${escapeXml(meta)}</text>
       ${box.mountingConflict && !minimap ? `<text class="topology-mounting-meta" x="${box.x + 12}"
         y="${box.y + box.height - 8}">Periksa konflik mounting</text>` : ''}
@@ -847,8 +849,7 @@ function renderEdge(edge, {
     : ''
   return `
     <g class="topology-edge-target" data-edge-id="${escapeAttribute(edge.id)}" tabindex="0"
-      role="button" aria-label="Detail relasi ${escapeAttribute(edge.id)}. Tekan Delete atau Backspace untuk menghapus."
-      aria-keyshortcuts="Delete Backspace">
+      role="button" aria-label="Detail relasi ${escapeAttribute(edge.id)}">
       <path class="topology-edge-underlay" d="${path}"${edge.dimmed ? ' opacity="0.12"' : ''}/>
       <path class="${classes}" data-connection-type="${style.key ?? 'other'}" d="${path}" stroke="${escapeAttribute(color)}" style="stroke:${escapeAttribute(color)}"${arrow}>
         <title>${escapeXml(style.label)} · ${escapeXml(describeEdge(edge))}${edge.hierarchyDirection ? ' · Panah hierarki tampilan; arah komunikasi belum ditetapkan.' : ''}</title>
