@@ -495,6 +495,7 @@ export function createTopologyDiagramLayoutCacheKey({
   selectedFamilies = model?.selectedFamilies,
   frameAssignments = {},
   customFrames = {},
+  retainEmptyFrameIds = [],
   hideFiltered = false,
   overview = false,
 } = {}) {
@@ -511,6 +512,7 @@ export function createTopologyDiagramLayoutCacheKey({
     .map((frame) => `${frame.id}:${frame.type}:${frame.areaKey}:${frame.name ?? ''}`)
     .sort((left, right) => left.localeCompare(right, 'id'))
     .join(',')
+  const retainedEmptyFrames = [...retainEmptyFrameIds].sort().join(',')
   return [
     datasetVersionId ?? '',
     branchId ?? '',
@@ -526,6 +528,7 @@ export function createTopologyDiagramLayoutCacheKey({
     (model?.nodes ?? []).map(node => `${node.id}:${node.mountingExpectation ?? ''}`).sort().join(','),
     assignments,
     frames,
+    retainedEmptyFrames,
     families,
     hideFiltered ? 'hide' : 'dim',
     overview ? 'overview' : 'detail',
@@ -775,18 +778,20 @@ function buildPoleBackboneAreaLaneSpec({
         custom: true,
       })),
   ]
+  const retainedEmptyFrameIds = new Set(settings.retainEmptyFrameIds ?? [])
   const logicalGroupSpecs = applyFrameAssignmentsToGroups(
     splitFramesByExternalJunction(groupSpecs, nodeById, edgeAdjacency),
     frameAssignments,
     nodeById,
     mountingGroups,
-  ).filter((group) => (
-    group.kind !== 'empty'
-    || group.nodeIds.length > 0
-    || group.custom
-    || customFrames?.[group.id]
-    || !/^AUTO-[A-F0-9]{12,}$/i.test(String(group.hostName || group.hostId || '').trim())
-  ))
+  ).filter((group) => {
+    if (!group.nodeIds.length && !retainedEmptyFrameIds.has(group.id)
+      && (group.kind === 'empty' || group.custom)) return false
+    return group.kind !== 'empty'
+      || group.nodeIds.length > 0
+      || retainedEmptyFrameIds.has(group.id)
+      || !/^AUTO-[A-F0-9]{12,}$/i.test(String(group.hostName || group.hostId || '').trim())
+  })
   const mountingBoxes = logicalGroupSpecs.map((group) => buildMountingBoxSpec({
     group,
     nodeById,
