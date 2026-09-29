@@ -133,7 +133,7 @@ test('drawer keeps missing relations actionable without the retired review warni
   assert.doesNotMatch(html, /Kandidat relasi|Konfirmasi Koneksi/)
 })
 
-test('drawer renders the direct relation editor and replacement action', () => {
+test('drawer renders searchable relation targets and replacement actions', () => {
   const html = renderAssetDetailDrawer({
     asset,
     connectedAssets: [{
@@ -147,15 +147,18 @@ test('drawer renders the direct relation editor and replacement action', () => {
       reason: 'Junction box terdekat',
     }],
     relationEditorOpen: true,
-    relationTargetId: 'jb-02',
     relationReplaceId: 'rel-01',
+    relationSearch: 'jb',
     trace: { status: 'idle' },
   })
 
-  assert.match(html, /Ganti hubungan aset/)
-  assert.match(html, /data-relation-target/)
-  assert.match(html, /value="jb-02"/)
-  assert.match(html, /data-save-relation/)
+  assert.match(html, /aria-label="Ganti relasi aset"/)
+  assert.match(html, /data-relation-search/)
+  assert.match(html, /data-relation-search-results/)
+  assert.match(html, /role="option" data-relation-target="jb-02"/)
+  assert.match(html, /Ganti relasi dengan JB-02/)
+  assert.match(html, />swap_horiz<\/span>/)
+  assert.doesNotMatch(html, /data-save-relation|Simpan hubungan/)
   assert.match(html, /data-replace-relation="rel-01"/)
   assert.match(html, /data-remove-relation="rel-01"/)
   assert.ok(html.indexOf('data-remove-relation="rel-01"') > html.indexOf('data-replace-relation="rel-01"'))
