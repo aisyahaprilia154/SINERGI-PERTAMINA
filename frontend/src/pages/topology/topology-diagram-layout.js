@@ -772,6 +772,7 @@ function buildPoleBackboneAreaLaneSpec({
         hostId: frame.type === 'pole' ? frame.poleAssetId : null,
         hostName: frame.name || (frame.type === 'indoor' ? 'Indoor' : frame.type === 'pole' ? frame.poleAssetId : 'Non-tiang'),
         hostType: frame.type === 'pole' ? 'Tiang' : frame.type === 'indoor' ? 'Aset dalam ruangan' : 'Aset non-tiang',
+        frameType: frame.type,
         kind: frame.type === 'pole' ? 'empty' : 'excluded',
         nodeIds: [],
         mountingConflict: false,
@@ -1058,6 +1059,7 @@ function buildExcludedMountingGroupSpecs({ area, nodeIds = [], connectedNodes = 
   for (const id of [...nodeIds].sort()) {
     if (!isJunction(id)) continue
     groups.set(id, {...base, id: `excluded-mounting:${area.key}:${id}`,
+      frameType: byId.get(id)?.mountingExpectation === 'indoor' ? 'indoor' : 'non-pole',
       hostName: `${byId.get(id)?.mountingExpectation === 'indoor' ? 'Indoor' : 'Non-tiang'} · ${byId.get(id).name || id}`,
       nodeIds: [id]})
   }
@@ -1089,11 +1091,13 @@ function buildExcludedMountingGroupSpecs({ area, nodeIds = [], connectedNodes = 
       }
     }
     const owner = preferredJunctionOwnerId([...owners], byId, edgeAdjacency)
-    const kind = byId.get(first)?.mountingExpectation === 'indoor' ? 'Indoor' : 'Non-tiang'
+    const frameType = byId.get(first)?.mountingExpectation === 'indoor' ? 'indoor' : 'non-pole'
+    const kind = frameType === 'indoor' ? 'Indoor' : 'Non-tiang'
     // Keep physical scope distinct from logical ownership, including standalone devices.
     const key = `${owner ?? first}:${kind}`
     if (groups.has(key)) groups.get(key).nodeIds.push(...ids)
     else groups.set(key, {...base, id: `excluded-mounting:${area.key}:${first}`,
+      frameType,
       hostName: `${kind} · ${owner ? byId.get(owner).name || owner : ids.map(id => byId.get(id)?.name || id).join(', ')}`,
       ...(owner ? {connectionLabel: `Terhubung ke ${byId.get(owner).name || owner}`} : {}), nodeIds: ids})
   }

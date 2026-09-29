@@ -579,14 +579,17 @@ function renderMountingGroups(model, layout, {
     showDiagnostics || box.kind !== 'empty' || box.nodeIds.length > 0 || box.custom
   ))
   return boxes.map((box, index) => {
-    const singleAsset = layout.options?.layoutStyle === 'facility-schematic' && box.nodeIds.length === 1
-      && !String(box.label ?? box.hostName ?? '').startsWith('Indoor')
     const customLabel = mountingLabelById instanceof Map
       ? mountingLabelById.get(box.id)
       : mountingLabelById?.[box.id]
+    const hasCustomLabel = typeof customLabel === 'string' && customLabel.trim().length > 0
     const hostName = shorten(customLabel || box.label || box.hostName || box.hostId, 26)
+    const indoorFrame = box.frameType === 'indoor'
+      || (!box.frameType && /^indoor\b/i.test(String(box.label ?? box.hostName ?? '')))
+    const singleAsset = layout.options?.layoutStyle === 'facility-schematic' && box.nodeIds.length === 1
+      && !indoorFrame
     const palette = box.kind === 'excluded'
-      ? box.label?.startsWith('Indoor')
+      ? indoorFrame
         ? { fill: '#f4f1f8', stroke: '#c9bdd9', accent: '#75658e' }
         : { fill: '#f7f5f1', stroke: '#cfc8be', accent: '#756d65' }
       : box.kind === 'needs-mounting'
@@ -597,9 +600,11 @@ function renderMountingGroups(model, layout, {
         ? { fill: '#f2f4f7', stroke: '#94a3b8', accent: '#526477' }
         : mountingBubblePalette(box.hostId || box.id, index)
     const label = box.kind === 'excluded'
-      ? hostName.startsWith('Indoor') || hostName.startsWith('Non-tiang')
+      ? box.custom || hasCustomLabel
         ? hostName
-        : `Non-tiang · ${hostName}`
+        : indoorFrame
+          ? /^indoor\b/i.test(hostName) ? hostName : `Indoor · ${hostName}`
+          : /^non-tiang\b/i.test(hostName) ? hostName : `Non-tiang · ${hostName}`
       : box.kind === 'needs-mounting'
         ? 'Perlu mounting'
       : box.kind === 'unassigned'
@@ -610,7 +615,7 @@ function renderMountingGroups(model, layout, {
       'topology-mounting-group',
       singleAsset ? 'single-asset' : '',
       box.kind === 'excluded'
-        ? 'excluded'
+        ? `excluded ${indoorFrame ? 'indoor' : 'non-pole'}`
         : box.kind === 'needs-mounting'
           ? 'needs-mounting'
           : box.kind === 'unassigned' ? 'unassigned'
@@ -623,7 +628,7 @@ function renderMountingGroups(model, layout, {
     const inheritedCount = box.presentationInheritedNodeIds?.length ?? 0
     const mountedCount = Math.max(0, box.nodeIds.length - inheritedCount)
     const meta = box.kind === 'excluded'
-      ? box.connectionLabel ? `${box.nodeIds.length} kamera · ${box.connectionLabel}` : `${box.nodeIds.length} aset · ${label.startsWith('Indoor') ? 'indoor' : 'non-tiang'}`
+      ? box.connectionLabel ? `${box.nodeIds.length} kamera · ${box.connectionLabel}` : `${box.nodeIds.length} aset · ${indoorFrame ? 'indoor' : 'non-tiang'}`
       : box.kind === 'needs-mounting'
         ? `${box.nodeIds.length} aset · perlu ditetapkan`
       : box.kind === 'unassigned'

@@ -1933,7 +1933,7 @@ function mountTopologyWorkspace(container, {
             `).join('') : '<p class="topology-stitch-muted">Belum ada relasi terkonfirmasi pada perangkat ini.</p>'}
           </div>
           <div class="topology-relation-editor">
-            <label class="topology-stitch-search-field" for="topology-relation-search">
+            <label class="topology-stitch-search-field search-control" for="topology-relation-search">
               <span class="material-symbols-outlined" aria-hidden="true">search</span>
               <input id="topology-relation-search" data-relation-search type="search"
                 value="${escapeAttribute(state.relationSearch)}" placeholder="Cari aset untuk dihubungkan…"

@@ -2109,3 +2109,124 @@
   border-color: var(--app-glass-border);
   outline: none;
 }
+
+/* Keep native area menus readable in both OS and browser themes. */
+.topology-body #app .topology-sidebar .area-selector select {
+  color-scheme: light;
+}
+.topology-body #app .topology-sidebar .area-selector select option {
+  color: var(--app-ink);
+  background: var(--app-surface);
+}
+:root[data-theme="dark"] .topology-body #app .topology-sidebar .area-selector select {
+  color-scheme: dark;
+}
+:root[data-theme="dark"] .topology-body #app .topology-sidebar .area-selector select option {
+  color: #f5f5f7;
+  background: #29292b;
+}
+
+/* The relation picker uses the same search surface and focus treatment as
+   the sidebar's "Cari perangkat" field. */
+.topology-body #app .topology-stitch-inspector .topology-stitch-search-field {
+  width: 100%;
+  height: 44px;
+  min-height: 44px;
+  flex: 0 0 44px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 12px;
+  color: var(--app-muted);
+  background: var(--app-control);
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  box-shadow: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.topology-body #app .topology-stitch-inspector .topology-stitch-search-field:hover {
+  border-color: color-mix(in srgb, var(--app-accent) 45%, var(--app-border));
+}
+.topology-body #app .topology-stitch-inspector .topology-stitch-search-field:focus-within {
+  border-color: var(--app-accent);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent) 18%, transparent);
+}
+.topology-body #app .topology-stitch-inspector .topology-stitch-search-field > .material-symbols-outlined {
+  color: var(--app-muted);
+  font-size: 19px;
+}
+.topology-body #app .topology-stitch-inspector .topology-stitch-search-field:focus-within > .material-symbols-outlined {
+  color: var(--app-accent);
+}
+.topology-body #app .topology-stitch-inspector .topology-stitch-search-field input {
+  height: 100%;
+  color: var(--app-ink);
+  font-size: 13px;
+  line-height: 1.4;
+}
+:root[data-theme="dark"] .topology-body #app .topology-stitch-inspector .topology-stitch-search-field {
+  background: var(--app-glass-control);
+  border-color: var(--app-glass-border);
+}
+
+/* Match the inline frame-name editor to the graphite canvas in dark mode. */
+:root[data-theme="dark"] .topology-body #app .topology-frame-name-editor {
+  color: #f5f5f7;
+  background: rgba(39, 39, 42, .96);
+  border-color: rgba(255, 255, 255, .14);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .06);
+}
+:root[data-theme="dark"] .topology-body #app .topology-frame-name-editor > label,
+:root[data-theme="dark"] .topology-body #app .topology-frame-name-editor > small {
+  color: #b7b7bf;
+}
+:root[data-theme="dark"] .topology-body #app .topology-frame-name-editor input {
+  color: #f5f5f7;
+  caret-color: #91c5e8;
+  background: #2d2d30;
+  border-color: #667b89;
+  box-shadow: 0 0 0 3px rgba(111, 177, 216, .16);
+}
+:root[data-theme="dark"] .topology-body #app .topology-frame-name-editor button {
+  color: #d1d1d6;
+  background: #303034;
+  border-color: #55555d;
+}
+:root[data-theme="dark"] .topology-body #app .topology-frame-name-editor button:hover,
+:root[data-theme="dark"] .topology-body #app .topology-frame-name-editor button:focus-visible {
+  color: #fff;
+  background: #414146;
+  outline: 2px solid rgba(145, 197, 232, .75);
+  outline-offset: 1px;
+}
+:root[data-theme="dark"] .topology-body #app .topology-frame-name-editor button[type="submit"] {
+  color: #101820;
+  background: #91c5e8;
+  border-color: #91c5e8;
+}
+
+/* Keep frame bodies graphite while retaining a quiet category tint. */
+:root[data-theme="dark"] .topology-body #app .topology-stitch-graph-frame svg .topology-mounting-group.indoor {
+  --frame-fill: #29262e !important;
+  --frame-stroke: #62566f !important;
+  --frame-accent: #51445f !important;
+}
+:root[data-theme="dark"] .topology-body #app .topology-stitch-graph-frame svg .topology-mounting-group.non-pole {
+  --frame-fill: #292827 !important;
+  --frame-stroke: #69635c !important;
+  --frame-accent: #4f4a43 !important;
+}
+
+/* A mobile asset drawer covers the lower map. Move map controls out of its
+   content area by hiding the floating group while the drawer is open. */
+@media (min-width: 961px) {
+  .map-body .map-workspace.drawer-open .map-stage .map-floating-bottom {
+    right: calc(var(--map-drawer-width) + var(--space-4) + max(24px, var(--map-control-gap)));
+  }
+}
+@media (max-width: 960px) {
+  .map-body .map-workspace.drawer-open .map-stage .map-floating-bottom {
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
