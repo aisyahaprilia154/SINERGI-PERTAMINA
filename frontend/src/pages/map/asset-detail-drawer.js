@@ -20,8 +20,8 @@ export function renderAssetDetailDrawer({
   diagramAvailable = true,
   relationOptions = [],
   relationEditorOpen = false,
-  relationTargetId = '',
   relationReplaceId = null,
+  relationSearch = '',
   relationStatus = 'idle',
   relationError = null,
 }) {
@@ -78,11 +78,15 @@ export function renderAssetDetailDrawer({
             <span class="count-badge">${connectedAssets.length}</span>
             ${relationOptions.length ? `
               <button class="drawer-relation-add" type="button" data-open-relation-picker
-                aria-label="${hasDirectRelations ? 'Tambah atau ganti relasi' : 'Sambungkan aset'}"
-                title="${hasDirectRelations ? 'Tambah atau ganti relasi' : 'Sambungkan aset'}"
+                aria-label="${relationEditorOpen && !relationReplaceId
+                  ? 'Tutup pencarian relasi'
+                  : hasDirectRelations ? 'Tambah atau ganti relasi' : 'Sambungkan aset'}"
+                title="${relationEditorOpen && !relationReplaceId
+                  ? 'Tutup pencarian relasi'
+                  : hasDirectRelations ? 'Tambah atau ganti relasi' : 'Sambungkan aset'}"
                 aria-expanded="${relationEditorOpen ? 'true' : 'false'}"
                 ${relationBusy ? 'disabled' : ''}>
-                <span class="material-symbols-outlined" aria-hidden="true">add</span>
+                <span class="material-symbols-outlined" aria-hidden="true">${relationEditorOpen && !relationReplaceId ? 'close' : 'add'}</span>
               </button>
             ` : ''}
           </div>
@@ -108,8 +112,8 @@ export function renderAssetDetailDrawer({
         ` : ''}
         ${relationEditorOpen ? renderRelationEditor({
           relationOptions,
-          relationTargetId,
           relationReplaceId,
+          relationSearch,
           relationStatus,
           relationError,
         }) : ''}
@@ -198,39 +202,91 @@ export function renderAssetDetailDrawer({
 
 function renderRelationEditor({
   relationOptions = [],
-  relationTargetId = '',
   relationReplaceId = null,
+  relationSearch = '',
   relationStatus = 'idle',
   relationError = null,
 }) {
   const saving = relationStatus === 'saving'
-  const selectedTargetId = relationTargetId || relationOptions[0]?.asset?.id || ''
+  const hasQuery = Boolean(relationSearch.trim())
   return `
-    <div class="drawer-relation-editor" role="group" aria-labelledby="relation-editor-title">
-      <strong id="relation-editor-title">${relationReplaceId ? 'Ganti hubungan aset' : 'Sambungkan ke aset'}</strong>
-      <label for="relation-target-select">Pilih aset tujuan</label>
-      <select id="relation-target-select" data-relation-target ${saving ? 'disabled' : ''}>
-        <option value="">Pilih aset</option>
-        ${relationOptions.map(({ asset: optionAsset, reason }) => `
-          <option value="${escapeAttribute(optionAsset.id)}"
-            ${optionAsset.id === selectedTargetId ? 'selected' : ''}>
-            ${escapeHtml(displayAssetName(optionAsset))} · ${escapeHtml(reason)}
-          </option>
-        `).join('')}
-      </select>
-      <small>Relasi yang disimpan langsung menjadi terkonfirmasi dan garisnya ditampilkan pada peta.</small>
-      ${relationError ? `<p class="drawer-relation-error" role="alert">${escapeHtml(relationError)}</p>` : ''}
-      <div class="drawer-relation-editor-actions">
-        <button class="button secondary" type="button" data-cancel-relation ${saving ? 'disabled' : ''}>
-          Batal
-        </button>
-        <button class="button primary" type="button" data-save-relation
-          ${!selectedTargetId || saving ? 'disabled' : ''}>
-          ${saving ? 'Menyimpan…' : 'Simpan hubungan'}
-        </button>
+    <div class="drawer-relation-editor" role="group" aria-label="${relationReplaceId ? 'Ganti relasi aset' : 'Tambah relasi aset'}" aria-busy="${saving ? 'true' : 'false'}">
+      <label class="search-control drawer-relation-search" for="drawer-relation-search">
+        <span class="material-symbols-outlined" aria-hidden="true">search</span>
+        <input id="drawer-relation-search" data-relation-search type="search"
+          value="${escapeAttribute(relationSearch)}"
+          placeholder="Cari aset untuk dihubungkan…"
+          aria-label="Cari aset untuk ${relationReplaceId ? 'mengganti' : 'menambah'} relasi"
+          autocomplete="off" spellcheck="false" ${saving ? 'disabled' : ''}/>
+      </label>
+      <div class="drawer-relation-search-results" data-relation-search-results
+        role="listbox" aria-label="Aset yang dapat dihubungkan" ${hasQuery ? '' : 'hidden'}>
+        ${renderRelationSearchResults(relationOptions, relationSearch, relationReplaceId, saving)}
       </div>
+      <small>${relationReplaceId
+        ? 'Cari aset pengganti, lalu pilih untuk memperbarui relasi.'
+        : 'Cari aset, lalu pilih + untuk menambahkan relasi.'}</small>
+      ${relationError ? `<p class="drawer-relation-error" role="alert">${escapeHtml(relationError)}</p>` : ''}
     </div>
   `
+}
+
+export function renderRelationSearchResults(
+  relationOptions = [],
+  searchText = '',
+  relationReplaceId = null,
+  disabled = false,
+) {
+  const query = String(searchText || '').trim().toLocaleLowerCase('id')
+  if (!query) return ''
+
+  const matchingOptions = relationOptions
+    .map((option, index) => {
+      const optionAsset = option.asset
+      const searchValue = [
+        displayAssetName(optionAsset),
+        optionAsset?.id,
+        optionAsset?.type,
+        optionAsset?.category,
+        optionAsset?.branchName,
+        optionAsset?.areaName,
+        optionAsset?.locationGroupName,
+        option.reason,
+      ].filter(Boolean).join(' ').toLocaleLowerCase('id')
+      const matchIndex = searchValue.indexOf(query)
+      if (matchIndex < 0) return null
+      const name = displayAssetName(optionAsset).toLocaleLowerCase('id')
+      const id = String(optionAsset?.id || '').toLocaleLowerCase('id')
+      const score = name.startsWith(query) || id.startsWith(query) ? 2 : 1
+      return { ...option, index, score }
+    })
+    .filter(Boolean)
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, 30)
+
+  if (!matchingOptions.length) {
+    return '<p role="status">Tidak ada aset yang cocok.</p>'
+  }
+
+  const actionIcon = relationReplaceId ? 'swap_horiz' : 'add'
+  return matchingOptions.map(({ asset: optionAsset, reason }) => {
+    const metadata = [
+      optionAsset.type || optionAsset.category || 'Aset',
+      optionAsset.branchName || optionAsset.locationGroupName || optionAsset.areaName || reason,
+    ].filter(Boolean).join(' · ')
+    return `
+      <button type="button" role="option" data-relation-target="${escapeAttribute(optionAsset.id)}"
+        aria-label="${relationReplaceId ? 'Ganti relasi dengan' : 'Tambah relasi ke'} ${escapeAttribute(displayAssetName(optionAsset))}"
+        ${disabled ? 'disabled' : ''}>
+        ${renderRelationAssetIcon(optionAsset)}
+        <span>
+          <strong>${escapeHtml(displayAssetName(optionAsset))}</strong>
+          <small>${escapeHtml(metadata)}</small>
+        </span>
+        <span class="material-symbols-outlined" aria-hidden="true">${actionIcon}</span>
+      </button>
+    `
+  }).join('')
 }
 
 function renderMountingSection({

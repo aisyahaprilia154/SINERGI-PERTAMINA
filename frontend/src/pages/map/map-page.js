@@ -12,7 +12,10 @@ import {
   revokeTopologyRelation,
   setMountingRelation,
 } from '../../services/active-dataset-service.js'
-import { renderAssetDetailDrawer } from './asset-detail-drawer.js'
+import {
+  renderAssetDetailDrawer,
+  renderRelationSearchResults,
+} from './asset-detail-drawer.js'
 import { patraNiagaLogoMarkup } from '../brand-logo.js'
 import { renderNetworkMapCanvas } from './map-surface.js'
 import { renderNetworkList as renderNetworkSidebarList, renderNetworkSidebar } from './network-sidebar.js'
@@ -218,8 +221,8 @@ export async function renderMapPage(container) {
     dataStatus: 'loading',
     dataError: null,
     relationEditorOpen: false,
-    relationTargetId: '',
     relationReplaceId: null,
+    relationSearch: '',
     relationStatus: 'idle',
     relationError: null,
   }
@@ -606,6 +609,7 @@ export async function renderMapPage(container) {
       assets,
       connectedAssets,
       locationKey: selectedArea?.key,
+      limit: assets.length,
     })
     drawer.innerHTML = renderAssetDetailDrawer({
       status: state.assetDetailStatus,
@@ -629,8 +633,8 @@ export async function renderMapPage(container) {
       diagramAvailable,
       relationOptions,
       relationEditorOpen: state.relationEditorOpen,
-      relationTargetId: state.relationTargetId,
       relationReplaceId: state.relationReplaceId,
+      relationSearch: state.relationSearch,
       relationStatus: state.relationStatus,
       relationError: state.relationError,
     })
@@ -646,21 +650,24 @@ export async function renderMapPage(container) {
       loadAssetDetail(selection.selectedAssetId, { force: true })
     })
     drawer.querySelector('[data-open-relation-picker]')?.addEventListener('click', () => {
-      state.relationEditorOpen = true
+      const closePicker = state.relationEditorOpen && !state.relationReplaceId
+      state.relationEditorOpen = !closePicker
       state.relationReplaceId = null
-      state.relationTargetId = relationOptions[0]?.asset?.id ?? ''
+      state.relationSearch = ''
       state.relationError = null
       renderDrawer()
-      drawer.querySelector('[data-relation-target]')?.focus()
+      if (state.relationEditorOpen) drawer.querySelector('[data-relation-search]')?.focus()
     })
     drawer.querySelectorAll('[data-replace-relation]').forEach((button) => {
       button.addEventListener('click', () => {
-        state.relationEditorOpen = true
-        state.relationReplaceId = button.dataset.replaceRelation || null
-        state.relationTargetId = relationOptions[0]?.asset?.id ?? ''
+        const relationId = button.dataset.replaceRelation || null
+        const closePicker = state.relationEditorOpen && state.relationReplaceId === relationId
+        state.relationEditorOpen = !closePicker
+        state.relationReplaceId = closePicker ? null : relationId
+        state.relationSearch = ''
         state.relationError = null
         renderDrawer()
-        drawer.querySelector('[data-relation-target]')?.focus()
+        if (state.relationEditorOpen) drawer.querySelector('[data-relation-search]')?.focus()
       })
     })
     drawer.querySelectorAll('[data-remove-relation]').forEach((button) => {
@@ -668,18 +675,23 @@ export async function renderMapPage(container) {
         void removeAssetRelation(button.dataset.removeRelation)
       })
     })
-    drawer.querySelector('[data-relation-target]')?.addEventListener('change', (event) => {
-      state.relationTargetId = event.currentTarget.value
+    drawer.querySelector('[data-relation-search]')?.addEventListener('input', (event) => {
+      state.relationSearch = event.currentTarget.value
+      const results = drawer.querySelector('[data-relation-search-results]')
+      if (!results) return
+      const hasQuery = Boolean(state.relationSearch.trim())
+      results.hidden = !hasQuery
+      results.innerHTML = renderRelationSearchResults(
+        relationOptions,
+        state.relationSearch,
+        state.relationReplaceId,
+        state.relationStatus === 'saving',
+      )
     })
-    drawer.querySelector('[data-save-relation]')?.addEventListener('click', () => {
-      saveAssetRelation(asset.id, state.relationTargetId, state.relationReplaceId)
-    })
-    drawer.querySelector('[data-cancel-relation]')?.addEventListener('click', () => {
-      state.relationEditorOpen = false
-      state.relationReplaceId = null
-      state.relationTargetId = ''
-      state.relationError = null
-      renderDrawer()
+    drawer.querySelector('[data-relation-search-results]')?.addEventListener('click', (event) => {
+      const targetButton = event.target.closest('[data-relation-target]')
+      if (!targetButton || !event.currentTarget.contains(targetButton)) return
+      saveAssetRelation(asset.id, targetButton.dataset.relationTarget, state.relationReplaceId)
     })
     drawer.querySelectorAll('[data-connected-asset]').forEach((button) => {
       button.addEventListener('click', () => handleAssetSelect(button.dataset.connectedAsset))
@@ -876,7 +888,7 @@ export async function renderMapPage(container) {
       state.relationStatus = 'saved'
       state.relationEditorOpen = false
       state.relationReplaceId = null
-      state.relationTargetId = ''
+      state.relationSearch = ''
       renderDrawer()
       syncMap()
     } catch (error) {
@@ -921,7 +933,7 @@ export async function renderMapPage(container) {
         state.relationStatus = 'removed'
         state.relationEditorOpen = false
         state.relationReplaceId = null
-        state.relationTargetId = ''
+        state.relationSearch = ''
         renderDrawer()
       }
       syncMap()
