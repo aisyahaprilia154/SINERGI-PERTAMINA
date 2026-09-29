@@ -1415,6 +1415,7 @@ function toActiveMapDataset(resolved, { siteId = null, siteBoundaries = {} } = {
     }
   })
   return {
+    recordRevision: Number(record.recordRevision ?? 0),
     mapView: true,
     topologyEdgeOverrides: record.topologyEdgeOverrides ?? [],
     activePointer: resolved.pointer,
