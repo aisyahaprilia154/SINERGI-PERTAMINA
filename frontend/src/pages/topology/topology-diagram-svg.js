@@ -847,7 +847,8 @@ function renderEdge(edge, {
     : ''
   return `
     <g class="topology-edge-target" data-edge-id="${escapeAttribute(edge.id)}" tabindex="0"
-      role="button" aria-label="Detail relasi ${escapeAttribute(edge.id)}">
+      role="button" aria-label="Detail relasi ${escapeAttribute(edge.id)}. Tekan Delete atau Backspace untuk menghapus."
+      aria-keyshortcuts="Delete Backspace">
       <path class="topology-edge-underlay" d="${path}"${edge.dimmed ? ' opacity="0.12"' : ''}/>
       <path class="${classes}" data-connection-type="${style.key ?? 'other'}" d="${path}" stroke="${escapeAttribute(color)}" style="stroke:${escapeAttribute(color)}"${arrow}>
         <title>${escapeXml(style.label)} · ${escapeXml(describeEdge(edge))}${edge.hierarchyDirection ? ' · Panah hierarki tampilan; arah komunikasi belum ditetapkan.' : ''}</title>
