@@ -600,6 +600,13 @@ function mountTopologyWorkspace(container, {
       closeFrameComposer()
       return
     }
+    const isEditing = event.target?.closest?.('input, textarea, select, [contenteditable="true"]')
+    if (!isEditing && !event.ctrlKey && !event.metaKey && !event.altKey
+      && ['Delete', 'Backspace'].includes(event.key) && state.selectedEdgeId) {
+      event.preventDefault()
+      void removeRelation(state.selectedEdgeId)
+      return
+    }
     if (event.target?.matches?.('[data-topology-search]')) {
       if (event.key !== 'Enter') return
       event.preventDefault()
@@ -693,6 +700,19 @@ function mountTopologyWorkspace(container, {
     renderGraph()
     renderInspector()
     updatePanelState()
+    container.querySelector(`[data-edge-id="${cssEscape(edgeId)}"]`)?.focus({ preventScroll: true })
+  }
+
+  async function removeRelation(edgeId) {
+    const edge = model.edgeById.get(edgeId)
+    if (!edge || state.mutationBusy) return
+    const added = state.changes.find(change => change.type === 'add-relation' && change.draftEdgeId === edgeId)
+    if (added) state.changes = state.changes.filter(change => change !== added)
+    else stageChange({ type: 'remove-edge', edgeId })
+    graph = { ...graph, edges: graph.edges.filter(item => (item.id ?? item.relationId) !== edgeId) }
+    state.selectedEdgeId = null
+    rebuild()
+    showToast('Relasi dihapus dari draft. Gunakan Batal untuk memulihkannya sebelum disimpan.')
   }
 
   function selectMountingGroup(groupId) {
@@ -1859,6 +1879,7 @@ function mountTopologyWorkspace(container, {
         <section class="topology-stitch-inspector-card"><div class="topology-stitch-section-label"><span class="material-symbols-outlined" aria-hidden="true">route</span>Endpoint Relasi</div><p>${escapeHtml(source?.name || edge.sourceId)} <span class="material-symbols-outlined topology-stitch-inline-icon" aria-hidden="true">arrow_forward</span> ${escapeHtml(target?.name || edge.targetId)}</p></section>
         <section class="topology-stitch-inspector-section"><label>Provenance</label><p class="topology-stitch-provenance">${escapeHtml(edge.provenance || edge.sourceGeometryId || 'Relasi aktif dari dataset topology.')}</p></section>
         <section class="topology-stitch-inspector-section"><label>Metadata</label><dl class="topology-stitch-facts"><div><dt>Status</dt><dd>Terkonfirmasi</dd></div><div><dt>Arah</dt><dd>${escapeHtml(edge.direction || 'undirected')}</dd></div>${edge.lengthMeters != null ? `<div><dt>Panjang</dt><dd>${escapeHtml(String(edge.lengthMeters))} m</dd></div>` : ''}</dl></section>
+        <p class="topology-stitch-muted">Tekan Delete atau Backspace untuk menghapus relasi dari draft.</p>
       </div>
       <div class="topology-stitch-inspector-footer"><button type="button" class="topology-stitch-secondary-button" data-action="open-map" data-asset-id="${escapeAttribute(source?.id || '')}"><span class="material-symbols-outlined" aria-hidden="true">map</span>Buka di Peta Aset</button></div>
     `
