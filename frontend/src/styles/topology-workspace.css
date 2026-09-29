@@ -78,7 +78,6 @@
   color: var(--workspace-accent);
   background: var(--workspace-inset);
 }
-.topology-body #app .topology-remove-edge-tool.active { color: #d64040; background: rgba(255,59,48,.1); }
 .topology-body #app .topology-stitch-toolbar-button:disabled { opacity: .35; cursor: default; transform: none; }
 .topology-body #app .topology-stitch-toolbar-button,
 .topology-body #app .topology-stitch-zoom-control button { transition: background 120ms ease, color 120ms ease, transform 120ms ease; }
@@ -1279,8 +1278,7 @@
 .topology-body #app .topology-actions-menu,
 .topology-body #app .topology-stitch-floating-panel,
 .topology-body #app .topology-legend-popover { background: var(--workspace-raised); }
-.topology-body #app .topology-actions-menu[hidden],
-.topology-body #app .topology-remove-mode-hint[hidden] { display: none; }
+.topology-body #app .topology-actions-menu[hidden] { display: none; }
 .topology-body #app .topology-actions-menu {
   position: absolute;
   z-index: 45;
@@ -1320,51 +1318,9 @@
 .topology-body #app .topology-actions-menu button .material-symbols-outlined { font-size: 17px; }
 .topology-body #app .topology-actions-menu button:hover:not(:disabled) { background: var(--workspace-inset); }
 .topology-body #app .topology-actions-menu button:disabled { opacity: .44; cursor: default; }
-.topology-body #app .topology-actions-menu .topology-remove-edge-tool { color: var(--workspace-danger); }
-.topology-body #app .topology-remove-mode-hint {
-  position: absolute;
-  z-index: 34;
-  top: 78px;
-  left: 50%;
-  width: min(430px, calc(100% - 28px));
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 11px 13px;
-  color: var(--workspace-text);
-  background: var(--workspace-raised);
-  border: 1px solid color-mix(in srgb, var(--workspace-danger) 40%, var(--workspace-line));
-  border-radius: 12px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .13);
-  transform: translateX(-50%);
-  animation: topology-hint-in 190ms cubic-bezier(.2,.8,.2,1) both;
-}
-.topology-body #app .topology-remove-mode-hint > .material-symbols-outlined { color: var(--workspace-danger); }
-.topology-body #app .topology-remove-mode-hint > span:nth-child(2) { min-width: 0; display: grid; gap: 2px; flex: 1; }
-.topology-body #app .topology-remove-mode-hint strong { font-size: 12px; }
-.topology-body #app .topology-remove-mode-hint small { color: var(--workspace-secondary); font-size: 11px; line-height: 1.35; }
-.topology-body #app .topology-remove-mode-hint button {
-  padding: 7px 10px;
-  color: var(--workspace-danger);
-  background: transparent;
-  border: 0;
-  border-radius: 7px;
-  font-size: 11px;
-  font-weight: 650;
-  cursor: pointer;
-}
-.topology-body #app .topology-remove-mode-hint button:hover { background: var(--workspace-inset); }
-.topology-body #app .topology-stitch-app.is-remove-edge-mode .topology-stitch-viewport {
-  box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--workspace-danger) 45%, transparent);
-}
 @keyframes topology-menu-in {
   from { opacity: 0; transform: translateY(-5px) scale(.98); }
   to { opacity: 1; transform: translateY(0) scale(1); }
-}
-@keyframes topology-hint-in {
-  from { opacity: 0; transform: translate(-50%, -6px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
 }
 /* Saturated headers provide color; frame bodies stay calm enough for diagram lines. */
 .topology-body #app .topology-stitch-graph-frame svg .topology-mounting-group .topology-mounting-bubble {
@@ -1469,8 +1425,7 @@
   .topology-body #app .topology-stitch-graph-frame svg .topology-mounting-bubble {
     transition: none;
   }
-  .topology-body #app .topology-actions-menu,
-  .topology-body #app .topology-remove-mode-hint { animation: none; }
+  .topology-body #app .topology-actions-menu { animation: none; }
 }
 
 /* The topology canvas shares the map workspace's visual hierarchy. */
@@ -1579,7 +1534,6 @@
   background: var(--workspace-inset);
 }
 .topology-body #app .topology-actions-menu { top: 72px; }
-.topology-body #app .topology-remove-mode-hint { top: 136px; }
 .topology-body #app .topology-stitch-export-panel { top: 128px; }
 
 .topology-body #app .topology-canvas-navigation {
@@ -1625,7 +1579,6 @@
     width: min(420px, calc(100% - 32px));
   }
   .topology-body #app .topology-actions-menu { top: 188px; }
-  .topology-body #app .topology-remove-mode-hint { top: 194px; }
 }
 @media (max-width: 1180px) {
   .topology-body #app .topology-stitch-export-panel { top: 246px; }
@@ -1657,7 +1610,6 @@
   .topology-body #app .topology-canvas-navigation { right: 12px; }
   .topology-body #app .topology-stitch-main.has-disconnected-tray .topology-canvas-navigation { bottom: 48px; }
   .topology-body #app .topology-actions-menu { top: 154px; right: 12px; }
-  .topology-body #app .topology-remove-mode-hint { top: 146px; }
   .topology-body #app .topology-stitch-export-panel { top: 212px; right: 12px; }
   .topology-body #app .topology-stitch-app:has(.topology-stitch-inspector:not([hidden])) :is(.topology-context-card, .topology-stitch-toolbar, .topology-canvas-navigation) {
     visibility: hidden;
