@@ -274,7 +274,7 @@ export function decryptSyncPackage(envelope, passphrase) {
   }
 }
 
-function changeToDiagramAction({ key, after }) {
+function changeToDiagramAction({ key, before, after }) {
   const separator = key.indexOf(':')
   const kind = key.slice(0, separator)
   const reference = key.slice(separator + 1)
@@ -294,6 +294,9 @@ function changeToDiagramAction({ key, after }) {
   }
   if (kind === 'relation' && after) return {
     type: 'add-relation', sourceAssetId: after.source, targetAssetId: after.target,
+  }
+  if (kind === 'relation' && before && !after) return {
+    type: 'remove-relation', sourceAssetId: before.source, targetAssetId: before.target,
   }
   throw invalidPackage(`Koreksi ${kind} tidak dapat diterapkan.`)
 }

@@ -1,3 +1,6 @@
+import { formatAssetTypeLabel } from '../../domain/asset-type-label.js'
+import { isJunctionBoxAsset, JUNCTION_BOX_ICON_URL } from '../../domain/junction-box-icon.js'
+
 export function renderAssetDetailDrawer({
   status = 'ready',
   errorMessage = null,
@@ -14,9 +17,7 @@ export function renderAssetDetailDrawer({
   mountingActionError = null,
   mountingControlsAvailable = false,
   activeContext,
-  showAdditionalMetadata = false,
   diagramAvailable = true,
-  topologySummary = {},
   relationOptions = [],
   relationEditorOpen = false,
   relationTargetId = '',
@@ -25,30 +26,31 @@ export function renderAssetDetailDrawer({
   relationError = null,
 }) {
   if (status === 'loading' && !asset) return renderLoadingState()
-  if (status === 'error') return renderErrorState(errorMessage)
+  if (status === 'error') return renderErrorState(errorMessage, asset)
   if (!asset) return renderEmptyState()
 
   const category = getAssetCategory(asset, assetNetworks)
-  const hasIpAddress = asset.ip && !['—', 'â€”', '-'].includes(asset.ip)
   const poleAsset = isPoleAsset(asset)
   const hasDirectRelations = connectedAssets.length > 0
   const operationalStatus = resolveOperationalStatus(asset)
   const assetName = displayAssetName(asset)
+  const positionAvailable = hasMapPosition(asset.coordinate)
+  const assetTypeLabel = formatAssetTypeLabel(asset)
+  const relationBusy = ['saving', 'removing'].includes(relationStatus)
 
   return `
-    <header class="drawer-header">
-      <div class="drawer-heading">
-        <span class="asset-type-icon">
-          <span class="material-symbols-outlined" aria-hidden="true">${assetIcon(asset.type)}</span>
-        </span>
-        <span>
-          <small>Detail aset</small>
-        </span>
-      </div>
+    <header class="drawer-header drawer-header-minimal">
+      <h2 class="drawer-compact-title">Detail aset ${escapeHtml(assetName)}</h2>
+      <button class="icon-button toggle-mobile-drawer" type="button"
+        aria-expanded="false" aria-label="Perluas detail aset" title="Perluas detail aset">
+        <span class="material-symbols-outlined" aria-hidden="true">expand_less</span>
+      </button>
       <button class="icon-button close-drawer" type="button" aria-label="Tutup detail aset">
         <span class="material-symbols-outlined" aria-hidden="true">close</span>
       </button>
     </header>
+
+    ${renderMobileLocationSummary(asset)}
 
     ${status === 'loading' ? `<p class="drawer-detail-loading" role="status" aria-live="polite">Memuat data tambahan aset…</p>` : ''}
 
@@ -65,34 +67,45 @@ export function renderAssetDetailDrawer({
             </span>
           ` : ''}
         </div>
-        <h2>${escapeHtml(assetName)}</h2>
-        <p>${escapeHtml(asset.type || 'Jenis aset belum tersedia')}</p>
+        <p>${escapeHtml(assetTypeLabel)}</p>
+        ${asset.location ? `<small class="drawer-asset-location">${escapeHtml(asset.location)}</small>` : ''}
       </section>
 
-      ${poleAsset ? '' : `<section class="drawer-section drawer-topology-summary" aria-labelledby="asset-topology-title">
+      ${poleAsset || (!hasDirectRelations && !relationOptions.length && !['saved', 'removed', 'removing', 'error'].includes(relationStatus)) ? '' : `<section class="drawer-section drawer-topology-summary" aria-labelledby="asset-topology-title">
         <div class="drawer-section-heading">
           <h3 id="asset-topology-title">Relasi aset</h3>
-          <span class="count-badge">${connectedAssets.length}</span>
+          <div class="drawer-section-heading-actions">
+            <span class="count-badge">${connectedAssets.length}</span>
+            ${relationOptions.length ? `
+              <button class="drawer-relation-add" type="button" data-open-relation-picker
+                aria-label="${hasDirectRelations ? 'Tambah atau ganti relasi' : 'Sambungkan aset'}"
+                title="${hasDirectRelations ? 'Tambah atau ganti relasi' : 'Sambungkan aset'}"
+                aria-expanded="${relationEditorOpen ? 'true' : 'false'}"
+                ${relationBusy ? 'disabled' : ''}>
+                <span class="material-symbols-outlined" aria-hidden="true">add</span>
+              </button>
+            ` : ''}
+          </div>
         </div>
-        <p>${hasDirectRelations
-          ? `${connectedAssets.length} relasi langsung terkonfirmasi untuk aset ini.`
-          : 'Relasi aset belum tersedia.'}</p>
-        <small>${Number(topologySummary.confirmedConnectionCount) || 0} relasi otomatis terkonfirmasi pada area aktif.</small>
+        ${hasDirectRelations ? '' : '<p>Relasi aset belum tersedia.</p>'}
         ${relationStatus === 'saved' ? `
           <p class="drawer-relation-success" role="status">
             <span class="material-symbols-outlined" aria-hidden="true">check_circle</span>
             Hubungan tersimpan dan sudah ditampilkan pada peta.
           </p>
         ` : ''}
-        ${relationOptions.length ? `
-          <button class="drawer-relation-add" type="button" data-open-relation-picker>
-            <span class="material-symbols-outlined" aria-hidden="true">add_link</span>
-            ${hasDirectRelations ? 'Tambah atau ganti relasi' : 'Sambungkan aset'}
-            <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
-          </button>
-        ` : `
+        ${relationStatus === 'removing' ? `
+          <p class="drawer-relation-feedback" role="status">Menghapus relasi…</p>
+        ` : ''}
+        ${relationStatus === 'removed' ? `
+          <p class="drawer-relation-feedback success" role="status">Relasi berhasil dihapus.</p>
+        ` : ''}
+        ${relationStatus === 'error' && !relationEditorOpen && relationError ? `
+          <p class="drawer-relation-feedback error" role="alert">${escapeHtml(relationError)}</p>
+        ` : ''}
+        ${!relationOptions.length ? `
           <small class="drawer-relation-hint">Tidak ada aset kompatibel lain yang tersedia di area ini.</small>
-        `}
+        ` : ''}
         ${relationEditorOpen ? renderRelationEditor({
           relationOptions,
           relationTargetId,
@@ -100,6 +113,38 @@ export function renderAssetDetailDrawer({
           relationStatus,
           relationError,
         }) : ''}
+        ${connectedAssets.length ? `
+          <ul class="relation-list">
+            ${connectedAssets.map(({ asset: connectedAsset, network, relation }) => `
+              <li>
+                <div class="relation-item-row">
+                  <button type="button" data-connected-asset="${escapeAttribute(connectedAsset.id)}">
+                    ${renderRelationAssetIcon(connectedAsset)}
+                    <span>
+                      <strong>${escapeHtml(displayAssetName(connectedAsset))}</strong>
+                      <small>${escapeHtml(network?.shortName || network?.name || 'Relasi terkonfirmasi')}</small>
+                    </span>
+                    <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+                  </button>
+                  ${relation?.id ? `
+                    <button class="relation-action-button relation-replace-button" type="button"
+                      data-replace-relation="${escapeAttribute(relation.id)}"
+                      aria-label="Ganti relasi dengan ${escapeAttribute(displayAssetName(connectedAsset))}"
+                      title="Ganti relasi" ${relationBusy ? 'disabled' : ''}>
+                      <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
+                    </button>
+                    <button class="relation-action-button relation-remove-button" type="button"
+                      data-remove-relation="${escapeAttribute(relation.id)}"
+                      aria-label="Hapus relasi dengan ${escapeAttribute(displayAssetName(connectedAsset))}"
+                      title="Hapus relasi" ${relationBusy ? 'disabled' : ''}>
+                      <span class="material-symbols-outlined" aria-hidden="true">close</span>
+                    </button>
+                  ` : ''}
+                </div>
+              </li>
+            `).join('')}
+          </ul>
+        ` : ''}
       </section>`}
 
       ${renderMountingSection({
@@ -115,123 +160,36 @@ export function renderAssetDetailDrawer({
         mountingControlsAvailable,
       })}
 
-      <section class="drawer-section" aria-labelledby="asset-information-title">
-        <h3 id="asset-information-title">Informasi aset</h3>
-        <dl class="asset-properties">
-          <div><dt>Nama aset</dt><dd>${escapeHtml(assetName)}</dd></div>
-          <div><dt>Kategori</dt><dd>${escapeHtml(category.label)}</dd></div>
-          <div><dt>Jenis aset</dt><dd>${escapeHtml(asset.type || 'Jenis aset belum tersedia')}</dd></div>
-          <div><dt>Lokasi</dt><dd>${escapeHtml(asset.location || 'Lokasi belum tersedia')}</dd></div>
-          ${operationalStatus.present && !operationalStatus.value ? `
-            <div class="asset-operational-status-empty">
-              <dt>Status operasional</dt><dd>Belum dicatat</dd>
-            </div>
-          ` : ''}
-          ${hasIpAddress ? `<div><dt>IP address</dt><dd>${escapeHtml(asset.ip)}</dd></div>` : ''}
-          <div>
-            <dt>Dataset aktif</dt>
-            <dd>${escapeHtml(activeContext.datasetName === activeContext.version
-              ? activeContext.datasetName
-              : `${activeContext.datasetName} · ${activeContext.version}`)}</dd>
-          </div>
-        </dl>
-        <details class="asset-technical-metadata">
-          <summary>
-            <span>Informasi teknis</span>
-            <span class="material-symbols-outlined" aria-hidden="true">expand_more</span>
-          </summary>
-          <dl class="asset-properties compact">
-            <div><dt>ID internal</dt><dd class="asset-id-value">${renderAssetId(asset.id)}</dd></div>
-          </dl>
-        </details>
-      </section>
-
-      <section class="drawer-section connected-networks" aria-labelledby="asset-networks-title">
+      ${assetNetworks.length ? `<section class="drawer-section connected-networks" aria-labelledby="asset-networks-title">
         <div class="drawer-section-heading">
           <h3 id="asset-networks-title">Jaringan yang mencakup aset</h3>
           <span class="count-badge">${assetNetworks.length}</span>
         </div>
-        ${assetNetworks.length ? assetNetworks.map((network) => `
+        ${assetNetworks.map((network) => `
           <button type="button" data-focus-network="${escapeAttribute(network.id)}">
             <i style="--network-indicator:${escapeAttribute(network.color)}" aria-hidden="true"></i>
             <span>
               <strong>${escapeHtml(network.shortName || network.name)}</strong>
               <small>${escapeHtml(network.type)}</small>
             </span>
-            <span class="material-symbols-outlined" aria-hidden="true">center_focus_strong</span>
+            <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
           </button>
-        `).join('') : renderInlineEmpty('Aset ini belum tercakup dalam jaringan pada dataset aktif.')}
-      </section>
+        `).join('')}
+      </section>` : ''}
 
-      ${poleAsset ? '' : `<section class="drawer-section connected-assets" aria-labelledby="connected-assets-title">
-        <div class="drawer-section-heading">
-          <h3 id="connected-assets-title">Aset terhubung</h3>
-          <span class="count-badge">${connectedAssets.length}</span>
-        </div>
-        ${connectedAssets.length ? `
-          <ul class="relation-list">
-            ${connectedAssets.map(({ asset: connectedAsset, network, relation }) => `
-              <li>
-                <div class="relation-item-row">
-                  <button type="button" data-connected-asset="${escapeAttribute(connectedAsset.id)}">
-                    <span class="relation-icon material-symbols-outlined" aria-hidden="true">
-                      ${assetIcon(connectedAsset.type)}
-                    </span>
-                    <span>
-                      <strong>${escapeHtml(displayAssetName(connectedAsset))}</strong>
-                      <small>${escapeHtml(connectedAsset.id)} · ${escapeHtml(network?.shortName || network?.name || 'Relasi terkonfirmasi')}</small>
-                    </span>
-                    <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
-                  </button>
-                  ${relation?.id ? `
-                    <button class="relation-replace-button" type="button"
-                      data-replace-relation="${escapeAttribute(relation.id)}">
-                      Ganti
-                    </button>
-                  ` : ''}
-                </div>
-              </li>
-            `).join('')}
-          </ul>
-        ` : renderInlineEmpty('Relasi aset belum tersedia.')}
-      </section>`}
-
-      <section class="drawer-section additional-metadata ${showAdditionalMetadata ? 'expanded' : ''}"
-        aria-labelledby="additional-metadata-title">
-        <div class="drawer-section-heading">
-          <h3 id="additional-metadata-title">Metadata tambahan</h3>
-        </div>
-        ${showAdditionalMetadata ? `
-          <dl class="asset-properties compact">
-            <div><dt>Penanggung jawab</dt><dd>${escapeHtml(asset.owner || 'Belum tersedia')}</dd></div>
-            <div><dt>Kantor cabang</dt><dd>${escapeHtml(activeContext.branchName)}</dd></div>
-            <div><dt>Versi dataset</dt><dd>${escapeHtml(activeContext.version)}</dd></div>
-            <div><dt>Dipublikasikan</dt><dd>${escapeHtml(activeContext.publishedAt || 'Belum tersedia')}</dd></div>
-          </dl>
-        ` : `
-          <p class="section-summary">Informasi operasional tambahan tersedia tanpa membuka mode edit.</p>
-        `}
-      </section>
-
-      <p class="read-only-note">
-        <span class="material-symbols-outlined" aria-hidden="true">${mountingControlsAvailable ? 'admin_panel_settings' : 'lock'}</span>
-        ${mountingControlsAvailable
-          ? 'Geometri sumber tetap read-only; penempatan tiang dapat disesuaikan administrator.'
-          : 'Detail dan relasi ini hanya dapat dibaca.'}
-      </p>
     </div>
 
     <footer class="drawer-actions">
-      <div class="drawer-secondary-actions">
-        <button class="button secondary open-asset-detail" type="button"
-          aria-expanded="${String(showAdditionalMetadata)}">
-          <span class="material-symbols-outlined" aria-hidden="true">info</span>
-          Buka detail aset
-        </button>
+      <div class="drawer-secondary-actions${positionAvailable ? '' : ' single-action'}">
+        ${positionAvailable ? `<button class="button secondary drawer-map-position-action" type="button"
+          data-focus-asset-position>
+          <span class="material-symbols-outlined" aria-hidden="true">center_focus_strong</span>
+          Lihat di peta
+        </button>` : ''}
         <button class="button secondary open-schematic" type="button"
           ${diagramAvailable ? '' : 'disabled aria-disabled="true" title="Belum ada aset yang dapat ditampilkan pada diagram."'}>
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
-          Buka Diagram Topologi
+          Diagram topologi
         </button>
       </div>
     </footer>
@@ -290,8 +248,10 @@ function renderMountingSection({
   const mountable = isMountableAsset(asset)
   const pole = isPoleAsset(asset)
   const availableMountingOptions = mountingOptions.length ? mountingOptions : mountingCandidates
-  if (!mountable && !pole && !mountedOnAsset && !mountedAssets.length
-    && !availableMountingOptions.length) {
+  if (!pole && !mountedOnAsset && !mountedAssets.length
+    && !(mountable && mountingControlsAvailable)
+    && !showMountingCandidates && !mountingActionError
+    && mountingActionStatus !== 'success') {
     return ''
   }
 
@@ -300,8 +260,12 @@ function renderMountingSection({
   const assignedLabel = mountedOnAsset
     ? displayAssetName(mountedOnAsset)
     : 'Belum ditentukan'
-  const expectation = asset.mountingExpectation ?? 'unknown'
-  const reviewWarnings = asset.mountingReview?.warnings ?? []
+  const mountingPickerLabel = showMountingCandidates
+    ? 'Tutup pilihan tiang'
+    : mountedOnAsset ? 'Ganti tiang' : 'Tambah tiang'
+  const mountingPickerIcon = showMountingCandidates
+    ? 'close'
+    : mountedOnAsset ? 'swap_horiz' : 'add'
   const normalizedSearch = String(mountingSearch ?? '').trim().toLocaleLowerCase('id')
   const filteredMountingOptions = availableMountingOptions.filter((candidate) => {
     if (!normalizedSearch) return true
@@ -317,9 +281,9 @@ function renderMountingSection({
         <span class="relation-icon material-symbols-outlined" aria-hidden="true">location_on</span>
         <span>
           <strong>${escapeHtml(candidate.targetAssetName || candidate.targetAssetId)}</strong>
-          <small>${escapeHtml(candidate.targetAssetId)} · ${formatDistance(candidate.distanceMeters)} · pilih untuk menetapkan</small>
+          <small>${escapeHtml(candidate.targetAssetId)} · ${formatDistance(candidate.distanceMeters)}</small>
         </span>
-        <span class="material-symbols-outlined" aria-hidden="true">check</span>
+        <span class="material-symbols-outlined" aria-hidden="true">add</span>
       </button>
     </li>
   `).join('')
@@ -327,44 +291,52 @@ function renderMountingSection({
   return `
     <section class="drawer-section mounting-section" aria-labelledby="asset-mounting-title">
       <div class="drawer-section-heading">
-        <h3 id="asset-mounting-title">Pemasangan fisik</h3>
-        <span class="count-badge">${pole ? mountedAssets.length : mountedOnAsset ? 1 : 0}</span>
+        <h3 id="asset-mounting-title">${pole ? 'Aset terpasang' : 'Jaringan tiang'}</h3>
+        <div class="drawer-section-heading-actions">
+          <span class="count-badge">${pole ? mountedAssets.length : mountedOnAsset ? 1 : 0}</span>
+          ${canEdit && !mountedOnAsset ? `
+            <button class="mounting-picker-action" type="button" data-mounting-action="change"
+              aria-label="${mountingPickerLabel}" title="${mountingPickerLabel}"
+              aria-expanded="${showMountingCandidates ? 'true' : 'false'}" ${busy ? 'disabled' : ''}>
+              <span class="material-symbols-outlined" aria-hidden="true">${mountingPickerIcon}</span>
+            </button>
+          ` : ''}
+        </div>
       </div>
       ${mountable ? `
-        <div class="mounting-expectation-row">
-          <span class="mounting-label">Ekspektasi pemasangan</span>
-          <span class="category-badge mounting-expectation-${escapeAttribute(expectation)}">
-            ${escapeHtml(mountingExpectationLabel(expectation))}
-          </span>
-        </div>
-        ${reviewWarnings.includes('number_coordinate_mismatch') ? `
-          <p class="mounting-action-status warning">
-            <span class="material-symbols-outlined" aria-hidden="true">warning</span>
-            Nomor aset berbeda dari tiang terdekat; koordinat dipakai sebagai sumber kebenaran.
-          </p>
-        ` : ''}
-      ` : ''}
-      ${mountable ? `
-        <div class="mounting-assignment">
-          <span class="mounting-label">Dipasang pada</span>
+        <div class="mounting-assignment mounting-current-row">
           ${mountedOnAsset ? `
-            <button type="button" class="mounting-current" data-connected-asset="${escapeAttribute(mountedOnAsset.id)}">
+            <button type="button" class="mounting-current" data-connected-asset="${escapeAttribute(mountedOnAsset.id)}"
+              title="${escapeAttribute(`${assignedLabel} · ${mountedOnAsset.id}`)}">
               <span class="relation-icon material-symbols-outlined" aria-hidden="true">location_on</span>
               <span><strong>${escapeHtml(assignedLabel)}</strong><small>${escapeHtml(mountedOnAsset.id)}</small></span>
               <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
             </button>
           ` : `<p class="drawer-inline-empty">Belum ada tiang yang ditetapkan.</p>`}
+          ${mountedOnAsset && canEdit ? `
+            <button class="mounting-picker-action relation-replace-button" type="button"
+              data-mounting-action="change" aria-label="${mountingPickerLabel}"
+              title="${mountingPickerLabel}" aria-expanded="${showMountingCandidates ? 'true' : 'false'}"
+              ${busy ? 'disabled' : ''}>
+              <span class="material-symbols-outlined" aria-hidden="true">${mountingPickerIcon}</span>
+            </button>
+            <button class="mounting-picker-action mounting-remove-button" type="button"
+              data-mounting-action="detach"
+              aria-label="Hapus relasi dengan tiang ${escapeAttribute(assignedLabel)}"
+              title="Hapus relasi tiang" ${busy ? 'disabled' : ''}>
+              <span class="material-symbols-outlined" aria-hidden="true">close</span>
+            </button>
+          ` : ''}
         </div>
       ` : ''}
       ${pole ? `
         <div class="mounting-assignment">
-          <span class="mounting-label">Aset terpasang</span>
           ${mountedAssets.length ? `
             <ul class="relation-list mounting-asset-list">
               ${mountedAssets.map((mountedAsset) => `
                 <li>
                   <button type="button" data-connected-asset="${escapeAttribute(mountedAsset.id)}">
-                    <span class="relation-icon material-symbols-outlined" aria-hidden="true">${assetIcon(mountedAsset.type)}</span>
+                    ${renderRelationAssetIcon(mountedAsset)}
                     <span><strong>${escapeHtml(displayAssetName(mountedAsset))}</strong><small>${escapeHtml(mountedAsset.id)}</small></span>
                     <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
                   </button>
@@ -374,23 +346,9 @@ function renderMountingSection({
           ` : renderInlineEmpty('Belum ada aset yang terdeteksi terpasang pada tiang ini.')}
         </div>
       ` : ''}
-      ${canEdit ? `
-        <div class="mounting-actions">
-          <button type="button" class="button secondary" data-mounting-action="change" ${busy ? 'disabled' : ''}>
-            <span class="material-symbols-outlined" aria-hidden="true">swap_horiz</span>
-            Ganti tiang
-          </button>
-          ${mountedOnAsset ? `
-            <button type="button" class="button secondary danger" data-mounting-action="detach" ${busy ? 'disabled' : ''}>
-              <span class="material-symbols-outlined" aria-hidden="true">link_off</span>
-              Lepaskan
-            </button>
-          ` : ''}
-        </div>
-      ` : ''}
       ${showMountingCandidates ? `
         <div class="mounting-candidate-panel" aria-live="polite">
-          <span class="mounting-label">Tiang dalam fasilitas untuk dipilih</span>
+          <h4 class="mounting-candidate-heading">Pilih tiang</h4>
           <label class="mounting-search-field">
             <span class="material-symbols-outlined" aria-hidden="true">search</span>
             <span class="sr-only">Cari tiang</span>
@@ -403,7 +361,7 @@ function renderMountingSection({
         </div>
       ` : ''}
       ${busy ? `<p class="mounting-action-status" role="status"><span class="material-symbols-outlined" aria-hidden="true">progress_activity</span>Menyimpan penempatan…</p>` : ''}
-      ${mountingActionStatus === 'success' ? `<p class="mounting-action-status success" role="status"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Penempatan fisik diperbarui.</p>` : ''}
+      ${mountingActionStatus === 'success' ? `<p class="mounting-action-status success" role="status"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span>Jaringan tiang diperbarui.</p>` : ''}
       ${mountingActionError ? `<p class="mounting-action-status error" role="alert"><span class="material-symbols-outlined" aria-hidden="true">error</span>${escapeHtml(mountingActionError)}</p>` : ''}
       </section>
   `
@@ -411,8 +369,7 @@ function renderMountingSection({
 
 function renderLoadingState(asset) {
   return `
-    <header class="drawer-header">
-      <div class="drawer-heading"><span class="drawer-title-placeholder">Detail aset</span></div>
+    <header class="drawer-header drawer-header-minimal">
       <button class="icon-button close-drawer" type="button" aria-label="Tutup detail aset">
         <span class="material-symbols-outlined" aria-hidden="true">close</span>
       </button>
@@ -429,27 +386,47 @@ function renderLoadingState(asset) {
   `
 }
 
-function renderErrorState(errorMessage) {
+function renderErrorState(errorMessage, asset = null) {
   return `
-    <header class="drawer-header">
-      <div class="drawer-heading"><strong>Detail aset</strong></div>
+    <header class="drawer-header drawer-header-minimal">
+      <button class="icon-button toggle-mobile-drawer" type="button"
+        aria-expanded="false" aria-label="Perluas detail aset" title="Perluas detail aset">
+        <span class="material-symbols-outlined" aria-hidden="true">expand_less</span>
+      </button>
       <button class="icon-button close-drawer" type="button" aria-label="Tutup detail aset">
         <span class="material-symbols-outlined" aria-hidden="true">close</span>
       </button>
     </header>
-    <div class="drawer-state drawer-error" role="alert">
-      <span class="material-symbols-outlined" aria-hidden="true">error</span>
-      <strong>Detail aset tidak dapat dimuat</strong>
-      <p>${escapeHtml(errorMessage || 'Aset tidak tersedia pada dataset aktif.')}</p>
-      <button class="button secondary retry-asset-detail" type="button">Coba lagi</button>
+    ${asset ? renderMobileLocationSummary(asset) : ''}
+    <div class="drawer-scroll-content">
+      <div class="drawer-state drawer-error" role="alert">
+        <span class="material-symbols-outlined" aria-hidden="true">error</span>
+        <strong>Detail aset tidak dapat dimuat</strong>
+        <p>${escapeHtml(errorMessage || 'Aset tidak tersedia pada dataset aktif.')}</p>
+        <button class="button secondary retry-asset-detail" type="button">Coba lagi</button>
+      </div>
+    </div>
+  `
+}
+
+function renderMobileLocationSummary(asset) {
+  const positionAvailable = hasMapPosition(asset?.coordinate)
+  return `
+    <div class="drawer-mobile-summary">
+      <span class="drawer-mobile-location-copy">
+        <strong>${escapeHtml(displayAssetName(asset))}</strong>
+        <small>${escapeHtml(formatAssetTypeLabel(asset))}${asset.location ? ` · ${escapeHtml(asset.location)}` : ''}</small>
+      </span>
+      ${positionAvailable ? `<button class="focus-asset-position" type="button" data-focus-asset-position>
+        Lihat posisi di peta
+      </button>` : ''}
     </div>
   `
 }
 
 function renderEmptyState() {
   return `
-    <header class="drawer-header">
-      <div class="drawer-heading"><strong>Detail aset</strong></div>
+    <header class="drawer-header drawer-header-minimal">
       <button class="icon-button close-drawer" type="button" aria-label="Tutup detail aset">
         <span class="material-symbols-outlined" aria-hidden="true">close</span>
       </button>
@@ -550,6 +527,12 @@ function assetIcon(type = '') {
   return 'device_hub'
 }
 
+function renderRelationAssetIcon(asset) {
+  return isJunctionBoxAsset(asset)
+    ? `<img class="relation-icon relation-icon-image" src="${JUNCTION_BOX_ICON_URL}" alt="" aria-hidden="true">`
+    : `<span class="relation-icon material-symbols-outlined" aria-hidden="true">${assetIcon(asset.type)}</span>`
+}
+
 function isMountableAsset(asset) {
   return /junction|\bjb\b|cctv|camera|kamera/i.test(
     `${asset?.type || ''} ${asset?.category || ''}`,
@@ -568,19 +551,6 @@ function formatDistance(value) {
   return Number.isFinite(distance) ? `${distance.toLocaleString('id-ID', { maximumFractionDigits: 2 })} m` : 'jarak tidak tersedia'
 }
 
-function mountingExpectationLabel(value) {
-  return ({
-    pole: 'Tiang',
-    indoor: 'Indoor',
-    standalone: 'Standalone',
-    unknown: 'Perlu klasifikasi',
-  })[value] ?? 'Perlu klasifikasi'
-}
-
-function renderAssetId(value) {
-  return escapeHtml(value).replaceAll(':', ':<wbr>')
-}
-
 function displayAssetName(asset) {
   return String(asset?.name || '').trim() || 'Aset tanpa nama'
 }
@@ -592,6 +562,13 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;')
+}
+
+function hasMapPosition(coordinate) {
+  return Array.isArray(coordinate)
+    && coordinate.length >= 2
+    && Number.isFinite(Number(coordinate[0]))
+    && Number.isFinite(Number(coordinate[1]))
 }
 
 function escapeAttribute(value) {

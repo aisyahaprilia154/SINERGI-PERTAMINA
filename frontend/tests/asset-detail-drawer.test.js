@@ -25,7 +25,7 @@ const network = {
   color: '#9698f4',
 }
 
-test('drawer exposes read-only asset, network, relation, and action details', () => {
+test('drawer prioritizes asset identity, network, relation, and diagram action', () => {
   const html = renderAssetDetailDrawer({
     asset,
     assetNetworks: [network],
@@ -37,22 +37,23 @@ test('drawer exposes read-only asset, network, relation, and action details', ()
     trace: { status: 'idle' },
   })
 
-  assert.match(html, /cam-01/)
   assert.match(html, /CCTV-GATE-01/)
-  assert.match(html, /10\.42\.3\.31/)
-  assert.match(html, /SMG Network Master/)
+  assert.match(html, /Kamera CCTV/)
+  assert.match(html, /Gerbang Utama/)
   assert.match(html, /JB-CCTV-01/)
+  assert.match(html, /src="\/icons\/junction-box\.png"/)
   assert.doesNotMatch(html, /Telusuri koneksi|Tracing|penelusuran/i)
   assert.match(html, /Relasi aset/)
-  assert.match(html, /Buka detail aset/)
-  assert.match(html, /Buka Diagram Topologi/)
+  assert.match(html, /Diagram topologi/)
+  assert.doesNotMatch(html, /Informasi aset|Metadata tambahan|Nama gedung/)
+  assert.doesNotMatch(html, /asset-type-icon/)
   assert.match(html, /asset-status success/)
   assert.match(html, /Online/)
   assert.doesNotMatch(html, /Status tidak tersedia/)
   assert.doesNotMatch(html, /tombol edit|tombol hapus|ubah relasi/i)
 })
 
-test('drawer moves an empty recorded operational status into asset information', () => {
+test('drawer omits an empty recorded operational status', () => {
   const html = renderAssetDetailDrawer({
     asset: { ...asset, status: null, hasOperationalStatusField: true },
     activeContext,
@@ -60,7 +61,7 @@ test('drawer moves an empty recorded operational status into asset information',
   })
 
   assert.doesNotMatch(html, /class="asset-status/)
-  assert.match(html, /<dt>Status operasional<\/dt><dd>Belum dicatat<\/dd>/)
+  assert.doesNotMatch(html, /Status operasional|Belum dicatat/)
   assert.doesNotMatch(html, /Status tidak tersedia/)
 })
 
@@ -96,6 +97,18 @@ test('drawer shows known asset details while additional data loads', () => {
   assert.match(html, /Memuat data tambahan aset/)
 })
 
+test('drawer shows both footer actions when the asset has a map position', () => {
+  const html = renderAssetDetailDrawer({
+    asset: { ...asset, coordinate: [110.4, -7.1] },
+    activeContext,
+  })
+
+  assert.match(html, /class="drawer-secondary-actions"/)
+  assert.doesNotMatch(html, /class="drawer-secondary-actions single-action"/)
+  assert.match(html, /drawer-map-position-action/)
+  assert.match(html, /open-schematic/)
+})
+
 test('drawer keeps missing relations actionable without the retired review warning', () => {
   const html = renderAssetDetailDrawer({
     asset,
@@ -114,6 +127,8 @@ test('drawer keeps missing relations actionable without the retired review warni
   assert.match(html, /Relasi aset belum tersedia\./)
   assert.doesNotMatch(html, /class="button primary trace-from"/)
   assert.match(html, /data-open-relation-picker/)
+  assert.match(html, /data-open-relation-picker[\s\S]*?<span class="material-symbols-outlined" aria-hidden="true">add<\/span>/)
+  assert.doesNotMatch(html, /add_link/)
   assert.match(html, /Sambungkan aset/)
   assert.doesNotMatch(html, /Kandidat relasi|Konfirmasi Koneksi/)
 })
@@ -142,6 +157,9 @@ test('drawer renders the direct relation editor and replacement action', () => {
   assert.match(html, /value="jb-02"/)
   assert.match(html, /data-save-relation/)
   assert.match(html, /data-replace-relation="rel-01"/)
+  assert.match(html, /data-remove-relation="rel-01"/)
+  assert.ok(html.indexOf('data-remove-relation="rel-01"') > html.indexOf('data-replace-relation="rel-01"'))
+  assert.match(html, /aria-label="Hapus relasi dengan JB-01"[\s\S]*?>\s*<span class="material-symbols-outlined" aria-hidden="true">close<\/span>/)
 })
 
 test('drawer confirms that a saved relation is already visible on the map', () => {
@@ -156,9 +174,13 @@ test('drawer confirms that a saved relation is already visible on the map', () =
   assert.match(html, /Hubungan tersimpan dan sudah ditampilkan pada peta/)
 })
 
-test('drawer exposes physical mounting assignment and administrator override controls', () => {
+test('drawer exposes compact pole assignment controls and an inline picker', () => {
   const html = renderAssetDetailDrawer({
-    asset,
+    asset: {
+      ...asset,
+      mountingExpectation: 'pole',
+      mountingReview: { warnings: ['number_coordinate_mismatch'] },
+    },
     mountedOnAsset: { id: 'pole-01', name: 'Tiang CCTV-01', type: 'Tiang CCTV' },
     mountingOptions: [{
       optionId: 'mount-option-01',
@@ -177,16 +199,41 @@ test('drawer exposes physical mounting assignment and administrator override con
     trace: { status: 'idle' },
   })
 
-  assert.match(html, /Pemasangan fisik/)
-  assert.match(html, /Dipasang pada/)
+  assert.match(html, /Jaringan tiang/)
+  assert.match(html, /aria-label="Tutup pilihan tiang"[\s\S]*?title="Tutup pilihan tiang"[\s\S]*?aria-expanded="true"/)
+  assert.match(html, /class="mounting-current"[\s\S]*?class="mounting-picker-action relation-replace-button"[\s\S]*?aria-label="Tutup pilihan tiang"/)
   assert.match(html, /Tiang CCTV-01/)
   assert.match(html, /data-mounting-action="change"/)
-  assert.match(html, /data-mounting-action="detach"/)
+  assert.match(html, /data-mounting-action="detach"[\s\S]*?aria-label="Hapus relasi dengan tiang Tiang CCTV-01"[\s\S]*?>\s*<span class="material-symbols-outlined" aria-hidden="true">close<\/span>/)
+  assert.ok(html.indexOf('data-mounting-action="detach"') > html.indexOf('data-mounting-action="change"'))
+  assert.doesNotMatch(html, /Lepaskan dari tiang|link_off/)
+  assert.match(html, /Pilih tiang/)
   assert.match(html, /data-mounting-pole="pole-02"/)
   assert.match(html, /data-mounting-pole="pole-03"/)
   assert.match(html, /1,2 m/)
   assert.match(html, /data-mounting-search/)
   assert.match(html, /Tiang CCTV-02/)
+  assert.doesNotMatch(html, /Pemasangan fisik|Ekspektasi pemasangan|Dipasang pada/)
+  assert.doesNotMatch(html, /Nomor aset berbeda dari tiang terdekat/)
+})
+
+test('unmounted assets get a plus action labeled Tambah tiang', () => {
+  const html = renderAssetDetailDrawer({
+    asset,
+    mountingOptions: [{
+      optionId: 'mount-option-01',
+      targetAssetId: 'pole-02',
+      targetAssetName: 'Tiang CCTV-02',
+      distanceMeters: 1.2,
+    }],
+    mountingControlsAvailable: true,
+    activeContext,
+    trace: { status: 'idle' },
+  })
+
+  assert.match(html, /Jaringan tiang/)
+  assert.match(html, /aria-label="Tambah tiang" title="Tambah tiang"\s+aria-expanded="false"/)
+  assert.match(html, /data-mounting-action="change"[\s\S]*?>\s*<span class="material-symbols-outlined" aria-hidden="true">add<\/span>/)
 })
 
 test('pole detail shows installed JB and cameras without the connected-assets section', () => {
@@ -204,8 +251,8 @@ test('pole detail shows installed JB and cameras without the connected-assets se
     trace: { status: 'idle' },
   })
 
-  assert.match(html, /Pemasangan fisik/)
   assert.match(html, /Aset terpasang/)
+  assert.doesNotMatch(html, /Pemasangan fisik/)
   assert.match(html, /JB-18\.1-WP/)
   assert.match(html, /C-018/)
   assert.ok(html.indexOf('JB-18.1-WP') < html.indexOf('C-018'))

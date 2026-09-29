@@ -56,6 +56,21 @@ test('koreksi berbeda dari kedua laptop bergabung dan ekspor ulang tidak menggan
   assert.equal(createCorrectionPackage(bob).changes.length, 2)
 })
 
+test('paket sinkronisasi membawa penghapusan fakta relasi manual', () => {
+  const shared = initializeSyncRecord({ ...baseline(), topologySync: null,
+    topologyInputBundle: { explicitRelations: [{
+      source: 'manual_admin', sourceKey: 'manual_device_connection',
+      sourceReference: 'JB-11', targetReference: 'JB-11.1',
+    }] },
+  }, 'shared-sync-id')
+  const sender = structuredClone(shared)
+  sender.topologyInputBundle.explicitRelations = []
+  const preview = previewCorrectionPackage(shared, createCorrectionPackage(sender))
+  assert.deepEqual(diagramChangesFromPreview(preview).changes, [{
+    type: 'remove-relation', sourceAssetId: 'JB-11', targetAssetId: 'JB-11.1',
+  }])
+})
+
 test('edit aset sama menghasilkan konflik dan butuh pilihan manusia', () => {
   const shared = baseline()
   const alice = structuredClone(shared)

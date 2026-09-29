@@ -219,7 +219,6 @@ test('diagram save applies multiple edits with one write and one aggregate revis
   const result = await service.saveDiagram('dv-review', 'admin-1', {
     expectedRecordRevision: record.recordRevision ?? 0,
     changes: [
-      { type: 'mount', assetId: 'CAM-01', poleAssetId: 'POLE-FIELD' },
       { type: 'move-frame', assetId: 'CAM-01', frameId: 'excluded-mounting:booster-kutawinangun:indoor' },
       { type: 'rename-frame', assetId: 'POLE-FIELD', name: 'Tiang pintu masuk' },
       { type: 'create-frame', frame: { id: 'excluded-mounting:site-1:custom:frame-1',
@@ -230,12 +229,36 @@ test('diagram save applies multiple edits with one write and one aggregate revis
   assert.equal(result.recordRevision, (record.recordRevision ?? 0) + 1)
   assert.equal(result.topologyFrameNames['POLE-FIELD'], 'Tiang pintu masuk')
   assert.equal(result.topologyFrameAssignments['CAM-01'], 'excluded-mounting:booster-kutawinangun:indoor')
-  assert.equal(result.topologyFrames['excluded-mounting:site-1:custom:frame-1'].type, 'indoor')
-  assert.equal(result.mountingRelations.find(r => r.sourceAssetId === 'CAM-01').targetAssetId, 'POLE-FIELD')
+  assert.equal(result.topologyFrames['excluded-mounting:site-1:custom:frame-1'], undefined)
+  assert.equal(result.mountingRelations.some(r => r.sourceAssetId === 'CAM-01'), false)
   assert.equal(result.mountingRelations.find(r => r.sourceAssetId === 'OTHER-FACILITY-JB').targetAssetId,
     'OTHER-FACILITY-POLE')
   assert.deepEqual((await repository.get('dv-review')).topologyInputBundle.classifiedNodes,
     record.topologyInputBundle.classifiedNodes)
+})
+
+test('diagram save keeps occupied custom frames and removes them when emptied', async () => {
+  const bundle = mountingBundle()
+  const record = applyArtifacts(baseRecord(bundle), generateRelationArtifacts(bundle))
+  const repository = new SerializedMemoryRepository([record])
+  const service = new TopologyService({ repository, auditLog: new MemoryAuditLog() })
+  const frameId = 'excluded-mounting:booster-kutawinangun:custom:frame-1'
+  const occupied = await service.saveDiagram('dv-review', 'admin-1', {
+    expectedRecordRevision: record.recordRevision ?? 0,
+    changes: [
+      { type: 'create-frame', frame: { id: frameId, type: 'indoor',
+        areaKey: 'booster-kutawinangun', name: 'Indoor' } },
+      { type: 'move-frame', assetId: 'CAM-01', frameId },
+    ],
+  })
+  assert.equal(occupied.topologyFrames[frameId]?.name, 'Indoor')
+
+  const emptied = await service.saveDiagram('dv-review', 'admin-1', {
+    expectedRecordRevision: occupied.recordRevision,
+    changes: [{ type: 'move-frame', assetId: 'CAM-01', frameId: null }],
+  })
+  assert.equal(emptied.topologyFrames[frameId], undefined)
+  assert.equal(emptied.topologyFrameAssignments['CAM-01'], undefined)
 })
 
 test('diagram save retains several dragged asset placements in one batch', async () => {
@@ -318,7 +341,7 @@ test('diagram save retains frame moves and connections mixed in one batch', asyn
   }
 })
 
-test('diagram save places a non-mountable device in a pole frame beside a connection', async () => {
+test('diagram save rejects a non-mountable device in a pole frame atomically', async () => {
   const bundle = mountingBundle()
   for (const [id, type] of [['SERVER-01', 'Server'], ['JB-01', 'Junction Box']]) {
     const node = mountingNode(id, type, [110.000006, -7])
@@ -329,20 +352,51 @@ test('diagram save places a non-mountable device in a pole frame beside a connec
   const service = new TopologyService({
     repository: new SerializedMemoryRepository([record]), auditLog: new MemoryAuditLog(),
   })
-  const result = await service.saveDiagram('dv-review', 'admin-1', {
+  await assert.rejects(service.saveDiagram('dv-review', 'admin-1', {
     expectedRecordRevision: record.recordRevision ?? 0,
     changes: [
       { type: 'move-frame', assetId: 'SERVER-01', frameId: 'pole-group:POLE-FIELD' },
       { type: 'add-relation', sourceAssetId: 'SERVER-01', targetAssetId: 'JB-01' },
     ],
-  })
-  assert.equal(result.topologyFrameAssignments['SERVER-01'], 'pole-group:POLE-FIELD')
-  assert.equal(result.mountingRelations.some(relation => relation.sourceAssetId === 'SERVER-01'), false)
-  assert.ok(result.graph.edges.some(edge => [edge.sourceAssetId, edge.targetAssetId]
-    .includes('SERVER-01') && [edge.sourceAssetId, edge.targetAssetId].includes('JB-01')))
+  }), { code: 'mounting_asset_not_mountable' })
 })
 
-test('draft replaces a camera JB relation atomically while retaining source evidence', async () => {
+test('moving a parent JB leaves a child JB on its own pole', async () => {
+  const bundle = mountingBundle()
+  for (const [id, type] of [['JB-11', 'Junction Box'], ['JB-11.1', 'Junction Box'], ['POLE-NEW', 'Tiang']]) {
+    const node = mountingNode(id, type, [110.000006, -7])
+    bundle.classifiedNodes.push(node.object)
+    bundle.geometries.push(node.geometry)
+  }
+  const record = applyArtifacts(baseRecord(bundle), generateRelationArtifacts(bundle))
+  const repository = new SerializedMemoryRepository([record])
+  const service = new TopologyService({ repository, auditLog: new MemoryAuditLog() })
+  const initial = await service.saveDiagram('dv-review', 'admin-1', {
+    expectedRecordRevision: record.recordRevision ?? 0,
+    changes: [
+      { type: 'mount', assetId: 'JB-11', poleAssetId: 'POLE-NEAR' },
+      { type: 'mount', assetId: 'JB-11.1', poleAssetId: 'POLE-FIELD' },
+      { type: 'add-relation', sourceAssetId: 'JB-11', targetAssetId: 'JB-11.1' },
+    ],
+  })
+  const moved = await service.saveDiagram('dv-review', 'admin-1', {
+    expectedRecordRevision: initial.recordRevision,
+    changes: [
+      { type: 'move-frame', assetId: 'JB-11', frameId: 'pole-group:POLE-NEW' },
+      { type: 'mount', assetId: 'JB-11', poleAssetId: 'POLE-NEW' },
+    ],
+  })
+  assert.equal(moved.topologyFrameAssignments['JB-11'], 'pole-group:POLE-NEW')
+  assert.equal(moved.mountingRelations.find(relation => relation.sourceAssetId === 'JB-11')?.targetAssetId,
+    'POLE-NEW')
+  assert.equal(moved.mountingRelations.find(relation => relation.sourceAssetId === 'JB-11.1')?.targetAssetId,
+    'POLE-FIELD')
+  assert.equal(moved.topologyFrameAssignments['JB-11.1'], undefined)
+  assert.ok(moved.graph.edges.some(edge => [edge.sourceAssetId, edge.targetAssetId].includes('JB-11')
+    && [edge.sourceAssetId, edge.targetAssetId].includes('JB-11.1')))
+})
+
+test('draft replaces a camera JB relation atomically and removes old relation evidence', async () => {
   const bundle = mountingBundle()
   for (const id of ['JB-OLD', 'JB-NEW']) {
     const node = mountingNode(id, 'Junction Box', [110.00001, -7])
@@ -373,7 +427,7 @@ test('draft replaces a camera JB relation atomically while retaining source evid
     .map(edge => [edge.sourceAssetId, edge.targetAssetId].find(id => id !== 'CAM-01')),
   ['JB-NEW'])
   const stored = await repository.get('dv-review')
-  assert.equal(stored.topologyInputBundle.explicitRelations.length, 2)
+  assert.equal(stored.topologyInputBundle.explicitRelations.length, 1)
   assert.ok(stored.topologyEdgeOverrides.some(override => override.edgeId === oldEdge.id))
 })
 
@@ -398,7 +452,7 @@ test('diagram save is all-or-nothing for invalid changes and rejects stale revis
   }), { code: 'dataset_version_stale_revision' })
 })
 
-test('diagram draft saves a frame move when its added device pair is already confirmed', async () => {
+test('diagram draft rejects duplicate relation and keeps the frame move unsaved', async () => {
   const bundle = mountingBundle()
   const junction = mountingNode('JB-01.2', 'Junction Box', [110.000005, -7])
   bundle.classifiedNodes.push(junction.object)
@@ -413,19 +467,15 @@ test('diagram draft saves a frame move when its added device pair is already con
   const repository = new SerializedMemoryRepository([record])
   const service = new TopologyService({ repository, auditLog: new MemoryAuditLog() })
 
-  const result = await service.saveDiagram('dv-review', 'admin-1', {
+  await assert.rejects(service.saveDiagram('dv-review', 'admin-1', {
     expectedRecordRevision: record.recordRevision ?? 0,
     changes: [
       { type: 'add-relation', sourceAssetId: 'CAM-01', targetAssetId: 'JB-01.2' },
       { type: 'move-frame', assetId: 'CAM-01',
         frameId: 'excluded-mounting:booster-kutawinangun:indoor' },
     ],
-  })
-  assert.equal(result.graph.edges.filter(edge => [edge.sourceAssetId, edge.targetAssetId]
-    .includes('CAM-01') && [edge.sourceAssetId, edge.targetAssetId]
-      .includes('JB-01.2')).length, 1)
-  assert.equal(result.topologyFrameAssignments['CAM-01'],
-    'excluded-mounting:booster-kutawinangun:indoor')
+  }), { code: 'topology_manual_relation_exists' })
+  assert.equal((await repository.get('dv-review')).topologyFrameAssignments?.['CAM-01'], undefined)
 })
 
 test('diagram removal accepts a derived edge ID and survives artifact rebuild', async () => {
@@ -457,6 +507,46 @@ test('diagram removal resolves the semantic edge key when an imported ID differs
   })
   assert.equal(result.graph.edges.some(edge => diagramEdgeKey(edge) === edgeKey), false)
   assert.equal(result.topologyEdgeOverrides[0].edgeKey, edgeKey)
+})
+
+test('removing a line deletes only exclusive relation evidence and keeps shared geometry', async () => {
+  const record = traceRecord()
+  record.topologyGraph.edges[0].sourceRelationIds = ['shared-relation', 'exclusive-relation']
+  record.topologyGraph.edges[0].candidateIds = [
+    'shared-candidate', 'exclusive-candidate', 'removed-reused-candidate',
+  ]
+  record.topologyGraph.edges[1].sourceRelationIds = ['shared-relation']
+  record.topologyGraph.edges[1].candidateIds = ['shared-candidate', 'kept-reused-candidate']
+  record.confirmedRelations = [
+    { relationId: 'shared-relation', candidateId: 'shared-candidate' },
+    { relationId: 'exclusive-relation', candidateId: 'exclusive-candidate' },
+  ]
+  record.relations = structuredClone(record.confirmedRelations)
+  record.topologyCandidates = [
+    { candidateId: 'shared-candidate', explicitRelationEvidenceId: 'shared-evidence' },
+    { candidateId: 'exclusive-candidate', explicitRelationEvidenceId: 'exclusive-evidence' },
+    { candidateId: 'removed-reused-candidate', explicitRelationEvidenceId: 'reused-evidence' },
+    { candidateId: 'kept-reused-candidate', explicitRelationEvidenceId: 'reused-evidence' },
+  ]
+  record.topologyInputBundle = { explicitRelations: [
+    { explicitRelationEvidenceId: 'shared-evidence' },
+    { explicitRelationEvidenceId: 'exclusive-evidence' },
+    { explicitRelationEvidenceId: 'reused-evidence' },
+  ], geometries: [{ geometryId: 'shared-geometry' }] }
+  const repository = new MemoryRepository([record])
+  const service = new TopologyService({ repository, auditLog: new MemoryAuditLog() })
+  await service.saveDiagram('dv-trace', 'admin-1', {
+    expectedRecordRevision: 0,
+    changes: [{ type: 'remove-edge', edgeId: 'edge-a-b' }],
+  })
+  const stored = await repository.get('dv-trace')
+  assert.deepEqual(stored.confirmedRelations.map(item => item.relationId), ['shared-relation'])
+  assert.deepEqual(stored.topologyCandidates.map(item => item.candidateId), [
+    'shared-candidate', 'kept-reused-candidate',
+  ])
+  assert.deepEqual(stored.topologyInputBundle.explicitRelations
+    .map(item => item.explicitRelationEvidenceId), ['shared-evidence', 'reused-evidence'])
+  assert.deepEqual(stored.topologyInputBundle.geometries, [{ geometryId: 'shared-geometry' }])
 })
 
 test('diagram draft persists atomically through a real JSON repository and reload', async t => {

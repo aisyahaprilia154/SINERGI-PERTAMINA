@@ -7,6 +7,7 @@ import { assetDescription } from '../../domain/asset-description.js'
 import { lineJumpPaths } from './topology-line-jumps.js'
 import { topologyDocumentMeta } from './topology-document-meta.js'
 import { CONNECTION_STYLES, connectionStyle } from './topology-connection-style.js'
+import { isJunctionBoxAsset, JUNCTION_BOX_ICON_URL } from '../../domain/junction-box-icon.js'
 
 const THEME = Object.freeze({
   background: '#f5f5f7',
@@ -286,8 +287,9 @@ export function renderTopologyDiagramSvg({
           .topology-node.pulse .topology-node-selection-glow{animation:topology-selection-pulse 1.4s ease-out}
           @keyframes topology-selection-pulse{0%{opacity:1;stroke-width:4}100%{opacity:.35;stroke-width:2}}
           .topology-node-status-dot{stroke:#fff;stroke-width:2;vector-effect:non-scaling-stroke}
-          .topology-node-status-dot.online{fill:${THEME.connected}}
-          .topology-node-status-dot.offline{fill:${THEME.unresolved}}
+          .topology-node-status-dot.connected{fill:${THEME.connected}}
+          .topology-node-status-dot.suggested{fill:${THEME.candidate}}
+          .topology-node-status-dot.disconnected{fill:${THEME.unresolved}}
           .topology-device-icon{fill:${THEME.surface};stroke-width:2.2}
           .topology-device-glyph{font:900 8px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.text};pointer-events:none}
           .topology-node-name{font:750 11px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.text};text-anchor:middle}
@@ -380,9 +382,6 @@ export function renderTopologyDiagramSvg({
         : `<g class="topology-sections" aria-label="Area fasilitas">
           ${layout.sections.map((section) => renderSection(section)).join('')}
         </g>`}
-      ${showMountingPhysical && layout.mode !== 'area-overview' && !schematic && !layout.options?.mountingRootColumns
-        ? renderPresentationBackbones(layout, { minimap })
-        : ''}
       ${showMountingPhysical && layout.mode !== 'area-overview'
         ? renderMountingGroups(model, layout, {
           selectedAssetId,
@@ -391,9 +390,12 @@ export function renderTopologyDiagramSvg({
           mountingLabelById,
           semanticLevel: resolvedSemanticLevel,
           renderMode,
+          showDiagnostics: showAdminLayers,
         })
         : ''}
-      ${layout.mode === 'area-overview' ? '' : renderBackboneGaps(layout, { minimap })}
+      ${showAdminLayers && layout.mode !== 'area-overview'
+        ? renderBackboneGaps(layout, { minimap })
+        : ''}
       <g class="topology-edges" aria-label="Relasi terkonfirmasi">
         ${edges.map((edge) => renderEdge({
           ...model.edgeById.get(edge.id),
@@ -403,7 +405,8 @@ export function renderTopologyDiagramSvg({
             ? nodesById.get(edge.targetId)?.layoutParentId === edge.sourceId ? 'source_to_target'
               : nodesById.get(edge.sourceId)?.layoutParentId === edge.targetId ? 'target_to_source' : null
             : null,
-          dimmed: edge.dimmed || (selectionActive && !edge.trace && (
+          dimmed: (edge.dimmed && !directIds.has(edge.id) && !selectionPathIds.has(edge.id))
+            || (selectionActive && !edge.trace && (
             selectedEdgeId
               ? edge.id !== selectedEdgeId
               : !directIds.has(edge.id) && !selectionPathIds.has(edge.id)
@@ -414,6 +417,7 @@ export function renderTopologyDiagramSvg({
           selectionPathIds,
           minimap,
           schematic,
+          zoom,
           jumpPath: jumpPaths.get(edge.id),
         })).join('')}
       </g>
@@ -426,7 +430,9 @@ export function renderTopologyDiagramSvg({
         ${nodes.map((node) => renderNode({
           ...model.nodeById.get(node.id),
           ...node,
-          dimmed: node.dimmed || (selectionActive && !node.trace && (
+          dimmed: (node.dimmed && !selectionPathNodes.has(node.id)
+            && !directNodes.has(node.id) && node.id !== selectedAssetId)
+            || (selectionActive && !node.trace && (
             selectedAssetId
               ? !selectionPathNodes.has(node.id) && !directNodes.has(node.id) && !revealedEndpointIds.has(node.id) && node.id !== selectedAssetId
               : !selectedEdgeNodes.has(node.id)
@@ -567,8 +573,11 @@ function renderMountingGroups(model, layout, {
   mountingLabelById = null,
   semanticLevel = 'focus',
   renderMode = 'interactive',
+  showDiagnostics = false,
 } = {}) {
-  const boxes = layout.mountingBoxes ?? []
+  const boxes = (layout.mountingBoxes ?? []).filter((box) => (
+    showDiagnostics || box.kind !== 'empty' || box.nodeIds.length > 0 || box.custom
+  ))
   return boxes.map((box, index) => {
     const singleAsset = layout.options?.layoutStyle === 'facility-schematic' && box.nodeIds.length === 1
       && !String(box.label ?? box.hostName ?? '').startsWith('Indoor')
@@ -792,7 +801,15 @@ function renderUnresolvedPanel(panel, section) {
   `
 }
 
-function renderEdge(edge, { selectedEdgeId, directIds, selectionPathIds, minimap, schematic = false, jumpPath }) {
+function renderEdge(edge, {
+  selectedEdgeId,
+  directIds,
+  selectionPathIds,
+  minimap,
+  schematic = false,
+  zoom = 1,
+  jumpPath,
+}) {
   const path = jumpPath ?? orthogonalPath(edge.routePoints ?? edge.linePoints)
   const family = normalizeFamilyClass(edge.networkFamily)
   const selected = edge.id === selectedEdgeId
@@ -816,7 +833,9 @@ function renderEdge(edge, { selectedEdgeId, directIds, selectionPathIds, minimap
     ? 'topology-arrow-selected'
     : `topology-arrow-type-${style.key ?? 'other'}`
   const direction = edge.hierarchyDirection ?? edge.direction
+  const contextualPath = selected || selectedPath || edge.trace
   const arrow = !edge.dimmed && !minimap && direction !== 'undirected'
+      && (contextualPath || Number(zoom) >= .52)
     ? `${direction === 'target_to_source' || direction === 'bidirectional'
       ? ` marker-start="url(#${marker})"`
       : ''}${direction === 'source_to_target' || direction === 'bidirectional'
@@ -886,6 +905,14 @@ function renderNode(node, {
   const typeY = visualBox.y + visualBox.height + 27
   const warning = node.connectivityStatus === 'disconnected'
     || node.connectivityStatus === 'suggested-only'
+  const connectivityDot = node.connectivityStatus === 'confirmed'
+    ? 'connected'
+    : node.connectivityStatus === 'suggested-only' ? 'suggested' : 'disconnected'
+  const connectivityText = node.connectivityStatus === 'confirmed'
+    ? 'Terhubung'
+    : node.connectivityStatus === 'suggested-only'
+      ? 'Hanya memiliki saran koneksi'
+      : 'Belum terhubung'
   const isCoreOrJunction = ['rack-root', 'junction-peer', 'junction-extended']
     .includes(node.diagramClass)
   const color = node.isCore
@@ -919,8 +946,11 @@ function renderNode(node, {
       <rect class="topology-node-selection-glow" x="${visualBox.x - 6}" y="${visualBox.y - 6}"
         width="${visualBox.width + 12}" height="${visualBox.height + 12}" rx="${visualBox.radius + 4}"/>
       ${renderNodeGlyph(node, iconX, iconY, color, sourceIconDataByUrl)}
-      <circle class="topology-node-status-dot${warning ? ' offline' : ' online'}"
-        cx="${visualBox.x + visualBox.width - 1}" cy="${visualBox.y + 1}" r="${node.isEndpoint ? 3 : 4}"/>
+      <circle class="topology-node-status-dot ${connectivityDot}"
+        cx="${visualBox.x + visualBox.width - 1}" cy="${visualBox.y + 1}"
+        r="${node.isEndpoint ? 3 : 4}">
+        <title>Konektivitas diagram: ${connectivityText}. Ini bukan status operasional perangkat.</title>
+      </circle>
       ${showLabels && (isCoreOrJunction || endpointLabel) ? `
         <text class="topology-node-name"${labelDetailAttribute} x="${iconX}" y="${labelY}">${escapeXml(labelText)}</text>
         ${showType ? `<text class="topology-node-type"${labelDetailAttribute} x="${iconX}" y="${typeY}">${escapeXml(shorten(assetDescription(node), 36))}</text>` : ''}
@@ -1047,7 +1077,9 @@ function renderAdminLayer(model, layout, { selectedCandidateId, selectedUnresolv
 }
 
 function renderNodeGlyph(node, x, y, color, sourceIconDataByUrl = null) {
-  const sourceIcon = sourceIconDataByUrl?.get?.(node.sourceIconUrl) ?? null
+  const sourceIcon = sourceIconDataByUrl?.get?.(
+    isJunctionBoxAsset(node) ? JUNCTION_BOX_ICON_URL : node.sourceIconUrl,
+  ) ?? null
   if (sourceIcon) return renderSourceIcon(sourceIcon, x, y, node)
   const role = normalizeTopologyRole(node.topologyRole)
   if (node.iconType === 'server-rack-core' || ['root', 'core', 'server', 'nvr', 'router'].includes(role)) {

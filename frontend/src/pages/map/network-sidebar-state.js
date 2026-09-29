@@ -66,6 +66,7 @@ export function createNetworkSelectionState({
   const validAssetIds = new Set(assetIds)
   let selectedNetworkIds = sanitizeIds(initialSelectedNetworkIds, validNetworkIds)
   let selectedAssetId = validAssetIds.has(initialSelectedAssetId) ? initialSelectedAssetId : null
+  let allSelectionMode = selectedNetworkIds.size === validNetworkIds.size
 
   return {
     get selectedNetworkIds() {
@@ -78,15 +79,33 @@ export function createNetworkSelectionState({
       if (!validNetworkIds.has(networkId)) return
       if (selectedNetworkIds.has(networkId)) selectedNetworkIds.delete(networkId)
       else selectedNetworkIds.add(networkId)
+      allSelectionMode = false
+    },
+    toggleNetworkGroup(networkIds) {
+      const group = sanitizeIds(networkIds, validNetworkIds)
+      if (!group.size) return
+      if (allSelectionMode) {
+        selectedNetworkIds = group
+        allSelectionMode = false
+        return
+      }
+      const groupSelected = [...group].every((id) => selectedNetworkIds.has(id))
+      for (const id of group) {
+        if (groupSelected) selectedNetworkIds.delete(id)
+        else selectedNetworkIds.add(id)
+      }
     },
     showAllNetworks() {
       selectedNetworkIds = new Set(validNetworkIds)
+      allSelectionMode = true
     },
     hideAllNetworks() {
       selectedNetworkIds.clear()
+      allSelectionMode = false
     },
     selectOnlyNetwork(networkId) {
       selectedNetworkIds = validNetworkIds.has(networkId) ? new Set([networkId]) : new Set()
+      allSelectionMode = false
     },
     selectAsset(assetId) {
       selectedAssetId = validAssetIds.has(assetId) ? assetId : null
@@ -94,6 +113,7 @@ export function createNetworkSelectionState({
     replace(nextState) {
       selectedNetworkIds = sanitizeIds(nextState.selectedNetworkIds, validNetworkIds)
       selectedAssetId = validAssetIds.has(nextState.selectedAssetId) ? nextState.selectedAssetId : null
+      allSelectionMode = selectedNetworkIds.size === validNetworkIds.size
     },
   }
 }

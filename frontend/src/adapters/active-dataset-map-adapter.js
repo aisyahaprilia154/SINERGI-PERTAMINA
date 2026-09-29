@@ -3,11 +3,10 @@ import {
   OPERATIONAL_NETWORK_COLORS,
   OPERATIONAL_NETWORK_SOFT_COLORS,
 } from '../domain/network-colors.js'
-import { correctFacilityEdges, correctedMountingExpectation, correctAdditionalMounts } from '../../../shared/facility-corrections.mjs'
+import { correctedMountingExpectation } from '../../../shared/facility-corrections.mjs'
 import {
   buildPoleGroups,
   isPoleRecord,
-  ensureDppuYiaKnownMountingRelations,
   MOUNTING_RELATION_TYPE,
 } from '../domain/pole-groups.js'
 import {
@@ -112,7 +111,7 @@ export function adaptActiveDatasetForMap(payload) {
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
   const validNodeIds = new Set(assets.map(({ id }) => id))
   const topologyGraph = confirmedTopologyProjection(payload)
-  topologyGraph.edges = filterRemovedDiagramEdges(correctFacilityEdges(topologyGraph.edges, assets), payload.topologyEdgeOverrides)
+  topologyGraph.edges = filterRemovedDiagramEdges(topologyGraph.edges, payload.topologyEdgeOverrides)
   const resolver = createFrontendIdentityResolver(payload)
   const topologyReadiness = resolveTopologyReadiness({
     topologyReadiness: payload.topologyReadiness,
@@ -143,11 +142,8 @@ export function adaptActiveDatasetForMap(payload) {
   ))
   // The presentation layer may group confirmed mounting relations, but it must
   // never turn proximity into a physical attachment that is absent from data.
-  const mountingRelations = reconcileFrameMountingAssignments(correctAdditionalMounts(ensureDppuYiaKnownMountingRelations(
-    explicitMountingRelations.filter(relation => relation.provenance === 'manual_admin'
-      || !correctedMountingExpectation(assetById[relation.sourceAssetId])),
-    assets,
-  ), assets), payload, assets)
+  const mountingRelations = explicitMountingRelations.filter(relation =>
+    !['rejected', 'revoked'].includes(relation.verificationStatus))
   const mountingOptions = normalizeMountingOptions(
     payload.mountingOptions ?? payload.mountingCandidates,
     resolver,
@@ -352,13 +348,13 @@ export function adaptActiveDatasetForTopology(payload) {
       location: asset.location ?? asset.locationText ?? location.locationGroupName,
     }
   }).filter(({ id }) => Boolean(id))
-  topologyGraph.edges = filterRemovedDiagramEdges(correctFacilityEdges(topologyGraph.edges, assets), payload.topologyEdgeOverrides)
+  topologyGraph.edges = filterRemovedDiagramEdges(topologyGraph.edges, payload.topologyEdgeOverrides)
   const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
-  const mountingRelations = reconcileFrameMountingAssignments(correctAdditionalMounts(ensureDppuYiaKnownMountingRelations(normalizeMountingRelations(
+  const mountingRelations = normalizeMountingRelations(
     payload.mountingRelations ?? [],
     resolver,
   ).filter((relation) => assetById[relation.sourceAssetId] && assetById[relation.targetAssetId]
-    && (relation.provenance === 'manual_admin' || !correctedMountingExpectation(assetById[relation.sourceAssetId]))), assets), assets), payload, assets)
+    && !['rejected', 'revoked'].includes(relation.verificationStatus))
   const mountingExpectations = normalizeMountingExpectations(
     payload.mountingExpectations,
     resolver,

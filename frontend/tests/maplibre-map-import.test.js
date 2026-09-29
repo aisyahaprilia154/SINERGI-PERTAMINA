@@ -33,7 +33,7 @@ test('MapLibre map class does not shadow the native Map collection', async () =>
   )
 })
 
-test('operational network lines render without a visible casing', async () => {
+test('operational network lines use a restrained contrast casing', async () => {
   const mapSource = await readFile(
     new URL('../src/pages/map/maplibre-map.js', import.meta.url),
     'utf8',
@@ -48,7 +48,8 @@ test('operational network lines render without a visible casing', async () => {
   )
 
   assert.doesNotMatch(mapSource, /id: 'cable-lines-casing'/)
-  assert.doesNotMatch(mapSource, /id: 'asset-relations-casing'/)
+  assert.match(mapSource, /id: 'asset-relations-casing'/)
+  assert.match(mapSource, /context\.strokeStyle = '#ffffff'/)
   assert.doesNotMatch(mapSource, /drawProjectedLine\(context, map, entry, 'casing'\)/)
   assert.doesNotMatch(mapSource, /drawProjectedLine\(context, map, entry, 'focus-glow'\)/)
   assert.doesNotMatch(canvasSource, /strokeCanvasPath\(points, colors\.surface/)
@@ -67,7 +68,8 @@ test('user map mounts MapLibre with area scope and never loads review candidates
     'utf8',
   )
 
-  assert.match(source, /import \{ createMapLibreSurface \} from '\.\/maplibre-map\.js'/)
+  assert.match(source, /const mapSurfacePromise = import\('\.\/maplibre-map\.js'\)/)
+  assert.match(source, /const \{ createMapLibreSurface \} = await mapSurfacePromise/)
   assert.match(source, /projection: 'overlays'/)
   assert.match(source, /candidates: \[\]/)
   assert.match(source, /params\.set\('area', nextArea\)/)
@@ -201,7 +203,7 @@ test('MapLibre basemap is environment-configured and operational data is fail-sa
   assert.match(surfaceSource, /basemap-status-overview/)
   assert.match(surfaceSource, /basemap-status-metrics/)
   assert.match(surfaceSource, /class="map-attribution"/)
-  assert.match(mapPageSource, /account_tree<\/span>Diagram Topologi/)
+  assert.match(mapPageSource, /account_tree<\/span><span class="nav-label">Diagram Topologi<\/span>/)
 })
 
 test('fallback and vector basemap styles are valid and use a visible neutral canvas', () => {

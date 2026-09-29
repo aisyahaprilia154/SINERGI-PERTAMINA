@@ -17,6 +17,7 @@ import {
 
 export function openMapDataTransferDialog({
   activeContext,
+  areaScopeLabel = null,
   assets = [],
   networks = [],
   selectedNetworkIds = new Set(),
@@ -63,6 +64,7 @@ export function openMapDataTransferDialog({
   function render() {
     dialog.innerHTML = renderMapDataTransferDialog({
       activeContext,
+      areaScopeLabel,
       assets,
       networks,
       selectedNetworkIds,
@@ -421,6 +423,7 @@ function normalizeBranchKey(value) {
 
 export function renderMapDataTransferDialog({
   activeContext,
+  areaScopeLabel,
   assets,
   networks,
   selectedNetworkIds,
@@ -459,6 +462,7 @@ export function renderMapDataTransferDialog({
           ? renderImportPanel(activeContext, state)
           : renderExportPanel({
             activeContext,
+            areaScopeLabel,
             assets,
             networks,
             selectedNetworkIds,
@@ -502,7 +506,7 @@ function renderImportPanel(activeContext, state) {
       </div>
 
       <input id="map-import-file" type="file" accept=".kml,.kmz"
-        class="visually-hidden" aria-describedby="map-import-help" />
+        class="visually-hidden" hidden aria-describedby="map-import-help" />
       ${state.file ? renderSelectedFile(state.file, state.fileValidation) : `
         <div class="map-import-dropzone" role="button" tabindex="0">
           <span class="material-symbols-outlined" aria-hidden="true">upload_file</span>
@@ -683,6 +687,7 @@ function renderInvalidResult(state) {
 
 function renderExportPanel({
   activeContext,
+  areaScopeLabel,
   assets,
   networks,
   selectedNetworkIds,
@@ -690,6 +695,13 @@ function renderExportPanel({
 }) {
   const hasActiveDataset = Boolean(activeContext.datasetVersionId)
   const selectedAssetIds = collectSelectedNetworkAssetIds(networks, selectedNetworkIds)
+  const selectedScope = areaScopeLabel
+    ? `di area ${areaScopeLabel}`
+    : `pada cabang ${activeContext.branchName || activeContext.branchId}`
+  const activeDatasetScope = [
+    activeContext.branchName || activeContext.branchId,
+    activeContext.version || 'versi aktif',
+  ].filter(Boolean).join(' · ')
   return `
     <section class="map-export-panel">
       <p class="map-transfer-intro">
@@ -699,15 +711,16 @@ function renderExportPanel({
         ${renderExportOption({
           icon: 'public',
           title: 'Dataset aktif ke KML',
-          description: `${assets.length} aset · ${activeContext.version || 'Belum ada versi aktif'}`,
+          description: `Seluruh dataset aktif · ${activeDatasetScope}`,
           buttonClass: 'export-active-kml',
           buttonLabel: 'Export KML',
-          disabled: !hasActiveDataset || !assets.length,
+          disabled: !hasActiveDataset,
         })}
         ${renderExportOption({
           icon: 'filter_alt',
           title: 'Jaringan terpilih ke KML',
-          description: `${selectedAssetIds.length} aset dari ${selectedNetworkIds.size} jaringan`,
+          description: `${selectedAssetIds.length} aset ${selectedScope} ·
+            ${selectedNetworkIds.size} jaringan terpilih`,
           buttonClass: 'export-selected-kml',
           buttonLabel: 'Export pilihan',
           disabled: !hasActiveDataset || !selectedAssetIds.length,

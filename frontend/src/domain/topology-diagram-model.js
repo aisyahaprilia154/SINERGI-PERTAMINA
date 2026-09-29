@@ -1,5 +1,6 @@
 import { OPERATIONAL_NETWORK_COLORS } from './network-colors.js'
 import { normalizeSearchText, searchMatchScore } from './search-normalization.js'
+import { formatAssetTypeLabel } from './asset-type-label.js'
 
 const NETWORK_FAMILY_ORDER = Object.freeze([
   'cctv',
@@ -190,6 +191,14 @@ export function buildTopologyDiagramModel({
   const allEdges = normalizeConfirmedEdges(graph?.edges, allDeviceIds, {
     branchId,
     datasetVersionId,
+  })
+  const confirmedPairs = new Set(allEdges.map(edge =>
+    unorderedPair(edge.sourceId, edge.targetId)))
+  nodes.forEach(node => {
+    if (node.layoutParentId
+      && !confirmedPairs.has(unorderedPair(node.id, node.layoutParentId))) {
+      node.layoutParentId = null
+    }
   })
   const edges = allEdges.filter((edge) => (
     nodeById.has(edge.sourceId)
@@ -604,16 +613,21 @@ export function getTopologyDiagramSearchResults(model, query, limit = 12) {
   const normalized = normalizeSearch(query)
   if (!normalized) return []
   const nodeResults = (model?.nodes ?? [])
-    .map((node) => ({
-      kind: 'asset',
-      id: node.id,
-      label: node.name || node.id,
-      typeLabel: translatedTopologyType(node.type),
-      area: node.areaName || node.areaKey || 'Area belum tersedia',
-      statusLabel: connectivityLabel(node.connectivityStatus),
-      detail: `${translatedTopologyType(node.type)} · ${node.areaName || node.areaKey || 'Area belum tersedia'} · ${connectivityLabel(node.connectivityStatus)}`,
-      score: searchScore(node, normalized),
-    }))
+    .map((node) => {
+      const typeLabel = formatAssetTypeLabel(node)
+      const area = node.areaName || node.areaKey || 'Area belum tersedia'
+      const statusLabel = connectivityLabel(node.connectivityStatus)
+      return {
+        kind: 'asset',
+        id: node.id,
+        label: node.name || node.id,
+        typeLabel,
+        area,
+        statusLabel,
+        detail: `${typeLabel} · ${area} · Konektivitas diagram: ${statusLabel} · Status operasional: ${operationalStatusLabel(node.status || node.operationalStatus)}`,
+        score: searchScore(node, normalized),
+      }
+    })
     .filter(({ score }) => score > 0)
   const edgeResults = (model?.edges ?? [])
     .map((edge) => {
@@ -630,7 +644,7 @@ export function getTopologyDiagramSearchResults(model, query, limit = 12) {
         kind: 'edge',
         id: edge.id,
         assetId: source?.id ?? target?.id ?? null,
-        label: edge.sourceGeometryId || edge.relationId || edge.id,
+        label: `${source?.name ?? edge.sourceId} → ${target?.name ?? edge.targetId}`,
         typeLabel: 'Relasi terkonfirmasi',
         area: source?.areaName || target?.areaName || source?.areaKey || 'Area belum tersedia',
         statusLabel: 'Terkonfirmasi',
@@ -666,26 +680,19 @@ export function getTopologyDiagramSearchResults(model, query, limit = 12) {
     .slice(0, limit)
 }
 
-function translatedTopologyType(value) {
-  const source = String(value ?? '').trim()
-  if (!source || /^unknown$/i.test(source)) return 'Belum terklasifikasi'
-  const normalized = source.toLowerCase()
-  if (/cctv|camera|kamera/.test(normalized)) return 'Kamera CCTV'
-  if (/junction|\bjb\b/.test(normalized)) return 'Junction box'
-  if (/router/.test(normalized)) return 'Router'
-  if (/switch/.test(normalized)) return 'Switch'
-  if (/server|rack|nvr/.test(normalized)) return 'Server / rack'
-  if (/access.?point|\bap\b/.test(normalized)) return 'Access point'
-  if (/printer/.test(normalized)) return 'Printer'
-  return source
-}
-
 function connectivityLabel(value) {
   return {
-    confirmed: 'Terkonfirmasi',
+    confirmed: 'Terhubung',
     'suggested-only': 'Hanya memiliki saran',
     disconnected: 'Belum terhubung',
-  }[value] ?? 'Belum terklasifikasi'
+  }[value] ?? 'Status konektivitas belum tercatat'
+}
+
+function operationalStatusLabel(value) {
+  const status = String(value ?? '').trim()
+  return !status || /^(unknown|not recorded|not_recorded|n\/a|none|status tidak tersedia|belum dicatat|-)$/i.test(status)
+    ? 'Belum dicatat'
+    : status
 }
 
 export function isConfirmedTopologyEdge(edge) {
@@ -1107,10 +1114,7 @@ function normalizeMountingGroups({
 
   ;(Array.isArray(poleGroups) ? poleGroups : []).forEach((group) => {
     const hostId = group?.poleAssetId ?? group?.hostAssetId ?? group?.targetAssetId
-    const childIds = (group?.assetIds ?? []).filter((id) => id !== hostId)
-    addGroup(hostId, childIds, (group?.relations ?? []).map((relation) => (
-      relation?.relationId ?? relation?.id
-    )))
+    addGroup(hostId, [], [], { allowEmpty: true })
   })
 
   ;(Array.isArray(mountingRelations) ? mountingRelations : []).forEach((relation) => {
@@ -1121,13 +1125,6 @@ function normalizeMountingGroups({
     const hostId = relation?.targetAssetId ?? relation?.targetNodeId
       ?? relation?.poleAssetId ?? relation?.hostAssetId
     addGroup(hostId, [childId], [relation?.relationId ?? relation?.id])
-  })
-
-  nodeById.forEach((node) => {
-    if (node.mountedOnAssetId) addGroup(node.mountedOnAssetId, [node.id])
-  })
-  assetById.forEach((asset) => {
-    if (Array.isArray(asset.mountedAssetIds)) addGroup(asset.id, asset.mountedAssetIds)
   })
 
   return [...groups.values()]

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildTopologyDiagramModel } from '../src/domain/topology-diagram-model.js'
 import { calculateTopologyDiagramLayout } from '../src/pages/topology/topology-diagram-layout.js'
+import { JUNCTION_BOX_ICON_URL } from '../src/domain/junction-box-icon.js'
 import {
   getTopologySelectionRoute,
   renderTopologyDiagramSvg,
@@ -81,7 +82,7 @@ test('SVG is a light logical projection and hides admin evidence by default', ()
   assert.match(svg, /<rect class="topology-mounting-bubble"/)
   assert.match(svg, /<path class="topology-mounting-header-fill"/)
   assert.match(svg, /--frame-accent:#[0-9a-f]{6}/)
-  assert.match(svg, /class="topology-presentation-backbone" data-parent-id="core"/)
+  assert.doesNotMatch(svg, /class="topology-presentation-backbone"/)
   const withoutMountingBoxes = renderTopologyDiagramSvg({
     model,
     layout,
@@ -129,6 +130,23 @@ test('SVG uses the preloaded source icon from the KMZ style when available', () 
   assert.match(svg, /data:image\/png;base64,Y2FtZXJh/)
 })
 
+test('JB nodes use the shared cabinet icon before a KMZ source icon', () => {
+  const { model, layout } = renderFixture()
+  const junction = layout.nodes.find(({ id }) => id === 'camera')
+  junction.iconType = 'junction-box'
+  junction.sourceIconUrl = '/old-jb-icon.png'
+  const svg = renderTopologyDiagramSvg({
+    model,
+    layout,
+    sourceIconDataByUrl: new Map([
+      [JUNCTION_BOX_ICON_URL, 'data:image/png;base64,amItY2FiaW5ldA=='],
+      ['/old-jb-icon.png', 'data:image/png;base64,b2xkLWpi'],
+    ]),
+  })
+  assert.match(svg, /data:image\/png;base64,amItY2FiaW5ldA==/)
+  assert.doesNotMatch(svg, /data:image\/png;base64,b2xkLWpi/)
+})
+
 test('SVG renders rack backbone gaps separately from confirmed edges', () => {
   const assets = [
     { id: 'rack', name: 'JB Rack Server', type: 'Server Rack', topologyRole: 'core', locationGroupKey: 'area-a' },
@@ -159,7 +177,7 @@ test('SVG renders rack backbone gaps separately from confirmed edges', () => {
     layout.backboneGaps[0].routePoints[1].y - layout.backboneGaps[0].routePoints[0].y,
   ) <= 24, 'gap diagnostic stays local to its island root')
   assert.match(svg, /class="topology-backbone-gap"/)
-  assert.match(svg, /class="topology-presentation-backbone" data-parent-id="rack"/)
+  assert.doesNotMatch(svg, /class="topology-presentation-backbone"/)
   assert.doesNotMatch(svg, /GAP KE RACK/)
   assert.doesNotMatch(svg, /data-edge-id="backbone-gap:/)
 })

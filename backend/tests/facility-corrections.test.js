@@ -41,7 +41,7 @@ test('actual Booster coordinates cannot mount Cam-13 23m away or split it from C
       topologyGraph: {nodes: input.classifiedNodes, edges}}
     const projected = projectFacilityRecord(record)
     assert.equal(projected.mountingRelations.some(r => r.sourceAssetId === 'Cam-13'), false)
-    const view = adaptActiveDatasetForTopology(record)
+    const view = adaptActiveDatasetForTopology(projected)
     const model = buildTopologyDiagramModel({assets: view.assets, graph: view.topologyGraph,
       mountingRelations: view.mountingRelations, poleGroups: view.poleGroups, area})
     const layout = calculateTopologyDiagramLayout(model)
@@ -82,7 +82,7 @@ test('Booster C-13 belongs only to JB-02 through projection, generation, and reg
     const projected = projectFacilityRecord(record)
     assertOwnership(projected.topologyGraph.edges)
     assertOwnership(projected.confirmedRelations)
-    const view = adaptActiveDatasetForTopology(record)
+    const view = adaptActiveDatasetForTopology(projected)
     assertOwnership(view.topologyGraph.edges)
     const first = generateRelationArtifacts(input, {previousRelations: [oldEdge]})
     assertOwnership(first.confirmedRelations)
@@ -312,9 +312,9 @@ test('existing topology projections separate indoor frames and keep each camera 
   const corrected = correctFacilityEdges(edges, sourceAssets)
   assert.ok(!corrected.some(e => e.id === 'wrong'))
   assert.deepEqual(correctFacilityEdges(corrected, sourceAssets), corrected)
-  const view = adaptActiveDatasetForTopology({datasetVersion: {id: 'dv'}, assets: sourceAssets,
+  const view = adaptActiveDatasetForTopology(projectFacilityRecord({datasetVersion: {id: 'dv'}, assets: sourceAssets,
     topologyGraph: {nodes: sourceAssets, edges},
-    mountingRelations: sourceAssets.filter(a => a.id !== 'T-01').map(a => ({sourceAssetId: a.id, targetAssetId: 'T-01', relationType: 'mounted_on'}))})
+    mountingRelations: sourceAssets.filter(a => a.id !== 'T-01').map(a => ({sourceAssetId: a.id, targetAssetId: 'T-01', relationType: 'mounted_on'}))}))
   const model = buildTopologyDiagramModel({assets: view.assets, graph: view.topologyGraph, mountingRelations: view.mountingRelations,
     poleGroups: view.poleGroups, area: 'ft-tegal-baru', roots: ['Server']})
   const layout = calculateTopologyDiagramLayout(model, {layoutStyle: 'facility-schematic'})

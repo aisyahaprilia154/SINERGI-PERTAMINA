@@ -1,13 +1,2 @@
 @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:FILL@0..1&display=swap');
 @import './styles/base.css';
-@import './styles/login.css';
-@import './styles/map-tokens.css';
-@import './styles/map.css';
-@import './styles/map-canvas.css';
-@import './styles/topology.css';
-@import './styles/topology-review.css';
-@import './styles/admin-import.css';
-@import './styles/admin-preview.css';
-@import './styles/user-account.css';
-@import './styles/visual-system.css';
-@import './styles/location-context-panel.css';
