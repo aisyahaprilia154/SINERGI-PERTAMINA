@@ -446,36 +446,6 @@
   background: var(--topology-container);
 }
 
-.topology-remove-edge-tool .material-symbols-outlined {
-  font-size: 21px;
-  font-weight: 600;
-}
-
-.topology-remove-edge-tool.active {
-  color: #a72222;
-  background: #fff0f0;
-  border-color: #e7aaaa;
-  box-shadow: 0 0 0 3px rgba(186, 26, 26, .08);
-}
-
-.topology-stitch-app.is-remove-edge-mode .topology-stitch-viewport {
-  cursor: default;
-}
-
-.topology-stitch-app.is-remove-edge-mode .topology-edge-target {
-  cursor: crosshair;
-}
-
-.topology-stitch-app.is-remove-edge-mode .topology-edge-target:hover .topology-edge-underlay {
-  stroke: rgba(186, 26, 26, .2);
-  stroke-width: 14;
-}
-
-.topology-stitch-app.is-remove-edge-mode .topology-edge-target:hover .topology-edge {
-  stroke: #ba1a1a !important;
-  stroke-width: 4;
-}
-
 .topology-stitch-toolbar-divider {
   margin: 0 4px;
 }

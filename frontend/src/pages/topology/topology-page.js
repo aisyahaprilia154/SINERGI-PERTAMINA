@@ -170,7 +170,6 @@ function mountTopologyWorkspace(container, {
     search: '',
     labelMode: 'auto',
     showMountingPhysical: true,
-    showDiagnostics: false,
     zoom: DEFAULT_ZOOM,
     sidebarCollapsed: window.matchMedia?.('(max-width: 960px)').matches ?? false,
     exportOpen: false,
@@ -179,7 +178,6 @@ function mountTopologyWorkspace(container, {
     inspectorOpen: Boolean(selectedAssetFromUrl),
     searchResults: [],
     relationSearch: '',
-    removeEdgeMode: false,
     mutationBusy: false,
     frameComposerOpen: false,
     pendingFrameId: null,
@@ -218,7 +216,6 @@ function mountTopologyWorkspace(container, {
     selectedFamilies: state.selectedFamilies,
     search: state.search,
     showMountingPhysical: state.showMountingPhysical,
-    showAdminLayers: state.showDiagnostics,
     publicationProfile: activeContext.publicationProfile,
     readiness: mapData.topologyReadiness,
   })
@@ -376,10 +373,6 @@ function mountTopologyWorkspace(container, {
       return
     }
     if (target?.dataset.edgeId) {
-      if (state.removeEdgeMode) {
-        void removeRelation(target.dataset.edgeId)
-        return
-      }
       selectEdge(target.dataset.edgeId)
       return
     }
@@ -452,25 +445,6 @@ function mountTopologyWorkspace(container, {
     if (action === 'zoom-reset') return zoomGraphTo(DEFAULT_ZOOM)
     if (action === 'fit') return fitGraph()
     if (action === 'focus-relations') return focusRelations()
-    if (action === 'toggle-diagnostics') {
-      state.showDiagnostics = !state.showDiagnostics
-      state.actionsOpen = false
-      model = buildModel()
-      layout = buildLayout()
-      renderGraph()
-      renderInspector()
-      renderTray()
-      renderTopologySidebar()
-      updateToolbar()
-      updatePanelState()
-      return
-    }
-    if (action === 'toggle-remove-edge') {
-      state.actionsOpen = false
-      state.removeEdgeMode = !state.removeEdgeMode
-      updatePanelState()
-      return
-    }
     if (action === 'toggle-export') {
       state.exportOpen = !state.exportOpen
       state.legendOpen = false
@@ -629,10 +603,6 @@ function mountTopologyWorkspace(container, {
       if (openPanel) container.querySelector(`[data-action="toggle-${openPanel}"]`)?.focus()
       if (dragState) cancelAssetDrag()
       closeFrameComposer()
-      if (state.removeEdgeMode) {
-        state.removeEdgeMode = false
-        updatePanelState()
-      }
       closeFrameNameEditor()
       return
     }
@@ -1019,7 +989,6 @@ function mountTopologyWorkspace(container, {
       selectedMountingGroupId: state.selectedMountingGroupId,
       labelMode: state.labelMode,
       showMountingPhysical: state.showMountingPhysical,
-      showAdminLayers: state.showDiagnostics,
       zoom: state.zoom,
       renderMode: 'interactive',
       sourceIconDataByUrl: sourceIconLoader.dataByUrl,
@@ -1064,7 +1033,7 @@ function mountTopologyWorkspace(container, {
       : (layout.mountingBoxes ?? [])
         .filter((box) => (
           box.kind !== 'needs-mounting'
-            && (state.showDiagnostics || box.kind !== 'empty' || box.custom)
+            && (box.kind !== 'empty' || box.custom)
         ))
         .map((box) => ({
           kind: 'mounting',
@@ -1480,7 +1449,6 @@ function mountTopologyWorkspace(container, {
     if (added) state.changes = state.changes.filter(change => change !== added)
     else stageChange({ type: 'remove-edge', edgeId })
     graph = { ...graph, edges: graph.edges.filter(item => (item.id ?? item.relationId) !== edgeId) }
-    state.removeEdgeMode = false
     state.selectedEdgeId = null
     rebuild()
     showToast('Relasi dihapus dari draft. Gunakan Batal untuk memulihkannya sebelum disimpan.')
@@ -2053,14 +2021,12 @@ function mountTopologyWorkspace(container, {
     setHidden('[data-topology-export-panel]', !state.exportOpen)
     setHidden('[data-topology-legend]', !state.legendOpen)
     setHidden('[data-topology-actions-menu]', !state.actionsOpen)
-    setHidden('[data-remove-mode-hint]', !state.removeEdgeMode)
     const actionsToggle = container.querySelector('[data-action="toggle-actions"]')
     actionsToggle?.setAttribute('aria-expanded', String(state.actionsOpen))
     const inspector = container.querySelector('.topology-stitch-inspector')
     if (inspector) inspector.hidden = !state.inspectorOpen
     const app = container.querySelector('[data-topology-app]')
     app?.classList.toggle('topology-sidebar-collapsed', state.sidebarCollapsed)
-    app?.classList.toggle('is-remove-edge-mode', state.removeEdgeMode)
     app?.classList.toggle('is-saving', state.mutationBusy)
     const draftBar = container.querySelector('[data-draft-bar]')
     if (draftBar) {
@@ -2086,8 +2052,6 @@ function mountTopologyWorkspace(container, {
     const actionStates = {
       'toggle-export': state.exportOpen,
       'toggle-legend': state.legendOpen,
-      'toggle-remove-edge': state.removeEdgeMode,
-      'toggle-diagnostics': state.showDiagnostics,
     }
     Object.entries(actionStates).forEach(([action, active]) => {
       container.querySelectorAll(`[data-action="${action}"]`).forEach((button) => {
@@ -2101,13 +2065,6 @@ function mountTopologyWorkspace(container, {
     })
     const legendToggle = container.querySelector('[data-action="toggle-legend"]')
     legendToggle?.setAttribute('aria-label', state.legendOpen ? 'Sembunyikan legenda diagram' : 'Tampilkan legenda diagram')
-    container.querySelectorAll('[data-action="toggle-remove-edge"]').forEach((button) => {
-      button.setAttribute('aria-label', state.removeEdgeMode ? 'Selesai menghapus relasi' : 'Aktifkan mode hapus relasi')
-      button.setAttribute('title', state.removeEdgeMode ? 'Selesai menghapus relasi (Esc)' : 'Hapus relasi dengan memilih garis')
-      const label = button.querySelector('[data-remove-edge-label]')
-      if (label) label.textContent = state.removeEdgeMode ? 'Selesai' : 'Hapus relasi'
-      button.disabled = state.mutationBusy
-    })
   }
 
   function exportDiagram(kind) {
@@ -2327,14 +2284,7 @@ function renderWorkspaceShell({ activeContext, mapData, state, model }) {
           <div class="topology-actions-menu" id="topology-actions-menu" data-topology-actions-menu hidden>
             <span class="topology-actions-heading">Tindakan diagram</span>
             <button type="button" data-action="rename-selected-frame" title="Pilih frame terlebih dahulu" disabled><span class="material-symbols-outlined" aria-hidden="true">edit</span><span>Ubah nama frame</span></button>
-            <button type="button" data-action="toggle-diagnostics" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">monitoring</span><span>Lapisan diagnostik</span></button>
-            <button type="button" class="topology-remove-edge-tool" data-action="toggle-remove-edge" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">link_off</span><span data-remove-edge-label>Hapus relasi</span></button>
             <button type="button" data-action="open-sync"><span class="material-symbols-outlined" aria-hidden="true">sync_alt</span><span>Sinkronisasi data</span></button>
-          </div>
-          <div class="topology-remove-mode-hint" data-remove-mode-hint role="status" hidden>
-            <span class="material-symbols-outlined" aria-hidden="true">link_off</span>
-            <span><strong>Mode hapus relasi</strong><small>Pilih garis yang ingin dihapus. Perubahan masih bisa dibatalkan sebelum disimpan.</small></span>
-            <button type="button" data-action="toggle-remove-edge">Selesai</button>
           </div>
           <div class="topology-stitch-viewport" data-topology-viewport tabindex="0" aria-label="Canvas diagram topologi">
             <div class="topology-stitch-canvas"><div class="topology-stitch-graph-frame" data-topology-frame></div></div>
