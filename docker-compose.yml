@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-sinergi}
       POSTGRES_USER: ${POSTGRES_USER:-sinergi}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sinergi_local_dev_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}
     volumes:
       - sinergi-postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -19,7 +19,7 @@ services:
       context: .
       dockerfile: docker/backend.Dockerfile
     environment:
-      SINERGI_DATABASE_URL: "postgresql://${POSTGRES_USER:-sinergi}:${POSTGRES_PASSWORD:-sinergi_local_dev_password}@db:5432/${POSTGRES_DB:-sinergi}"
+      SINERGI_DATABASE_URL: "postgresql://${POSTGRES_USER:-sinergi}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}@db:5432/${POSTGRES_DB:-sinergi}"
       SINERGI_STORAGE_MODE: postgres
     depends_on:
       db:
@@ -37,14 +37,15 @@ services:
       SINERGI_PORT: 5000
       SINERGI_DATA_ROOT: /app/.data
       SINERGI_STORAGE_MODE: postgres
-      SINERGI_DATABASE_URL: "postgresql://${POSTGRES_USER:-sinergi}:${POSTGRES_PASSWORD:-sinergi_local_dev_password}@db:5432/${POSTGRES_DB:-sinergi}"
-      SINERGI_AUTH_TOKENS: '${SINERGI_AUTH_TOKENS:-{"local-admin":{"id":"local-admin","role":"Administrator","name":"Local Administrator"}}}'
+      SINERGI_DATABASE_URL: "postgresql://${POSTGRES_USER:-sinergi}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}@db:5432/${POSTGRES_DB:-sinergi}"
+      SINERGI_AUTH_TOKENS: '${SINERGI_AUTH_TOKENS:?Set SINERGI_AUTH_TOKENS in .env.docker}'
+      SINERGI_TOPOLOGY_DRAFT_REQUIRED: "true"
       SINERGI_BRANCH_IDS: "${SINERGI_BRANCH_IDS:-semarang}"
       SINERGI_BRANCH_DATASETS: '${SINERGI_BRANCH_DATASETS:-{"semarang":"dataset-semarang"}}'
     volumes:
       - sinergi-app-data:/app/.data
     ports:
-      - "${SINERGI_API_PORT:-5000}:5000"
+      - "127.0.0.1:${SINERGI_API_PORT:-5000}:5000"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -65,7 +66,7 @@ services:
         VITE_SINERGI_VECTOR_TILES_URL: ${VITE_SINERGI_VECTOR_TILES_URL:-/api/basemap/openfreemap/planet}
         VITE_SINERGI_BASEMAP_ATTRIBUTION: ${VITE_SINERGI_BASEMAP_ATTRIBUTION:-}
     ports:
-      - "${SINERGI_HTTP_PORT:-8080}:8080"
+      - "127.0.0.1:${SINERGI_HTTP_PORT:-8080}:8080"
     depends_on:
       backend:
         condition: service_healthy

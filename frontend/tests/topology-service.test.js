@@ -6,6 +6,7 @@ import {
 } from '../src/services/import-dataset-service.js'
 import {
   createTopologyRelation,
+  saveTopologyDiagram,
   analyzeTopologyImpact,
   loadAllTopologyCandidates,
   loadTopologyProjection,
@@ -17,7 +18,30 @@ import {
   setMountingExpectation,
   reviewTopologyBulk,
   reviewTopologyCandidate,
+  revokeTopologyRelation,
 } from '../src/services/active-dataset-service.js'
+
+test('diagram save sends one revision-guarded batch for all draft changes', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options })
+    return new Response(JSON.stringify({ recordRevision: 21 }), { status: 200 })
+  }
+  const changes = [
+    { type: 'mount', assetId: 'camera', poleAssetId: 'pole-from-kmz' },
+    { type: 'rename-frame', assetId: 'pole-from-kmz', name: 'Pintu masuk' },
+    { type: 'remove-edge', edgeId: 'topology-edge:derived' },
+  ]
+  try {
+    const result = await saveTopologyDiagram({ datasetVersionId: 'dv-1', changes, expectedRecordRevision: 20, token: 'admin' })
+    assert.equal(requests.length, 1)
+    assert.equal(requests[0].url, '/api/dataset-versions/dv-1/topology/diagram')
+    assert.equal(requests[0].options.method, 'POST')
+    assert.deepEqual(JSON.parse(requests[0].options.body), { changes, expectedRecordRevision: 20 })
+    assert.equal(result.recordRevision, 21)
+  } finally { globalThis.fetch = originalFetch }
+})
 
 test('mounting review API forwards filters, revision, bulk decisions, and idempotency', async () => {
   const originalFetch = globalThis.fetch
@@ -343,6 +367,35 @@ test('manual topology relation sends the selected device pair and audit reason',
       relationType: 'connected-to',
       direction: 'undirected',
       reason: 'Diverifikasi dari dokumentasi lapangan.',
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('relation revocation carries dataset scope and optimistic graph revision', async () => {
+  const originalFetch = globalThis.fetch
+  let request
+  globalThis.fetch = async (url, options) => {
+    request = { url, options }
+    return new Response(JSON.stringify({ relation: { verificationStatus: 'revoked' } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    await revokeTopologyRelation({
+      relationId: 'relation-1',
+      datasetVersionId: 'dv-1',
+      reason: 'Dihapus lewat editor diagram.',
+      expectedGraphRevision: 'graph:7',
+      token: 'admin',
+    })
+    assert.equal(request.url, '/api/topology/relations/relation-1/revoke')
+    assert.deepEqual(JSON.parse(request.options.body), {
+      datasetVersionId: 'dv-1',
+      reason: 'Dihapus lewat editor diagram.',
+      expectedGraphRevision: 'graph:7',
     })
   } finally {
     globalThis.fetch = originalFetch

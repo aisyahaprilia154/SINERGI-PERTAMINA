@@ -6,6 +6,8 @@ import {
   calculateSchematicFitScale,
   MIN_SCHEMATIC_ZOOM,
 } from './schematic-viewport.js'
+import { searchMatchScore } from '../../domain/search-normalization.js'
+import { isJunctionBoxAsset, JUNCTION_BOX_ICON_URL } from '../../domain/junction-box-icon.js'
 
 export function openSchematicDialog({
   diagrams,
@@ -309,7 +311,9 @@ function bindDialogEvents({
 
   const preloadSourceIcons = async (diagram, sequence) => {
     const urls = [...new Set(
-      (diagram?.layout?.nodes ?? []).map((node) => node.sourceIconUrl).filter(Boolean),
+      (diagram?.layout?.nodes ?? []).map((node) => (
+        isJunctionBoxAsset(node) ? JUNCTION_BOX_ICON_URL : node.sourceIconUrl
+      )).filter(Boolean),
     )]
     if (!urls.length) return
     await Promise.all(urls.map(loadSourceIcon))
@@ -618,15 +622,17 @@ function renderDiagramState(graph) {
 }
 
 function renderSearchResults({ query, nodes, container }) {
-  const normalized = String(query || '').trim().toLowerCase()
+  const normalized = String(query || '').trim()
   if (!normalized) {
     container.hidden = true
     container.innerHTML = ''
     return
   }
-  const matches = nodes.filter((node) => (
-    `${node.id} ${node.name} ${node.type}`.toLowerCase().includes(normalized)
-  )).slice(0, 8)
+  const matches = nodes.filter((node) => searchMatchScore([
+    node.id,
+    node.name,
+    node.type,
+  ], normalized) > 0).slice(0, 8)
   container.innerHTML = matches.length
     ? matches.map((node) => `
       <button type="button" role="option" data-search-asset-id="${escapeHtml(node.id)}"

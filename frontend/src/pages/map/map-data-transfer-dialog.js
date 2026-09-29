@@ -17,6 +17,7 @@ import {
 
 export function openMapDataTransferDialog({
   activeContext,
+  areaScopeLabel = null,
   assets = [],
   networks = [],
   selectedNetworkIds = new Set(),
@@ -33,6 +34,7 @@ export function openMapDataTransferDialog({
     file: null,
     fileValidation: null,
     officialSourceConfirmed: false,
+    importMode: 'replace_active',
     versionName: createVersionName(),
     phase: 'idle',
     uploadPercent: null,
@@ -62,6 +64,7 @@ export function openMapDataTransferDialog({
   function render() {
     dialog.innerHTML = renderMapDataTransferDialog({
       activeContext,
+      areaScopeLabel,
       assets,
       networks,
       selectedNetworkIds,
@@ -125,6 +128,11 @@ export function openMapDataTransferDialog({
     })
     dialog.querySelector('[name="mapOfficialSource"]')?.addEventListener('change', (event) => {
       state.officialSourceConfirmed = event.target.checked
+      render()
+    })
+    dialog.querySelector('[name="mapImportMode"]')?.addEventListener('change', (event) => {
+      state.importMode = event.target.value
+      state.error = null
       render()
     })
     dialog.querySelector('[name="mapConfirmBreakingChanges"]')?.addEventListener('change', (event) => {
@@ -198,6 +206,7 @@ export function openMapDataTransferDialog({
         fields: {
           branchId: importTarget.id,
           datasetId: importTarget.datasetId,
+          importMode: state.importMode,
           versionName: state.versionName.trim(),
           officialSourceConfirmed: true,
         },
@@ -236,7 +245,33 @@ export function openMapDataTransferDialog({
         render()
         return
       }
+      if (status.datasetVersion.status === 'active') {
+        state.phase = 'active'
+        render()
+        window.setTimeout(() => onActivated?.({
+          datasetVersion: status.datasetVersion,
+          mapUrl: '/map',
+        }), 350)
+        return
+      }
       if (status.datasetVersion.status === 'valid' && status.canActivate) {
+        if (status.datasetVersion.importMode === 'replace_active') {
+          if (status.autoActivation?.status === 'failed') {
+            state.phase = 'error'
+            state.error = status.autoActivation.message
+              || 'Import selesai, tetapi aktivasi otomatis gagal. Coba aktifkan dari halaman preview.'
+            render()
+            return
+          }
+          render()
+          await delay(500, state.controller.signal)
+          continue
+        }
+        if (status.datasetVersion.importMode === 'stage_only') {
+          state.phase = 'staged'
+          render()
+          return
+        }
         state.requiresBreakingChangeConfirmation = status.comparisonSummary
           ?.requiresBreakingChangeConfirmation === true
         if (state.requiresBreakingChangeConfirmation) {
@@ -331,6 +366,7 @@ export function openMapDataTransferDialog({
     state.file = null
     state.fileValidation = null
     state.officialSourceConfirmed = false
+    state.importMode = 'replace_active'
     state.versionName = createVersionName()
     state.phase = 'idle'
     state.uploadPercent = null
@@ -387,6 +423,7 @@ function normalizeBranchKey(value) {
 
 export function renderMapDataTransferDialog({
   activeContext,
+  areaScopeLabel,
   assets,
   networks,
   selectedNetworkIds,
@@ -425,6 +462,7 @@ export function renderMapDataTransferDialog({
           ? renderImportPanel(activeContext, state)
           : renderExportPanel({
             activeContext,
+            areaScopeLabel,
             assets,
             networks,
             selectedNetworkIds,
@@ -436,6 +474,7 @@ export function renderMapDataTransferDialog({
 }
 
 function renderImportPanel(activeContext, state) {
+  const importMode = state.importMode ?? 'replace_active'
   if (state.configStatus === 'loading') {
     return renderTransferState('progress_activity', 'Menyiapkan import', 'Membaca batas file dari server.')
   }
@@ -447,6 +486,7 @@ function renderImportPanel(activeContext, state) {
   }
   if (state.phase === 'awaiting-confirmation') return renderBreakingChangeConfirmation(state)
   if (state.phase === 'invalid') return renderInvalidResult(state)
+  if (state.phase === 'staged') return renderStagedResult(state)
 
   const fileError = state.fileValidation?.valid === false
     ? state.fileValidation.error
@@ -466,7 +506,7 @@ function renderImportPanel(activeContext, state) {
       </div>
 
       <input id="map-import-file" type="file" accept=".kml,.kmz"
-        class="visually-hidden" aria-describedby="map-import-help" />
+        class="visually-hidden" hidden aria-describedby="map-import-help" />
       ${state.file ? renderSelectedFile(state.file, state.fileValidation) : `
         <div class="map-import-dropzone" role="button" tabindex="0">
           <span class="material-symbols-outlined" aria-hidden="true">upload_file</span>
@@ -487,12 +527,26 @@ function renderImportPanel(activeContext, state) {
           maxlength="120" autocomplete="off" />
       </label>
 
+      <label class="map-transfer-field">
+        <span>Setelah import</span>
+        <select name="mapImportMode">
+          <option value="replace_active" ${importMode === 'replace_active' ? 'selected' : ''}>
+            Timpa data aktif dan langsung tampilkan
+          </option>
+          <option value="stage_only" ${importMode === 'stage_only' ? 'selected' : ''}>
+            Jangan timpa — simpan untuk ditinjau
+          </option>
+        </select>
+      </label>
+
       <label class="map-import-confirmation">
         <input name="mapOfficialSource" type="checkbox"
           ${state.officialSourceConfirmed ? 'checked' : ''} />
         <span>
           <strong>File berasal dari sumber resmi.</strong>
-          <small>Jika valid, versi aktif saat ini akan diarsipkan dan peta dimuat ulang.</small>
+          <small>${importMode === 'replace_active'
+            ? 'Jika valid, versi aktif saat ini akan diarsipkan dan peta serta diagram dimuat ulang.'
+            : 'File diproses menjadi versi tinjauan tanpa mengubah peta dan diagram aktif.'}</small>
         </span>
       </label>
 
@@ -506,8 +560,29 @@ function renderImportPanel(activeContext, state) {
         <button class="button primary start-map-import" type="button"
           ${state.fileValidation?.valid && state.officialSourceConfirmed ? '' : 'disabled'}>
           <span class="material-symbols-outlined" aria-hidden="true">map</span>
-          Import dan tampilkan di peta
+          ${importMode === 'replace_active'
+            ? 'Import dan tampilkan di peta'
+            : 'Import untuk ditinjau'}
         </button>
+      </footer>
+    </section>
+  `
+}
+
+function renderStagedResult(state) {
+  const topology = state.status?.topology ?? {}
+  return `
+    <section class="map-transfer-progress" aria-live="polite">
+      <span class="map-transfer-progress-icon material-symbols-outlined" aria-hidden="true">
+        task_alt
+      </span>
+      <h3>Versi tinjauan berhasil dibuat</h3>
+      <p>Data aktif tidak berubah. Diagram sementara berisi ${Number(topology.nodeCount ?? 0).toLocaleString('id-ID')} aset dan ${Number(topology.edgeCount ?? 0).toLocaleString('id-ID')} relasi.</p>
+      <footer class="map-transfer-actions">
+        <button class="button secondary close-map-transfer" type="button">Tutup</button>
+        <a class="button primary" href="/admin/datasets/import/${encodeURIComponent(state.status.datasetVersion.id)}/preview">
+          Tinjau versi
+        </a>
       </footer>
     </section>
   `
@@ -612,6 +687,7 @@ function renderInvalidResult(state) {
 
 function renderExportPanel({
   activeContext,
+  areaScopeLabel,
   assets,
   networks,
   selectedNetworkIds,
@@ -619,6 +695,13 @@ function renderExportPanel({
 }) {
   const hasActiveDataset = Boolean(activeContext.datasetVersionId)
   const selectedAssetIds = collectSelectedNetworkAssetIds(networks, selectedNetworkIds)
+  const selectedScope = areaScopeLabel
+    ? `di area ${areaScopeLabel}`
+    : `pada cabang ${activeContext.branchName || activeContext.branchId}`
+  const activeDatasetScope = [
+    activeContext.branchName || activeContext.branchId,
+    activeContext.version || 'versi aktif',
+  ].filter(Boolean).join(' · ')
   return `
     <section class="map-export-panel">
       <p class="map-transfer-intro">
@@ -628,15 +711,16 @@ function renderExportPanel({
         ${renderExportOption({
           icon: 'public',
           title: 'Dataset aktif ke KML',
-          description: `${assets.length} aset · ${activeContext.version || 'Belum ada versi aktif'}`,
+          description: `Seluruh dataset aktif · ${activeDatasetScope}`,
           buttonClass: 'export-active-kml',
           buttonLabel: 'Export KML',
-          disabled: !hasActiveDataset || !assets.length,
+          disabled: !hasActiveDataset,
         })}
         ${renderExportOption({
           icon: 'filter_alt',
           title: 'Jaringan terpilih ke KML',
-          description: `${selectedAssetIds.length} aset dari ${selectedNetworkIds.size} jaringan`,
+          description: `${selectedAssetIds.length} aset ${selectedScope} ·
+            ${selectedNetworkIds.size} jaringan terpilih`,
           buttonClass: 'export-selected-kml',
           buttonLabel: 'Export pilihan',
           disabled: !hasActiveDataset || !selectedAssetIds.length,

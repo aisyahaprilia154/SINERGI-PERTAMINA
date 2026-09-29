@@ -300,9 +300,6 @@ export function createMapCanvas(canvas, {
         context.lineCap = 'round'
         context.lineJoin = 'round'
         context.setLineDash(lineStyle.dash)
-        if (active || emphasized) {
-          strokeCanvasPath(points, colors.surface, lineWidth + 3)
-        }
         strokeCanvasPath(points, network.color, lineWidth)
         context.restore()
         points.slice(1).forEach((end, index) => {

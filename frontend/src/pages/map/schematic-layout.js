@@ -705,7 +705,7 @@ function calculateMapRelativeLayout(graph, settings) {
 }
 
 function calculateCategorySectionLayout(graph, settings) {
-  const categoryOrder = ['cctv', 'fiber-optic', 'lan', 'infrastructure', 'peripheral']
+  const categoryOrder = ['cctv', 'fiber-optic', 'power', 'lan', 'infrastructure', 'peripheral']
   const groups = new Map()
   graph.nodes.forEach((node) => {
     const category = node.category || 'infrastructure'

@@ -21,5 +21,35 @@ menurut komponen yang terhubung, termasuk aset tanpa relasi. Label menampilkan
 nomor/nama aset dan tipe kamera dari folder sumber bila tersedia.
 
 Regenerasi berikutnya menyimpan relasi koreksi sebagai relasi terkonfirmasi.
-Adapter menerapkannya pada diagram dataset lama tanpa menulis ulang penyimpanan.
-Tes regresi: `backend/tests/facility-corrections.test.js`.
+Proyeksi record aktif backend menerapkannya pada respons dataset, graph, dan
+trace dataset lama tanpa menulis ulang penyimpanan. Adapter frontend tetap
+menangani data lama yang belum melalui proyeksi tersebut.
+
+Diagram memakai struktur kartu seragam mengikuti referensi Figma: server di
+atas, frame tiang berisi JB dan kamera, serta frame indoor/non-tiang terpisah.
+Kamera indoor dengan satu JB penghubung yang sama digabung dalam frame indoor.
+Hierarki frame mengikuti relasi aktual; komponen yang belum tersambung ke server
+disusun pada baris berikutnya tanpa menambahkan garis server sintetis. Tampilan
+awal menjaga ukuran kartu tetap terbaca; Fit semua menampilkan keseluruhan,
+sedangkan Fokus relasi membingkai aset terpilih dan tetangga langsungnya.
+
+JB setingkat menggunakan posisi vertikal bersama meskipun tinggi frame berbeda.
+Frame endpoint indoor ditempatkan di samping frame JB asal tanpa menjadi bagian
+dari tiang. Frame tiang memakai biru muda, indoor ungu muda, non-tiang jingga muda.
+Routing ortogonal menghindari kartu dan judul frame. Crossing antargaris diizinkan
+agar tidak menambah detour; belokan tidak digambar sebagai junction baru.
+Persilangan antarrelasi yang tidak berbagi endpoint diberi line jump; segmen
+trunk yang berbagi sumber tidak diberi penanda persilangan palsu. Jarak level
+dihitung terpisah per zona agar frame tinggi di zona server tidak memperpanjang
+relasi pada komponen lain. Root lebih besar, backbone lebih tebal daripada
+cabang, dan kartu menggunakan bayangan ringan di atas latar zona. Root frame
+dipaketkan ke matriks lebar-terbatas; komponen terhubung dan komponen terpisah
+berbagi baris matriks agar tidak membentuk jurang vertikal atau deretan tak
+berujung ke kanan.
+Panah penuh mengikuti direction pada graph. Panah kosong hanya menunjukkan
+parent-child dari layout dan diberi keterangan terpisah; undirected tidak diubah
+menjadi aliran satu arah maupun bukti komunikasi dua arah. Kartu diperbesar,
+ikon endpoint memakai skala 1.3, dan frame satelit memakai baris kompak agar
+tidak membentuk kolom panjang jika masih ada ruang di sampingnya.
+Tes regresi: `backend/tests/facility-corrections.test.js` dan
+`frontend/tests/topology-schematic-layout.test.js`.

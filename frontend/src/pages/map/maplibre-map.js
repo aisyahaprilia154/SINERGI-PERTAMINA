@@ -15,6 +15,7 @@ import {
   attachClustersToPoleGroups,
   buildAdaptiveAssetLayout,
 } from './adaptive-asset-layout.js'
+import { createSourceIconLoader } from '../../domain/source-icon-loader.js'
 import {
   isCctvCoverageOverlay,
   shouldRenderCctvCoverageOverlay,
@@ -23,24 +24,44 @@ import {
 import {
   BASEMAP_LOAD_TIMEOUT_MS,
   BASEMAP_RETRY_DELAYS_MS,
+  DEFAULT_IMAGERY_MAX_ZOOM,
+  applyBaseStyleTheme,
   basemapErrorMessage,
   createBaseStyle,
   isBasemapError,
   isBasemapLoadedEvent,
 } from './maplibre-basemap.js'
 import { assetPointRadiusExpression } from './maplibre-style-expressions.js'
+import { OPERATIONAL_NETWORK_COLORS } from '../../domain/network-colors.js'
+import { isJunctionBoxAsset, JUNCTION_BOX_ICON_URL } from '../../domain/junction-box-icon.js'
+import {
+  assetVisibleAtZoom,
+  assetVisualTier,
+  maximumVisibleLineTier,
+} from './semantic-zoom.js'
 
 setWorkerUrl(maplibreWorkerUrl)
 
 const CATEGORY_COLORS = Object.freeze({
   CCTV: '#6f6de8',
   'CCTV cable': '#6f6de8',
-  'Fiber optic': '#26a985',
-  LAN: '#708196',
-  Infrastructure: '#c58722',
+  'Fiber optic': OPERATIONAL_NETWORK_COLORS['fiber-optic'],
+  'Power PLN': OPERATIONAL_NETWORK_COLORS.power,
+  LAN: OPERATIONAL_NETWORK_COLORS.lan,
+  Infrastructure: OPERATIONAL_NETWORK_COLORS.infrastructure,
   Peripheral: '#8a65d8',
   'Belum terpetakan': '#7b8794',
 })
+
+function markerScaleForZoom(zoom, minimum = 0.64) {
+  const progress = Math.max(0, Math.min(1, (Number(zoom) - 15) / 5))
+  return minimum + (1 - minimum) * progress
+}
+
+function poleMarkerScaleForZoom(zoom) {
+  const progress = Math.max(0, Math.min(1, (Number(zoom) - 15) / 5))
+  return 1 - 0.22 * progress
+}
 
 export function createMapLibreSurface(element, {
   assets = [],
@@ -51,6 +72,7 @@ export function createMapLibreSurface(element, {
   candidates = [],
   overlays = [],
   onSelectAsset = () => {},
+  onHoverAsset = () => {},
   onSelectNetwork = () => {},
   onSelectCandidate = () => {},
   onBasemapStatus = () => {},
@@ -62,6 +84,10 @@ export function createMapLibreSurface(element, {
   const assetById = new Map(assets.map((asset) => [asset.id, asset]))
   const geometryById = new Map(geometries.map((geometry) => [geometry.id, geometry]))
   const networkById = new Map(networks.map((network) => [network.id, network]))
+  const geometryDetailLevels = buildGeometryDetailLevels({
+    geometries, networks, topologyGraph, assetById,
+  })
+  const geometryLinkedAssetIds = buildGeometryLinkedAssetIds(topologyGraph)
   const networkByGeometryId = new Map()
   const assetNetworkIds = new Map()
   networks.forEach((network) => {
@@ -77,7 +103,9 @@ export function createMapLibreSurface(element, {
     selectedNetworkIds: new Set(networks.filter(({ isDefaultVisible }) => isDefaultVisible)
       .map(({ id }) => id)),
     selectedAssetId: null,
+    hoveredAssetId: null,
     connectedNodeIds: [],
+    physicalRelatedIds: [],
     selectedCandidateId: null,
     dimOthers: true,
     isolateSelectedCandidate: false,
@@ -94,7 +122,12 @@ export function createMapLibreSurface(element, {
   let basemapLastError = ''
   let basemapHasLoadedTile = false
   let declutterEnabled = true
+  let showAssetLabels = false
+  let searchHighlightTimer = null
+  const sourceIconLoader = createSourceIconLoader()
   let layoutFrame = null
+  let transformFrame = null
+  let layoutAnchor = null
   let layoutStatusSignature = ''
   let clusterLookup = new Map()
   let groundOverlayLayers = []
@@ -103,15 +136,25 @@ export function createMapLibreSurface(element, {
   // that the same as an omitted value so the same-origin proxy remains the
   // safe default instead of rendering only the neutral canvas.
   const imageryTiles = String(import.meta.env.VITE_SINERGI_BASEMAP_TILES ?? '').trim()
+  const imageryMaxZoom = String(
+    import.meta.env.VITE_SINERGI_BASEMAP_MAX_ZOOM ?? DEFAULT_IMAGERY_MAX_ZOOM,
+  ).trim() || DEFAULT_IMAGERY_MAX_ZOOM
   const vectorTiles = String(
     import.meta.env.VITE_SINERGI_VECTOR_TILES_URL ?? '',
   ).trim() || '/api/basemap/openfreemap/planet'
   const basemapAttribution = String(import.meta.env.VITE_SINERGI_BASEMAP_ATTRIBUTION ?? '').trim()
+  const darkMode = document.documentElement.dataset.theme === 'dark'
   let basemapMode = vectorTiles ? 'street' : 'satellite'
   const loadedBasemapSourceIds = new Set()
   const map = new MapLibreMap({
     container: element,
-    style: createBaseStyle({ imageryTiles, vectorTiles, attribution: basemapAttribution }),
+    style: createBaseStyle({
+      imageryTiles,
+      imageryMaxZoom,
+      vectorTiles,
+      attribution: basemapAttribution,
+      darkMode,
+    }),
     center: initialBounds
       ? [(initialBounds[0] + initialBounds[2]) / 2, (initialBounds[1] + initialBounds[3]) / 2]
       : [117, -2],
@@ -132,6 +175,14 @@ export function createMapLibreSurface(element, {
         : { url }
     ),
   })
+  const handleThemeChange = (event) => {
+    applyBaseStyleTheme(map, {
+      darkMode: event.detail?.theme === 'dark',
+      imageryTiles,
+      vectorTiles,
+    })
+  }
+  window.addEventListener('sinergi:theme-change', handleThemeChange)
   const markerOverlay = document.createElement('div')
   markerOverlay.className = 'map-adaptive-marker-layer'
   markerOverlay.setAttribute('aria-label', 'Aset KML dengan tata letak adaptif')
@@ -287,8 +338,10 @@ export function createMapLibreSurface(element, {
   map.on('mousemove', 'candidate-connectors-hit', (event) => (
     showFeatureTooltip(event, 'candidate')
   ))
-  map.on('move', scheduleAdaptiveMarkers)
-  map.on('zoom', scheduleAdaptiveMarkers)
+  // Keep existing DOM markers in step with the map while the camera moves.
+  // Rebuilding the adaptive layout and its canvas on every frame stalls panning.
+  map.on('move', scheduleMarkerTransform)
+  map.on('moveend', scheduleAdaptiveMarkers)
   map.on('resize', scheduleAdaptiveMarkers)
   markerOverlay.addEventListener('click', (event) => {
     const assetButton = event.target.closest('[data-adaptive-asset]')
@@ -302,6 +355,26 @@ export function createMapLibreSurface(element, {
     event.stopPropagation()
     focusCluster(clusterLookup.get(clusterButton.dataset.adaptiveCluster))
   })
+  markerOverlay.addEventListener('pointerover', (event) => {
+    const assetButton = event.target.closest('[data-adaptive-asset]')
+    if (!assetButton || map.isMoving()) return
+    const assetId = assetButton.dataset.adaptiveAsset
+    if (state.hoveredAssetId === assetId) return
+    state.hoveredAssetId = assetId
+    state.hoveredNetworkId = assetNetworkIds.get(assetId)?.[0] ?? null
+    onHoverAsset(assetId)
+    syncSources()
+    drawKmlLineOverlay(markerOverlay.querySelector('.map-kml-line-overlay'))
+  })
+  markerOverlay.addEventListener('pointerout', (event) => {
+    const assetButton = event.target.closest('[data-adaptive-asset]')
+    if (!assetButton || assetButton.contains(event.relatedTarget)) return
+    if (state.hoveredAssetId !== assetButton.dataset.adaptiveAsset) return
+    state.hoveredAssetId = null
+    state.hoveredNetworkId = null
+    syncSources()
+    drawKmlLineOverlay(markerOverlay.querySelector('.map-kml-line-overlay'))
+  })
 
   renderAccessibleAssets(element, assets, onSelectAsset)
 
@@ -312,10 +385,13 @@ export function createMapLibreSurface(element, {
       networks,
       assetById,
       assetNetworkIds,
+      geometryDetailLevels,
+      geometryLinkedAssetIds,
       topologyGraph: currentTopologyGraph,
       candidates: currentCandidates,
       overlays,
       state,
+      zoom: map.getZoom(),
     })
     map.getSource('sinergi-polygons').setData(featureCollections.polygons)
     map.getSource('sinergi-overlays').setData(featureCollections.overlays)
@@ -347,8 +423,29 @@ export function createMapLibreSurface(element, {
     })
   }
 
+  function scheduleMarkerTransform() {
+    if (transformFrame !== null || destroyed || !layoutAnchor) return
+    transformFrame = window.requestAnimationFrame(() => {
+      transformFrame = null
+      if (!layoutAnchor || destroyed) return
+      const projected = map.project(layoutAnchor.coordinate)
+      const scale = 2 ** (map.getZoom() - layoutAnchor.zoom)
+      const transform = `translate(${projected.x - scale * layoutAnchor.point.x}px, ${projected.y - scale * layoutAnchor.point.y}px) scale(${scale})`
+      for (const child of markerOverlay.children) child.style.transform = transform
+    })
+  }
+
   function syncAdaptiveMarkers() {
     if (!loaded || destroyed) return
+    if (transformFrame !== null) {
+      window.cancelAnimationFrame(transformFrame)
+      transformFrame = null
+    }
+    const anchorCoordinate = map.getCenter().toArray()
+    const anchorPoint = map.project(anchorCoordinate)
+    const zoom = map.getZoom()
+    markerOverlay.style.setProperty('--asset-marker-scale', markerScaleForZoom(zoom).toFixed(3))
+    markerOverlay.style.setProperty('--pole-marker-scale', poleMarkerScaleForZoom(zoom).toFixed(3))
     const selectedCandidate = currentCandidates.find(({ candidateId }) => (
       candidateId === state.selectedCandidateId
     ))
@@ -358,10 +455,6 @@ export function createMapLibreSurface(element, {
       selectedCandidate?.targetAssetId,
       selectedCandidate?.targetPathAssetId,
     ].filter(Boolean))
-    const focusedNetwork = state.focusedNetworkId
-      ? networkById.get(state.focusedNetworkId)
-      : null
-    const hidePoleGroupLabels = isInfrastructureNetwork(focusedNetwork)
     const isAssetActive = (asset) => (
       !asset.networkIds?.length
         || asset.networkIds.some((networkId) => state.selectedNetworkIds.has(networkId))
@@ -386,6 +479,11 @@ export function createMapLibreSurface(element, {
     const items = assets
       .filter(({ coordinate }) => validPosition(coordinate))
       .map((asset) => {
+        const isJunctionBox = isJunctionBoxAsset(asset)
+        const assetIcon = iconForAsset(asset)
+        const sourceIconUrl = isJunctionBox
+          ? JUNCTION_BOX_ICON_URL
+          : asset.sourceIconUrl || null
         const networkFocused = Boolean(
           state.focusedNetworkId && asset.networkIds?.includes(state.focusedNetworkId),
         )
@@ -394,7 +492,10 @@ export function createMapLibreSurface(element, {
           : !asset.networkIds?.length
             || asset.networkIds.some((networkId) => state.selectedNetworkIds.has(networkId))
         const focusContext = Boolean(
-          state.focusedNetworkId && asset.networkIds?.length && !networkFocused,
+          (state.focusedNetworkId && asset.networkIds?.length && !networkFocused)
+            || (state.selectedAssetId && asset.id !== state.selectedAssetId
+              && !state.connectedNodeIds.includes(asset.id)
+              && !state.physicalRelatedIds.includes(asset.id)),
         )
         const projected = map.project(asset.coordinate.slice(0, 2))
         return {
@@ -405,24 +506,40 @@ export function createMapLibreSurface(element, {
           coordinate: asset.coordinate.slice(0, 2),
           point: { x: projected.x, y: projected.y },
           color: assetColor(asset, networks, state.focusedNetworkId),
-          icon: iconForAsset(asset),
-          active,
+          icon: assetIcon,
+          sourceIconUrl,
+          sourceIconDataUrl: sourceIconLoader.dataByUrl.get(sourceIconUrl) ?? null,
+          isJunctionBox,
+          active: active || asset.id === state.selectedAssetId
+            || state.physicalRelatedIds.includes(asset.id),
           focusContext,
           networkFocused,
           candidateEndpoint: focusedAssetIds.has(asset.id),
           candidateContext: Boolean(selectedCandidate && !focusedAssetIds.has(asset.id)),
           selected: asset.id === state.selectedAssetId,
+          hovered: asset.id === state.hoveredAssetId,
+          physicalRelated: state.physicalRelatedIds.includes(asset.id),
           isCoreNode: asset.isCoreNode,
           isPole: isPoleAsset(asset),
+          searchHighlighted: asset.id === state.searchHighlightedAssetId,
         }
       })
       .filter(({ active }) => active)
 
+    const sourceIconPreload = sourceIconLoader.preload(items.map(({ sourceIconUrl }) => sourceIconUrl))
+    if (sourceIconPreload) {
+      void sourceIconPreload.then(() => {
+        if (!destroyed) scheduleAdaptiveMarkers()
+      })
+    }
+
     const layout = buildAdaptiveAssetLayout(items, {
-      zoom: map.getZoom(),
+      zoom,
       viewport: { width: element.clientWidth, height: element.clientHeight },
       enabled: declutterEnabled,
+      showLabels: showAssetLabels,
     })
+    updateLineZoomVisibility(zoom)
     const { clusterGroupIds } = attachClustersToPoleGroups(
       layout.markers,
       renderedPoleGroups,
@@ -436,7 +553,7 @@ export function createMapLibreSurface(element, {
         const poleGroup = marker.representativePole
           ? poleGroupByPoleAssetId.get(marker.representativePole.id)
           : poleGroupById.get(clusterGroupIds.get(marker.key))
-        return renderClusterMarker(marker, key, poleGroup, { hidePoleGroupLabels })
+        return renderClusterMarker(marker, key, poleGroup)
       }
       return renderAdaptiveAssetMarker(marker)
     }).join('')
@@ -445,6 +562,7 @@ export function createMapLibreSurface(element, {
       + `<div class="map-adaptive-markers">${markers}</div>`
     drawKmlLineOverlay(markerOverlay.querySelector('.map-kml-line-overlay'))
     syncSelectedCandidateOverlay()
+    layoutAnchor = { coordinate: anchorCoordinate, point: anchorPoint, zoom: map.getZoom() }
 
     const signature = JSON.stringify({
       enabled: declutterEnabled,
@@ -454,6 +572,22 @@ export function createMapLibreSurface(element, {
       layoutStatusSignature = signature
       onLayoutStatus({ enabled: declutterEnabled, ...layout.summary })
     }
+  }
+
+  function updateLineZoomVisibility(zoom) {
+    if (!loaded || destroyed) return
+    const maxTier = maximumVisibleLineTier(zoom)
+    const filter = ['any',
+      ['<=', ['get', 'detailLevel'], maxTier],
+      ['==', ['get', 'selectedRelated'], true],
+      ['==', ['get', 'highlighted'], true],
+      ['==', ['get', 'focused'], true],
+      ['==', ['get', 'selectedCandidate'], true],
+    ]
+    ;['cable-lines', 'cable-lines-hit', 'asset-relations-casing', 'asset-relations']
+      .forEach((layerId) => {
+        if (map.getLayer(layerId)) map.setFilter(layerId, filter)
+      })
   }
 
   function syncSelectedCandidateOverlay() {
@@ -555,7 +689,7 @@ export function createMapLibreSurface(element, {
         center.longitude / cluster.coordinates.length,
         center.latitude / cluster.coordinates.length,
       ],
-      zoom: Math.min(21, Math.max(17.2, map.getZoom() + 2)),
+      zoom: Math.min(21, Math.max(18.1, map.getZoom() + 2)),
       duration: 420,
     })
   }
@@ -613,6 +747,22 @@ export function createMapLibreSurface(element, {
         )
         const selectedCandidateGeometry = selectedCandidateGeometryIds.has(geometry.id)
           || selectedCandidateGeometryIds.has(geometry.sourceGeometryId)
+        const linkedAssetIds = geometryLinkedAssetIds.get(geometry.id)
+          ?? geometryLinkedAssetIds.get(geometry.sourceGeometryId)
+          ?? []
+        const selectedRelated = Boolean(state.selectedAssetId
+          && (geometry.assetId === state.selectedAssetId
+            || linkedAssetIds.includes(state.selectedAssetId)
+            || linkedAssetIds.some(id => state.connectedNodeIds.includes(id)
+              || state.physicalRelatedIds.includes(id))))
+        const hoveredRelated = Boolean(state.hoveredAssetId
+          && (geometry.assetId === state.hoveredAssetId
+            || linkedAssetIds.includes(state.hoveredAssetId)))
+        const highlighted = networkIds.includes(state.highlightedNetworkId)
+          || networkIds.includes(state.hoveredNetworkId)
+        const detailLevel = geometryDetailLevels.get(geometry.id)
+          ?? geometryDetailLevels.get(geometry.sourceGeometryId)
+          ?? 2
         return {
           geometry,
           network,
@@ -624,15 +774,23 @@ export function createMapLibreSurface(element, {
             focusedNetwork ?? network,
             geometry.category,
           ),
-          highlighted: networkIds.includes(state.highlightedNetworkId),
+          highlighted,
           focused,
           focusContext,
+          selectedRelated: selectedRelated || hoveredRelated,
+          detailLevel,
           candidateFocused: selectedCandidateFocus && !selectedCandidateGeometry,
           candidateGeometry: selectedCandidateGeometry,
         }
       })
-      .filter(({ active }) => active)
+      .filter(({ active, selectedRelated, highlighted, focused }) => (
+        active || selectedRelated || highlighted || focused
+      ))
       .filter(({ candidateGeometry }) => !isolateCandidate || candidateGeometry)
+      .filter(({ detailLevel, selectedRelated, highlighted, focused }) => (
+        detailLevel <= maximumVisibleLineTier(map.getZoom())
+          || selectedRelated || highlighted || focused
+      ))
       .sort((left, right) => Number(left.focused) - Number(right.focused)
         || Number(left.active) - Number(right.active)
       )
@@ -640,14 +798,12 @@ export function createMapLibreSurface(element, {
     linework
       .filter(({ focused }) => !focused)
       .forEach((entry) => {
-        drawProjectedLine(context, map, entry, 'casing')
-        drawProjectedLine(context, map, entry, 'color')
+        drawProjectedLine(context, map, entry, 'color', basemapMode)
       })
     linework
       .filter(({ focused }) => focused)
       .forEach((entry) => {
-        drawProjectedLine(context, map, entry, 'focus-glow')
-        drawProjectedLine(context, map, entry, 'focus-main')
+        drawProjectedLine(context, map, entry, 'focus-main', basemapMode)
       })
   }
 
@@ -745,6 +901,7 @@ export function createMapLibreSurface(element, {
       setBasemapStatus('loading', { mode: basemapMode })
       armBasemapTimeout()
     }
+    drawKmlLineOverlay(markerOverlay.querySelector('.map-kml-line-overlay'))
     return true
   }
 
@@ -768,6 +925,18 @@ export function createMapLibreSurface(element, {
           map.easeTo({ center: coordinate.slice(0, 2), zoom: Math.max(map.getZoom(), 19) })
         }
       }
+    },
+    highlightAsset(assetId, duration = 1_800) {
+      if (!assetById.has(assetId)) return
+      if (searchHighlightTimer !== null) window.clearTimeout(searchHighlightTimer)
+      state.searchHighlightedAssetId = assetId
+      syncAdaptiveMarkers()
+      searchHighlightTimer = window.setTimeout(() => {
+        searchHighlightTimer = null
+        if (destroyed || state.searchHighlightedAssetId !== assetId) return
+        state.searchHighlightedAssetId = null
+        syncAdaptiveMarkers()
+      }, Math.max(400, Number(duration) || 1_800))
     },
     setCandidates(nextCandidates = []) {
       currentCandidates = Array.isArray(nextCandidates) ? nextCandidates : []
@@ -847,14 +1016,21 @@ export function createMapLibreSurface(element, {
       declutterEnabled = Boolean(enabled)
       syncAdaptiveMarkers()
     },
+    setAssetLabelsVisible(visible) {
+      showAssetLabels = Boolean(visible)
+      syncAdaptiveMarkers()
+    },
     destroy() {
       destroyed = true
+      if (searchHighlightTimer !== null) window.clearTimeout(searchHighlightTimer)
       if (basemapTimer !== null) window.clearTimeout(basemapTimer)
       clearBasemapRetry()
       if (layoutFrame !== null) window.cancelAnimationFrame(layoutFrame)
+      if (transformFrame !== null) window.cancelAnimationFrame(transformFrame)
       window.removeEventListener('keydown', enableCtrlPitch)
       window.removeEventListener('keyup', disableCtrlPitch)
       window.removeEventListener('blur', disableCtrlPitch)
+      window.removeEventListener('sinergi:theme-change', handleThemeChange)
       element.removeEventListener('pointerdown', toggleCtrlPitchFromPointer)
       markerOverlay.remove()
       selectedCandidateOverlay.remove()
@@ -885,17 +1061,6 @@ function addOperationalLayers(map) {
     },
   })
   map.addLayer({
-    id: 'cable-lines-casing',
-    type: 'line',
-    source: 'sinergi-lines',
-    paint: {
-      'line-color': '#ffffff',
-      'line-opacity': ['get', 'opacity'],
-      'line-width': ['interpolate', ['linear'], ['zoom'], 14, 4, 19, 10],
-      'line-blur': 0.4,
-    },
-  })
-  map.addLayer({
     id: 'cable-lines',
     type: 'line',
     source: 'sinergi-lines',
@@ -909,7 +1074,7 @@ function addOperationalLayers(map) {
       'line-width': [
         'case',
         ['get', 'selectedCandidate'], 6,
-        ['interpolate', ['linear'], ['zoom'], 14, 2, 19, 7],
+        ['interpolate', ['linear'], ['zoom'], 14, 2, 19, 4],
       ],
     },
   })
@@ -926,8 +1091,9 @@ function addOperationalLayers(map) {
     layout: { 'line-cap': 'round', 'line-join': 'round' },
     paint: {
       'line-color': '#ffffff',
-      'line-opacity': ['get', 'opacity'],
-      'line-width': ['interpolate', ['linear'], ['zoom'], 13, 4, 19, 8],
+      'line-opacity': ['*', ['get', 'opacity'], .88],
+      'line-width': ['interpolate', ['linear'], ['zoom'], 13, 5, 19, 7],
+      'line-dasharray': [1.5, 1.5],
     },
   })
   map.addLayer({
@@ -938,7 +1104,7 @@ function addOperationalLayers(map) {
     paint: {
       'line-color': ['get', 'color'],
       'line-opacity': ['get', 'opacity'],
-      'line-width': ['interpolate', ['linear'], ['zoom'], 13, 2, 19, 4],
+      'line-width': ['interpolate', ['linear'], ['zoom'], 13, 2.5, 19, 4.5],
       'line-dasharray': [1.5, 1.5],
     },
   })
@@ -997,20 +1163,8 @@ function addOperationalLayers(map) {
       'line-dasharray': [2, 2],
     },
   })
-  // Focus is rendered from a dedicated source so the selected network is
-  // always composited after every regular network line. The two passes keep
-  // the emphasis visible over satellite imagery without turning it neon.
-  map.addLayer({
-    id: 'cable-lines-focus-glow',
-    type: 'line',
-    source: 'sinergi-focus-lines',
-    paint: {
-      'line-color': ['get', 'focusColor'],
-      'line-opacity': ['*', ['get', 'focusOpacity'], 0.34],
-      'line-width': ['interpolate', ['linear'], ['zoom'], 14, 9, 19, 12],
-      'line-blur': 1.2,
-    },
-  })
+  // Focus uses one solid pass so the selected network stays visible without
+  // adding a casing or glow around the line.
   map.addLayer({
     id: 'cable-lines-focus',
     type: 'line',
@@ -1047,6 +1201,67 @@ function geometryIdsForCandidate(candidate) {
     : candidate.sourceGeometryIds ?? []
 }
 
+function lineOpacityByTier(tier = 2) {
+  if (tier <= 1) return 0.9
+  if (tier <= 2) return 0.82
+  if (tier === 3) return 0.62
+  return 0.4
+}
+
+function buildGeometryDetailLevels({ geometries = [], networks = [], topologyGraph, assetById }) {
+  const levels = new Map()
+  const assign = (id, level) => {
+    if (!id) return
+    const previous = levels.get(id)
+    levels.set(id, previous === undefined ? level : Math.min(previous, level))
+  }
+  ;(topologyGraph?.edges ?? []).forEach((edge) => {
+    const sourceId = edge.sourceAssetId ?? edge.sourceNodeId
+    const targetId = edge.targetAssetId ?? edge.targetNodeId
+    const level = Math.max(
+      assetVisualTier(assetById.get(sourceId) ?? {}),
+      assetVisualTier(assetById.get(targetId) ?? {}),
+    )
+    relationGeometryIds(edge).forEach((id) => assign(id, level))
+  })
+  const networkByGeometryId = new Map()
+  networks.forEach((network) => (network.geometryIds ?? []).forEach((id) => {
+    networkByGeometryId.set(id, network)
+  }))
+  geometries.filter(({ geometryType }) => geometryType === 'line_string').forEach((geometry) => {
+    const network = networkByGeometryId.get(geometry.id)
+      ?? networkByGeometryId.get(geometry.sourceGeometryId)
+    const identity = `${network?.name ?? ''} ${network?.shortName ?? ''} ${geometry.category ?? ''}`
+      .toLowerCase()
+    const fallback = /backbone|back-bone|trunk|jalur utama/.test(identity) ? 1 : 2
+    const level = levels.get(geometry.id) ?? levels.get(geometry.sourceGeometryId) ?? fallback
+    assign(geometry.id, level)
+    assign(geometry.sourceGeometryId, level)
+  })
+  return levels
+}
+
+function buildGeometryLinkedAssetIds(topologyGraph) {
+  const linked = new Map()
+  ;(topologyGraph?.edges ?? []).forEach((edge) => {
+    const assetIds = [...new Set([
+      edge.sourceAssetId ?? edge.sourceNodeId,
+      edge.targetAssetId ?? edge.targetNodeId,
+    ].filter(Boolean))]
+    relationGeometryIds(edge).forEach((geometryId) => {
+      linked.set(geometryId, [...new Set([...(linked.get(geometryId) ?? []), ...assetIds])])
+    })
+  })
+  return linked
+}
+
+function relationGeometryIds(edge = {}) {
+  const values = Array.isArray(edge.sourceGeometryIds)
+    ? edge.sourceGeometryIds
+    : [edge.sourceGeometryId]
+  return values.filter((value) => typeof value === 'string' && value)
+}
+
 function isConfirmedMapRelation(relation) {
   if (relation?.verificationStatus !== undefined) {
     return relation.verificationStatus === 'confirmed'
@@ -1070,26 +1285,28 @@ function drawProjectedLine(context, map, {
   highlighted,
   focused,
   focusContext,
+  selectedRelated,
+  detailLevel = 2,
   focusColor: entryFocusColor,
   candidateFocused,
-}, pass) {
-  const isFocusGlow = pass === 'focus-glow'
+}, pass, basemapMode = 'street') {
   const isFocusMain = pass === 'focus-main'
   const focusColor = safeColor(
     entryFocusColor ?? network?.color ?? operationalLineColor(network, geometry.category),
   )
-  const opacity = isFocusGlow
-    ? 0.34
-    : isFocusMain
-      ? 0.96
+  const opacity = isFocusMain
+    ? 1
+    : selectedRelated
+      ? 1
       : candidateFocused
-        ? 0.16
+        ? 0.14
         : !active
           ? 0
           : focusContext
-            ? 0.32
-            : 0.94
-  const width = isFocusGlow ? 10 : isFocusMain ? 4.5 : highlighted ? 4.8 : 3
+            ? 0.18
+            : highlighted ? 0.96 : lineOpacityByTier(detailLevel)
+  const width = isFocusMain ? 5 : highlighted ? 4.2
+    : basemapMode === 'satellite' ? 3 : 3
   context.beginPath()
   geometry.coordinates.forEach((coordinate, index) => {
     if (!validPosition(coordinate)) return
@@ -1097,28 +1314,31 @@ function drawProjectedLine(context, map, {
     if (index === 0) context.moveTo(point.x, point.y)
     else context.lineTo(point.x, point.y)
   })
-  context.globalAlpha = opacity
-  context.strokeStyle = pass === 'casing'
-    ? 'rgba(2, 8, 16, .88)'
-    : isFocusGlow || isFocusMain
-      ? focusColor
-      : operationalLineColor(network, geometry.category)
-  context.lineWidth = pass === 'casing' ? width + 3.5 : width
-  context.shadowBlur = isFocusGlow ? 8 : pass === 'color' && active ? 4 : 0
-  context.shadowColor = isFocusGlow || isFocusMain
-    ? focusColor
-    : 'transparent'
+  context.globalAlpha = opacity * (basemapMode === 'satellite' ? 0.84 : 0.92)
+  context.strokeStyle = '#ffffff'
+  context.lineWidth = width + (basemapMode === 'satellite' ? 3 : 2.6)
+  context.shadowBlur = basemapMode === 'satellite' ? 2.4 : 0
+  context.shadowColor = 'rgba(0, 0, 0, .65)'
   context.stroke()
+  context.globalAlpha = opacity
+  context.strokeStyle = isFocusMain
+    ? focusColor
+    : operationalLineColor(network, geometry.category)
+  context.lineWidth = width
   context.shadowBlur = 0
+  context.stroke()
   context.globalAlpha = 1
 }
 
 function operationalLineColor(network, category = '') {
   const key = String(network?.categoryKey ?? network?.type ?? category).toLowerCase()
-  if (key.includes('fiber') || key.includes('fibre')) return '#2de2a6'
-  if (key.includes('lan') || key.includes('utp')) return '#35b8ff'
+  if (key.includes('power') || key.includes('pln') || key.includes('listrik')) {
+    return OPERATIONAL_NETWORK_COLORS.power
+  }
+  if (key.includes('fiber') || key.includes('fibre')) return OPERATIONAL_NETWORK_COLORS['fiber-optic']
+  if (key.includes('lan') || key.includes('utp')) return OPERATIONAL_NETWORK_COLORS.lan
   if (key.includes('cctv')) return '#8d7cff'
-  if (key.includes('infra') || key.includes('power')) return '#ffc247'
+  if (key.includes('infra')) return OPERATIONAL_NETWORK_COLORS.infrastructure
   return safeColor(network?.color)
 }
 
@@ -1133,41 +1353,99 @@ function renderAdaptiveLeader(leader) {
     + `--leader-color:${safeColor(leader.color)}"></span>`
 }
 
+const POLE_PIN_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7Zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5Z" clip-rule="evenodd"/></svg>'
+const CAMERA_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="13" height="12" rx="2"/><path d="m15 10 6-3v10l-6-3"/></svg>'
+const HUB_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><path d="M11 7 6 16m7-9 5 9M7 18h10"/></svg>'
+const DEVICE_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="12" cy="12" r="3"/></svg>'
+
+function renderPoleBadge({ id, isCluster = false, label, title, point, color, classes = [] }) {
+  const dataAttribute = isCluster ? 'data-adaptive-cluster' : 'data-adaptive-asset'
+  const className = ['map-adaptive-cluster', 'map-pole-overview-cluster', ...classes]
+    .filter(Boolean).join(' ')
+  return `
+    <button class="${className}" type="button"
+      ${dataAttribute}="${escapeHtml(id)}"
+      aria-label="${escapeHtml(title)}" title="${escapeHtml(title)}"
+      style="left:${styleNumber(point.x)}px;top:${styleNumber(point.y)}px;
+        --marker-color:${safeColor(color)}">
+      <span class="map-cluster-pole-icon" aria-hidden="true">${POLE_PIN_SVG}</span>
+      <strong>${escapeHtml(label)}</strong>
+    </button>
+  `
+}
+
+function fallbackAssetIcon(icon) {
+  if (icon === 'videocam') return CAMERA_ICON_SVG
+  if (icon === 'hub') return HUB_ICON_SVG
+  return DEVICE_ICON_SVG
+}
+
 function renderAdaptiveAssetMarker(marker) {
+  const visualTier = assetVisualTier(marker)
+  const label = marker.selected
+    ? marker.label || marker.id
+    : shortAssetLabel(marker.label || marker.id)
+  const title = `${marker.label || marker.id} · ${marker.type} · posisi aktual dari KML`
+  if (visualTier === 0) {
+    return renderPoleBadge({
+      id: marker.id,
+      label,
+      title,
+      point: marker.point,
+      color: marker.color,
+      classes: [
+        'map-pole-asset-marker',
+        marker.selected ? 'selected' : '',
+        marker.hovered ? 'hovered' : '',
+        marker.networkFocused ? 'network-focused' : '',
+        marker.physicalRelated ? 'physical-related' : '',
+        marker.searchHighlighted ? 'search-highlight' : '',
+      ],
+    })
+  }
   const classes = [
     'map-adaptive-asset',
+    `asset-tier-${visualTier}`,
+    `label-${marker.labelPlacement || 'right'}`,
     marker.showLabel ? 'show-label' : '',
+    marker.autoLabel ? 'auto-label' : '',
     marker.selected ? 'selected' : '',
+    marker.hovered ? 'hovered' : '',
+    marker.searchHighlighted ? 'search-highlight' : '',
+    marker.physicalRelated ? 'physical-related' : '',
     marker.displaced ? 'displaced' : '',
     marker.networkFocused ? 'network-focused' : '',
     marker.focusContext ? 'focus-context' : '',
     marker.candidateEndpoint ? 'candidate-endpoint' : '',
     marker.candidateContext ? 'candidate-context' : '',
     marker.active === false ? 'inactive' : '',
+    marker.isJunctionBox ? 'junction-box' : '',
   ].filter(Boolean).join(' ')
-  const label = shortAssetLabel(marker.label || marker.id)
-  const title = `${marker.label || marker.id} · ${marker.type} · posisi aktual dari KML`
+  const icon = marker.sourceIconDataUrl
+    ? `<img class="map-adaptive-source-icon" src="${escapeHtml(marker.sourceIconDataUrl)}" alt="" aria-hidden="true">`
+    : fallbackAssetIcon(marker.icon)
   return `
     <button class="${classes}" type="button"
       data-adaptive-asset="${escapeHtml(marker.id)}"
       aria-label="${escapeHtml(title)}" title="${escapeHtml(title)}"
       style="left:${styleNumber(marker.point.x)}px;top:${styleNumber(marker.point.y)}px;
         --marker-color:${safeColor(marker.color)}">
-      <span class="map-adaptive-asset-icon material-symbols-outlined"
-        aria-hidden="true">${escapeHtml(marker.icon)}</span>
+      <span class="map-adaptive-asset-icon${marker.sourceIconDataUrl ? ' source-icon' : ' vector-icon'}"
+        aria-hidden="true">${icon}</span>
       <span class="map-adaptive-asset-name">${escapeHtml(label)}</span>
     </button>
   `
 }
 
-function renderClusterMarker(marker, key, poleGroup = null, { hidePoleGroupLabels = false } = {}) {
-  const classes = [
-    'map-adaptive-cluster',
+function renderClusterMarker(marker, key, poleGroup = null) {
+  const stateClasses = [
     marker.networkFocused ? 'network-focused' : '',
     marker.candidateEndpoint ? 'candidate-endpoint' : '',
     marker.candidateContext ? 'candidate-context' : '',
-  ].filter(Boolean).join(' ')
-  const title = `${marker.count} aset berdekatan · klik untuk memperbesar`
+  ].filter(Boolean)
+  const classes = ['map-adaptive-cluster', ...stateClasses].join(' ')
+  const memberSummary = (marker.memberLabels ?? []).join(', ')
+  const title = `${marker.count} aset berdekatan${memberSummary ? `: ${memberSummary}` : ''} · klik untuk memperbesar`
   const representedPole = marker.representativePole ?? (poleGroup
     ? {
         id: poleGroup.poleAssetId,
@@ -1175,29 +1453,31 @@ function renderClusterMarker(marker, key, poleGroup = null, { hidePoleGroupLabel
       }
     : null)
   if (representedPole) {
-    if (hidePoleGroupLabels) return ''
     const poleName = shortAssetLabel(representedPole.label)
     const nearbyCount = Math.max(0, marker.count - (marker.representativePole ? 1 : 0))
     const countLabel = poleGroup?.childCount > 0
       ? `${poleGroup.childCount} terpasang`
       : `${nearbyCount} berdekatan`
     const poleTitle = `${poleName} · ${countLabel} · ${title}`
-    return `
-      <button class="map-pole-group-collapsed map-pole-cluster" type="button"
-        data-adaptive-cluster="${key}" aria-label="${escapeHtml(poleTitle)}"
-        title="${escapeHtml(poleTitle)}"
-        style="left:${styleNumber(marker.point.x)}px;top:${styleNumber(marker.point.y)}px">
-        <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
-        <span><strong>${escapeHtml(poleName)}</strong><small>${escapeHtml(countLabel)}</small></span>
-      </button>
-    `
+    return renderPoleBadge({
+      id: key,
+      isCluster: true,
+      label: poleName,
+      title: poleTitle,
+      point: marker.point,
+      color: marker.color,
+      classes: stateClasses,
+    })
   }
   return `
-    <button class="${classes}" type="button"
+    <button class="${classes} map-generic-cluster" type="button"
       data-adaptive-cluster="${key}" aria-label="${escapeHtml(title)}"
       title="${escapeHtml(title)}"
       style="left:${styleNumber(marker.point.x)}px;top:${styleNumber(marker.point.y)}px;
         --marker-color:${safeColor(marker.color)}">
+      <span class="map-cluster-asset-icon" aria-hidden="true">
+        <span class="material-symbols-outlined">category</span>
+      </span>
       <strong>${marker.count}</strong>
     </button>
   `
@@ -1211,7 +1491,9 @@ function iconForAsset(asset) {
   if (type.includes('switch') || type.includes('router')) return 'device_hub'
   if (type.includes('fiber') || type.includes('fibre') || /\bfo\b/.test(type)) return 'cable'
   if (type.includes('lan') || type.includes('utp')) return 'lan'
-  if (type.includes('tiang')) return 'location_on'
+  if (type.includes('tiang') || /^t[-_ ]?(?:\d+|tower)\b/i.test(String(asset?.name ?? '').trim())) {
+    return 'location_on'
+  }
   return 'memory'
 }
 
@@ -1219,13 +1501,7 @@ function isPoleAsset(asset) {
   const identity = `${asset?.type || ''} ${asset?.category || ''}`.toLowerCase()
   const name = String(asset?.name || '').trim()
   return /\b(tiang|pole)\b/.test(identity)
-    || /^t[-_ ]?\d+[a-z]?$/i.test(name)
-}
-
-function isInfrastructureNetwork(network) {
-  const source = `${network?.categoryKey || ''} ${network?.type || ''} ${network?.name || ''}`
-    .toLowerCase()
-  return /infrastructure|infrastruktur/.test(source)
+    || /^t[-_ ]?(?:\d+[a-z]?|tower)\b/i.test(name)
 }
 
 function shortAssetLabel(value) {
@@ -1280,10 +1556,13 @@ function buildFeatureCollections({
   networks,
   assetById,
   assetNetworkIds,
+  geometryDetailLevels,
+  geometryLinkedAssetIds,
   topologyGraph,
   candidates,
   overlays,
   state,
+  zoom,
 }) {
   const networkByGeometry = new Map()
   networks.forEach((network) => {
@@ -1316,6 +1595,7 @@ function buildFeatureCollections({
     && selectedCandidateGeometryIds.size,
   )
   const connectedIds = new Set(state.connectedNodeIds)
+  const physicalRelatedIds = new Set(state.physicalRelatedIds)
   const collections = {
     points: [],
     lines: [],
@@ -1334,6 +1614,13 @@ function buildFeatureCollections({
       polygon: 'Polygon',
     }[geometry.geometryType]
     if (!geoType) return
+    const ownerAsset = geometry.assetId ? assetById.get(geometry.assetId) : null
+    if (geoType === 'Point' && ownerAsset
+      && !assetVisibleAtZoom(ownerAsset, zoom)
+      && ownerAsset.id !== state.selectedAssetId
+      && ownerAsset.id !== state.hoveredAssetId
+      && !state.connectedNodeIds.includes(ownerAsset.id)
+      && !state.physicalRelatedIds.includes(ownerAsset.id)) return
     const network = networkByGeometry.get(geometry.id)
       ?? networkByGeometry.get(geometry.sourceGeometryId)
       ?? networks.find(({ nodeIds }) => nodeIds.includes(geometry.assetId))
@@ -1344,6 +1631,7 @@ function buildFeatureCollections({
     const active = !networkIds.length
       || networkIds.some((id) => state.selectedNetworkIds.has(id))
     const highlighted = networkIds.includes(state.highlightedNetworkId)
+      || networkIds.includes(state.hoveredNetworkId)
     const focused = Boolean(
       state.focusedNetworkId && networkIds.includes(state.focusedNetworkId),
     )
@@ -1360,7 +1648,21 @@ function buildFeatureCollections({
     const candidateContextDimmed = selectedCandidateFocus
       && geoType === 'LineString'
       && !selectedCandidateGeometry
+    const linkedAssetIds = geometryLinkedAssetIds.get(geometry.id)
+      ?? geometryLinkedAssetIds.get(geometry.sourceGeometryId)
+      ?? []
+    const selectedRelated = Boolean(state.selectedAssetId
+      && (geometry.assetId === state.selectedAssetId
+        || linkedAssetIds.includes(state.selectedAssetId)
+        || linkedAssetIds.some(id => state.connectedNodeIds.includes(id)
+          || state.physicalRelatedIds.includes(id))))
+    const hoveredRelated = Boolean(state.hoveredAssetId
+      && (geometry.assetId === state.hoveredAssetId
+        || linkedAssetIds.includes(state.hoveredAssetId)))
     if (isolateCandidate && !selectedCandidateGeometry) return
+    const detailLevel = geometryDetailLevels.get(geometry.id)
+      ?? geometryDetailLevels.get(geometry.sourceGeometryId)
+      ?? 2
     const properties = {
       assetId: geometry.assetId ?? '',
       name: assetById.get(geometry.assetId)?.name ?? geometry.assetId ?? geometry.id,
@@ -1371,15 +1673,17 @@ function buildFeatureCollections({
         : network?.color ?? CATEGORY_COLORS[geometry.category] ?? '#708196',
       focusColor,
       focusOpacity: focused && active ? 0.96 : 0,
-      opacity: !active
+      opacity: selectedRelated || hoveredRelated
+        ? 1
+        : !active
         ? 0
+        : candidateContextDimmed
+          ? 0.16
         : selectedCandidateGeometry
           ? 1
-          : candidateContextDimmed
-            ? 0.16
-            : focusContext ? 0.32 : 1,
+          : focusContext ? 0.18 : highlighted ? 0.96 : lineOpacityByTier(detailLevel),
       selected: geometry.assetId === state.selectedAssetId,
-      connected: connectedIds.has(geometry.assetId),
+      connected: connectedIds.has(geometry.assetId) || physicalRelatedIds.has(geometry.assetId),
       highlighted,
       focused,
       focusContext,
@@ -1390,6 +1694,8 @@ function buildFeatureCollections({
       hasCandidate: candidateGeometryIds.has(geometry.id)
         || candidateGeometryIds.has(geometry.sourceGeometryId),
       selectedCandidate: selectedCandidateGeometry,
+      selectedRelated: selectedRelated || hoveredRelated,
+      detailLevel,
     }
     if (properties.highlighted && active && !focusContext && !candidateContextDimmed) {
       properties.opacity = 1
@@ -1442,6 +1748,16 @@ function buildFeatureCollections({
     )
     const selected = state.selectedAssetId === sourceAssetId
       || state.selectedAssetId === targetAssetId
+      || state.connectedNodeIds.includes(sourceAssetId)
+      || state.connectedNodeIds.includes(targetAssetId)
+      || state.physicalRelatedIds.includes(sourceAssetId)
+      || state.physicalRelatedIds.includes(targetAssetId)
+    const hovered = state.hoveredAssetId === sourceAssetId
+      || state.hoveredAssetId === targetAssetId
+    const detailLevel = Math.max(
+      assetVisualTier(sourceAsset ?? {}),
+      assetVisualTier(targetAsset ?? {}),
+    )
     collections.relations.push({
       type: 'Feature',
       id: relationKey,
@@ -1451,7 +1767,14 @@ function buildFeatureCollections({
         targetAssetId,
         relationSource: edge.relationSource || 'automatic',
         color: focused || selected ? '#1367d1' : '#4b78a8',
-        opacity: active ? (focused || selected ? 0.96 : 0.82) : 0,
+        focused,
+        highlighted: focused,
+        opacity: selected || hovered ? 1 : !active
+          ? 0
+          : (state.selectedAssetId || state.hoveredAssetId) && !focused ? 0.32
+            : focused ? 1 : lineOpacityByTier(detailLevel),
+        selectedRelated: selected || hovered,
+        detailLevel,
       },
       geometry: {
         type: 'LineString',

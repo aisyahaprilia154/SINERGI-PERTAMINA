@@ -1,0 +1,114 @@
+/* Keep the map as the primary surface. Data management lives in one menu. */
+.map-body .map-data-actions {
+  position: relative;
+}
+
+.map-body .map-data-actions summary {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  color: var(--ui-text);
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius-control);
+  cursor: pointer;
+  list-style: none;
+}
+
+.map-body .map-data-actions summary::-webkit-details-marker { display: none; }
+.map-body .map-data-actions summary:hover,
+.map-body .map-data-actions[open] summary {
+  color: var(--ui-ink);
+  background: var(--ui-surface-soft);
+}
+
+.map-body .map-data-actions summary:focus-visible {
+  outline: 2px solid var(--ui-selected);
+  outline-offset: 2px;
+}
+
+.map-body .map-data-actions-menu {
+  min-width: 176px;
+  padding: 5px;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  display: grid;
+  gap: 2px;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-line);
+  border-radius: 12px;
+  box-shadow: var(--ui-shadow-panel);
+}
+
+.map-body .map-data-actions-menu .tool-button {
+  min-height: 40px;
+  width: 100%;
+  padding: 0 10px;
+  justify-content: flex-start;
+  color: var(--ui-ink);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.map-body .map-data-actions-menu .tool-button:hover {
+  background: var(--ui-surface-soft);
+}
+
+.map-body .map-adaptive-asset {
+  box-shadow: 0 0 0 1px rgba(23, 50, 77, .18), 0 2px 6px rgba(15, 23, 42, .14);
+}
+
+.map-body .map-adaptive-asset:hover,
+.map-body .map-adaptive-asset:focus-visible,
+.map-body .map-adaptive-asset.selected {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px color-mix(in srgb, var(--marker-color) 60%, transparent), 0 5px 12px rgba(15, 23, 42, .2);
+}
+
+@media (min-width: 961px) {
+  .map-body .map-action-group > .diagram-toggle { display: none; }
+}
+
+@media (max-width: 960px) {
+  .map-body .map-workspace.drawer-open .asset-drawer {
+    height: min(72dvh, 560px);
+    max-height: calc(100dvh - 88px);
+    top: auto;
+    right: 8px;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    left: 8px;
+    z-index: 50;
+  }
+
+  .map-body .map-workspace.drawer-open .map-floating-top,
+  .map-body .map-workspace.drawer-open .map-floating-bottom,
+  .map-body .map-workspace.drawer-open .map-context-pill,
+  .map-body .map-workspace.drawer-open .sidebar-reopen {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .map-body .asset-drawer .drawer-scroll-content {
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .map-body .asset-drawer .drawer-actions {
+    flex: 0 0 auto;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 620px) {
+  .map-body .map-action-group > .diagram-toggle span:not(.material-symbols-outlined) {
+    display: none;
+  }
+
+  .map-body .map-data-actions-menu .tool-button span:not(.material-symbols-outlined) {
+    display: inline;
+  }
+}
