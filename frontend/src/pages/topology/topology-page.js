@@ -179,7 +179,6 @@ function mountTopologyWorkspace(container, {
     inspectorOpen: Boolean(selectedAssetFromUrl),
     searchResults: [],
     relationSearch: '',
-    removeEdgeMode: false,
     mutationBusy: false,
     frameComposerOpen: false,
     pendingFrameId: null,
@@ -299,8 +298,6 @@ function mountTopologyWorkspace(container, {
     container.addEventListener('change', handleChange)
     container.addEventListener('input', handleInput)
     container.addEventListener('keydown', handleKeydown)
-    container.addEventListener('dblclick', handleDoubleClick)
-    container.addEventListener('submit', handleSubmit)
     const viewport = container.querySelector('[data-topology-viewport]')
     const warnUnsaved = event => {
       if (!viewport?.isConnected) { window.removeEventListener('beforeunload', warnUnsaved); return }
@@ -366,8 +363,6 @@ function mountTopologyWorkspace(container, {
       state.actionsOpen = false
       updatePanelState()
     }
-    // Do not replace the SVG label between the clicks of a double-click.
-    if (event.target?.closest?.('[data-frame-label]')) return
     const target = event.target?.closest?.('[data-node-id], [data-edge-id], [data-mounting-group-id]')
     if (target?.dataset.nodeId) {
       selectAsset(target.dataset.nodeId, {
@@ -376,10 +371,6 @@ function mountTopologyWorkspace(container, {
       return
     }
     if (target?.dataset.edgeId) {
-      if (state.removeEdgeMode) {
-        void removeRelation(target.dataset.edgeId)
-        return
-      }
       selectEdge(target.dataset.edgeId)
       return
     }
@@ -440,13 +431,6 @@ function mountTopologyWorkspace(container, {
       return
     }
     if (action === 'close-frame-composer') return closeFrameComposer()
-    if (action === 'rename-selected-frame') {
-      state.actionsOpen = false
-      updatePanelState()
-      const label = container.querySelector(`[data-frame-label="${cssEscape(state.selectedMountingGroupId)}"]`)
-      if (label) openFrameNameEditor(state.selectedMountingGroupId, label)
-      return
-    }
     if (action === 'zoom-in') return changeZoom(0.1)
     if (action === 'zoom-out') return changeZoom(-0.1)
     if (action === 'zoom-reset') return zoomGraphTo(DEFAULT_ZOOM)
@@ -462,12 +446,6 @@ function mountTopologyWorkspace(container, {
       renderTray()
       renderTopologySidebar()
       updateToolbar()
-      updatePanelState()
-      return
-    }
-    if (action === 'toggle-remove-edge') {
-      state.actionsOpen = false
-      state.removeEdgeMode = !state.removeEdgeMode
       updatePanelState()
       return
     }
@@ -506,15 +484,6 @@ function mountTopologyWorkspace(container, {
     }
     if (action === 'clear-selection') {
       clearSelection()
-      return
-    }
-    if (action === 'cancel-frame-name') {
-      closeFrameNameEditor()
-      return
-    }
-    if (action === 'remove-relation') {
-      const relationId = event.target.closest('[data-action]')?.dataset.relationId
-      if (relationId) void removeRelation(relationId)
       return
     }
     if (action === 'open-map') return openAssetMap(event.target.closest('[data-action]')?.dataset.assetId)
@@ -629,11 +598,6 @@ function mountTopologyWorkspace(container, {
       if (openPanel) container.querySelector(`[data-action="toggle-${openPanel}"]`)?.focus()
       if (dragState) cancelAssetDrag()
       closeFrameComposer()
-      if (state.removeEdgeMode) {
-        state.removeEdgeMode = false
-        updatePanelState()
-      }
-      closeFrameNameEditor()
       return
     }
     if (event.target?.matches?.('[data-topology-search]')) {
@@ -647,12 +611,6 @@ function mountTopologyWorkspace(container, {
       return
     }
     if (event.key !== 'Enter' && event.key !== ' ') return
-    const frameLabel = event.target?.closest?.('[data-frame-label]')
-    if (frameLabel) {
-      event.preventDefault()
-      openFrameNameEditor(frameLabel.dataset.frameLabel, frameLabel)
-      return
-    }
     const target = event.target?.closest?.('[data-node-id], [data-edge-id], [data-mounting-group-id]')
     if (!target) return
     event.preventDefault()
@@ -666,35 +624,6 @@ function mountTopologyWorkspace(container, {
         focusMountingGroup(target.dataset.mountingGroupId)
       }
     }
-  }
-
-  function handleDoubleClick(event) {
-    const label = event.target?.closest?.('[data-frame-label]')
-    if (!label?.dataset.frameLabel) return
-    event.preventDefault()
-    openFrameNameEditor(label.dataset.frameLabel, label)
-  }
-
-  function handleSubmit(event) {
-    if (!event.target?.matches?.('[data-frame-name-form]')) return
-    event.preventDefault()
-    const form = event.target
-    const groupId = form.dataset.groupId
-    const input = form.querySelector('[data-frame-name-input]')
-    const value = String(input?.value ?? '').trim()
-    const box = layout?.mountingBoxes?.find(item => item.id === groupId)
-    if (!groupId || !box || (!box.hostId && !mapData.topologyFrames?.[groupId]) || state.mutationBusy) return
-    if (value) state.frameNames[groupId] = value
-    else delete state.frameNames[groupId]
-    if (mapData.topologyFrames?.[groupId]) {
-      const frame = { ...mapData.topologyFrames[groupId], name: value || box.hostName }
-      mapData.topologyFrames = { ...mapData.topologyFrames, [groupId]: frame }
-      stageChange({ type: 'create-frame', frame })
-    } else {
-      stageChange({ type: 'rename-frame', assetId: box.hostId, name: value })
-    }
-    closeFrameNameEditor()
-    renderGraph()
   }
 
   function selectSearchResult(result) {
@@ -1473,19 +1402,6 @@ function mountTopologyWorkspace(container, {
     void feedback?.finish(container.querySelector(`[data-mounting-group-id="${cssEscape(box.id)}"]`))
   }
 
-  async function removeRelation(edgeId) {
-    const edge = model.edgeById.get(edgeId)
-    if (!edge || state.mutationBusy) return
-    const added = state.changes.find(change => change.type === 'add-relation' && change.draftEdgeId === edgeId)
-    if (added) state.changes = state.changes.filter(change => change !== added)
-    else stageChange({ type: 'remove-edge', edgeId })
-    graph = { ...graph, edges: graph.edges.filter(item => (item.id ?? item.relationId) !== edgeId) }
-    state.removeEdgeMode = false
-    state.selectedEdgeId = null
-    rebuild()
-    showToast('Relasi dihapus dari draft. Gunakan Batal untuk memulihkannya sebelum disimpan.')
-  }
-
   async function addRelation(sourceAssetId, targetAssetId) {
     if (!sourceAssetId || !targetAssetId || sourceAssetId === targetAssetId || state.mutationBusy) return
     const target = model.nodeById.get(targetAssetId)
@@ -1527,7 +1443,7 @@ function mountTopologyWorkspace(container, {
   }
 
   function stageChange(change) {
-    if (['mount', 'move-frame', 'rename-frame'].includes(change.type)) {
+    if (['mount', 'move-frame'].includes(change.type)) {
       state.changes = state.changes.filter(item => item.type !== change.type || item.assetId !== change.assetId)
     }
     if (change.type === 'create-frame') {
@@ -1550,7 +1466,6 @@ function mountTopologyWorkspace(container, {
     state.frameNames = snapshot.frameNames
     state.changes = []
     state.saveError = ''
-    closeFrameNameEditor()
     rebuild()
   }
 
@@ -1662,30 +1577,6 @@ function mountTopologyWorkspace(container, {
         if (manualMounts.has(node.id)) node.mountingExpectation = 'pole'
       })
     }
-  }
-
-  function openFrameNameEditor(groupId, labelElement) {
-    const form = container.querySelector('[data-frame-name-form]')
-    const input = form?.querySelector('[data-frame-name-input]')
-    const box = layout?.mountingBoxes?.find(({ id }) => id === groupId)
-    if (!form || !input || !box || (!box.hostId && !mapData.topologyFrames?.[groupId]) || state.mutationBusy) return
-    const rect = labelElement.getBoundingClientRect()
-    form.dataset.groupId = groupId
-    input.value = state.frameNames[groupId] || box.label || box.hostName || box.hostId || ''
-    form.hidden = false
-    form.style.left = `${Math.min(window.innerWidth - 282, Math.max(12, rect.left - 12))}px`
-    form.style.top = `${Math.min(window.innerHeight - 86, rect.bottom + 8)}px`
-    requestAnimationFrame(() => {
-      input.focus()
-      input.select()
-    })
-  }
-
-  function closeFrameNameEditor() {
-    const form = container.querySelector('[data-frame-name-form]')
-    if (!form || form.hidden) return
-    form.hidden = true
-    form.removeAttribute('data-group-id')
   }
 
   function openFrameComposer() {
@@ -1924,11 +1815,6 @@ function mountTopologyWorkspace(container, {
                   <span class="topology-stitch-relation-main"><span class="material-symbols-outlined" aria-hidden="true">${iconForNode(other)}</span><strong>${escapeHtml(other.name || other.id)}</strong></span>
                   <span class="topology-stitch-relation-meta">${escapeHtml(edge.networkFamilyLabel || networkFamilyLabel(other.networkFamily))}<i class="${other.connectivityStatus === 'disconnected' ? 'offline' : ''}"></i></span>
                 </button>
-                <button type="button" class="topology-stitch-relation-remove" data-action="remove-relation"
-                  data-relation-id="${escapeAttribute(edge.id)}" aria-label="Hapus relasi dengan ${escapeAttribute(other.name || other.id)}"
-                  title="Hapus relasi" ${state.mutationBusy ? 'disabled' : ''}>
-                  <span class="material-symbols-outlined" aria-hidden="true">close</span>
-                </button>
               </div>
             `).join('') : '<p class="topology-stitch-muted">Belum ada relasi terkonfirmasi pada perangkat ini.</p>'}
           </div>
@@ -2053,14 +1939,12 @@ function mountTopologyWorkspace(container, {
     setHidden('[data-topology-export-panel]', !state.exportOpen)
     setHidden('[data-topology-legend]', !state.legendOpen)
     setHidden('[data-topology-actions-menu]', !state.actionsOpen)
-    setHidden('[data-remove-mode-hint]', !state.removeEdgeMode)
     const actionsToggle = container.querySelector('[data-action="toggle-actions"]')
     actionsToggle?.setAttribute('aria-expanded', String(state.actionsOpen))
     const inspector = container.querySelector('.topology-stitch-inspector')
     if (inspector) inspector.hidden = !state.inspectorOpen
     const app = container.querySelector('[data-topology-app]')
     app?.classList.toggle('topology-sidebar-collapsed', state.sidebarCollapsed)
-    app?.classList.toggle('is-remove-edge-mode', state.removeEdgeMode)
     app?.classList.toggle('is-saving', state.mutationBusy)
     const draftBar = container.querySelector('[data-draft-bar]')
     if (draftBar) {
@@ -2073,20 +1957,12 @@ function mountTopologyWorkspace(container, {
     }
     const focusButton = container.querySelector('[data-action="focus-relations"]')
     if (focusButton) focusButton.disabled = !state.selectedAssetId
-    const renameButton = container.querySelector('[data-action="rename-selected-frame"]')
-    if (renameButton) {
-      renameButton.disabled = !state.selectedMountingGroupId || state.mutationBusy
-      renameButton.title = state.selectedMountingGroupId
-        ? 'Ubah nama frame terpilih'
-        : 'Pilih frame terlebih dahulu'
-    }
     container.querySelectorAll('[data-action="toggle-sidebar"]').forEach((button) => {
       button.setAttribute('aria-expanded', String(!state.sidebarCollapsed))
     })
     const actionStates = {
       'toggle-export': state.exportOpen,
       'toggle-legend': state.legendOpen,
-      'toggle-remove-edge': state.removeEdgeMode,
       'toggle-diagnostics': state.showDiagnostics,
     }
     Object.entries(actionStates).forEach(([action, active]) => {
@@ -2101,13 +1977,6 @@ function mountTopologyWorkspace(container, {
     })
     const legendToggle = container.querySelector('[data-action="toggle-legend"]')
     legendToggle?.setAttribute('aria-label', state.legendOpen ? 'Sembunyikan legenda diagram' : 'Tampilkan legenda diagram')
-    container.querySelectorAll('[data-action="toggle-remove-edge"]').forEach((button) => {
-      button.setAttribute('aria-label', state.removeEdgeMode ? 'Selesai menghapus relasi' : 'Aktifkan mode hapus relasi')
-      button.setAttribute('title', state.removeEdgeMode ? 'Selesai menghapus relasi (Esc)' : 'Hapus relasi dengan memilih garis')
-      const label = button.querySelector('[data-remove-edge-label]')
-      if (label) label.textContent = state.removeEdgeMode ? 'Selesai' : 'Hapus relasi'
-      button.disabled = state.mutationBusy
-    })
   }
 
   function exportDiagram(kind) {
@@ -2326,15 +2195,8 @@ function renderWorkspaceShell({ activeContext, mapData, state, model }) {
           </div>
           <div class="topology-actions-menu" id="topology-actions-menu" data-topology-actions-menu hidden>
             <span class="topology-actions-heading">Tindakan diagram</span>
-            <button type="button" data-action="rename-selected-frame" title="Pilih frame terlebih dahulu" disabled><span class="material-symbols-outlined" aria-hidden="true">edit</span><span>Ubah nama frame</span></button>
             <button type="button" data-action="toggle-diagnostics" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">monitoring</span><span>Lapisan diagnostik</span></button>
-            <button type="button" class="topology-remove-edge-tool" data-action="toggle-remove-edge" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">link_off</span><span data-remove-edge-label>Hapus relasi</span></button>
             <button type="button" data-action="open-sync"><span class="material-symbols-outlined" aria-hidden="true">sync_alt</span><span>Sinkronisasi data</span></button>
-          </div>
-          <div class="topology-remove-mode-hint" data-remove-mode-hint role="status" hidden>
-            <span class="material-symbols-outlined" aria-hidden="true">link_off</span>
-            <span><strong>Mode hapus relasi</strong><small>Pilih garis yang ingin dihapus. Perubahan masih bisa dibatalkan sebelum disimpan.</small></span>
-            <button type="button" data-action="toggle-remove-edge">Selesai</button>
           </div>
           <div class="topology-stitch-viewport" data-topology-viewport tabindex="0" aria-label="Canvas diagram topologi">
             <div class="topology-stitch-canvas"><div class="topology-stitch-graph-frame" data-topology-frame></div></div>
@@ -2381,14 +2243,6 @@ function renderWorkspaceShell({ activeContext, mapData, state, model }) {
         </label>
         <div class="topology-frame-options" data-frame-options role="listbox" aria-label="Pilihan frame"></div>
       </section>
-      <form class="topology-frame-name-editor" data-frame-name-form hidden>
-        <label for="topology-frame-name">Nama frame</label>
-        <div><input id="topology-frame-name" data-frame-name-input maxlength="48" autocomplete="off" />
-          <button type="button" data-action="cancel-frame-name" aria-label="Batal"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
-          <button type="submit" aria-label="Terapkan nama ke draft"><span class="material-symbols-outlined" aria-hidden="true">check</span></button>
-        </div>
-        <small>Nama tampilan saja; nama aset KMZ tetap. Tekan Enter, lalu Simpan draft.</small>
-      </form>
       <div class="topology-stitch-toast" data-topology-toast role="status" aria-live="polite"></div>
     </div>
   `
