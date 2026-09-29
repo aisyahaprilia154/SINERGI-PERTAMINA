@@ -242,6 +242,11 @@ function mountTopologyWorkspace(container, {
     overview: state.area === null,
     frameAssignments: mapData.topologyFrameAssignments,
     customFrames: mapData.topologyFrames,
+    retainEmptyFrameIds: [
+      state.pendingFrameId,
+      ...state.changes.filter((change) => change.type === 'create-frame')
+        .map((change) => change.frame?.id),
+    ].filter(Boolean),
     ...overrides,
   })
 
