@@ -1668,13 +1668,6 @@
   transform: none;
 }
 
-.topology-body .topology-remove-edge-tool.active {
-  color: #b3261e;
-  background: rgba(255, 59, 48, .10);
-  border-color: rgba(255, 59, 48, .17);
-  box-shadow: 0 0 0 3px rgba(255, 59, 48, .08);
-}
-
 .topology-body .topology-stitch-viewport {
   background-color: #f5f5f7;
   background-image: radial-gradient(circle at 1px 1px, rgba(90, 96, 104, .16) 1px, transparent 1.4px);
