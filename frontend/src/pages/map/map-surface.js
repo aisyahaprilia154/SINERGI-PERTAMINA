@@ -1,3 +1,7 @@
+import { branchNameForFacility } from '../../domain/facility-branch.js'
+import { renderLocationContextPanel } from '../../components/location-context-panel.js'
+import { JUNCTION_BOX_ICON_URL } from '../../domain/junction-box-icon.js'
+
 export function renderNetworkMapCanvas(activeContext, {
   empty = false,
   assetsWithoutGeometry = 0,
@@ -32,7 +36,7 @@ export function renderNetworkMapCanvas(activeContext, {
           </span>
         </span>
         <span class="basemap-status-metrics">
-          ${Number(counts.assetNodeCount) || 0} aset &middot; ${Number(counts.lineCount) || 0} jalur &middot; ${displayedConfirmedConnectionCount} koneksi terkonfirmasi
+          ${Number(counts.assetNodeCount) || 0} aset di ${escapeHtml(selectedArea?.name || 'dataset aktif')} &middot; ${Number(counts.lineCount) || 0} jalur &middot; ${displayedConfirmedConnectionCount} koneksi
         </span>
         <span class="map-sr-only">Peta dasar <b class="basemap-availability">memuat</b>,
           mode <b class="basemap-mode-label">Jalan &amp; bangunan</b>.</span>
@@ -47,11 +51,16 @@ export function renderNetworkMapCanvas(activeContext, {
             : 'Pilih atau aktifkan dataset yang memiliki Point, LineString, atau Polygon valid.'}</p>
         </section>
       ` : ''}
+      <section class="map-hidden-layers-empty" hidden role="status" aria-live="polite">
+        <span class="material-symbols-outlined" aria-hidden="true">layers_clear</span>
+        <strong>Semua jaringan disembunyikan</strong>
+        <p>Basemap saja yang tampil. Tampilkan jaringan untuk melihat aset dan jalurnya.</p>
+        <button class="button secondary" type="button" data-show-networks>
+          Tampilkan jaringan
+        </button>
+      </section>
       <div class="map-info-overlays" aria-label="Informasi konteks peta">
-        ${renderMapContextPill(activeContext, operationalReadiness, selectedArea, {
-          counts,
-          confirmedConnectionCount: displayedConfirmedConnectionCount,
-        })}
+        ${renderMapContextPill(activeContext, operationalReadiness, selectedArea)}
       </div>
       ${renderMapFloatingControls(activeContext, operationalReadiness)}
 
@@ -90,49 +99,16 @@ export function renderMapContextPill(
   activeContext,
   topologyReadiness = null,
   selectedArea = null,
-  { counts = {}, confirmedConnectionCount = 0 } = {},
 ) {
-  const branchName = formatBranchName(activeContext.branchName)
-  const topologyStatus = 'ready'
-  const assetCount = Number(counts.assetNodeCount) || 0
-  const lineCount = Number(counts.lineCount) || 0
-  const confirmedCount = Number(confirmedConnectionCount) || 0
-  return `
-    <section class="map-context-pill" aria-label="Konteks peta aktif">
-      <span class="context-main-row">
-        <span class="context-branch context-item">
-          <span class="material-symbols-outlined" aria-hidden="true">location_on</span>
-          <span>
-            <small>Kantor cabang</small>
-            <strong title="${escapeHtml(branchName)}">${escapeHtml(branchName)}</strong>
-          </span>
-        </span>
-        <span class="context-separator" aria-hidden="true"></span>
-        <span class="context-area context-item">
-          <small>Area</small>
-          <strong title="${escapeHtml(selectedArea?.name || 'Area aktif')}">${escapeHtml(selectedArea?.name || 'Area aktif')}</strong>
-        </span>
-        <span class="context-separator" aria-hidden="true"></span>
-        <span class="context-dataset context-item">
-          <small>Dataset aktif</small>
-          <strong>${escapeHtml(activeContext.version)}</strong>
-        </span>
-      </span>
-      <span class="context-statuses">
-        <span class="context-readonly">
-          <span class="material-symbols-outlined" aria-hidden="true">lock</span>
-          Read-only
-        </span>
-        <span class="context-topology ${topologyStatus}"
-          title="Relasi kuat pada dataset dibaca dan dikonfirmasi otomatis.">
-          ${confirmedCount > 0 ? 'Relasi otomatis' : 'Belum ada relasi'}
-        </span>
-      </span>
-      <span class="context-metrics" aria-label="Ringkasan aset dan jalur">
-        ${assetCount} aset &middot; ${lineCount} jalur &middot; ${confirmedCount} koneksi terkonfirmasi
-      </span>
-    </section>
-  `
+  const branchName = branchNameForFacility(
+    selectedArea,
+    formatBranchName(activeContext.branchName),
+  )
+  return renderLocationContextPanel({
+    surface: 'map',
+    branchName,
+    areaName: selectedArea?.name || 'Area aktif',
+  })
 }
 
 export function renderMapFloatingControls(
@@ -165,16 +141,21 @@ export function renderMapFloatingControls(
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
           <span>Diagram Topologi</span>
         </button>
-        <button class="tool-button import-toggle map-action-ghost" type="button"
-          aria-label="Import" title="Import data peta">
-          <span class="material-symbols-outlined" aria-hidden="true">upload_file</span>
-          <span>Import</span>
-        </button>
-        <button class="tool-button export-toggle map-action-ghost" type="button"
-          aria-label="Export" title="Export data peta">
-          <span class="material-symbols-outlined" aria-hidden="true">download</span>
-          <span>Export</span>
-        </button>
+        <details class="map-data-actions">
+          <summary aria-label="Aksi data peta" title="Aksi data peta">
+            <span class="material-symbols-outlined" aria-hidden="true">more_horiz</span>
+          </summary>
+          <div class="map-data-actions-menu">
+            <button class="tool-button import-toggle" type="button" aria-label="Import data peta">
+              <span class="material-symbols-outlined" aria-hidden="true">upload_file</span>
+              <span>Import data</span>
+            </button>
+            <button class="tool-button export-toggle" type="button" aria-label="Export data peta">
+              <span class="material-symbols-outlined" aria-hidden="true">download</span>
+              <span>Export data</span>
+            </button>
+          </div>
+        </details>
       </div>
     </div>
 
@@ -231,13 +212,14 @@ function renderMapLegend() {
         <small>Warna jaringan</small>
         <span><i class="legend-color cctv"></i>CCTV</span>
         <span><i class="legend-color fiber"></i>Fiber Optic</span>
+        <span><i class="legend-color power"></i>Power PLN</span>
         <span><i class="legend-color lan"></i>LAN</span>
         <span><i class="legend-color infrastructure"></i>Infrastruktur</span>
       </section>
       <section>
         <small>Bentuk aset</small>
         <span><i class="legend-shape circle"></i>CCTV</span>
-        <span><i class="legend-shape diamond"></i>Junction Box</span>
+        <span><img class="legend-junction-icon" src="${JUNCTION_BOX_ICON_URL}" alt="" aria-hidden="true">Junction Box</span>
         <span><i class="legend-shape square"></i>Switch</span>
         <span><i class="legend-shape rectangle"></i>NVR / Server</span>
         <span><i class="legend-shape hexagon"></i>OTB</span>

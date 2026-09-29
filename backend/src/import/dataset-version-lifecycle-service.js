@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { projectFacilityRecord } from '../topology/facility-record-projection.js'
+import { verifiedRootNodes, graphValidationErrorCount } from '../topology/verified-roots.js'
 import path from 'node:path'
 import { AppError } from '../errors.js'
 import {
@@ -390,6 +391,24 @@ export class DatasetVersionLifecycleService {
     return toActiveTopologyDataset(resolved)
   }
 
+  async getDraftTopologyDataset(datasetVersionId) {
+    const record = await this.repository.get(datasetVersionId)
+    if (!record.datasetVersion.baseDatasetVersionId
+      || record.datasetVersion.publicationStatus !== 'unpublished') {
+      throw new AppError('Draft topologi tidak ditemukan.', {
+        code: 'topology_draft_not_found', statusCode: 404,
+      })
+    }
+    const pointer = {
+      datasetId: record.datasetVersion.datasetId,
+      branchId: record.datasetVersion.branchId,
+      datasetVersionId,
+      revision: `draft-${record.recordRevision ?? 0}`,
+      publicationProfile: record.datasetVersion.publicationProfile ?? 'map_only',
+    }
+    return { ...toActiveTopologyDataset({ record, pointer }), draft: true }
+  }
+
   async getActiveAssetDetail({
     datasetId,
     branchId,
@@ -671,10 +690,11 @@ export class DatasetVersionLifecycleService {
     correlationId = null,
   } = {}) {
     let target = null
+    let activationAuditContext = null
     const activatedAt = this.clock().toISOString()
     try {
       target = await this.repository.get(datasetVersionId)
-      const active = await this.repository.findActive(
+      let active = await this.repository.findActive(
         target.datasetVersion.datasetId,
         {
           excludeId: datasetVersionId,
@@ -703,6 +723,17 @@ export class DatasetVersionLifecycleService {
           },
         })
       }
+      activationAuditContext = {
+        branchId: target.datasetVersion.branchId,
+        datasetId: target.datasetVersion.datasetId,
+        graphRevision: target.topologyGraph?.graphRevision ?? null,
+        validationSummary: target.validation?.summary ?? {},
+      }
+      // The repository performs its own locked reads. Release the two large
+      // aggregates before entering that transaction so import activation does
+      // not keep duplicate 150+ MB object graphs alive.
+      target = null
+      active = null
       const transaction = await this.repository.activateVersionAtomically({
         datasetVersionId,
         actorId,
@@ -829,17 +860,21 @@ export class DatasetVersionLifecycleService {
         {
           actorId,
           datasetVersionId,
-          branchId: context.branchId ?? target?.datasetVersion.branchId ?? null,
+          branchId: context.branchId ?? activationAuditContext?.branchId
+            ?? target?.datasetVersion.branchId ?? null,
           correlationId,
           outcome: 'failed',
           details: {
-            datasetId: context.datasetId ?? target?.datasetVersion.datasetId ?? null,
+            datasetId: context.datasetId ?? activationAuditContext?.datasetId
+              ?? target?.datasetVersion.datasetId ?? null,
             previousVersionId: context.previousVersionId ?? null,
             newVersionId: datasetVersionId,
-            graphRevision: target?.topologyGraph?.graphRevision ?? null,
+            graphRevision: activationAuditContext?.graphRevision
+              ?? target?.topologyGraph?.graphRevision ?? null,
             activatedBy: actorId,
             activatedAt,
-            validationSummary: target?.validation?.summary ?? {},
+            validationSummary: activationAuditContext?.validationSummary
+              ?? target?.validation?.summary ?? {},
             result: 'rolled_back',
             errorCode: error.code ?? error.name,
             operation,
@@ -1037,6 +1072,7 @@ function toActiveTopologyDataset(resolved) {
   const record = resolved.record
   const assetIdentityMap = buildAssetIdentityMapFromRecord(record)
   const resolver = createAssetIdentityResolver(assetIdentityMap)
+  const sourceIconIndex = buildSourceIconIndex(record)
   const topology = normalizeTopologyGraph(record, assetIdentityMap)
   const topologyGraph = projectTopologyGraph(topology.graph)
   const topologyRelations = filterConflictingCameraEdges(
@@ -1058,6 +1094,11 @@ function toActiveTopologyDataset(resolved) {
   const assets = catalog.map((item) => {
     const id = item.canonicalAssetId
     const graphNode = graphNodeById.get(id) ?? {}
+    const sourceIcon = resolveAssetSourceIcon(item.rawAsset, sourceIconIndex)
+    const sourceIconUrl = sourceIcon?.resource?.resourceId
+      ? `/api/dataset-versions/${encodeURIComponent(record.datasetVersion.id)}`
+        + `/source-resources/${encodeURIComponent(sourceIcon.resource.resourceId)}`
+      : null
     return {
       id,
       assetId: id,
@@ -1068,6 +1109,10 @@ function toActiveTopologyDataset(resolved) {
       identityStatus: item.identityStatus,
       identityAliases: item.identityAliases,
       sourceFeatureId: item.sourceFeatureId,
+      sourceStyleId: sourceIcon?.styleId ?? null,
+      sourceIconHref: sourceIcon?.href ?? null,
+      sourceIconResourceId: sourceIcon?.resource?.resourceId ?? null,
+      sourceIconUrl,
       name: item.name,
       type: item.assetType,
       assetType: item.assetType,
@@ -1117,6 +1162,14 @@ function toActiveTopologyDataset(resolved) {
   })
   return {
     topologyView: true,
+      recordRevision: Number(record.recordRevision ?? 0),
+      topologyFrameNames: record.topologyFrameNames ?? {},
+      topologyFrameAssignments: record.topologyFrameAssignments ?? {},
+      topologyFrames: record.topologyFrames ?? {},
+      topologyEdgeOverrides: record.topologyEdgeOverrides ?? [],
+    topologyRoots: graphValidationErrorCount(record.topologyValidation) > 0
+      ? []
+      : verifiedRootNodes(topologyGraph).map(node => ({ assetId: node.id, topologyRole: node.topologyRole })),
     activePointer: resolved.pointer,
     datasetVersion: publicDatasetVersion(record.datasetVersion, resolved.pointer),
     assets,
@@ -1166,7 +1219,7 @@ function toActiveTopologyDataset(resolved) {
 // evidence. Internal service/termination/interface registries are useful for
 // backend tracing and review, but shipping them with every topology page
 // response makes the initial render needlessly expensive.
-function projectTopologyGraph(graph = {}) {
+export function projectTopologyGraph(graph = {}) {
   const nodes = (graph.nodes ?? []).map((node) => ({
     id: node.id ?? node.canonicalAssetId ?? node.assetId,
     canonicalAssetId: node.canonicalAssetId ?? node.id ?? node.assetId,
@@ -1323,8 +1376,10 @@ function toActiveMapDataset(resolved, { siteId = null, siteBoundaries = {} } = {
     publicationProfile,
     readiness: readinessContract,
   })
+  const catalogByNodeId = new Map(catalog.map((item) => [item.nodeId, item]))
   const baseAssets = (record.assets ?? []).map((asset) => {
     const identity = identityForAsset(asset, assetIdentityMap, resolver)
+    const catalogItem = catalogByNodeId.get(asset.id)
     const sourceIcon = resolveAssetSourceIcon(asset, sourceIconIndex)
     const sourceIconUrl = sourceIcon?.resource?.resourceId
       ? `/api/dataset-versions/${encodeURIComponent(record.datasetVersion.id)}`
@@ -1334,6 +1389,9 @@ function toActiveMapDataset(resolved, { siteId = null, siteBoundaries = {} } = {
       id: asset.id,
       datasetVersionId: asset.datasetVersionId,
       layerId: asset.layerId,
+      sourceFolderPath: catalogItem?.sourceFolderPath ?? asset.sourceFolderPath ?? null,
+      locationGroupKey: catalogItem?.locationGroupKey ?? null,
+      locationGroupName: catalogItem?.locationGroupName ?? null,
       assetId: asset.assetId,
       canonicalAssetId: identity?.canonicalAssetId ?? asset.canonicalAssetId ?? asset.assetId,
       stableAssetId: identity?.stableAssetId ?? asset.stableAssetId ?? null,
@@ -1358,6 +1416,7 @@ function toActiveMapDataset(resolved, { siteId = null, siteBoundaries = {} } = {
   })
   return {
     mapView: true,
+    topologyEdgeOverrides: record.topologyEdgeOverrides ?? [],
     activePointer: resolved.pointer,
     datasetVersion: publicDatasetVersion(record.datasetVersion, resolved.pointer),
     layers: (record.layers ?? []).map((layer) => ({

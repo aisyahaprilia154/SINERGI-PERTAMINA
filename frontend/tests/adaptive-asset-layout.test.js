@@ -56,9 +56,9 @@ test('far zoom combines dense KML points into a clickable aggregate', () => {
   assert.equal(layout.leaders.length, 0)
 })
 
-test('close zoom spreads dense assets while keeping leaders on canonical coordinates', () => {
+test('detail zoom spreads dense assets while keeping leaders on canonical coordinates', () => {
   const layout = buildAdaptiveAssetLayout(denseAssets, {
-    zoom: 18,
+    zoom: 20,
     viewport: { width: 800, height: 600 },
   })
   const assetMarkers = layout.markers.filter(({ kind }) => kind === 'asset')
@@ -77,7 +77,56 @@ test('close zoom spreads dense assets while keeping leaders on canonical coordin
   assert.equal(layout.summary.displacedAssetCount, 3)
 })
 
-test('selected asset expands its cluster and keeps its identity label visible', () => {
+test('very close zoom adds compact labels for named equipment without labeling network lines', () => {
+  const assets = [
+    {
+      id: 'C-09',
+      label: 'CCTV-09',
+      type: 'CCTV',
+      point: { x: 120, y: 120 },
+    },
+    {
+      id: 'JB-09',
+      label: 'JB-09',
+      type: 'Junction Box',
+      point: { x: 360, y: 120 },
+    },
+    {
+      id: 'T-09',
+      label: 'T-09',
+      type: 'Tiang',
+      point: { x: 600, y: 120 },
+    },
+    {
+      id: 'FO-09',
+      label: 'Fiber optic 09',
+      type: 'Fiber optic',
+      point: { x: 120, y: 360 },
+    },
+  ]
+  const close = buildAdaptiveAssetLayout(assets, {
+    zoom: 19,
+    viewport: { width: 800, height: 600 },
+    showLabels: true,
+  })
+  const closeById = new Map(close.markers.map((marker) => [marker.id, marker]))
+
+  assert.equal(closeById.get('C-09').autoLabel, true)
+  assert.equal(closeById.get('C-09').showLabel, true)
+  assert.equal(closeById.get('JB-09').autoLabel, true)
+  assert.equal(closeById.get('T-09').autoLabel, true)
+  assert.equal(closeById.get('FO-09').autoLabel, false)
+  assert.equal(closeById.get('FO-09').showLabel, false)
+
+  const medium = buildAdaptiveAssetLayout(assets, {
+    zoom: 18.5,
+    viewport: { width: 800, height: 600 },
+    showLabels: false,
+  })
+  assert.equal(medium.markers.find(({ id }) => id === 'C-09').autoLabel, false)
+})
+
+test('selected asset stays visible while neighboring assets remain grouped', () => {
   const selected = denseAssets.map((asset) => ({
     ...asset,
     selected: asset.id === 'CAM-01',
@@ -87,9 +136,10 @@ test('selected asset expands its cluster and keeps its identity label visible', 
     viewport: { width: 800, height: 600 },
   })
 
-  assert.equal(layout.markers.every(({ kind }) => kind === 'asset'), true)
+  assert.equal(layout.markers.filter(({ kind }) => kind === 'cluster').length, 1)
+  assert.equal(layout.markers.find(({ kind }) => kind === 'cluster').count, 2)
   assert.equal(layout.markers.find(({ id }) => id === 'CAM-01').showLabel, true)
-  assert.equal(layout.leaders.length, 3)
+  assert.equal(layout.leaders.length, 0)
 })
 
 test('large dense groups stay compact and peel out only the selected asset', () => {
@@ -104,7 +154,7 @@ test('large dense groups stay compact and peel out only the selected asset', () 
     selected: index === 0,
   }))
   const layout = buildAdaptiveAssetLayout(manyAssets, {
-    zoom: 18,
+    zoom: 17.9,
     viewport: { width: 800, height: 600 },
   })
   const assetMarkers = layout.markers.filter(({ kind }) => kind === 'asset')
@@ -115,6 +165,46 @@ test('large dense groups stay compact and peel out only the selected asset', () 
   assert.equal(assetMarkers[0].showLabel, true)
   assert.equal(clusters.length, 1)
   assert.equal(clusters[0].count, 29)
+})
+
+test('pole groups stay compact until close zoom and retain the pole identity', () => {
+  const overview = buildAdaptiveAssetLayout(denseAssets, {
+    zoom: 17.9,
+    viewport: { width: 800, height: 600 },
+  })
+  assert.equal(overview.markers[0].kind, 'cluster')
+
+  for (const zoom of [18, 18.9, 19, 19.9]) {
+    const detail = buildAdaptiveAssetLayout(denseAssets, {
+      zoom,
+      viewport: { width: 800, height: 600 },
+    })
+    assert.equal(detail.markers.length, 1)
+    assert.equal(detail.markers[0].representativePole.label, 'T-04')
+  }
+  const close = buildAdaptiveAssetLayout(denseAssets, {
+    zoom: 20,
+    viewport: { width: 800, height: 600 },
+  })
+  assert.equal(close.markers.filter(({ kind }) => kind === 'asset').length, 3)
+})
+
+test('nearby equipment without a pole remains separate and can reveal labels', () => {
+  const equipment = denseAssets.slice(0, 2)
+  const compact = buildAdaptiveAssetLayout(equipment, {
+    zoom: 18,
+    viewport: { width: 800, height: 600 },
+  })
+  assert.equal(compact.summary.clusterCount, 0)
+  assert.equal(compact.markers.length, 2)
+  assert.equal(compact.leaders.length, 2)
+  assert.equal(compact.markers.every(({ showLabel }) => !showLabel), true)
+  const labeled = buildAdaptiveAssetLayout(equipment, {
+    zoom: 18,
+    viewport: { width: 800, height: 600 },
+    showLabels: true,
+  })
+  assert.equal(labeled.markers.some(({ id, showLabel }) => id === 'CAM-01' && showLabel), true)
 })
 
 test('turning adaptive layout off keeps every marker at its exact projected point', () => {

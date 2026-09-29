@@ -20,10 +20,11 @@
   --admin-danger-soft: #fdf1f2;
   --admin-focus: #2563eb;
   --admin-cctv: #9698f4;
-  --admin-fiber: #70cfb5;
+  --admin-fiber: #0d47a1;
+  --admin-power: #d32f2f;
   --admin-peripheral: #a88af3;
-  --admin-infrastructure: #efc363;
-  --admin-lan: #aeb8c5;
+  --admin-infrastructure: #f9a825;
+  --admin-lan: #2e7d32;
   --admin-radius-sm: 8px;
   --admin-radius-md: 10px;
   --admin-radius-lg: 14px;
@@ -32,7 +33,7 @@
   overflow: hidden;
   color: var(--admin-text);
   background: var(--admin-page);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter Variable', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
 }
 
 .admin-preview-body button,
@@ -567,6 +568,7 @@
 
 .preview-map-object.category-cctv { color: var(--admin-cctv); }
 .preview-map-object.category-fiber-optic { color: var(--admin-fiber); }
+.preview-map-object.category-power { color: var(--admin-power); }
 .preview-map-object.category-peripheral { color: var(--admin-peripheral); }
 .preview-map-object.category-lan { color: var(--admin-lan); }
 

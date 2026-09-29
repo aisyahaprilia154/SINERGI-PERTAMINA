@@ -2,14 +2,23 @@ const DEFAULT_VIEWPORT = Object.freeze({
   width: Number.POSITIVE_INFINITY,
   height: Number.POSITIVE_INFINITY,
 })
+import {
+  assetLabelEligibleAtZoom,
+  assetVisibleAtZoom,
+  assetVisualTier,
+} from './semantic-zoom.js'
 
 export function buildAdaptiveAssetLayout(items = [], {
   zoom = 18,
   viewport = DEFAULT_VIEWPORT,
   enabled = true,
+  showLabels = false,
 } = {}) {
   const visibleItems = items
     .filter(({ point }) => validPoint(point))
+    .filter((item) => assetVisibleAtZoom(item, zoom)
+      || item.selected || item.hovered || item.searchHighlighted
+      || item.physicalRelated || item.candidateEndpoint)
     .filter(({ point }) => insideViewport(point, viewport, 120))
   const groups = enabled
     ? groupNearbyItems(visibleItems, separationForZoom(zoom))
@@ -19,10 +28,11 @@ export function buildAdaptiveAssetLayout(items = [], {
 
   groups.forEach((group) => {
     const ranked = [...group].sort(compareItems)
-    const focused = ranked
-      .filter(({ selected, networkFocused }) => selected || networkFocused)
-      .slice(0, 4)
-    if (enabled && ranked.length > 8) {
+    const focused = ranked.filter(({ selected, hovered, physicalRelated, candidateEndpoint }) => (
+      selected || hovered || physicalRelated || candidateEndpoint
+    ))
+    if (enabled && zoom < 18 && ranked.length > 1
+      && ranked.some(({ isPole }) => isPole)) {
       const focusedIds = new Set(focused.map(({ id }) => id))
       const clustered = ranked.filter(({ id }) => !focusedIds.has(id))
       const center = centroid(ranked.map(({ point }) => point))
@@ -42,6 +52,7 @@ export function buildAdaptiveAssetLayout(items = [], {
             anchorPoint: item.point,
             displaced,
             showLabel: true,
+            autoLabel: false,
           })
           if (displaced) {
             leaders.push({
@@ -55,20 +66,27 @@ export function buildAdaptiveAssetLayout(items = [], {
         })
       }
 
-      if (clustered.length) {
-        markers.push(createClusterMarker(
-          clustered,
-          focused.length === 1 ? { x: center.x + 38, y: center.y } : center,
-        ))
+      if (clustered.length > 1 && clustered.some(({ isPole }) => isPole)) {
+        markers.push(createClusterMarker(clustered, focused.length
+          ? { x: center.x + 38, y: center.y }
+          : center))
+      } else {
+        clustered.forEach((item) => {
+          const autoLabel = assetLabelEligibleAtZoom(item, zoom, {
+            showAllLabels: showLabels,
+          })
+          markers.push({
+            ...item,
+            key: `asset:${item.id}`,
+            kind: 'asset',
+            point: item.point,
+            anchorPoint: item.point,
+            displaced: false,
+            showLabel: autoLabel,
+            autoLabel,
+          })
+        })
       }
-      return
-    }
-
-    const mustExpand = zoom >= 17
-      || ranked.some(({ selected, networkFocused }) => selected || networkFocused)
-
-    if (enabled && ranked.length > 1 && !mustExpand) {
-      markers.push(createClusterMarker(ranked))
       return
     }
 
@@ -80,6 +98,11 @@ export function buildAdaptiveAssetLayout(items = [], {
     ranked.forEach((item, index) => {
       const point = displayPoints[index]
       const displaced = distance(item.point, point) > 7
+      const explicitLabel = Boolean(item.selected || item.hovered
+        || item.physicalRelated || item.candidateEndpoint || item.searchHighlighted)
+      const autoLabel = !explicitLabel && assetLabelEligibleAtZoom(item, zoom, {
+        showAllLabels: showLabels,
+      })
       const marker = {
         ...item,
         key: `asset:${item.id}`,
@@ -87,7 +110,8 @@ export function buildAdaptiveAssetLayout(items = [], {
         point,
         anchorPoint: item.point,
         displaced,
-        showLabel: Boolean(item.selected || (item.isCoreNode && zoom >= 19.5)),
+        showLabel: explicitLabel || autoLabel,
+        autoLabel,
       }
       markers.push(marker)
       if (displaced) {
@@ -129,6 +153,7 @@ function createClusterMarker(items, point = centroid(items.map((item) => item.po
     point,
     count: items.length,
     memberIds: items.map(({ id }) => id),
+    memberLabels: items.map(({ label, id }) => label || id).slice(0, 4),
     coordinates: items.map(({ coordinate }) => coordinate).filter(validCoordinate),
     label: clusterLabel(items),
     representativePole: representativePole
@@ -204,7 +229,7 @@ export function attachClustersToPoleGroups(markers = [], poleGroups = [], maxDis
 function spreadPoints(center, count) {
   if (count <= 1) return [center]
   if (count <= 8) {
-    const radius = Math.max(38, 21 + count * 5)
+    const radius = Math.max(30, 20 + count * 4)
     return Array.from({ length: count }, (_, index) => {
       const angle = (-Math.PI / 2) + ((Math.PI * 2 * index) / count)
       return {
@@ -229,28 +254,58 @@ function avoidLabelCollisions(markers) {
   const placed = []
   const ranked = markers
     .filter(({ kind, showLabel }) => kind === 'asset' && showLabel)
-    .sort(compareItems)
+    .sort((left, right) => itemPriority(left) - itemPriority(right)
+      || compareItems(left, right))
 
   ranked.forEach((marker) => {
-    const box = labelBox(marker)
-    const collides = placed.some((placedBox) => boxesOverlap(box, placedBox))
-    const mandatory = marker.selected
-    if (collides && !mandatory) {
+    const placements = ['right', 'left', 'top', 'bottom']
+      .map((placement) => ({ placement, box: labelBox(marker, placement) }))
+    const available = placements.find(({ box }) => (
+      placed.every((placedBox) => !boxesOverlap(box, placedBox))
+    ))
+    if (available) {
+      marker.labelPlacement = available.placement
+      placed.push(available.box)
+      return
+    }
+    const mandatory = marker.selected || marker.hovered
+    if (!mandatory) {
       marker.showLabel = false
       return
     }
-    placed.push(box)
+    marker.labelPlacement = 'right'
+    placed.push(placements[0].box)
   })
 }
 
-function labelBox(marker) {
-  const labelWidth = Math.min(116, 38 + String(marker.label || marker.id).length * 6)
-  return {
-    left: marker.point.x - 15,
-    right: marker.point.x + labelWidth,
-    top: marker.point.y - 17,
-    bottom: marker.point.y + 17,
+function labelBox(marker, placement = 'right') {
+  const labelWidth = Math.min(116, 38 + compactLabel(marker.label || marker.id).length * 6)
+  const labelHeight = 22
+  const gap = 4
+  if (placement === 'left') {
+    return { left: marker.point.x - 15 - gap - labelWidth,
+      right: marker.point.x - 15 - gap, top: marker.point.y - labelHeight / 2,
+      bottom: marker.point.y + labelHeight / 2 }
   }
+  if (placement === 'top') {
+    return { left: marker.point.x - labelWidth / 2, right: marker.point.x + labelWidth / 2,
+      top: marker.point.y - 15 - gap - labelHeight, bottom: marker.point.y - 15 - gap }
+  }
+  if (placement === 'bottom') {
+    return { left: marker.point.x - labelWidth / 2, right: marker.point.x + labelWidth / 2,
+      top: marker.point.y + 15 + gap, bottom: marker.point.y + 15 + gap + labelHeight }
+  }
+  return {
+    left: marker.point.x + 15 + gap,
+    right: marker.point.x + 15 + gap + labelWidth,
+    top: marker.point.y - labelHeight / 2,
+    bottom: marker.point.y + labelHeight / 2,
+  }
+}
+
+function compactLabel(value) {
+  const label = String(value ?? '').trim()
+  return label.length > 18 ? `${label.slice(0, 17)}…` : label
 }
 
 function boxesOverlap(left, right) {
@@ -268,10 +323,11 @@ function compareItems(left, right) {
 
 function itemPriority(item) {
   if (item.selected) return 0
-  if (item.networkFocused) return 1
-  if (item.isCoreNode) return 2
-  if (item.active !== false) return 3
-  return 4
+  if (item.hovered) return 1
+  const tier = assetVisualTier(item)
+  if (tier === 0) return 2
+  if (item.networkFocused) return 3
+  return 4 + tier
 }
 
 function clusterLabel(items) {
@@ -281,10 +337,9 @@ function clusterLabel(items) {
 }
 
 function separationForZoom(zoom) {
-  if (zoom < 15) return 96
-  if (zoom < 17) return 68
-  if (zoom < 19) return 38
-  return 22
+  if (zoom < 18) return 72
+  if (zoom < 20) return 48
+  return 30
 }
 
 function centroid(points) {

@@ -144,6 +144,30 @@ test('atomic activation archives the previous version and publishes one shared p
   }
 })
 
+test('pointer-based activation does not load the complete dataset history', async () => {
+  const fixture = await createLifecycleFixture()
+  try {
+    await fixture.repository.create(versionRecord('version-old', 'active'))
+    await fixture.repository.create(versionRecord('version-middle', 'valid'))
+    await fixture.service.activate('version-middle', 'admin-1', {
+      expectedActiveVersionId: 'version-old',
+    })
+    await fixture.repository.create(versionRecord('version-new', 'valid'))
+
+    fixture.repository.list = async () => {
+      throw new Error('Full history must not be loaded after an active pointer exists.')
+    }
+    const result = await fixture.service.activate('version-new', 'admin-1', {
+      expectedActiveVersionId: 'version-middle',
+    })
+
+    assert.equal(result.datasetVersion.id, 'version-new')
+    assert.equal(result.archivedDatasetVersion.id, 'version-middle')
+  } finally {
+    await fixture.close()
+  }
+})
+
 test('rollback reactivates the previous archived version and publishes a new pointer', async () => {
   const fixture = await createLifecycleFixture()
   try {
@@ -289,6 +313,76 @@ test('active map exposes KMZ source icon resources for diagram nodes', async () 
     assert.equal(mapView.assets[0].sourceIconHref, 'files/camera.png')
     assert.equal(mapView.assets[0].sourceIconResourceId, 'resource-camera')
     assert.match(mapView.assets[0].sourceIconUrl, /source-resources\/resource-camera$/)
+
+    const topologyView = await fixture.service.getActiveTopologyDataset({
+      datasetId: 'dataset-semarang',
+      branchId: 'semarang',
+    })
+    assert.equal(topologyView.assets[0].sourceIconHref, 'files/camera.png')
+    assert.equal(topologyView.assets[0].sourceIconResourceId, 'resource-camera')
+    assert.match(topologyView.assets[0].sourceIconUrl, /source-resources\/resource-camera$/)
+  } finally {
+    await fixture.close()
+  }
+})
+
+test('active map and topology use the same source-feature area for newly imported branches', async () => {
+  const fixture = await createLifecycleFixture()
+  try {
+    const record = versionRecord('version-new-branch', 'active')
+    record.datasetVersion.datasetId = 'dataset-new-branch'
+    record.datasetVersion.branchId = 'branch-new'
+    record.assets[0].branchId = 'branch-new'
+    record.layers[0].sourceFolderPath = '/RJBT/Parent Area/Devices'
+    record.sourceFeatures = [{
+      sourceFeatureId: 'source-feature-version-new-branch',
+      sourceFolderPath: '/RJBT/New Facility/Devices/Switches',
+    }]
+    record.assets.push({
+      ...record.assets[0],
+      id: 'node-second',
+      assetId: 'ASSET-second',
+      name: 'Second switch',
+      properties: { sourceFeatureId: 'source-feature-second' },
+    })
+    record.geometries.push({
+      ...record.geometries[0],
+      id: 'geometry-second',
+      assetNodeId: 'node-second',
+      sourceFeatureId: 'source-feature-second',
+      coordinates: [110.001, -7],
+    })
+    record.sourceFeatures.push({
+      sourceFeatureId: 'source-feature-second',
+      sourceFolderPath: '/RJBT/New Facility/Devices/Switches',
+    })
+    record.topologyGraph = {
+      nodes: [
+        { id: 'ASSET-version-new-branch' },
+        { id: 'ASSET-second' },
+      ],
+      edges: [{
+        id: 'confirmed-connection',
+        sourceAssetId: 'ASSET-version-new-branch',
+        targetAssetId: 'ASSET-second',
+        relationType: 'connected_to',
+        verificationStatus: 'confirmed',
+      }],
+    }
+    await fixture.repository.create(record)
+
+    const context = { datasetId: 'dataset-new-branch', branchId: 'branch-new' }
+    const [mapView, topologyView] = await Promise.all([
+      fixture.service.getActiveMapDataset(context),
+      fixture.service.getActiveTopologyDataset(context),
+    ])
+    assert.equal(mapView.assets[0].locationGroupKey, 'new-facility')
+    assert.equal(mapView.assets[0].locationGroupName, 'New Facility')
+    assert.equal(mapView.assets[0].locationGroupKey, topologyView.assets[0].locationGroupKey)
+    assert.deepEqual(
+      mapView.topologyGraph.edges.map(({ id, sourceAssetId, targetAssetId }) => ({ id, sourceAssetId, targetAssetId })),
+      topologyView.topologyGraph.edges.map(({ id, sourceAssetId, targetAssetId }) => ({ id, sourceAssetId, targetAssetId })),
+    )
   } finally {
     await fixture.close()
   }

@@ -302,7 +302,7 @@ export function mountedChildrenForPole(mountingRelations = [], poleAssetId) {
     .map((relation) => relation.sourceAssetId))]
 }
 
-function isPoleRecord(asset) {
+export function isPoleRecord(asset) {
   const source = `${asset?.type || ''} ${asset?.category || ''} ${asset?.name || ''}`
   return /\b(tiang|pole|pylon)\b/i.test(source)
     || /^T-(?:\d+|TOWER)\b/i.test(String(asset?.name || ''))

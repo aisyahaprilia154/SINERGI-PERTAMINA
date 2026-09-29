@@ -376,6 +376,71 @@ test('Administrator upload is queued, persisted as a non-active version, and exp
   }
 })
 
+test('import mode can replace the active dataset automatically or keep it unchanged for review', async () => {
+  const fixture = await createFixture()
+  try {
+    const replacement = await uploadKml(
+      fixture.origin,
+      mountingFixtureKml(),
+      'replacement.kml',
+      {
+        versionName: 'Pengganti aktif',
+        officialSourceConfirmed: 'true',
+        importMode: 'replace_active',
+      },
+    )
+    assert.equal(replacement.response.status, 202)
+    assert.equal(replacement.body.datasetVersion.importMode, 'replace_active')
+
+    await fixture.jobQueue.onIdle()
+    const replacementStatusResponse = await fetch(
+      `${fixture.origin}${replacement.body.statusUrl}`,
+      { headers: { authorization: 'Bearer admin-token' } },
+    )
+    const replacementStatus = await replacementStatusResponse.json()
+    assert.equal(replacementStatus.datasetVersion.status, 'active')
+    assert.equal(replacementStatus.active, true)
+    assert.equal(replacementStatus.autoActivation.status, 'succeeded')
+    assert.equal(replacementStatus.topology.generated, true)
+    assert.ok(replacementStatus.topology.nodeCount > 0)
+
+    const activeAfterReplacement = await fixture.repository.findActive(
+      'dataset-semarang',
+      { branchId: 'semarang' },
+    )
+    assert.equal(activeAfterReplacement.datasetVersion.id, replacementStatus.datasetVersion.id)
+    assert.ok(activeAfterReplacement.topologyGraph.nodes.length > 0)
+
+    const staged = await uploadKml(
+      fixture.origin,
+      mountingFixtureKml({ cameraName: 'Camera Review' }),
+      'review.kml',
+      {
+        versionName: 'Tinjau dahulu',
+        officialSourceConfirmed: 'true',
+        importMode: 'stage_only',
+      },
+    )
+    await fixture.jobQueue.onIdle()
+    const stagedStatusResponse = await fetch(
+      `${fixture.origin}${staged.body.statusUrl}`,
+      { headers: { authorization: 'Bearer admin-token' } },
+    )
+    const stagedStatus = await stagedStatusResponse.json()
+    assert.equal(stagedStatus.datasetVersion.status, 'valid')
+    assert.equal(stagedStatus.datasetVersion.importMode, 'stage_only')
+    assert.equal(stagedStatus.active, false)
+
+    const activeAfterStagedImport = await fixture.repository.findActive(
+      'dataset-semarang',
+      { branchId: 'semarang' },
+    )
+    assert.equal(activeAfterStagedImport.datasetVersion.id, replacementStatus.datasetVersion.id)
+  } finally {
+    await fixture.close()
+  }
+})
+
 test('source download reports checksum and missing-file incidents without exposing storage path', async () => {
   const fixture = await createFixture()
   try {

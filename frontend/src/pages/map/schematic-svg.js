@@ -3,6 +3,7 @@ import {
   SCHEMATIC_THEME as SVG_THEME,
 } from './schematic-theme.js'
 import { assetDescription } from '../../domain/asset-description.js'
+import { isJunctionBoxAsset, JUNCTION_BOX_ICON_URL } from '../../domain/junction-box-icon.js'
 
 export function renderSchematicSvg({
   graph,
@@ -244,7 +245,9 @@ function renderNode(node, selectedAssetId, sourceIconDataByUrl) {
   ].filter(Boolean).join(' ')
   const detailLabel = assetDescription(node)
   const displayName = shortenNodeLabel(node.name || 'Aset tanpa nama')
-  const sourceIcon = sourceIconDataByUrl?.get?.(node.sourceIconUrl) ?? null
+  const sourceIcon = sourceIconDataByUrl?.get?.(
+    isJunctionBoxAsset(node) ? JUNCTION_BOX_ICON_URL : node.sourceIconUrl,
+  ) ?? null
 
   return `
     <g class="${classes}" data-asset-id="${escapeAttribute(node.id)}" tabindex="0"
@@ -283,7 +286,9 @@ function renderCompactNode(node, selectedAssetId, sourceIconDataByUrl) {
   const nodeX = x + 20
   const nodeY = y + height / 2
   const labelX = x + 39
-  const sourceIcon = sourceIconDataByUrl?.get?.(node.sourceIconUrl) ?? null
+  const sourceIcon = sourceIconDataByUrl?.get?.(
+    isJunctionBoxAsset(node) ? JUNCTION_BOX_ICON_URL : node.sourceIconUrl,
+  ) ?? null
   const classes = [
     'diagram-node',
     'compact',

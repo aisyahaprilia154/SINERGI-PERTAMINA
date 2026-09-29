@@ -97,6 +97,40 @@ test('selection state supports multi-select, show all, hide all, and asset selec
   assert.equal(selection.selectedAssetId, 'SW-PNG-01')
 })
 
+test('quick network filters can be combined and toggled independently', () => {
+  const selection = createNetworkSelectionState({
+    ...validIds,
+    initialSelectedNetworkIds: validIds.networkIds,
+  })
+
+  selection.toggleNetworkGroup(['cctv'])
+  assert.deepEqual([...selection.selectedNetworkIds], ['cctv'])
+
+  selection.toggleNetworkGroup(['fiber-optic'])
+  selection.toggleNetworkGroup(['lan'])
+  assert.deepEqual([...selection.selectedNetworkIds], ['cctv', 'fiber-optic', 'lan'])
+
+  selection.toggleNetworkGroup(['fiber-optic'])
+  assert.deepEqual([...selection.selectedNetworkIds], ['cctv', 'lan'])
+
+  selection.showAllNetworks()
+  assert.deepEqual([...selection.selectedNetworkIds], validIds.networkIds)
+})
+
+test('a hidden network renders an empty checkbox', () => {
+  const network = {
+    id: 'network:cctv', name: 'Jaringan CCTV', type: 'CCTV', categoryKey: 'cctv',
+    color: '#9698f4', nodeIds: [], edges: [],
+  }
+  const render = (selectedNetworkIds) => renderNetworkList({
+    status: 'ready', networks: [network], assets: [], selectedNetworkIds,
+    expandedNetworkIds: new Set(),
+  })
+
+  assert.match(render(new Set(['network:cctv'])), /network-checkbox checked[^>]*>\s*<span[^>]*>check<\/span>/)
+  assert.match(render(new Set()), /network-checkbox [^>]*>\s*<\/span>/)
+})
+
 test('asset search does not remove the network context', () => {
   const html = renderNetworkList({
     status: 'ready',
@@ -159,7 +193,7 @@ test('asset search does not remove the network context', () => {
   assert.equal((html.match(/class="network-item/g) || []).length, 4)
 })
 
-test('sidebar prioritizes area, search, filters, and networks before compact context', () => {
+test('sidebar keeps only area, search, quick filters, and network visibility', () => {
   const html = renderNetworkSidebar({
     branchId: 'semarang',
     datasetId: 'dataset-semarang',
@@ -183,12 +217,10 @@ test('sidebar prioritizes area, search, filters, and networks before compact con
   const searchIndex = html.indexOf('class="search-control"')
   const filterIndex = html.indexOf('class="map-category-presets"')
   const networkIndex = html.indexOf('class="network-list"')
-  const contextIndex = html.indexOf('class="sidebar-secondary-context"')
 
   assert.ok(areaIndex < searchIndex)
   assert.ok(searchIndex < filterIndex)
   assert.ok(filterIndex < networkIndex)
-  assert.ok(networkIndex < contextIndex)
   assert.match(html, /title="Tutup panel" aria-label="Tutup panel jaringan"/)
   assert.match(html, /aria-controls="network-sidebar" aria-expanded="true"/)
   assert.match(html, /class="area-selector-control"/)
@@ -198,13 +230,9 @@ test('sidebar prioritizes area, search, filters, and networks before compact con
   assert.match(html, /class="asset-search-combobox"/)
   assert.match(html, /role="combobox" aria-autocomplete="list" aria-haspopup="listbox"/)
   assert.match(html, /role="listbox" aria-label="Hasil pencarian aset"/)
-  assert.match(html, /<details class="sidebar-topology-readiness ready">/)
-  assert.doesNotMatch(html, /<details class="sidebar-topology-readiness ready" open>/)
-  assert.match(html, /class="text-button show-all-networks active" type="button"\s+aria-pressed="true"/)
-  assert.match(html, /class="text-button hide-all-networks" type="button"\s+aria-pressed="false"/)
-  assert.match(html, /Relasi aset/)
-  assert.match(html, /34 otomatis terkonfirmasi · 16 tanpa relasi/)
-  assert.match(html, /Relasi kuat dibaca otomatis\. Hubungan aset dapat disambungkan atau diganti dari Detail aset\./)
+  assert.match(html, /Pilihan cepat jaringan yang tampil di peta/)
+  assert.match(html, /4<\/strong> jaringan tampil di peta/)
+  assert.doesNotMatch(html, /Info hitungan|Dataset &amp; relasi|Tampilkan semua|Sembunyikan semua/)
   assert.doesNotMatch(html, /Status topologi|perlu diperiksa|Tracing menggunakan graph koneksi terkonfirmasi/)
 })
 

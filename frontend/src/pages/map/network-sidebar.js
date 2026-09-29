@@ -1,21 +1,16 @@
+import { formatAssetTypeLabel } from '../../domain/asset-type-label.js'
+
 export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, {
   locationGroups = [],
   selectedArea = null,
-  topologySummary = {},
 } = {}) {
-  const countSummary = formatDatasetCounts(counts)
-  const confirmedCount = Number(topologySummary.confirmedConnectionCount) || 0
-  const isolatedCount = Number(topologySummary.isolatedAssetCount) || 0
-  const totalNetworkCount = Number(counts.networkCount) || 0
-  const normalizedSelectedCount = Number(selectedCount) || 0
-  const showAllActive = totalNetworkCount > 0 && normalizedSelectedCount === totalNetworkCount
-  const hideAllActive = totalNetworkCount > 0 && normalizedSelectedCount === 0
+  const countSummary = `${formatDatasetCounts(counts)} di ${selectedArea?.name || 'dataset aktif'}`
   return `
     <aside class="network-sidebar" id="network-sidebar"
       aria-label="Pemilih jaringan. ${escapeAttribute(countSummary)}">
       <header class="sidebar-heading">
         <div>
-          <span class="eyebrow">DATASET AKTIF</span>
+          <span class="eyebrow">PETA ASET</span>
           <h1>Jaringan aset</h1>
         </div>
         <div class="sidebar-heading-actions">
@@ -62,64 +57,25 @@ export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, 
             role="listbox" aria-label="Hasil pencarian aset" hidden></div>
         </div>
 
-        <div class="map-category-presets" aria-label="Preset kategori peta">
+        <div class="sidebar-filter-heading"><strong>Jaringan</strong><small>Pilih cepat</small></div>
+        <div class="map-category-presets" aria-label="Pilihan cepat jaringan yang tampil di peta">
           <button type="button" data-category-preset="all" class="active"
             aria-pressed="true">Semua</button>
           <button type="button" data-category-preset="cctv" aria-pressed="false">CCTV</button>
           <button type="button" data-category-preset="fiber" aria-pressed="false">Fiber Optic</button>
+          <button type="button" data-category-preset="power" aria-pressed="false">Power PLN</button>
           <button type="button" data-category-preset="lan" aria-pressed="false">LAN</button>
           <button type="button" data-category-preset="infrastructure"
             aria-pressed="false">Infrastruktur</button>
         </div>
-
         <div class="sidebar-list-header">
           <div class="selection-summary" aria-live="polite">
-            <span><strong class="selected-count">${selectedCount}</strong> jaringan ditampilkan</span>
-          </div>
-          <div class="selection-actions" aria-label="Aksi pilihan jaringan">
-            <button class="text-button show-all-networks${showAllActive ? ' active' : ''}" type="button"
-              aria-pressed="${showAllActive}">Tampilkan semua</button>
-            <span aria-hidden="true"></span>
-            <button class="text-button hide-all-networks${hideAllActive ? ' active' : ''}" type="button"
-              aria-pressed="${hideAllActive}">Sembunyikan semua</button>
+            <span><strong class="selected-count">${selectedCount}</strong> jaringan tampil di peta</span>
           </div>
         </div>
 
         <div class="network-list" aria-label="Daftar jaringan" aria-busy="true"></div>
 
-        <section class="sidebar-secondary-context" aria-label="Informasi dataset dan topologi">
-          <section class="dataset-card" aria-label="Dataset aktif. ${escapeAttribute(countSummary)}">
-            <span class="dataset-icon material-symbols-outlined" aria-hidden="true">database</span>
-            <div>
-              <strong>${escapeHtml(activeContext.datasetName)}</strong>
-              <span>Versi aktif</span>
-            </div>
-            <span class="status-dot" title="Dataset aktif"></span>
-          </section>
-
-          <details class="sidebar-topology-readiness ready">
-            <summary>
-              <span>
-                <strong>Relasi aset</strong>
-                <small>${formatCount(confirmedCount)} otomatis terkonfirmasi · ${formatCount(isolatedCount)} tanpa relasi</small>
-              </span>
-              <span class="material-symbols-outlined topology-summary-chevron"
-                aria-hidden="true">expand_more</span>
-            </summary>
-            <div class="sidebar-topology-detail">
-              <span class="sidebar-topology-metrics">
-                <span><b>${formatCount(confirmedCount)}</b> otomatis terkonfirmasi</span>
-                <span><b>${formatCount(isolatedCount)}</b> tanpa relasi</span>
-              </span>
-              <small>Relasi kuat dibaca otomatis. Hubungan aset dapat disambungkan atau diganti dari Detail aset.</small>
-            </div>
-          </details>
-        </section>
-
-        <footer class="sidebar-footer">
-          <span class="material-symbols-outlined" aria-hidden="true">info</span>
-          <p>Peta bersifat read-only. Perubahan sumber dilakukan melalui Google Earth.</p>
-        </footer>
       </div>
     </aside>
   `
@@ -165,21 +121,23 @@ function renderNetworkItem({
   const networkId = escapeAttribute(network.id)
   const networkName = escapeHtml(network.name)
   const isCctvNetwork = network.categoryKey === 'cctv' || network.id === 'network:cctv'
+  const showHealth = network.health && String(network.health).toLocaleLowerCase('id') !== 'aktif'
 
   return `
     <article class="network-item ${selected ? 'selected' : ''} ${focused ? 'focused' : ''}"
+      data-network-category="${escapeAttribute(network.categoryKey || 'unmapped')}"
       data-network-id="${networkId}" style="--network-color:${escapeAttribute(network.color)}">
       <div class="network-row">
         <button class="network-main" type="button" data-network-select="${networkId}"
           aria-pressed="${selected}" aria-label="${selected ? 'Sembunyikan' : 'Tampilkan'} ${networkName}">
           <span class="network-checkbox ${selected ? 'checked' : ''}" aria-hidden="true">
-            <span class="material-symbols-outlined">check</span>
+            ${selected ? '<span class="material-symbols-outlined">check</span>' : ''}
           </span>
           <i class="network-color-indicator" style="--network-color:${network.color}" aria-hidden="true"></i>
           <span class="network-copy">
             <strong>${networkName}</strong>
             <small>
-              <span class="network-health"><i></i>${escapeHtml(network.health)}</span>
+              ${showHealth ? `<span class="network-health"><i></i>${escapeHtml(network.health)}</span>` : ''}
               <span>${Number(network.confirmedConnectionCount) || 0} koneksi</span>
               ${network.isolatedAssetCount ? `
                 <span class="network-relation-warning"
@@ -229,23 +187,22 @@ function renderNetworkItem({
 }
 
 function getNetworkSubcategories(network, assetById) {
-  if (Array.isArray(network.subcategories) && network.subcategories.length) {
-    return network.subcategories
-  }
   const counts = new Map()
   network.nodeIds.forEach((assetId) => {
     const asset = assetById[assetId]
     if (!asset) return
-    const label = normalizeSubcategory(asset.type, network.type)
+    const label = normalizeSubcategory(formatAssetTypeLabel(asset), network.type)
     counts.set(label, (counts.get(label) || 0) + 1)
   })
   return [...counts].map(([label, count]) => ({ label, count }))
 }
 
 function normalizeSubcategory(type, networkType) {
-  if (type === 'Junction box' && networkType === 'CCTV') return 'Junction Box CCTV'
-  if (type.includes('switch')) return 'Switch'
-  if (type === 'Access point') return 'Access Point'
+  const normalizedType = String(type ?? '').toLowerCase()
+  const normalizedNetwork = String(networkType ?? '').toLowerCase()
+  if (normalizedType === 'junction box' && normalizedNetwork === 'cctv') return 'Junction Box CCTV'
+  if (normalizedType.includes('switch')) return 'Switch'
+  if (normalizedType === 'access point') return 'Access Point'
   return type
 }
 
@@ -255,10 +212,6 @@ function formatDatasetCounts(counts) {
     + `${Number(counts.assetNodeCount) || 0} node, `
     + `${Number(counts.lineCount) || 0} line, `
     + `${Number(counts.polygonCount) || 0} polygon`
-}
-
-function formatCount(value) {
-  return Number(value || 0).toLocaleString('id-ID')
 }
 
 function renderLoadingSkeleton() {

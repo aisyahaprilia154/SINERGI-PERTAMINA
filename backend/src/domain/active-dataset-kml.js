@@ -33,6 +33,7 @@ export function serializeActiveDatasetKml({
   ].join('')
 }
 
+//export a safe filename for the active dataset KML file, based on the dataset version and site ID
 export function safeActiveKmlFilename({ datasetVersion = {}, siteId = null } = {}) {
   const base = [
     'sinergi',
@@ -50,6 +51,7 @@ export function safeActiveKmlFilename({ datasetVersion = {}, siteId = null } = {
   return `${normalized || 'sinergi-active-dataset'}.kml`
 }
 
+//Utility functions for KML serialization
 function serializePlacemark(item, geometry) {
   const data = [
     ['asset_id', item.assetId],
