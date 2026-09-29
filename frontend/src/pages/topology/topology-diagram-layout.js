@@ -785,12 +785,7 @@ function buildPoleBackboneAreaLaneSpec({
     nodeById,
     mountingGroups,
   ).filter((group) => {
-    if (!group.nodeIds.length && !retainedEmptyFrameIds.has(group.id)
-      && (group.kind === 'empty' || group.custom)) return false
-    return group.kind !== 'empty'
-      || group.nodeIds.length > 0
-      || retainedEmptyFrameIds.has(group.id)
-      || !/^AUTO-[A-F0-9]{12,}$/i.test(String(group.hostName || group.hostId || '').trim())
+    return group.nodeIds.length > 0 || retainedEmptyFrameIds.has(group.id)
   })
   const mountingBoxes = logicalGroupSpecs.map((group) => buildMountingBoxSpec({
     group,
