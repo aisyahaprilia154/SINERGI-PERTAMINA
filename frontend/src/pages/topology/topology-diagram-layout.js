@@ -623,6 +623,10 @@ function buildLaneSpec(args) {
   return buildSemanticLaneSpec(args)
 }
 
+function isGeneratedPoleName(name, id) {
+  return /^AUTO-[0-9A-F]+$/i.test(String(name || id || ''))
+}
+
 function buildPoleBackboneAreaLaneSpec({
   area,
   components,
@@ -692,19 +696,19 @@ function buildPoleBackboneAreaLaneSpec({
   const confirmedPoleIds = new Set(confirmedGroups
     .map((group) => group.hostId)
     .filter(Boolean))
-  const emptyPhysicalGroups = area.key === 'dppu-yia'
-    ? physicalMounts
-      .filter((pole) => pole.areaKey === area.key && !confirmedPoleIds.has(pole.id))
-      .map((pole) => ({
-        id: `pole-group:${pole.id}`,
-        hostId: pole.id,
-        hostName: pole.name,
-        hostType: 'Tiang',
-        kind: 'empty',
-        nodeIds: [],
-        mountingConflict: false,
-      }))
-    : []
+  const emptyPhysicalGroups = physicalMounts
+    .filter((pole) => (pole.areaKey ?? pole.locationGroupKey) === area.key
+      && !confirmedPoleIds.has(pole.id)
+      && !isGeneratedPoleName(pole.name, pole.id))
+    .map((pole) => ({
+      id: `pole-group:${pole.id}`,
+      hostId: pole.id,
+      hostName: pole.name,
+      hostType: 'Tiang',
+      kind: 'empty',
+      nodeIds: [],
+      mountingConflict: false,
+    }))
   const edgeAdjacency = buildLayoutEdgeAdjacency(connectedNodes, edges)
   const junctionGroups = buildEndpointJunctionGroups({
     confirmedGroups,
@@ -786,7 +790,10 @@ function buildPoleBackboneAreaLaneSpec({
     nodeById,
     mountingGroups,
   ).filter((group) => {
-    return group.nodeIds.length > 0 || retainedEmptyFrameIds.has(group.id)
+    return group.nodeIds.length > 0
+      || retainedEmptyFrameIds.has(group.id)
+      || group.custom
+      || (group.kind === 'empty' && !isGeneratedPoleName(group.hostName, group.hostId))
   })
   const mountingBoxes = logicalGroupSpecs.map((group) => buildMountingBoxSpec({
     group,

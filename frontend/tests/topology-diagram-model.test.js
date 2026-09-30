@@ -369,7 +369,7 @@ test('search results expose translated type, area, and connection status', () =>
 
   assert.equal(assetResult.typeLabel, 'Kamera CCTV')
   assert.equal(assetResult.area, 'Area Utara')
-  assert.equal(assetResult.statusLabel, 'Terkonfirmasi')
+  assert.equal(assetResult.statusLabel, 'Terhubung')
   assert.equal(edgeResult.typeLabel, 'Relasi terkonfirmasi')
   assert.equal(edgeResult.statusLabel, 'Terkonfirmasi')
 })

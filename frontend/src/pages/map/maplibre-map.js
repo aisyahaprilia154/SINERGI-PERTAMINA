@@ -300,7 +300,6 @@ export function createMapLibreSurface(element, {
     map.addSource('sinergi-asset-relations', emptyGeoJsonSource())
     map.addSource('sinergi-candidates', emptyGeoJsonSource())
     map.addSource('sinergi-points', emptyGeoJsonSource())
-    groundOverlayLayers = addGroundOverlayImages(map, overlays)
     syncGroundOverlayVisibility()
     syncSources()
     addOperationalLayers(map)
@@ -405,6 +404,7 @@ export function createMapLibreSurface(element, {
 
   function syncGroundOverlayVisibility() {
     if (!loaded || destroyed) return
+    groundOverlayLayers = addGroundOverlayImages(map, overlays, state.showCctvCoverage)
     groundOverlayLayers.forEach(({ layerId, isCctvCoverage }) => {
       if (!isCctvCoverage || !map.getLayer(layerId)) return
       map.setLayoutProperty(
@@ -1523,7 +1523,7 @@ function clampNumber(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, Number(value)))
 }
 
-function addGroundOverlayImages(map, overlays) {
+function addGroundOverlayImages(map, overlays, showCctvCoverage) {
   const layers = []
   overlays.filter(({ visibility, resourceUrl }) => (
     visibility !== false && resourceUrl
@@ -1532,6 +1532,11 @@ function addGroundOverlayImages(map, overlays) {
       const coordinates = groundOverlayCoordinates(overlay)
       if (!coordinates) return
       const sourceId = `ground-overlay-image-${index}`
+      const isCctvCoverage = isCctvCoverageOverlay(overlay)
+      // Hidden coverage must not download an image for every camera at startup.
+      if (isCctvCoverage && !showCctvCoverage && !map.getSource(sourceId)) return
+      layers.push({ layerId: `${sourceId}-layer`, isCctvCoverage })
+      if (map.getSource(sourceId)) return
       map.addSource(sourceId, {
         type: 'image',
         url: overlay.resourceUrl,
@@ -1542,11 +1547,7 @@ function addGroundOverlayImages(map, overlays) {
         type: 'raster',
         source: sourceId,
         paint: { 'raster-opacity': 0.82, 'raster-fade-duration': 0 },
-      })
-      layers.push({
-        layerId: `${sourceId}-layer`,
-        isCctvCoverage: isCctvCoverageOverlay(overlay),
-      })
+      }, map.getLayer('ground-overlay-footprints') ? 'ground-overlay-footprints' : undefined)
     })
   return layers
 }

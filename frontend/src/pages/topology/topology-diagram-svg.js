@@ -390,7 +390,6 @@ export function renderTopologyDiagramSvg({
           mountingLabelById,
           semanticLevel: resolvedSemanticLevel,
           renderMode,
-          showDiagnostics: showAdminLayers,
         })
         : ''}
       ${showAdminLayers && layout.mode !== 'area-overview'
@@ -573,11 +572,8 @@ function renderMountingGroups(model, layout, {
   mountingLabelById = null,
   semanticLevel = 'focus',
   renderMode = 'interactive',
-  showDiagnostics = false,
 } = {}) {
-  const boxes = (layout.mountingBoxes ?? []).filter((box) => (
-    showDiagnostics || box.kind !== 'empty' || box.nodeIds.length > 0 || box.custom
-  ))
+  const boxes = layout.mountingBoxes ?? []
   return boxes.map((box, index) => {
     const customLabel = mountingLabelById instanceof Map
       ? mountingLabelById.get(box.id)

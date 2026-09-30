@@ -25,9 +25,13 @@ tersedia pada halaman import. Contoh bawaan mendaftarkan `semarang` ke
 `dataset-semarang`; tambahkan pasangan baru di `.env.docker` bila deployment
 memiliki cabang lain.
 
-Buka [http://localhost:5173](http://localhost:5173). API langsung tersedia di
-[http://localhost:5000/health](http://localhost:5000/health), sedangkan healthcheck
-melalui frontend tersedia di [http://localhost:5173/health](http://localhost:5173/health).
+Dengan `.env.docker.example`, buka [http://localhost:5173/map](http://localhost:5173/map).
+Jika port 5173 sudah dipakai, atur `SINERGI_HTTP_PORT=5174` di `.env.docker`,
+jalankan kembali perintah `docker compose up --build -d` di atas, lalu buka
+`http://localhost:5174/map`. Jika port API 5000 sudah dipakai, atur
+`SINERGI_API_PORT=5001`. Healthcheck API langsung ada di
+`http://localhost:<SINERGI_API_PORT>/health`; healthcheck melalui frontend ada di
+`http://localhost:<SINERGI_HTTP_PORT>/health`.
 
 Perintah operasional:
 
@@ -37,8 +41,15 @@ docker compose --env-file .env.docker logs -f backend
 docker compose --env-file .env.docker down
 ```
 
-Migration dijalankan otomatis oleh service `migrate`. Untuk menjalankannya ulang setelah
-perubahan migration, gunakan `docker compose --env-file .env.docker run --rm migrate`.
+Migrasi dijalankan otomatis oleh service `migrate`. Setelah perubahan file migrasi,
+bangun ulang image migrasi dan jalankan migrasi sebelum backend terbaru dimulai:
+
+```powershell
+docker compose --env-file .env.docker build migrate backend
+docker compose --env-file .env.docker run --rm migrate
+docker compose --env-file .env.docker up -d --no-deps backend
+docker compose --env-file .env.docker restart frontend
+```
 
 `sinergi-postgres-data` dan `sinergi-app-data` adalah named volume. Jangan menjalankan
 `docker compose down -v` kecuali memang ingin menghapus database dan file upload lokal.

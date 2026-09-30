@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises'
 
 const distUrl = new URL('../dist/', import.meta.url)
 const clientUrl = new URL('../dist/client/', import.meta.url)
@@ -9,11 +9,9 @@ await mkdir(clientUrl, { recursive: true })
 for (const entry of await readdir(distUrl, { withFileTypes: true })) {
   if (entry.name === 'client' || entry.name === 'server') continue
 
-  const suffix = entry.isDirectory() ? '/' : ''
-  await cp(
-    new URL(`${entry.name}${suffix}`, distUrl),
-    new URL(`${entry.name}${suffix}`, clientUrl),
-    { recursive: true },
+  await rename(
+    new URL(entry.name, distUrl),
+    new URL(entry.name, clientUrl),
   )
 }
 

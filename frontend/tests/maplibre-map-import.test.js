@@ -259,12 +259,12 @@ test('fallback and vector basemap styles are valid and use a visible neutral can
   assert.equal(
     fallbackStyle.layers.find(({ id }) => id === 'safe-background')
       ?.paint?.['background-color'],
-    '#f7f6f1',
+    '#f4f5f4',
   )
   assert.equal(
     fieldStyle.layers.find(({ id }) => id === 'basemap-water')
       ?.paint?.['fill-color'],
-    '#a9dff0',
+    '#d9e8ed',
   )
   assert.equal(
     darkStyle.layers.find(({ id }) => id === 'safe-background')

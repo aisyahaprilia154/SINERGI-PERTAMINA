@@ -1782,19 +1782,25 @@ export function scopeMapData({
     scopedAssetIds.has(option.assetId)
       && scopedAssetIds.has(option.targetAssetId)
   ))
+  const mountingRelationsByHostId = new Map()
+  scopedMountingRelations.forEach((relation) => {
+    if (!mountingRelationsByHostId.has(relation.targetAssetId)) {
+      mountingRelationsByHostId.set(relation.targetAssetId, [])
+    }
+    mountingRelationsByHostId.get(relation.targetAssetId).push(relation)
+  })
   const scopedPoleGroups = poleGroups
-    .map((group) => ({
-      ...group,
-      assetIds: group.assetIds.filter((assetId) => scopedAssetIds.has(assetId)),
-      assets: group.assets.filter((asset) => scopedAssetIds.has(asset.id)),
-      relations: scopedMountingRelations.filter((relation) => (
-        relation.targetAssetId === group.poleAssetId
-      )),
-      count: group.assetIds.filter((assetId) => scopedAssetIds.has(assetId)).length,
-      childCount: group.assetIds.filter((assetId) => (
-        assetId !== group.poleAssetId && scopedAssetIds.has(assetId)
-      )).length,
-    }))
+    .map((group) => {
+      const assetIds = group.assetIds.filter((assetId) => scopedAssetIds.has(assetId))
+      return {
+        ...group,
+        assetIds,
+        assets: group.assets.filter((asset) => scopedAssetIds.has(asset.id)),
+        relations: mountingRelationsByHostId.get(group.poleAssetId) ?? [],
+        count: assetIds.length,
+        childCount: assetIds.filter((assetId) => assetId !== group.poleAssetId).length,
+      }
+    })
     .filter((group) => (
       group.assetIds.includes(group.poleAssetId) && group.assetIds.length > 1
     ))
@@ -1818,12 +1824,12 @@ export function scopeMapData({
       scopedAssetIds.has(relation.sourceAssetId)
       && scopedAssetIds.has(relation.targetAssetId)
     ))
-    const geometryAssetIds = scopedGeometries
-      .filter(({ id }) => geometryIds.includes(id))
+    const geometryIdSet = new Set(geometryIds)
+    const networkGeometries = scopedGeometries.filter(({ id }) => geometryIdSet.has(id))
+    const geometryAssetIds = networkGeometries
       .map(({ assetId }) => assetId)
       .filter(Boolean)
     const assetIds = [...new Set([...nodeIds, ...geometryAssetIds])]
-    const networkGeometries = scopedGeometries.filter(({ id }) => geometryIds.includes(id))
     const relationAssetIds = new Set(relations.flatMap(({ sourceAssetId, targetAssetId }) => (
       [sourceAssetId, targetAssetId]
     )))

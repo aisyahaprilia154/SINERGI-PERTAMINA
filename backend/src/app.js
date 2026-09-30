@@ -275,7 +275,9 @@ export function createApp({
         : null
       if (overlayResourceMatch) {
         authenticator.authenticate(request)
-        const record = await repository.get(overlayResourceMatch[1])
+        const record = await (repository.getSourceResourceManifest
+          ? repository.getSourceResourceManifest(overlayResourceMatch[1])
+          : repository.get(overlayResourceMatch[1]))
         const resourceKind = overlayResourceMatch[2]
         const resourceId = decodePathSegment(overlayResourceMatch[3])
         const resource = (record.sourceResources ?? []).find(({ resourceId: id }) => (

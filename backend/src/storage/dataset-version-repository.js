@@ -21,6 +21,7 @@ export class JsonDatasetVersionRepository {
     this.activationLockDirectory = path.join(this.rootDirectory, '.locks')
     this.activationHooks = activationHooks
     this.staleLockMilliseconds = staleLockMilliseconds
+    this.sourceManifestCache = new Map()
   }
 
   async create(record) {
@@ -54,6 +55,34 @@ export class JsonDatasetVersionRepository {
           statusCode: 404,
         })
       }
+      throw error
+    }
+  }
+
+  async getSourceResourceManifest(id) {
+    assertSafeId(id)
+    const info = await stat(this.#pathFor(id), { bigint: true }).catch(error => {
+      if (error.code === 'ENOENT') return null
+      throw error
+    })
+    if (!info) return this.get(id)
+    const revision = [info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':')
+    const cached = this.sourceManifestCache.get(id)
+    if (cached?.revision === revision) return cached.pending
+    const pending = this.get(id).then(record => ({
+      datasetVersion: record.datasetVersion,
+      sourceResources: record.sourceResources,
+      sourceOverlays: record.sourceOverlays,
+    }))
+    const entry = { revision, pending }
+    this.sourceManifestCache.set(id, entry)
+    while (this.sourceManifestCache.size > 4) {
+      this.sourceManifestCache.delete(this.sourceManifestCache.keys().next().value)
+    }
+    try {
+      return await pending
+    } catch (error) {
+      if (this.sourceManifestCache.get(id) === entry) this.sourceManifestCache.delete(id)
       throw error
     }
   }

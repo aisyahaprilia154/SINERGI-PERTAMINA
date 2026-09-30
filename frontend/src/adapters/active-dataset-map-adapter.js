@@ -193,26 +193,34 @@ export function adaptActiveDatasetForMap(payload) {
   const networkIdsByAssetId = new Map()
   networks.forEach((network) => {
     network.nodeIds.forEach((assetId) => {
-      networkIdsByAssetId.set(
-        assetId,
-        [...(networkIdsByAssetId.get(assetId) ?? []), network.id],
-      )
+      if (!networkIdsByAssetId.has(assetId)) networkIdsByAssetId.set(assetId, [])
+      networkIdsByAssetId.get(assetId).push(network.id)
     })
+  })
+  const relationCountByAssetId = new Map()
+  relations.forEach(({ sourceAssetId, targetAssetId }) => {
+    relationCountByAssetId.set(sourceAssetId, (relationCountByAssetId.get(sourceAssetId) ?? 0) + 1)
+    relationCountByAssetId.set(targetAssetId, (relationCountByAssetId.get(targetAssetId) ?? 0) + 1)
+  })
+  const mountingTargetByAssetId = new Map()
+  const mountedAssetIdsByHostId = new Map()
+  const manuallyMountedAssetIds = new Set()
+  mountingRelations.forEach(({ sourceAssetId, targetAssetId, provenance }) => {
+    if (!mountingTargetByAssetId.has(sourceAssetId)) {
+      mountingTargetByAssetId.set(sourceAssetId, targetAssetId)
+    }
+    if (!mountedAssetIdsByHostId.has(targetAssetId)) mountedAssetIdsByHostId.set(targetAssetId, [])
+    mountedAssetIdsByHostId.get(targetAssetId).push(sourceAssetId)
+    if (provenance === 'manual_admin') manuallyMountedAssetIds.add(sourceAssetId)
   })
   assets.forEach((asset) => {
     asset.networkIds = networkIdsByAssetId.get(asset.id) ?? []
-    asset.relationCount = relations.filter((relation) => (
-      relation.sourceAssetId === asset.id || relation.targetAssetId === asset.id
-    )).length
+    asset.relationCount = relationCountByAssetId.get(asset.id) ?? 0
     const poleGroup = poleGroupByAssetId.get(asset.id)
     asset.poleGroupId = poleGroup?.id ?? null
-    asset.mountedOnAssetId = mountingRelations.find((relation) => (
-      relation.sourceAssetId === asset.id
-    ))?.targetAssetId ?? null
-    asset.mountedAssetIds = mountingRelations
-      .filter((relation) => relation.targetAssetId === asset.id)
-      .map((relation) => relation.sourceAssetId)
-    asset.mountingExpectation = mountingRelations.some(relation => relation.sourceAssetId === asset.id && relation.provenance === 'manual_admin') ? 'pole' : correctedMountingExpectation(asset)
+    asset.mountedOnAssetId = mountingTargetByAssetId.get(asset.id) ?? null
+    asset.mountedAssetIds = mountedAssetIdsByHostId.get(asset.id) ?? []
+    asset.mountingExpectation = manuallyMountedAssetIds.has(asset.id) ? 'pole' : correctedMountingExpectation(asset)
       ?? expectationByAssetId.get(asset.id)?.expectation ?? 'unknown'
     asset.mountingReview = mountingReviewByAssetId.get(asset.id) ?? null
   })

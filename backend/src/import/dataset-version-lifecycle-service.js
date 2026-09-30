@@ -62,6 +62,8 @@ export class DatasetVersionLifecycleService {
     this.repository = repository
     this.auditLog = auditLog
     this.activeDatasetCache = activeDatasetCache
+    this.activeReadCache = new Map()
+    this.activeProjectionCache = null
     this.clock = clock
     this.siteBoundaries = siteBoundaries
   }
@@ -380,9 +382,15 @@ export class DatasetVersionLifecycleService {
 
   async getActiveMapDataset({ datasetId, branchId, siteId = null } = {}) {
     const resolved = await this.#resolveActive(datasetId, branchId)
+    const projection = buildActiveProjection(resolved)
+    this.activeProjectionCache = {
+      key: activeProjectionKey(resolved),
+      value: projection,
+    }
     return toActiveMapDataset(resolved, {
       siteId,
       siteBoundaries: this.siteBoundaries,
+      projection,
     })
   }
 
@@ -419,17 +427,15 @@ export class DatasetVersionLifecycleService {
   } = {}) {
     const resolved = await this.#resolveActive(datasetId, branchId)
     const record = resolved.record
-    const identityMap = buildAssetIdentityMapFromRecord(record)
-    const resolver = createAssetIdentityResolver(identityMap)
-    const topology = normalizeTopologyGraph(record, identityMap)
-    const readinessContract = buildReadinessContract(record, topology.graph)
-    const publicationProfile = activePublicationProfile(record, resolved.pointer)
-    const catalog = buildActiveAssetCatalog({
-      record,
-      identityMap,
-      topologyGraph: topology.graph,
-      publicationProfile,
-    })
+    const cacheKey = activeProjectionKey(resolved)
+    let projection = this.activeProjectionCache?.key === cacheKey
+      ? this.activeProjectionCache.value : null
+    if (!projection) {
+      projection = buildActiveProjection(resolved)
+      this.activeProjectionCache = { key: cacheKey, value: projection }
+    }
+    const { identityMap, resolver, topology, publicationProfile,
+      catalog, readinessContract } = projection
     const item = catalog.find((candidate) => candidate._aliases.has(String(assetId)))
     if (!item) {
       throw new AppError('Aset tidak ditemukan pada dataset aktif.', {
@@ -655,6 +661,10 @@ export class DatasetVersionLifecycleService {
 
   async #resolveActive(datasetId, branchId) {
     try {
+      const revision = await this.repository.getActiveReadRevision?.({ datasetId, branchId })
+      const cacheKey = revision == null ? null : JSON.stringify([datasetId, branchId, revision])
+      const cached = cacheKey && this.activeReadCache.get(cacheKey)
+      if (cached) return cached
       const resolved = await this.repository.resolveActiveVersion({
         datasetId,
         branchId,
@@ -665,7 +675,18 @@ export class DatasetVersionLifecycleService {
           statusCode: 404,
         })
       }
-      return { ...resolved, record: projectFacilityRecord(resolved.record) }
+      const projected = {
+        ...resolved,
+        record: projectFacilityRecord(resolved.record),
+        readRevision: revision,
+      }
+      if (cacheKey) {
+        this.activeReadCache.set(cacheKey, projected)
+        while (this.activeReadCache.size > 2) {
+          this.activeReadCache.delete(this.activeReadCache.keys().next().value)
+        }
+      }
+      return projected
     } catch (error) {
       if (['active_pointer_integrity_error', 'active_version_integrity_error']
         .includes(error?.code)) {
@@ -959,7 +980,7 @@ export class DatasetVersionLifecycleService {
 function normalizeRejectionReason(reason) {
   const normalized = String(reason ?? '').trim()
   if (!normalized || normalized.length > 1000
-    || /[ --]/.test(normalized)) {
+    || /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(normalized)) {
     throw new AppError('Alasan reject wajib diberikan.', {
       code: 'rejection_reason_required',
       statusCode: 400,
@@ -1325,11 +1346,49 @@ function projectTopologyIdentityMap(identityMap = {}, assets = []) {
   }
 }
 
-function toActiveMapDataset(resolved, { siteId = null, siteBoundaries = {} } = {}) {
+function activeProjectionKey({ record, pointer, readRevision }) {
+  return JSON.stringify([
+    record.datasetVersion.id,
+    record.recordRevision,
+    pointer.revision,
+    readRevision,
+  ])
+}
+
+function buildActiveProjection({ record, pointer }) {
+  const identityMap = buildAssetIdentityMapFromRecord(record)
+  const resolver = createAssetIdentityResolver(identityMap)
+  const topology = normalizeTopologyGraph(record, identityMap)
+  const publicationProfile = activePublicationProfile(record, pointer)
+  return {
+    identityMap,
+    resolver,
+    topology,
+    publicationProfile,
+    catalog: buildActiveAssetCatalog({
+      record,
+      identityMap,
+      topologyGraph: topology.graph,
+      publicationProfile,
+    }),
+    readinessContract: buildReadinessContract(record, topology.graph),
+  }
+}
+
+function toActiveMapDataset(resolved, {
+  siteId = null,
+  siteBoundaries = {},
+  projection = buildActiveProjection(resolved),
+} = {}) {
   const record = resolved.record
-  const assetIdentityMap = buildAssetIdentityMapFromRecord(record)
-  const resolver = createAssetIdentityResolver(assetIdentityMap)
-  const topology = normalizeTopologyGraph(record, assetIdentityMap)
+  const {
+    identityMap: assetIdentityMap,
+    resolver,
+    topology,
+    publicationProfile,
+    catalog,
+    readinessContract,
+  } = projection
   const topologyRelations = filterConflictingCameraEdges(
     record.confirmedRelations,
     topology.graph.nodes,
@@ -1337,13 +1396,6 @@ function toActiveMapDataset(resolved, { siteId = null, siteBoundaries = {} } = {
   const mountingRelations = filterResolvedMountingRelations(record, resolver)
   const mountingOptions = filterResolvedMountingOptions(record, resolver)
   const sourceIconIndex = buildSourceIconIndex(record)
-  const publicationProfile = activePublicationProfile(record, resolved.pointer)
-  const catalog = buildActiveAssetCatalog({
-    record,
-    identityMap: assetIdentityMap,
-    topologyGraph: topology.graph,
-    publicationProfile,
-  })
   const visibleCatalog = siteId
     ? catalog.filter((item) => item.siteId === siteId)
     : catalog
@@ -1365,7 +1417,6 @@ function toActiveMapDataset(resolved, { siteId = null, siteBoundaries = {} } = {
   const mapTopologyGraph = siteId
     ? filterTopologyGraphByCanonicalIds(topology.graph, visibleCanonicalIds)
     : topology.graph
-  const readinessContract = buildReadinessContract(record, topology.graph)
   const sites = buildActiveSites({ catalog, record, siteBoundaries })
   const overlays = buildActiveOverlayDescriptors({
     record,

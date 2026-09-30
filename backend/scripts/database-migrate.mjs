@@ -15,6 +15,7 @@ const migrationIds = Object.freeze([
   '0002_dataset_active_pointers',
   '0003_postgres_runtime_state',
   '0004_phase_one_publication_identity_diff',
+  '0005_topology_interface_registry',
 ])
 
 export async function runDatabaseMigrations({

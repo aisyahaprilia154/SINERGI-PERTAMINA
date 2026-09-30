@@ -160,6 +160,20 @@ export class PostgresDatasetVersionRepository {
     return this.#getWithExecutor(this.pool, id)
   }
 
+  async getSourceResourceManifest(id) {
+    assertSafeId(id)
+    // Images only need the source manifest, not the full topology aggregate.
+    const result = await this.pool.query(
+      `SELECT payload->'datasetVersion' AS "datasetVersion",
+              payload->'sourceResources' AS "sourceResources",
+              payload->'sourceOverlays' AS "sourceOverlays"
+       FROM dataset_versions WHERE id = $1`,
+      [id],
+    )
+    if (!result.rows?.length) throw datasetVersionNotFound()
+    return result.rows[0]
+  }
+
   async getActiveReadRevision({ datasetId, branchId } = {}) {
     assertDatasetContext(datasetId)
     const result = await this.pool.query(

@@ -1,22 +1,21 @@
 import { spawn } from 'node:child_process'
 import { readdir } from 'node:fs/promises'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const projectRoot = process.cwd()
 const files = []
 
 for (const directory of ['src', 'tests', 'scripts']) {
-  await collectJavaScriptFiles(path.join(projectRoot, directory), files)
+  await collectJavaScriptFiles(path.join(projectRoot, directory))
 }
 
 for (const file of files) {
-  await runNodeCheck(file)
+  await checkSyntax(file)
 }
 
-console.log(`Syntax lint passed for ${files.length} JavaScript files.`)
+console.log(`Syntax check passed for ${files.length} JavaScript files.`)
 
-async function collectJavaScriptFiles(directory, output) {
+async function collectJavaScriptFiles(directory) {
   let entries
   try {
     entries = await readdir(directory, { withFileTypes: true })
@@ -26,13 +25,13 @@ async function collectJavaScriptFiles(directory, output) {
   }
 
   for (const entry of entries) {
-    const target = path.join(directory, entry.name)
-    if (entry.isDirectory()) await collectJavaScriptFiles(target, output)
-    else if (entry.name.endsWith('.js') || entry.name.endsWith('.mjs')) output.push(target)
+    const file = path.join(directory, entry.name)
+    if (entry.isDirectory()) await collectJavaScriptFiles(file)
+    else if (/\.(?:m?js)$/.test(entry.name)) files.push(file)
   }
 }
 
-function runNodeCheck(file) {
+function checkSyntax(file) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['--check', file], {
       cwd: projectRoot,

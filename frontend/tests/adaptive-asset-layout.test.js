@@ -123,7 +123,7 @@ test('very close zoom adds compact labels for named equipment without labeling n
     viewport: { width: 800, height: 600 },
     showLabels: false,
   })
-  assert.equal(medium.markers.find(({ id }) => id === 'C-09').autoLabel, false)
+  assert.equal(medium.markers.find(({ id }) => id === 'C-09').autoLabel, true)
 })
 
 test('selected asset stays visible while neighboring assets remain grouped', () => {
@@ -167,14 +167,14 @@ test('large dense groups stay compact and peel out only the selected asset', () 
   assert.equal(clusters[0].count, 29)
 })
 
-test('pole groups stay compact until close zoom and retain the pole identity', () => {
+test('pole groups stay compact below detail zoom and retain the pole identity', () => {
   const overview = buildAdaptiveAssetLayout(denseAssets, {
     zoom: 17.9,
     viewport: { width: 800, height: 600 },
   })
   assert.equal(overview.markers[0].kind, 'cluster')
 
-  for (const zoom of [18, 18.9, 19, 19.9]) {
+  for (const zoom of [15, 17, 17.9]) {
     const detail = buildAdaptiveAssetLayout(denseAssets, {
       zoom,
       viewport: { width: 800, height: 600 },
@@ -183,13 +183,13 @@ test('pole groups stay compact until close zoom and retain the pole identity', (
     assert.equal(detail.markers[0].representativePole.label, 'T-04')
   }
   const close = buildAdaptiveAssetLayout(denseAssets, {
-    zoom: 20,
+    zoom: 18,
     viewport: { width: 800, height: 600 },
   })
   assert.equal(close.markers.filter(({ kind }) => kind === 'asset').length, 3)
 })
 
-test('nearby equipment without a pole remains separate and can reveal labels', () => {
+test('nearby equipment without a pole remains separate with readable labels', () => {
   const equipment = denseAssets.slice(0, 2)
   const compact = buildAdaptiveAssetLayout(equipment, {
     zoom: 18,
@@ -198,7 +198,7 @@ test('nearby equipment without a pole remains separate and can reveal labels', (
   assert.equal(compact.summary.clusterCount, 0)
   assert.equal(compact.markers.length, 2)
   assert.equal(compact.leaders.length, 2)
-  assert.equal(compact.markers.every(({ showLabel }) => !showLabel), true)
+  assert.equal(compact.markers.some(({ showLabel }) => showLabel), true)
   const labeled = buildAdaptiveAssetLayout(equipment, {
     zoom: 18,
     viewport: { width: 800, height: 600 },

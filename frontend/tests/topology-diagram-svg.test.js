@@ -168,7 +168,9 @@ test('SVG renders rack backbone gaps separately from confirmed edges', () => {
     },
   })
   const layout = calculateTopologyDiagramLayout(model)
-  const svg = renderTopologyDiagramSvg({ model, layout, renderMode: 'export', semanticLevel: 'focus' })
+  const svg = renderTopologyDiagramSvg({
+    model, layout, renderMode: 'export', semanticLevel: 'focus', showAdminLayers: true,
+  })
 
   assert.equal(layout.backboneGaps.length, 1)
   assert.equal(layout.backboneGaps[0].routePoints.length, 2)

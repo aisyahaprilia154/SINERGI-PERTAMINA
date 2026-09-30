@@ -54,6 +54,41 @@ test('comparison classifies new, updated, unchanged, and removed assets determin
   })
 })
 
+test('active map and asset details reuse one aggregate until the revision changes', async () => {
+  const fixture = await createLifecycleFixture()
+  try {
+    await fixture.repository.create(versionRecord('version-cache-a', 'valid'))
+    await fixture.service.activate('version-cache-a', 'admin-1')
+    const resolveActiveVersion = fixture.repository.resolveActiveVersion.bind(fixture.repository)
+    let aggregateReads = 0
+    fixture.repository.resolveActiveVersion = async (...args) => {
+      aggregateReads += 1
+      return resolveActiveVersion(...args)
+    }
+    const context = { datasetId: 'dataset-semarang', branchId: 'semarang' }
+    await fixture.service.getActiveMapDataset(context)
+    const firstDetail = await fixture.service.getActiveAssetDetail({
+      ...context, assetId: 'ASSET-version-cache-a',
+    })
+    await fixture.service.getActiveAssetDetail({
+      ...context, assetId: 'ASSET-version-cache-a',
+    })
+    assert.equal(firstDetail.datasetVersion.id, 'version-cache-a')
+    assert.equal(aggregateReads, 1)
+
+    await fixture.repository.create(versionRecord('version-cache-b', 'valid'))
+    await fixture.service.activate('version-cache-b', 'admin-1', {
+      expectedActiveVersionId: 'version-cache-a',
+    })
+    const nextDetail = await fixture.service.getActiveAssetDetail({
+      ...context, assetId: 'ASSET-version-cache-b',
+    })
+    assert.equal(nextDetail.datasetVersion.id, 'version-cache-b')
+  } finally {
+    await fixture.close()
+  }
+})
+
 test('atomic activation archives the previous version and publishes one shared pointer', async () => {
   const cacheEvents = []
   const fixture = await createLifecycleFixture({

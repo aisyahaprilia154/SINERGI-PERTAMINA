@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && node scripts/build-worker.mjs",
-    "preview": "vite preview",
-    "lint": "node scripts/lint.mjs",
+    "preview": "vite preview --outDir dist/client",
+    "lint": "node ../shared/lint.mjs",
     "test": "node --test"
   },
   "devDependencies": {
