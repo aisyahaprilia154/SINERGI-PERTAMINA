@@ -47,20 +47,19 @@ test('drawer prioritizes asset identity, network, relation, and diagram action',
   assert.match(html, /Diagram topologi/)
   assert.doesNotMatch(html, /Informasi aset|Metadata tambahan|Nama gedung/)
   assert.doesNotMatch(html, /asset-type-icon/)
-  assert.match(html, /asset-status success/)
-  assert.match(html, /Online/)
+  assert.doesNotMatch(html, /asset-status|Online|Offline/)
   assert.doesNotMatch(html, /Status tidak tersedia/)
   assert.doesNotMatch(html, /tombol edit|tombol hapus|ubah relasi/i)
 })
 
-test('drawer omits an empty recorded operational status', () => {
+test('drawer omits operational status even when the dataset records it', () => {
   const html = renderAssetDetailDrawer({
-    asset: { ...asset, status: null, hasOperationalStatusField: true },
+    asset: { ...asset, status: 'Offline', hasOperationalStatusField: true },
     activeContext,
     trace: { status: 'idle' },
   })
 
-  assert.doesNotMatch(html, /class="asset-status/)
+  assert.doesNotMatch(html, /class="asset-status|Offline/)
   assert.doesNotMatch(html, /Status operasional|Belum dicatat/)
   assert.doesNotMatch(html, /Status tidak tersedia/)
 })

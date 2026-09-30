@@ -202,7 +202,6 @@ export function createMapCanvas(canvas, {
       context.textAlign = 'center'
       context.textBaseline = 'middle'
       context.fillText(nodeGlyph[asset.type] || '•', point.x, point.y + .5)
-      drawStatusBadge(asset, point, radius)
       context.restore()
 
       renderedNodes.push({
@@ -442,50 +441,6 @@ export function createMapCanvas(canvas, {
     context.arc(point.x, point.y, radius, 0, Math.PI * 2)
     context.strokeStyle = color
     context.lineWidth = lineWidth
-    context.stroke()
-  }
-
-  function drawStatusBadge(asset, point, radius) {
-    const status = String(asset.status || '').trim().toLowerCase()
-    const online = ['online', 'active', 'aktif', 'normal'].includes(status)
-    const warning = status && ![
-      'status tidak tersedia',
-      'tidak tersedia',
-      'unknown',
-      'n/a',
-      '-',
-    ].includes(status)
-    if (!online && !warning) return
-    const x = point.x + radius - 1
-    const y = point.y - radius + 1
-    context.beginPath()
-    if (online) {
-      context.arc(x, y, 4.5, 0, Math.PI * 2)
-    } else {
-      context.moveTo(x, y - 5)
-      context.lineTo(x + 5, y + 4)
-      context.lineTo(x - 5, y + 4)
-      context.closePath()
-    }
-    context.fillStyle = online ? colors.success : colors.warning
-    context.fill()
-    context.strokeStyle = colors.surface
-    context.lineWidth = 1.5
-    context.stroke()
-    context.beginPath()
-    context.strokeStyle = colors.surface
-    context.lineWidth = 1.3
-    context.lineCap = 'round'
-    if (online) {
-      context.moveTo(x - 2.2, y)
-      context.lineTo(x - .4, y + 1.8)
-      context.lineTo(x + 2.5, y - 1.8)
-    } else {
-      context.moveTo(x, y - 1.8)
-      context.lineTo(x, y + 1.2)
-      context.moveTo(x, y + 2.8)
-      context.lineTo(x, y + 2.9)
-    }
     context.stroke()
   }
 

@@ -25,7 +25,6 @@ import { bindUserAccountMenu, renderTopNavigation } from '../map/map-page.js'
 import { bindThemeToggle } from '../../theme.js'
 import { getSessionUser } from '../../services/account-session.js'
 import { calculateTopologyDiagramLayout } from './topology-diagram-layout.js'
-import { loadTopologyDraft } from '../../services/topology-sync-service.js'
 import { renderTopologyDiagramSvg } from './topology-diagram-svg.js'
 import { resolveTopologyDropTarget } from './topology-drop-target.js'
 import { frameMoveAssetIds } from './topology-frame-descendants.js'
@@ -78,31 +77,12 @@ export async function renderTopologyPage(container) {
   bindThemeToggle()
 
   try {
-    const draftVersionId = new URLSearchParams(window.location.search).get('draftVersionId')
-    let payload
-    if (draftVersionId) {
-      try {
-        payload = await loadTopologyDraft(draftVersionId)
-      } catch (error) {
-        if (error.status !== 404) throw error
-        const active = await loadActiveDataset({ ...requested, view: 'topology' })
-        if (active.datasetVersion?.id !== draftVersionId) throw error
-        const url = new URL(window.location.href)
-        url.searchParams.delete('draftVersionId')
-        window.history.replaceState({}, '', url)
-        payload = active
-      }
-    } else {
-      payload = await loadActiveDataset({ ...requested, view: 'topology' })
-    }
+    const payload = await loadActiveDataset({ ...requested, view: 'topology' })
     const mapData = adaptActiveDatasetForTopology(payload)
     mapData.recordRevision = payload.recordRevision
     mapData.topologyFrameNames = payload.topologyFrameNames ?? {}
     mapData.topologyFrameAssignments = payload.topologyFrameAssignments ?? {}
     mapData.topologyFrames = payload.topologyFrames ?? {}
-    mapData.isDraft = payload.draft === true
-    mapData.editingRequiresDraft = payload.editingRequiresDraft === true
-    if (mapData.isDraft) mapData.activeContext.draftVersionId = draftVersionId
     persistActiveContext(mapData.activeContext)
 
     const datasetVersionId = mapData.activeContext.datasetVersionId
@@ -357,11 +337,6 @@ function mountTopologyWorkspace(container, {
       suppressViewportClick = false
       return
     }
-    if (event.target?.closest?.('[data-publish-draft]') && state.changes.length) {
-      event.preventDefault()
-      showToast('Simpan perubahan ke draft sebelum menerbitkan.')
-      return
-    }
     if (state.actionsOpen && !event.target?.closest?.('[data-topology-actions-menu], [data-action="toggle-actions"]')) {
       state.actionsOpen = false
       updatePanelState()
@@ -419,16 +394,9 @@ function mountTopologyWorkspace(container, {
 
     const action = event.target?.closest?.('[data-action]')?.dataset.action
     if (!canEditTopology && [
-      'open-sync', 'save-diagram', 'cancel-diagram', 'add-pole-frame',
+      'save-diagram', 'cancel-diagram', 'add-pole-frame',
       'toggle-actions', 'rename-selected-frame', 'remove-relation',
     ].includes(action)) return
-    if (action === 'open-sync') {
-      const draftId = new URLSearchParams(window.location.search).get('draftVersionId')
-      window.location.assign(draftId
-        ? `/admin/topology-sync?draftVersionId=${encodeURIComponent(draftId)}`
-        : '/admin/topology-sync')
-      return
-    }
     if (action === 'save-diagram') return void saveDraft()
     if (action === 'cancel-diagram') return cancelDraft()
     if (action === 'add-pole-frame') return openFrameComposer()
@@ -1397,7 +1365,7 @@ function mountTopologyWorkspace(container, {
     if (drop.kind === 'connect') {
       void addRelation(completed.assetId, drop.targetId)
       void completed.feedback?.finish(container.querySelector(`[data-node-id="${cssEscape(drop.targetId)}"]`))
-      showToast('Relasi ditambahkan ke draft. Pilih Simpan untuk menerapkan.')
+      showToast('Relasi ditambahkan. Pilih Simpan untuk menerapkan.')
       return
     }
     void moveAssetToFrame(completed.assetId, drop.box, completed.feedback)
@@ -1473,7 +1441,7 @@ function mountTopologyWorkspace(container, {
     graph = { ...graph, edges: graph.edges.filter(item => (item.id ?? item.relationId) !== edgeId) }
     state.selectedEdgeId = null
     rebuild()
-    showToast('Relasi dihapus dari draft. Gunakan Batal untuk memulihkannya sebelum disimpan.')
+    showToast('Relasi dihapus. Gunakan Batal untuk memulihkannya sebelum disimpan.')
   }
 
   async function addRelation(sourceAssetId, targetAssetId) {
@@ -1503,7 +1471,7 @@ function mountTopologyWorkspace(container, {
       state.relationSearch = ''
       state.selectedAssetId = sourceAssetId
       rebuild()
-      showToast('Relasi awal dipulihkan dalam draft.')
+      showToast('Relasi awal dipulihkan.')
       return
     }
     const id = `draft-edge:${crypto.randomUUID()}`
@@ -1514,7 +1482,7 @@ function mountTopologyWorkspace(container, {
     state.relationSearch = ''
     state.selectedAssetId = sourceAssetId
     rebuild()
-    if (replacement.replaced.length) showToast('Relasi JB utama sebelumnya diganti dalam draft. Batal akan memulihkannya.')
+    if (replacement.replaced.length) showToast('Relasi JB utama sebelumnya diganti. Batal akan memulihkannya.')
   }
 
   function stageChange(change) {
@@ -1549,10 +1517,6 @@ function mountTopologyWorkspace(container, {
   async function saveDraft() {
     if (!canEditTopology) return
     if (!state.changes.length || state.mutationBusy) return
-    if (mapData.editingRequiresDraft && !mapData.isDraft) {
-      showToast('Buat draft dari menu Sinkronisasi data sebelum menyimpan koreksi.')
-      return
-    }
     await runMutation(async () => {
       const response = await saveTopologyDiagram({ datasetVersionId: activeContext.datasetVersionId,
         expectedRecordRevision: mapData.recordRevision,
@@ -1567,10 +1531,8 @@ function mountTopologyWorkspace(container, {
       savedSnapshot = captureSavedSnapshot()
       rebuild()
       try {
-        const persisted = mapData.isDraft
-          ? await loadTopologyDraft(activeContext.datasetVersionId)
-          : await loadActiveDataset({ datasetId: activeContext.datasetId,
-            branchId: activeContext.branchId, view: 'topology' })
+        const persisted = await loadActiveDataset({ datasetId: activeContext.datasetId,
+          branchId: activeContext.branchId, view: 'topology' })
         if (persisted.datasetVersion?.id !== activeContext.datasetVersionId) {
           throw new Error('Versi dataset berubah sesudah penyimpanan.')
         }
@@ -1608,7 +1570,7 @@ function mountTopologyWorkspace(container, {
     try {
       await operation()
     } catch (error) {
-      state.saveError = error?.message || 'Perubahan belum dapat disimpan. Draft tetap tersedia.'
+      state.saveError = error?.message || 'Perubahan belum dapat disimpan.'
       showToast(error?.message || 'Perubahan belum dapat disimpan. Coba lagi.')
     } finally {
       state.mutationBusy = false
@@ -1784,7 +1746,7 @@ function mountTopologyWorkspace(container, {
     closeFrameComposer({ discard: false })
     rebuild()
     requestAnimationFrame(() => focusFrame(frame.id))
-    showToast(`${frame.name} ditambahkan ke draft.`)
+    showToast(`${frame.name} ditambahkan. Pilih Simpan untuk menerapkan.`)
   }
 
   function focusFrame(frameId) {
@@ -1858,7 +1820,6 @@ function mountTopologyWorkspace(container, {
       item.cameraAssetId === node.id)
       && !relations.some(({ other }) => ['junction-peer', 'junction-extended']
         .includes(other.diagramClass))
-    const online = node.connectivityStatus !== 'disconnected' && !isOfflineStatus(node.status)
     const availableFrames = (layout?.mountingBoxes ?? []).filter(box =>
       ['confirmed', 'empty', 'excluded'].includes(box.kind)
         && (!box.areaKey || box.areaKey === node.areaKey))
@@ -1872,13 +1833,12 @@ function mountTopologyWorkspace(container, {
       </div>
       <div class="topology-stitch-inspector-body">
         <div class="topology-stitch-asset-heading">
-          <div class="topology-stitch-asset-icon ${online ? 'online' : 'offline'}">
+          <div class="topology-stitch-asset-icon">
             <span class="material-symbols-outlined" aria-hidden="true">${iconForNode(node)}</span>
           </div>
           <div class="topology-stitch-asset-title">
             <div class="topology-stitch-name-row">
               <h4>${escapeHtml(node.name || node.id)}</h4>
-              <span class="topology-stitch-status ${online ? 'online' : 'offline'}"><i></i>${online ? 'Online' : 'Offline'}</span>
             </div>
             <span>${escapeHtml(node.type || node.assetType || 'Aset')}</span>
           </div>
@@ -1911,14 +1871,14 @@ function mountTopologyWorkspace(container, {
         <section class="topology-stitch-inspector-section">
           <div class="topology-stitch-section-heading">
             <label>Relasi (${relations.length})</label>
-            ${canEditTopology ? '<span>Perubahan masuk ke draft</span>' : ''}
+            ${canEditTopology ? '<span>Simpan untuk menerapkan perubahan</span>' : ''}
           </div>
           <div class="topology-stitch-relations">
             ${relations.length ? relations.map(({ other, edge }) => `
               <div class="topology-stitch-relation-row">
                 <button type="button" class="topology-stitch-relation" data-select-asset="${escapeAttribute(other.id)}">
                   <span class="topology-stitch-relation-main"><span class="material-symbols-outlined" aria-hidden="true">${iconForNode(other)}</span><strong>${escapeHtml(other.name || other.id)}</strong></span>
-                  <span class="topology-stitch-relation-meta">${escapeHtml(edge.networkFamilyLabel || networkFamilyLabel(other.networkFamily))}<i class="${other.connectivityStatus === 'disconnected' ? 'offline' : ''}"></i></span>
+                  <span class="topology-stitch-relation-meta">${escapeHtml(edge.networkFamilyLabel || networkFamilyLabel(other.networkFamily))}</span>
                 </button>
                 ${canEditTopology ? `<button type="button" class="topology-stitch-relation-remove" data-action="remove-relation"
                   data-relation-id="${escapeAttribute(edge.id)}" aria-label="Hapus relasi dengan ${escapeAttribute(other.name || other.id)}"
@@ -1963,8 +1923,8 @@ function mountTopologyWorkspace(container, {
       </div>
       <div class="topology-stitch-inspector-body">
         <div class="topology-stitch-asset-heading">
-          <div class="topology-stitch-asset-icon online"><span class="material-symbols-outlined" aria-hidden="true">cable</span></div>
-          <div class="topology-stitch-asset-title"><div class="topology-stitch-name-row"><h4>${escapeHtml(edge.relationId || edge.id)}</h4><span class="topology-stitch-status online"><i></i>Aktif</span></div><span>${escapeHtml(edge.networkFamilyLabel || 'Relasi terkonfirmasi')}</span></div>
+          <div class="topology-stitch-asset-icon"><span class="material-symbols-outlined" aria-hidden="true">cable</span></div>
+          <div class="topology-stitch-asset-title"><div class="topology-stitch-name-row"><h4>${escapeHtml(edge.relationId || edge.id)}</h4></div><span>${escapeHtml(edge.networkFamilyLabel || 'Relasi terkonfirmasi')}</span></div>
         </div>
         <section class="topology-stitch-inspector-card"><div class="topology-stitch-section-label"><span class="material-symbols-outlined" aria-hidden="true">route</span>Endpoint Relasi</div><p>${escapeHtml(source?.name || edge.sourceId)} <span class="material-symbols-outlined topology-stitch-inline-icon" aria-hidden="true">arrow_forward</span> ${escapeHtml(target?.name || edge.targetId)}</p></section>
         <section class="topology-stitch-inspector-section"><label>Provenance</label><p class="topology-stitch-provenance">${escapeHtml(edge.provenance || edge.sourceGeometryId || 'Relasi aktif dari dataset topology.')}</p></section>
@@ -2291,14 +2251,6 @@ function renderWorkspaceShell({ activeContext, mapData, state, model, canEditTop
             branchName: branchLabel,
             areaName: areaName(state.area, mapData.locationGroups),
           })}
-          ${canEditTopology && mapData.editingRequiresDraft && !mapData.isDraft ? `<div class="topology-draft-required" role="status">
-            <span>Versi aktif. Buat draft untuk mengubah diagram.</span>
-            <a href="/admin/topology-sync">Buat draft</a>
-          </div>` : ''}
-          ${canEditTopology && mapData.isDraft ? `<div class="topology-draft-required is-draft" role="status">
-            <span>Ini diagram draft. Simpan koreksi, lalu terbitkan agar muncul di diagram aktif.</span>
-            <a data-publish-draft href="/admin/topology-sync?draftVersionId=${encodeURIComponent(activeContext.draftVersionId || activeContext.datasetVersionId)}">Tinjau &amp; terbitkan</a>
-          </div>` : ''}
           <div class="topology-stitch-toolbar" role="group" aria-label="Alat diagram">
             <div class="topology-stitch-toolbar-actions">
               <div class="topology-toolbar-group topology-toolbar-edit-actions" aria-label="Edit diagram">
@@ -2313,7 +2265,6 @@ function renderWorkspaceShell({ activeContext, mapData, state, model, canEditTop
           ${canEditTopology ? `<div class="topology-actions-menu" id="topology-actions-menu" data-topology-actions-menu hidden>
             <span class="topology-actions-heading">Tindakan diagram</span>
             <button type="button" data-action="rename-selected-frame" title="Pilih frame terlebih dahulu" disabled><span class="material-symbols-outlined" aria-hidden="true">edit</span><span>Ubah nama frame</span></button>
-            <button type="button" data-action="open-sync"><span class="material-symbols-outlined" aria-hidden="true">sync_alt</span><span>Sinkronisasi data</span></button>
           </div>` : ''}
           <div class="topology-stitch-viewport" data-topology-viewport tabindex="0" aria-label="Canvas diagram topologi">
             <div class="topology-stitch-canvas"><div class="topology-stitch-graph-frame" data-topology-frame></div></div>
@@ -2335,7 +2286,7 @@ function renderWorkspaceShell({ activeContext, mapData, state, model, canEditTop
           ${canEditTopology ? `<div class="topology-draft-bar" data-draft-bar hidden role="status" aria-live="polite">
             <span class="topology-draft-indicator"></span><div><strong data-draft-count></strong><small data-draft-error></small></div>
             <button type="button" data-action="cancel-diagram">Batal</button>
-            <button type="button" class="topology-save-button" data-action="save-diagram">Simpan ke draft</button>
+            <button type="button" class="topology-save-button" data-action="save-diagram">Simpan perubahan</button>
           </div>` : ''}
           <aside class="topology-legend-popover" id="topology-legend" data-topology-legend hidden>
             <header><strong>Legenda diagram</strong><button type="button" data-action="close-legend" aria-label="Tutup legenda"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></header>
@@ -2364,9 +2315,9 @@ function renderWorkspaceShell({ activeContext, mapData, state, model, canEditTop
         <label for="topology-frame-name">Nama frame</label>
         <div><input id="topology-frame-name" data-frame-name-input maxlength="48" autocomplete="off" />
           <button type="button" data-action="cancel-frame-name" aria-label="Batal"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
-          <button type="submit" aria-label="Terapkan nama ke draft"><span class="material-symbols-outlined" aria-hidden="true">check</span></button>
+          <button type="submit" aria-label="Terapkan nama"><span class="material-symbols-outlined" aria-hidden="true">check</span></button>
         </div>
-        <small>Nama tampilan saja; nama aset KMZ tetap. Tekan Enter, lalu Simpan draft.</small>
+        <small>Nama tampilan saja; nama aset KMZ tetap. Tekan Enter, lalu Simpan perubahan.</small>
       </form>` : ''}
       <div class="topology-stitch-toast" data-topology-toast role="status" aria-live="polite"></div>
     </div>
@@ -2439,10 +2390,6 @@ function iconForNode(node) {
   if (/sensor/.test(type)) return 'sensors'
   if (/printer|peripheral/.test(type)) return 'developer_board'
   return 'hub'
-}
-
-function isOfflineStatus(value) {
-  return /offline|down|inactive|rusak|mati|disconnected/i.test(String(value ?? ''))
 }
 
 function slugify(value) {

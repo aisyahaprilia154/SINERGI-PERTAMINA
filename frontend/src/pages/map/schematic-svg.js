@@ -84,8 +84,6 @@ export function renderSchematicSvg({
           .node-ip{font:500 8.5px "Segoe UI Mono",Consolas,monospace;fill:${SVG_THEME.textMuted}}
           .sequence-badge{fill:${SVG_THEME.backgroundSubtle};stroke:${SVG_THEME.textSecondary};stroke-width:1}
           .sequence-text{font:700 7px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.text}}
-          .status-alert{fill:${SVG_THEME.warning};stroke:${SVG_THEME.background};stroke-width:1.5}
-          .status-alert-text{font:800 6px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.background}}
           .diagram-divider{stroke:${SVG_THEME.border};stroke-width:1}
           .legend-label{font:600 9px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.textSecondary}}
           .legend-title{font:700 8px Inter,ui-sans-serif,system-ui;fill:${SVG_THEME.textMuted};letter-spacing:.08em}
@@ -267,11 +265,6 @@ function renderNode(node, selectedAssetId, sourceIconDataByUrl) {
         <circle class="sequence-badge" cx="${nodeX + radius + 5}" cy="${nodeY - radius - 3}" r="6"/>
         <text class="sequence-text" x="${nodeX + radius + 5}" y="${nodeY - radius - .5}"
           text-anchor="middle">${node.order + 1}</text>
-      ` : ''}
-      ${node.status && node.status !== 'Online' ? `
-        <circle class="status-alert" cx="${nodeX - radius - 3}" cy="${nodeY - radius + 1}" r="5"/>
-        <text class="status-alert-text" x="${nodeX - radius - 3}" y="${nodeY - radius + 3}"
-          text-anchor="middle">!</text>
       ` : ''}
       <text class="node-id" x="${labelX}" y="${labelY}" text-anchor="start">${escapeXml(displayName)}</text>
       <text class="node-name" x="${labelX}" y="${labelY + 17}"

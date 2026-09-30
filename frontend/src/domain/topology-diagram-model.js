@@ -624,7 +624,7 @@ export function getTopologyDiagramSearchResults(model, query, limit = 12) {
         typeLabel,
         area,
         statusLabel,
-        detail: `${typeLabel} · ${area} · Konektivitas diagram: ${statusLabel} · Status operasional: ${operationalStatusLabel(node.status || node.operationalStatus)}`,
+        detail: `${typeLabel} · ${area} · Konektivitas diagram: ${statusLabel}`,
         score: searchScore(node, normalized),
       }
     })
@@ -686,13 +686,6 @@ function connectivityLabel(value) {
     'suggested-only': 'Hanya memiliki saran',
     disconnected: 'Belum terhubung',
   }[value] ?? 'Status konektivitas belum tercatat'
-}
-
-function operationalStatusLabel(value) {
-  const status = String(value ?? '').trim()
-  return !status || /^(unknown|not recorded|not_recorded|n\/a|none|status tidak tersedia|belum dicatat|-)$/i.test(status)
-    ? 'Belum dicatat'
-    : status
 }
 
 export function isConfirmedTopologyEdge(edge) {

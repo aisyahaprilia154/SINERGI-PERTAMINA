@@ -5,8 +5,6 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { JsonDatasetVersionRepository } from '../src/storage/dataset-version-repository.js'
 import { projectFacilityRecord } from '../src/topology/facility-record-projection.js'
-import { initializeSyncRecord } from '../src/topology/topology-sync.js'
-import { TopologySyncService } from '../src/topology/topology-sync-service.js'
 import { diagramEdgeKey } from '../../shared/topology-edge-overrides.mjs'
 import { generateRelationArtifacts } from '../src/topology/semantic-relation-engine.js'
 import {
@@ -571,91 +569,6 @@ test('diagram draft persists atomically through a real JSON repository and reloa
   assert.equal(reloaded.recordRevision, 1)
   assert.equal(reloaded.topologyFrameNames['POLE-FIELD'], 'Tiang hasil koreksi')
   assert.equal(reloaded.mountingRelations.find(r => r.sourceAssetId === 'CAM-01').targetAssetId, 'POLE-FIELD')
-})
-
-test('dua repository offline saling mengimpor koreksi diagram tanpa duplikasi', async () => {
-  const bundle = mountingBundle()
-  const initial = initializeSyncRecord(
-    applyArtifacts(baseRecord(bundle), generateRelationArtifacts(bundle)),
-    'shared-sync-id',
-  )
-  const makeLaptop = () => {
-    const repository = new SerializedMemoryRepository([structuredClone(initial)])
-    const auditLog = new MemoryAuditLog()
-    const topologyService = new TopologyService({ repository, auditLog })
-    return { repository, topologyService,
-      sync: new TopologySyncService({ repository, topologyService, auditLog }) }
-  }
-  const alice = makeLaptop()
-  const bob = makeLaptop()
-  await alice.topologyService.saveDiagram('dv-review', 'alice', {
-    expectedRecordRevision: 0,
-    changes: [{ type: 'mount', assetId: 'CAM-01', poleAssetId: 'POLE-FIELD' }],
-  })
-  await bob.topologyService.saveDiagram('dv-review', 'bob', {
-    expectedRecordRevision: 0,
-    changes: [{ type: 'rename-frame', assetId: 'POLE-FIELD', name: 'Tiang bersama' }],
-  })
-  const passphrase = 'sandi-aman-untuk-tim'
-  const fromAlice = await alice.sync.export('dv-review', passphrase)
-  const bobPreview = await bob.sync.preview('dv-review', fromAlice, passphrase)
-  assert.equal(bobPreview.summary.ready, 1)
-  await bob.sync.apply('dv-review', 'bob', fromAlice, passphrase, {
-    expectedRecordRevision: bobPreview.recordRevision,
-  })
-  assert.equal((await bob.sync.preview('dv-review', fromAlice, passphrase))
-    .summary.alreadyApplied, 1)
-  const fromBob = await bob.sync.export('dv-review', passphrase)
-  const alicePreview = await alice.sync.preview('dv-review', fromBob, passphrase)
-  assert.equal(alicePreview.summary.ready, 1)
-  await alice.sync.apply('dv-review', 'alice', fromBob, passphrase, {
-    expectedRecordRevision: alicePreview.recordRevision,
-  })
-  const a = await alice.repository.get('dv-review')
-  const b = await bob.repository.get('dv-review')
-  assert.deepEqual(a.topologyFrameNames, b.topologyFrameNames)
-  assert.equal(a.mountingRelations.find(item => item.sourceAssetId === 'CAM-01').targetAssetId,
-    b.mountingRelations.find(item => item.sourceAssetId === 'CAM-01').targetAssetId)
-})
-
-test('konflik nama frame menunggu pilihan lalu pilihan lokal diingat', async () => {
-  const bundle = mountingBundle()
-  const initial = initializeSyncRecord(
-    applyArtifacts(baseRecord(bundle), generateRelationArtifacts(bundle)),
-    'shared-sync-id',
-  )
-  const makeLaptop = () => {
-    const repository = new SerializedMemoryRepository([structuredClone(initial)])
-    const auditLog = new MemoryAuditLog()
-    const topologyService = new TopologyService({ repository, auditLog })
-    return { repository, topologyService,
-      sync: new TopologySyncService({ repository, topologyService, auditLog }) }
-  }
-  const alice = makeLaptop()
-  const bob = makeLaptop()
-  await alice.topologyService.saveDiagram('dv-review', 'alice', {
-    expectedRecordRevision: 0,
-    changes: [{ type: 'rename-frame', assetId: 'POLE-FIELD', name: 'Tiang A' }],
-  })
-  await bob.topologyService.saveDiagram('dv-review', 'bob', {
-    expectedRecordRevision: 0,
-    changes: [{ type: 'rename-frame', assetId: 'POLE-FIELD', name: 'Tiang B' }],
-  })
-  const passphrase = 'sandi-aman-untuk-tim'
-  const envelope = await alice.sync.export('dv-review', passphrase)
-  const preview = await bob.sync.preview('dv-review', envelope, passphrase)
-  assert.equal(preview.summary.conflict, 1)
-  await assert.rejects(bob.sync.apply('dv-review', 'bob', envelope, passphrase, {
-    expectedRecordRevision: preview.recordRevision,
-  }), { code: 'topology_sync_conflicts_unresolved' })
-  assert.equal((await bob.repository.get('dv-review')).topologyFrameNames['POLE-FIELD'], 'Tiang B')
-  await bob.sync.apply('dv-review', 'bob', envelope, passphrase, {
-    expectedRecordRevision: preview.recordRevision,
-    resolutions: { [preview.changes[0].id]: 'local' },
-  })
-  assert.equal((await bob.sync.preview('dv-review', envelope, passphrase))
-    .summary.alreadyApplied, 1)
-  assert.equal((await bob.repository.get('dv-review')).topologyFrameNames['POLE-FIELD'], 'Tiang B')
 })
 
 test('mounting preview is read-only and exposes review, integrity, and relation delta', async () => {

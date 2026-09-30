@@ -64,21 +64,18 @@ const MAX_MOUNTING_BULK_DECISIONS = 200
 
 export class TopologyService {
   async saveDiagram(datasetVersionId, actorId, { changes, expectedRecordRevision,
-    correlationId, syncAcceptedIds = [], syncAdopt = null,
-    syncTolerantEdges = false } = {}) {
-    if (!Array.isArray(changes) || (!changes.length && !syncAcceptedIds.length && !syncAdopt)
+    correlationId } = {}) {
+    if (!Array.isArray(changes) || !changes.length
       || changes.length > 200
       || changes.some(change => !change || typeof change !== 'object' || Array.isArray(change))
-      || !Number.isInteger(expectedRecordRevision)
-      || !Array.isArray(syncAcceptedIds) || syncAcceptedIds.length > 200
-      || syncAcceptedIds.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id))) {
+      || !Number.isInteger(expectedRecordRevision)) {
       throw new AppError('Daftar perubahan dan revisi diagram wajib valid (maksimal 200).', { code: 'invalid_diagram_changes', statusCode: 400 })
     }
     return this.#withMutationTransaction(async ({ repository, auditLog }) => {
       let batchAuditId
       const updated = await repository.update(datasetVersionId, async initial => {
         assertExpectedRecordRevision(initial, expectedRecordRevision)
-        // Run the existing validated mutation contracts against a private draft.
+        // Apply validated changes to a private copy before writing the record once.
         // Only the final record is written, once, under the repository lock.
         let draft = initial
         const audit = await auditLog.record('topology.diagram_edit_started', {
@@ -102,7 +99,7 @@ export class TopologyService {
           auditLog: { record: async () => audit }, config: this.config, clock: this.clock })
         editor.diagramDraft = true
         for (const change of changes) {
-          const reason = 'Koreksi manual melalui draft diagram topologi.'
+          const reason = 'Koreksi manual melalui diagram topologi.'
           if (change.type === 'mount') {
             await editor.setMountingRelation(datasetVersionId, actorId,
               { assetId: change.assetId, poleAssetId: change.poleAssetId ?? null,
@@ -142,64 +139,24 @@ export class TopologyService {
             await editor.createDeviceRelation(datasetVersionId, actorId,
               { sourceAssetId: change.sourceAssetId, targetAssetId: change.targetAssetId, reason })
           } else if (['rename-frame', 'remove-edge', 'remove-relation'].includes(change.type)) {
-            try {
-              const relationEdge = change.type === 'remove-relation'
-                ? projectFacilityRecord(draft).topologyGraph?.edges.find(item => (
-                  [item.sourceAssetId, item.targetAssetId].includes(change.sourceAssetId)
-                  && [item.sourceAssetId, item.targetAssetId].includes(change.targetAssetId)
-                )) : null
-              if (change.type === 'remove-relation' && !relationEdge) {
-                throw new AppError('Relasi yang akan dihapus tidak ditemukan. Muat ulang diagram.', {
-                  code: 'diagram_edge_not_found', statusCode: 409,
-                })
-              }
-              await editor.editDiagram(datasetVersionId, actorId, {
-                ...change, edgeId: relationEdge?.id ?? change.edgeId,
-                action: change.type === 'remove-relation' ? 'remove-edge' : change.type,
-                expectedRecordRevision: recordRevision(draft),
+            const relationEdge = change.type === 'remove-relation'
+              ? projectFacilityRecord(draft).topologyGraph?.edges.find(item => (
+                [item.sourceAssetId, item.targetAssetId].includes(change.sourceAssetId)
+                && [item.sourceAssetId, item.targetAssetId].includes(change.targetAssetId)
+              )) : null
+            if (change.type === 'remove-relation' && !relationEdge) {
+              throw new AppError('Relasi yang akan dihapus tidak ditemukan. Muat ulang diagram.', {
+                code: 'diagram_edge_not_found', statusCode: 409,
               })
-            } catch (error) {
-              if (!(syncTolerantEdges && ['remove-edge', 'remove-relation'].includes(change.type)
-                && error?.code === 'diagram_edge_not_found')) throw error
-              if (change.type === 'remove-relation') continue
-              const exists = (draft.topologyEdgeOverrides ?? []).some(item =>
-                item.action === 'remove' && (change.edgeKey
-                  ? item.edgeKey === change.edgeKey : item.edgeId === change.edgeId))
-              if (!exists) draft = { ...draft, topologyEdgeOverrides: [
-                ...(draft.topologyEdgeOverrides ?? []),
-                { action: 'remove', edgeId: change.edgeId ?? null,
-                  edgeKey: change.edgeKey ?? null, actorId,
-                  updatedAt: this.clock().toISOString() },
-              ] }
             }
+            await editor.editDiagram(datasetVersionId, actorId, {
+              ...change, edgeId: relationEdge?.id ?? change.edgeId,
+              action: change.type === 'remove-relation' ? 'remove-edge' : change.type,
+              expectedRecordRevision: recordRevision(draft),
+            })
           } else {
             throw new AppError('Jenis perubahan diagram tidak valid.', { code: 'invalid_diagram_change', statusCode: 400 })
           }
-        }
-        if (syncAcceptedIds.length) {
-          if (!draft.topologySync?.id) {
-            throw new AppError('Sinkronisasi dataset belum disiapkan.', {
-              code: 'topology_sync_not_initialized', statusCode: 409,
-            })
-          }
-          draft = { ...draft, topologySync: {
-            ...draft.topologySync,
-            appliedChangeIds: [...new Set([
-              ...(draft.topologySync.appliedChangeIds ?? []), ...syncAcceptedIds,
-            ])],
-          } }
-        }
-        if (syncAdopt) {
-          if (!draft.datasetVersion.baseDatasetVersionId
-            || draft.datasetVersion.publicationStatus !== 'unpublished'
-            || !syncAdopt.id || !syncAdopt.source?.datasetVersionId) {
-            throw new AppError('Titik sinkronisasi draft tidak valid.', {
-              code: 'topology_sync_invalid_adoption', statusCode: 409,
-            })
-          }
-          draft = { ...draft, topologySync: syncAdopt,
-            datasetVersion: { ...draft.datasetVersion,
-              syncRootDatasetVersionId: syncAdopt.source.datasetVersionId } }
         }
         return pruneEmptyTopologyFrames(draft)
       }, { expectedRevision: expectedRecordRevision, projectionMode: 'topology-review' })

@@ -20,7 +20,6 @@ Server Vite di port 5173 adalah lingkungan pengembangan terpisah. Agar form logi
 
 - [Pengaturan Docker dan volume](docs/DOCKER-SETUP.md)
 - [Perubahan optimasi, angka, dan batas pengukuran](docs/OPTIMASI-2026-09-30.md)
-- [Alur sinkronisasi topologi](docs/TOPOLOGY-SYNC.md)
 
 ## Pemeriksaan kode
 

@@ -33,7 +33,6 @@ export function renderAssetDetailDrawer({
   const category = getAssetCategory(asset, assetNetworks)
   const poleAsset = isPoleAsset(asset)
   const hasDirectRelations = connectedAssets.length > 0
-  const operationalStatus = resolveOperationalStatus(asset)
   const assetName = displayAssetName(asset)
   const positionAvailable = hasMapPosition(asset.coordinate)
   const assetTypeLabel = formatAssetTypeLabel(asset)
@@ -59,14 +58,6 @@ export function renderAssetDetailDrawer({
       <section class="drawer-title">
         <div class="asset-badge-row">
           <span class="category-badge category-${category.token}">${escapeHtml(category.label)}</span>
-          ${operationalStatus.value ? `
-            <span class="asset-status ${operationalStatusTone(operationalStatus.value)}">
-              <span class="material-symbols-outlined" aria-hidden="true">
-                ${operationalStatusIcon(operationalStatus.value)}
-              </span>
-              ${escapeHtml(operationalStatus.value)}
-            </span>
-          ` : ''}
         </div>
         <p>${escapeHtml(assetTypeLabel)}</p>
         ${asset.location ? `<small class="drawer-asset-location">${escapeHtml(asset.location)}</small>` : ''}
@@ -501,51 +492,6 @@ function renderEmptyState() {
 
 function renderInlineEmpty(message) {
   return `<p class="drawer-inline-empty">${escapeHtml(message)}</p>`
-}
-
-const OPERATIONAL_STATUS_KEYS = [
-  'operationalStatus',
-  'assetStatus',
-  'status',
-  'condition',
-]
-
-function resolveOperationalStatus(asset) {
-  if (typeof asset?.hasOperationalStatusField === 'boolean') {
-    return {
-      present: asset.hasOperationalStatusField,
-      value: normalizeOperationalStatus(asset.operationalStatus ?? asset.status),
-    }
-  }
-  const key = OPERATIONAL_STATUS_KEYS.find((candidate) => (
-    Object.prototype.hasOwnProperty.call(asset ?? {}, candidate)
-  ))
-  return key
-    ? { present: true, value: normalizeOperationalStatus(asset[key]) }
-    : { present: false, value: null }
-}
-
-function normalizeOperationalStatus(value) {
-  if (typeof value !== 'string') return null
-  const normalized = value.trim()
-  if (!normalized || normalized.toLocaleLowerCase('id') === 'status tidak tersedia') return null
-  return normalized
-}
-
-function operationalStatusTone(value) {
-  const normalized = value.toLocaleLowerCase('id')
-  if (['aktif', 'active', 'online', 'operasional', 'operational'].includes(normalized)) {
-    return 'success'
-  }
-  if (['dalam perbaikan', 'perbaikan', 'maintenance'].includes(normalized)) return 'warning'
-  return 'neutral'
-}
-
-function operationalStatusIcon(value) {
-  const tone = operationalStatusTone(value)
-  if (tone === 'success') return 'check_circle'
-  if (tone === 'warning') return 'build_circle'
-  return 'info'
 }
 
 function getAssetCategory(asset, assetNetworks) {

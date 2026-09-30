@@ -286,10 +286,6 @@ export function renderTopologyDiagramSvg({
           .topology-node.selected .topology-node-selection-glow,.topology-node:focus .topology-node-selection-glow{opacity:1}
           .topology-node.pulse .topology-node-selection-glow{animation:topology-selection-pulse 1.4s ease-out}
           @keyframes topology-selection-pulse{0%{opacity:1;stroke-width:4}100%{opacity:.35;stroke-width:2}}
-          .topology-node-status-dot{stroke:#fff;stroke-width:2;vector-effect:non-scaling-stroke}
-          .topology-node-status-dot.connected{fill:${THEME.connected}}
-          .topology-node-status-dot.suggested{fill:${THEME.candidate}}
-          .topology-node-status-dot.disconnected{fill:${THEME.unresolved}}
           .topology-device-icon{fill:${THEME.surface};stroke-width:2.2}
           .topology-device-glyph{font:900 8px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.text};pointer-events:none}
           .topology-node-name{font:750 11px 'Inter Variable',ui-sans-serif,system-ui;fill:${THEME.text};text-anchor:middle}
@@ -906,14 +902,6 @@ function renderNode(node, {
   const typeY = visualBox.y + visualBox.height + 27
   const warning = node.connectivityStatus === 'disconnected'
     || node.connectivityStatus === 'suggested-only'
-  const connectivityDot = node.connectivityStatus === 'confirmed'
-    ? 'connected'
-    : node.connectivityStatus === 'suggested-only' ? 'suggested' : 'disconnected'
-  const connectivityText = node.connectivityStatus === 'confirmed'
-    ? 'Terhubung'
-    : node.connectivityStatus === 'suggested-only'
-      ? 'Hanya memiliki saran koneksi'
-      : 'Belum terhubung'
   const isCoreOrJunction = ['rack-root', 'junction-peer', 'junction-extended']
     .includes(node.diagramClass)
   const color = node.isCore
@@ -947,11 +935,6 @@ function renderNode(node, {
       <rect class="topology-node-selection-glow" x="${visualBox.x - 6}" y="${visualBox.y - 6}"
         width="${visualBox.width + 12}" height="${visualBox.height + 12}" rx="${visualBox.radius + 4}"/>
       ${renderNodeGlyph(node, iconX, iconY, color, sourceIconDataByUrl)}
-      <circle class="topology-node-status-dot ${connectivityDot}"
-        cx="${visualBox.x + visualBox.width - 1}" cy="${visualBox.y + 1}"
-        r="${node.isEndpoint ? 3 : 4}">
-        <title>Konektivitas diagram: ${connectivityText}. Ini bukan status operasional perangkat.</title>
-      </circle>
       ${showLabels && (isCoreOrJunction || endpointLabel) ? `
         <text class="topology-node-name"${labelDetailAttribute} x="${iconX}" y="${labelY}">${escapeXml(labelText)}</text>
         ${showType ? `<text class="topology-node-type"${labelDetailAttribute} x="${iconX}" y="${typeY}">${escapeXml(shorten(assetDescription(node), 36))}</text>` : ''}
@@ -1274,7 +1257,6 @@ function describeNode(node) {
     node.id,
     node.name,
     node.type,
-    node.status && `status ${node.status}`,
     node.areaName,
     node.relationStatus === 'confirmed' ? 'memiliki relasi terkonfirmasi' : 'aset tanpa relasi',
   ].filter(Boolean).join(' · ')

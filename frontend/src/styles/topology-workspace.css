@@ -1368,9 +1368,6 @@
   fill: color-mix(in srgb, var(--workspace-accent) 14%, transparent);
   stroke: var(--workspace-accent);
 }
-.topology-body #app .topology-stitch-graph-frame svg .topology-node-status-dot.connected { fill: var(--workspace-success); }
-.topology-body #app .topology-stitch-graph-frame svg .topology-node-status-dot.suggested { fill: var(--color-warning, #e2a032); }
-.topology-body #app .topology-stitch-graph-frame svg .topology-node-status-dot.disconnected { fill: var(--workspace-danger); }
 .topology-body #app .topology-stitch-graph-frame svg .topology-edge:not(.selected):not(.selected-path):not(.trace) { opacity: .84; }
 .topology-body #app .topology-stitch-graph-frame svg .topology-node,
 .topology-body #app .topology-stitch-graph-frame svg .topology-mounting-bubble {

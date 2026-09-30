@@ -76,7 +76,6 @@ docker compose --env-file .env.docker restart frontend
 `docker compose down -v` kecuali memang ingin menghapus database dan file upload lokal.
 
 Port frontend dan API hanya diikat ke `127.0.0.1`. Untuk akses jarak jauh,
-pasang reverse proxy HTTPS di depannya. Koreksi Diagram Topologi pada stack
-Docker memakai draft dan publikasi setelah peninjauan; lihat
-[alur sinkronisasi topologi](TOPOLOGY-SYNC.md). Cadangkan volume PostgreSQL
-dan volume file sumber sebagai satu pasangan yang konsisten.
+pasang reverse proxy HTTPS di depannya. Koreksi Diagram Topologi oleh administrator
+disimpan langsung ke dataset aktif. Cadangkan volume PostgreSQL dan volume file
+sumber sebagai satu pasangan yang konsisten.

@@ -15,11 +15,6 @@ const routeLoaders = {
     loadPage: () => import('./pages/admin/topology-review-page.js'),
     render: 'renderTopologyReviewPage',
   },
-  '/admin/topology-sync': {
-    loadStyle: () => import('./styles/topology-route.css'),
-    loadPage: () => import('./pages/admin/topology-sync-page.js'),
-    render: 'renderTopologySyncPage',
-  },
   '/admin/datasets/import': {
     loadStyle: () => import('./styles/admin-import.css'),
     loadPage: () => import('./pages/admin/import-dataset-page.js'),

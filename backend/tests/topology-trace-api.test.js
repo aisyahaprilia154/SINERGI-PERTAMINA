@@ -25,18 +25,12 @@ test('diagram batch API requires administrator and forwards one revision-guarded
   assert.deepEqual(calls, [['dv-1', 'user-1', { ...body, correlationId: 'diagram-batch-test' }]])
 })
 
-test('production diagram API refuses edits to the published version', async t => {
+test('diagram API saves administrator changes to the active version', async t => {
   const calls = []
   const app = createApp({
-    config: { topologyDraftRequired: true },
     authenticator: { authenticate: () => ({ id: 'admin', role: 'Administrator' }) },
-    repository: { get: async id => ({ datasetVersion: id === 'dv-draft'
-      ? { baseDatasetVersionId: 'dv-active', publicationStatus: 'unpublished' }
-      : { publicationStatus: 'published' } }) },
     topologyService: {
       saveDiagram: async (...args) => { calls.push(args); return { recordRevision: 2 } },
-      setMountingRelation: async (...args) => { calls.push(args); return {} },
-      createDeviceRelation: async (...args) => { calls.push(args); return {} },
     },
   })
   await new Promise(resolve => app.listen(0, '127.0.0.1', resolve))
@@ -48,19 +42,9 @@ test('production diagram API refuses edits to the published version', async t =>
     body: JSON.stringify({ expectedRecordRevision: 1,
       changes: [{ type: 'rename-frame', assetId: 'pole', name: 'Gate' }] }),
   })
-  assert.equal((await send('dv-active')).status, 409)
-  assert.equal(calls.length, 0)
-  assert.equal((await send('dv-draft')).status, 200)
+  assert.equal((await send('dv-active')).status, 200)
   assert.equal(calls.length, 1)
-  for (const endpoint of ['mounting-relations', 'relations']) {
-    const response = await fetch(`http://127.0.0.1:${app.address().port}`
-      + `/api/dataset-versions/dv-active/topology/${endpoint}`, {
-      method: 'POST', headers: { authorization: 'Bearer test',
-        'content-type': 'application/json' }, body: '{}',
-    })
-    assert.equal(response.status, 409)
-  }
-  assert.equal(calls.length, 1)
+  assert.equal(calls[0][0], 'dv-active')
 })
 
 test('topology trace API authenticates a viewer and forwards the graph revision contract', async (t) => {
