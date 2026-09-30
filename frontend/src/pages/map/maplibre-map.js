@@ -79,6 +79,7 @@ export function createMapLibreSurface(element, {
   onSelectCandidate = () => {},
   onBasemapStatus = () => {},
   onLayoutStatus = () => {},
+  iconLoader = createSourceIconLoader(),
 } = {}) {
   let currentCandidates = candidates
   let currentTopologyGraph = topologyGraph
@@ -126,7 +127,7 @@ export function createMapLibreSurface(element, {
   let declutterEnabled = true
   let showAssetLabels = false
   let searchHighlightTimer = null
-  const sourceIconLoader = createSourceIconLoader()
+  const sourceIconLoader = iconLoader
   let layoutFrame = null
   let transformFrame = null
   let layoutAnchor = null

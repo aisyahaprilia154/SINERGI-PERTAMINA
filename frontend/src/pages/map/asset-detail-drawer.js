@@ -25,6 +25,7 @@ export function renderAssetDetailDrawer({
   relationSearch = '',
   relationStatus = 'idle',
   relationError = null,
+  sourceIconDataByUrl = null,
 }) {
   if (status === 'loading' && !asset) return renderLoadingState()
   if (status === 'error') return renderErrorState(errorMessage, asset)
@@ -108,6 +109,7 @@ export function renderAssetDetailDrawer({
           relationSearch,
           relationStatus,
           relationError,
+          sourceIconDataByUrl,
         }) : ''}
         ${connectedAssets.length ? `
           <ul class="relation-list">
@@ -115,7 +117,7 @@ export function renderAssetDetailDrawer({
               <li>
                 <div class="relation-item-row">
                   <button type="button" data-connected-asset="${escapeAttribute(connectedAsset.id)}">
-                    ${renderRelationAssetIcon(connectedAsset)}
+                    ${renderRelationAssetIcon(connectedAsset, sourceIconDataByUrl)}
                     <span>
                       <strong>${escapeHtml(displayAssetName(connectedAsset))}</strong>
                       <small>${escapeHtml(network?.shortName || network?.name || 'Relasi terkonfirmasi')}</small>
@@ -156,6 +158,7 @@ export function renderAssetDetailDrawer({
         mountingActionStatus,
         mountingActionError,
         mountingControlsAvailable,
+        sourceIconDataByUrl,
       })}
 
       ${assetNetworks.length ? `<section class="drawer-section connected-networks" aria-labelledby="asset-networks-title">
@@ -201,6 +204,7 @@ function renderRelationEditor({
   relationSearch = '',
   relationStatus = 'idle',
   relationError = null,
+  sourceIconDataByUrl = null,
 }) {
   const saving = relationStatus === 'saving'
   const hasQuery = Boolean(relationSearch.trim())
@@ -216,7 +220,7 @@ function renderRelationEditor({
       </label>
       <div class="drawer-relation-search-results" data-relation-search-results
         role="listbox" aria-label="Aset yang dapat dihubungkan" ${hasQuery ? '' : 'hidden'}>
-        ${renderRelationSearchResults(relationOptions, relationSearch, relationReplaceId, saving)}
+        ${renderRelationSearchResults(relationOptions, relationSearch, relationReplaceId, saving, sourceIconDataByUrl)}
       </div>
       <small>${relationReplaceId
         ? 'Cari aset pengganti, lalu pilih untuk memperbarui relasi.'
@@ -231,6 +235,7 @@ export function renderRelationSearchResults(
   searchText = '',
   relationReplaceId = null,
   disabled = false,
+  sourceIconDataByUrl = null,
 ) {
   const query = String(searchText || '').trim().toLocaleLowerCase('id')
   if (!query) return ''
@@ -273,7 +278,7 @@ export function renderRelationSearchResults(
       <button type="button" role="option" data-relation-target="${escapeAttribute(optionAsset.id)}"
         aria-label="${relationReplaceId ? 'Ganti relasi dengan' : 'Tambah relasi ke'} ${escapeAttribute(displayAssetName(optionAsset))}"
         ${disabled ? 'disabled' : ''}>
-        ${renderRelationAssetIcon(optionAsset)}
+        ${renderRelationAssetIcon(optionAsset, sourceIconDataByUrl)}
         <span>
           <strong>${escapeHtml(displayAssetName(optionAsset))}</strong>
           <small>${escapeHtml(metadata)}</small>
@@ -295,6 +300,7 @@ function renderMountingSection({
   mountingActionStatus,
   mountingActionError,
   mountingControlsAvailable,
+  sourceIconDataByUrl,
 }) {
   const mountable = isMountableAsset(asset)
   const pole = isPoleAsset(asset)
@@ -387,7 +393,7 @@ function renderMountingSection({
               ${mountedAssets.map((mountedAsset) => `
                 <li>
                   <button type="button" data-connected-asset="${escapeAttribute(mountedAsset.id)}">
-                    ${renderRelationAssetIcon(mountedAsset)}
+                    ${renderRelationAssetIcon(mountedAsset, sourceIconDataByUrl)}
                     <span><strong>${escapeHtml(displayAssetName(mountedAsset))}</strong><small>${escapeHtml(mountingAssetSubtitle(mountedAsset.id))}</small></span>
                     <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
                   </button>
@@ -533,10 +539,14 @@ function assetIcon(type = '') {
   return 'device_hub'
 }
 
-function renderRelationAssetIcon(asset) {
-  return isJunctionBoxAsset(asset)
-    ? `<img class="relation-icon relation-icon-image" src="${JUNCTION_BOX_ICON_URL}" alt="" aria-hidden="true">`
-    : `<span class="relation-icon material-symbols-outlined" aria-hidden="true">${assetIcon(`${asset?.type || ''} ${asset?.category || ''}`)}</span>`
+function renderRelationAssetIcon(asset, sourceIconDataByUrl = null) {
+  const iconUrl = isJunctionBoxAsset(asset) ? JUNCTION_BOX_ICON_URL : asset?.sourceIconUrl
+  const sourceIcon = sourceIconDataByUrl?.get?.(iconUrl)
+  if (sourceIcon) return `<img class="relation-icon relation-icon-image" src="${escapeAttribute(sourceIcon)}" alt="" aria-hidden="true">`
+  if (isJunctionBoxAsset(asset)) {
+    return `<img class="relation-icon relation-icon-image" src="${JUNCTION_BOX_ICON_URL}" alt="" aria-hidden="true">`
+  }
+  return `<span class="relation-icon material-symbols-outlined" aria-hidden="true">${assetIcon(`${asset?.type || ''} ${asset?.category || ''}`)}</span>`
 }
 
 function networkDisplayName(network = {}) {

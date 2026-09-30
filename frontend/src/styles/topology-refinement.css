@@ -156,3 +156,30 @@
   .topology-body #app .topology-stitch-graph-frame svg .topology-drop-slot rect { animation: none; }
   .topology-body #app .topology-stitch-graph-frame svg .topology-mounting-group.drop-target .topology-mounting-bubble { transform: none; transition: none; }
 }
+
+.topology-body #app .topology-stitch-relation-remove {
+  width: 32px;
+  min-height: 36px;
+  padding: 0;
+  color: var(--workspace-secondary);
+  background: var(--workspace-surface);
+  border: 1px solid var(--workspace-line);
+  border-radius: 8px;
+}
+.topology-body #app .topology-stitch-relation-remove:hover:not(:disabled),
+.topology-body #app .topology-stitch-relation-remove:focus-visible {
+  color: var(--workspace-danger);
+  background: color-mix(in srgb, var(--workspace-danger) 10%, var(--workspace-surface));
+  border-color: var(--workspace-danger);
+}
+.topology-body #app .topology-node-image {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+.topology-body #app .topology-stitch-asset-icon .topology-node-image {
+  width: 28px;
+  height: 28px;
+}

@@ -41,6 +41,7 @@ import { openMapDataTransferDialog } from './map-data-transfer-dialog.js'
 import { searchMatchScore } from '../../domain/search-normalization.js'
 import { branchNameForFacility } from '../../domain/facility-branch.js'
 import { formatAssetTypeLabel } from '../../domain/asset-type-label.js'
+import { createSourceIconLoader } from '../../domain/source-icon-loader.js'
 import { bindThemeToggle } from '../../theme.js'
 import { getSessionUser, logout } from '../../services/account-session.js'
 
@@ -274,6 +275,7 @@ export async function renderMapPage(container) {
   const dataActions = container.querySelector('.map-data-actions')
   const assetSearch = container.querySelector('.search-control input')
   const assetResults = container.querySelector('.sidebar-asset-search-results')
+  const sourceIconLoader = createSourceIconLoader()
   const { createMapLibreSurface } = await mapSurfacePromise
   const canvasApi = createMapLibreSurface(container.querySelector('#network-map'), {
     assets,
@@ -288,6 +290,7 @@ export async function renderMapPage(container) {
     onSelectNetwork: handleNetworkSelect,
     onBasemapStatus: updateBasemapStatus,
     onLayoutStatus: updateLayoutStatus,
+    iconLoader: sourceIconLoader,
   })
 
   function updateBasemapStatus(status, details = {}) {
@@ -609,6 +612,14 @@ export async function renderMapPage(container) {
         relation,
       }))
       .filter((item) => item.asset)
+    const iconPreload = sourceIconLoader.preload([
+      asset, mountedOnAsset, ...mountedAssets,
+      ...connectedAssets.map(({ asset: connected }) => connected),
+    ].filter(Boolean).map(({ sourceIconUrl }) => sourceIconUrl))
+    if (iconPreload) void iconPreload.then(() => {
+      if (selection.selectedAssetId === assetId && !state.relationEditorOpen
+        && !state.showMountingCandidates) renderDrawer()
+    })
     const relationOptions = canEditTopology ? buildRelationOptions({
       sourceAsset: asset,
       assets,
@@ -644,6 +655,7 @@ export async function renderMapPage(container) {
       relationSearch: state.relationSearch,
       relationStatus: state.relationStatus,
       relationError: state.relationError,
+      sourceIconDataByUrl: sourceIconLoader.dataByUrl,
     })
     drawer.classList.add('open')
     drawer.setAttribute('aria-hidden', 'false')
@@ -701,6 +713,7 @@ export async function renderMapPage(container) {
         state.relationSearch,
         state.relationReplaceId,
         state.relationStatus === 'saving',
+        sourceIconLoader.dataByUrl,
       )
     })
     drawer.querySelector('[data-relation-search-results]')?.addEventListener('click', (event) => {

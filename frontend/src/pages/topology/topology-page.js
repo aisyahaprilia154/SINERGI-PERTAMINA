@@ -946,7 +946,11 @@ function mountTopologyWorkspace(container, {
     )
     if (sourceIconPreload) {
       void sourceIconPreload.then(() => {
-        if (frame.isConnected && !dragState?.active) renderGraph()
+        if (frame.isConnected && !dragState?.active) {
+          renderGraph()
+          renderInspector()
+          renderTray()
+        }
       })
     }
     const displayBranchName = branchNameForFacility(
@@ -1792,12 +1796,22 @@ function mountTopologyWorkspace(container, {
     results.innerHTML = targets.length
       ? targets.map((target) => `
         <button type="button" data-relation-target="${escapeAttribute(target.id)}">
-          <span class="topology-stitch-relation-result-icon"><span class="material-symbols-outlined" aria-hidden="true">${iconForNode(target)}</span></span>
+          <span class="topology-stitch-relation-result-icon">${renderNodeIcon(target)}</span>
           <span><strong>${escapeHtml(target.name || target.id)}</strong><small>${escapeHtml(target.type || target.assetType || 'Aset')} · ${escapeHtml(target.areaName || '')}</small></span>
           <span class="material-symbols-outlined" aria-hidden="true">add</span>
         </button>
       `).join('')
       : hasQuery ? '<p>Tidak ada aset lain yang cocok atau aset sudah terhubung.</p>' : ''
+  }
+
+  function renderNodeIcon(node) {
+    const iconUrl = isJunctionBoxAsset(node) ? JUNCTION_BOX_ICON_URL : node?.sourceIconUrl
+    const imageUrl = sourceIconLoader.dataByUrl.get(iconUrl)
+      || (iconUrl === JUNCTION_BOX_ICON_URL ? iconUrl : null)
+    if (imageUrl) {
+      return `<img class="topology-node-image" src="${escapeAttribute(imageUrl)}" alt="" aria-hidden="true">`
+    }
+    return `<span class="material-symbols-outlined" aria-hidden="true">${iconForNode(node)}</span>`
   }
 
   function renderInspector() {
@@ -1833,9 +1847,7 @@ function mountTopologyWorkspace(container, {
       </div>
       <div class="topology-stitch-inspector-body">
         <div class="topology-stitch-asset-heading">
-          <div class="topology-stitch-asset-icon">
-            <span class="material-symbols-outlined" aria-hidden="true">${iconForNode(node)}</span>
-          </div>
+          <div class="topology-stitch-asset-icon">${renderNodeIcon(node)}</div>
           <div class="topology-stitch-asset-title">
             <div class="topology-stitch-name-row">
               <h4>${escapeHtml(node.name || node.id)}</h4>
@@ -1877,7 +1889,7 @@ function mountTopologyWorkspace(container, {
             ${relations.length ? relations.map(({ other, edge }) => `
               <div class="topology-stitch-relation-row">
                 <button type="button" class="topology-stitch-relation" data-select-asset="${escapeAttribute(other.id)}">
-                  <span class="topology-stitch-relation-main"><span class="material-symbols-outlined" aria-hidden="true">${iconForNode(other)}</span><strong>${escapeHtml(other.name || other.id)}</strong></span>
+                  <span class="topology-stitch-relation-main">${renderNodeIcon(other)}<strong>${escapeHtml(other.name || other.id)}</strong></span>
                   <span class="topology-stitch-relation-meta">${escapeHtml(edge.networkFamilyLabel || networkFamilyLabel(other.networkFamily))}</span>
                 </button>
                 ${canEditTopology ? `<button type="button" class="topology-stitch-relation-remove" data-action="remove-relation"
@@ -1951,7 +1963,7 @@ function mountTopologyWorkspace(container, {
     tray.innerHTML = `
       <div class="topology-stitch-tray-title"><span class="material-symbols-outlined" aria-hidden="true">link_off</span><span>Belum terhubung</span><strong>${isolated.length}</strong></div>
       <div class="topology-stitch-tray-list">
-        ${isolated.map((node) => `<button type="button" class="topology-stitch-tray-item" data-tray-asset="${escapeAttribute(node.id)}" title="${canEditTopology ? 'Klik untuk memilih, atau tarik ke frame' : 'Klik untuk memilih'}: ${escapeAttribute(node.name || node.id)}"><span class="topology-stitch-tray-icon"><span class="material-symbols-outlined" aria-hidden="true">${iconForNode(node)}</span></span><span>${escapeHtml(node.name || node.id)}</span></button>`).join('')}
+        ${isolated.map((node) => `<button type="button" class="topology-stitch-tray-item" data-tray-asset="${escapeAttribute(node.id)}" title="${canEditTopology ? 'Klik untuk memilih, atau tarik ke frame' : 'Klik untuk memilih'}: ${escapeAttribute(node.name || node.id)}"><span class="topology-stitch-tray-icon">${renderNodeIcon(node)}</span><span>${escapeHtml(node.name || node.id)}</span></button>`).join('')}
       </div>
     `
   }
