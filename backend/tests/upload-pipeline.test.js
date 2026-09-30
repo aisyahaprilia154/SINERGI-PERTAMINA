@@ -66,6 +66,97 @@ const SOURCE_NAME_FALLBACK_KML = `<?xml version="1.0" encoding="UTF-8"?>
   </Document>
 </kml>`
 
+const CUSTOM_DEVICE_KML = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+  <Folder><name>PC</name><Placemark><name>PC-01</name>
+    <ExtendedData><Data name="asset_id"><value>PC-01</value></Data></ExtendedData>
+    <Point><coordinates>110.4,-6.9</coordinates></Point>
+  </Placemark></Folder>
+  <Folder><name>PS</name><Placemark><name>PS-01</name>
+    <ExtendedData><Data name="asset_id"><value>PS-01</value></Data></ExtendedData>
+    <Point><coordinates>110.5,-6.9</coordinates></Point>
+  </Placemark></Folder>
+</Document></kml>`
+
+test('new KMZ categories require admin review and persist after activation', async () => {
+  const fixture = await createFixture()
+  try {
+    const accepted = await uploadKml(fixture.origin, CUSTOM_DEVICE_KML, 'new-devices.kml', {
+      officialSourceConfirmed: 'true', importMode: 'replace_active',
+    })
+    assert.equal(accepted.response.status, 202)
+    await fixture.jobQueue.onIdle()
+    const id = accepted.body.datasetVersion.id
+    const previewResponse = await fetch(`${fixture.origin}/api/admin/imports/${id}/preview`, {
+      headers: { authorization: 'Bearer admin-token' },
+    })
+    const preview = await previewResponse.json()
+    assert.equal(preview.datasetVersion.status, 'valid')
+    assert.equal(preview.canActivate, false)
+    assert.deepEqual(preview.categoryReviews.map(({ proposedLabel }) => proposedLabel).sort(), [
+      'PC', 'PS',
+    ])
+    const endpoint = `${fixture.origin}/api/admin/imports/${id}/category-reviews`
+    const body = JSON.stringify({
+      expectedRecordRevision: preview.datasetVersion.recordRevision,
+      decisions: preview.categoryReviews.map(({ key, proposedLabel }) => ({
+        key, label: proposedLabel,
+      })),
+    })
+    const viewerResponse = await fetch(endpoint, {
+      method: 'POST',
+      headers: { authorization: 'Bearer viewer-token', 'content-type': 'application/json' },
+      body,
+    })
+    assert.equal(viewerResponse.status, 403)
+    const reviewResponse = await fetch(endpoint, {
+      method: 'POST',
+      headers: { authorization: 'Bearer admin-token', 'content-type': 'application/json' },
+      body,
+    })
+    assert.equal(reviewResponse.status, 200)
+    const review = await reviewResponse.json()
+    assert.equal(review.canActivate, true)
+    const staleResponse = await fetch(endpoint, {
+      method: 'POST',
+      headers: { authorization: 'Bearer admin-token', 'content-type': 'application/json' },
+      body,
+    })
+    assert.equal(staleResponse.status, 409)
+    const stored = await fixture.repository.get(id)
+    assert.deepEqual(stored.classifiedObjects.map(({ category }) => category).sort(), [
+      'PC', 'PS',
+    ])
+    assert.ok(stored.classifiedObjects.every(({ categoryReview }) => (
+      categoryReview.status === 'approved' && categoryReview.actorId === 'admin-1'
+    )))
+    const activationResponse = await fetch(
+      `${fixture.origin}/api/admin/imports/${id}/activate`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer admin-token', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          confirmArchiveCurrent: true,
+          expectedActiveVersionId: null,
+          expectedRecordRevision: review.recordRevision,
+          publicationProfile: 'map_only',
+          confirmBreakingChanges: true,
+        }),
+      },
+    )
+    assert.equal(activationResponse.status, 200)
+    const mapResponse = await fetch(
+      `${fixture.origin}/api/datasets/dataset-semarang/active?view=map&branchId=semarang`,
+      { headers: { authorization: 'Bearer viewer-token' } },
+    )
+    assert.equal(mapResponse.status, 200)
+    const map = await mapResponse.json()
+    assert.deepEqual(map.assets.map(({ category }) => category).sort(), ['PC', 'PS'])
+    assert.ok(map.assets.every(({ dynamicCategory }) => dynamicCategory === true))
+  } finally {
+    await fixture.close()
+  }
+})
+
 test('parse job persists a bounded summary instead of the full dataset aggregate', () => {
   const result = summarizeImportJobResult({
     datasetVersion: {

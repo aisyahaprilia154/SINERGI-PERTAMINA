@@ -838,7 +838,8 @@ export function adaptActiveAssetDetail(payload, mapAsset) {
 }
 
 function createOwnerFeature({ asset, layer, geometries }) {
-  const category = normalizeCategory(asset.category, asset.type, layer)
+  const category = asset.dynamicCategory
+    ? asset.category : normalizeCategory(asset.category, asset.type, layer)
   const type = normalizeAssetType(asset.type, asset.category || category, layer, asset.name)
   const operationalStatus = readOperationalStatus(asset)
   const locationGroup = asset.locationGroupKey
@@ -869,6 +870,7 @@ function createOwnerFeature({ asset, layer, geometries }) {
     type,
     assetType: type,
     category,
+    dynamicCategory: asset.dynamicCategory === true,
     status: operationalStatus.value,
     operationalStatus: operationalStatus.value,
     hasOperationalStatusField: operationalStatus.present,
@@ -961,14 +963,17 @@ function createSemanticNetworks({
   }
 
   nodes.forEach((node) => {
-    const key = categoryKey(node.category, node.type)
+    const key = semanticCategoryKey(node)
     const group = ensureGroup(key)
     group.nodeIds.add(node.id)
     group.assetIds.add(node.assetId)
     if (node.layerId) group.layerIds.add(node.layerId)
   })
   geometries.forEach((geometry) => {
-    const key = categoryKey(geometry.category, featureByAssetId.get(geometry.assetId)?.type)
+    const feature = featureByAssetId.get(geometry.assetId)
+    const key = feature?.dynamicCategory
+      ? semanticCategoryKey(feature)
+      : categoryKey(geometry.category, feature?.type)
     const group = ensureGroup(key)
     group.geometryIds.add(geometry.id)
     if (geometry.assetId) group.assetIds.add(geometry.assetId)
@@ -977,10 +982,9 @@ function createSemanticNetworks({
   relations.forEach((relation) => {
     const relationLayer = relation.layerId ? layerById.get(relation.layerId) : null
     const source = featureByAssetId.get(relation.sourceAssetId)
-    const key = categoryKey(
-      relation.category || relationLayer?.category || source?.category,
-      source?.type,
-    )
+    const key = source?.dynamicCategory
+      ? semanticCategoryKey(source)
+      : categoryKey(relation.category || relationLayer?.category || source?.category, source?.type)
     const group = ensureGroup(key)
     group.relations.push(structuredClone(relation))
     group.nodeIds.add(relation.sourceAssetId)
@@ -1005,6 +1009,9 @@ function createSemanticNetworks({
       }))
       const networkGeometries = geometries.filter(({ id }) => group.geometryIds.has(id))
       const networkNodes = nodes.filter(({ id }) => group.nodeIds.has(id))
+      const customLabel = group.key.startsWith('custom:')
+        ? networkNodes.find(({ dynamicCategory }) => dynamicCategory)?.category ?? group.key.slice(7)
+        : null
       const lineCount = networkGeometries.filter(
         ({ geometryType }) => geometryType === 'line_string',
       ).length
@@ -1022,20 +1029,20 @@ function createSemanticNetworks({
         id: networkId,
         layerId: null,
         layerIds: [...group.layerIds],
-        name: networkName(group.key),
-        shortName: style.type,
+        name: customLabel ?? networkName(group.key),
+        shortName: customLabel ?? style.type,
         color: style.color,
         softColor: style.softColor,
-        type: style.type,
+        type: customLabel ?? style.type,
         categoryKey: group.key,
-        categoryLabel: style.type,
+        categoryLabel: customLabel ?? style.type,
         assetCount: group.assetIds.size,
         nodeCount: group.nodeIds.size,
         lineCount,
         polygonCount,
         layerCount: group.layerIds.size,
         health: 'Aktif',
-        description: `Data ${style.type} dari dataset version aktif.`,
+        description: `Data ${customLabel ?? style.type} dari dataset version aktif.`,
         sourceFolderPath: null,
         parentLayerId: null,
         nodeIds: [...group.nodeIds],
@@ -1287,6 +1294,14 @@ function categoryKey(...values) {
     || value.includes('tiang') || value.includes('pole') || value.includes('pylon')
     || value.includes('stp')) return 'infrastructure'
   return 'unmapped'
+}
+
+function semanticCategoryKey(asset) {
+  if (asset.dynamicCategory) {
+    return `custom:${String(asset.category ?? '').trim().toLocaleLowerCase('id')
+      .replace(/[^\p{L}\p{N}]+/gu, '-')}`
+  }
+  return categoryKey(asset.category, asset.type)
 }
 
 function styleFor(key) {

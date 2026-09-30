@@ -501,6 +501,7 @@ function renderInlineEmpty(message) {
 }
 
 function getAssetCategory(asset, assetNetworks) {
+  if (asset.dynamicCategory) return { label: asset.category, token: 'custom' }
   const assetSource = `${asset.category || ''} ${asset.type || ''}`.toLowerCase()
   if (assetSource.includes('cctv') || assetSource.includes('nvr') || assetSource.includes('junction')) {
     return { label: 'CCTV', token: 'cctv' }

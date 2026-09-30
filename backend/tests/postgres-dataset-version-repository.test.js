@@ -33,6 +33,31 @@ test('PostgreSQL adapter preserves aggregate CRUD and writes projections in one 
   assert.equal(pool.released, 2)
 })
 
+test('PostgreSQL projection stores an approved custom category', async () => {
+  const pool = new FakePool()
+  const repository = new PostgresDatasetVersionRepository(pool)
+  const record = datasetRecord('version-category')
+  record.sourceFeatures = [{ sourceFeatureId: 'feature-pc' }]
+  record.classifiedObjects = [{
+    classifiedObjectId: 'classified-pc',
+    sourceFeatureId: 'feature-pc',
+    siteId: 'branch-1',
+    objectRole: 'device_node',
+    networkFamily: 'unknown',
+    assetType: 'PC',
+    category: 'PC',
+    classificationStatus: 'classified',
+    categoryReview: { key: 'pc', status: 'approved', actorId: 'admin-1' },
+  }]
+  await repository.create(record)
+  const insert = pool.parameters.find(({ command }) => (
+    command.includes('INSERT INTO classified_objects')
+  ))
+  assert.equal(insert.values[10], 'PC')
+  assert.equal(JSON.parse(insert.values[15]).categoryReview.actorId, 'admin-1')
+  assert.equal((await repository.get('version-category')).classifiedObjects[0].category, 'PC')
+})
+
 test('PostgreSQL adapter casts GeoJSON parameters before PostGIS conversion', async () => {
   const pool = new FakePool()
   const repository = new PostgresDatasetVersionRepository(pool)

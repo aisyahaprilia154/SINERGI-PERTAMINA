@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import path from 'node:path'
+import { proposeAssetCategory } from './dynamic-asset-category.js'
 import {
   buildCanonicalAssetIdentityMap,
   createAutomaticIdentityRegistry,
@@ -154,7 +155,7 @@ const ROLE_RULES = Object.freeze([
     geometryTypes: ['Point'],
   },
   {
-    tokens: ['access point', 'printer', 'peripheral'],
+    tokens: ['access point', 'peripheral'],
     objectRole: 'device_node',
     networkFamily: 'lan',
     geometryTypes: ['Point'],
@@ -764,10 +765,32 @@ function classifyFeature({ feature, placemark, metadata, geometries, datasetVers
       explanation: 'Polygon diperlakukan sebagai area, bukan node atau path topology.',
     })
   }
-  const objectRole = match?.objectRole ?? 'unknown'
+  const hasPoint = geometries.some(({ geometryType }) => geometryType === 'Point')
+  const genericPoint = !match && hasPoint && Boolean(
+    metadata.semanticValues.asset_type || metadata.semanticValues.category
+      || feature.sourceFolderPath || feature.sourceName,
+  )
+  const objectRole = match?.objectRole ?? (genericPoint ? 'device_node' : 'unknown')
   const networkFamily = match?.networkFamily ?? 'unknown'
-  const rawAssetType = metadata.semanticValues.asset_type ?? match?.tokens?.[0] ?? 'unknown'
-  const rawCategory = metadata.semanticValues.category ?? inferredCategory(match)
+  const sourceCategory = metadata.semanticValues.category
+    ?? feature.sourceFolderPath?.split('/').at(-1)
+  const knownSourceCategory = canonicalVocabularyValue('category', sourceCategory)
+  const categoryProposal = proposeAssetCategory({
+    metadataCategory: metadata.semanticValues.category,
+    folderPath: feature.sourceFolderPath,
+    objectRole,
+    matchedRole: Boolean(findRoleRule(feature.sourceFolderPath?.split('/').at(-1), geometries)),
+  }) ?? (genericPoint && !knownSourceCategory ? {
+    key: 'lainnya', label: 'Lainnya', source: 'unspecified',
+  } : null)
+  const rawAssetType = metadata.semanticValues.asset_type
+    ?? match?.tokens?.[0]
+    ?? (genericPoint
+      ? (categoryProposal?.source === 'folder' ? categoryProposal.label : feature.sourceName) || 'Aset'
+      : 'unknown')
+  const rawCategory = categoryProposal?.label
+    ?? metadata.semanticValues.category
+    ?? (genericPoint ? knownSourceCategory ?? 'Lainnya' : inferredCategory(match))
   const jbProfileId = inferJbProfileId({
     objectRole,
     assetType: rawAssetType,
@@ -817,10 +840,12 @@ function classifyFeature({ feature, placemark, metadata, geometries, datasetVers
     evidence.push({
       source: 'classifier',
       observedValue: null,
-      normalizedValue: 'unknown',
-      ruleId: 'fallback.unknown',
+      normalizedValue: genericPoint ? 'device_node:review_required' : 'unknown',
+      ruleId: genericPoint ? 'fallback.point-asset-review' : 'fallback.unknown',
       weight: 0,
-      explanation: 'Tidak ada evidence yang cukup; object tidak dipaksa menjadi asset/path.',
+      explanation: genericPoint
+        ? 'Titik dengan nama atau metadata disimpan sebagai aset; kategori perlu ditinjau.'
+        : 'Tidak ada evidence yang cukup; object tidak dipaksa menjadi asset/path.',
     })
   }
   return {
@@ -850,7 +875,13 @@ function classifyFeature({ feature, placemark, metadata, geometries, datasetVers
     canonicalCategory,
     ...compact({ diagramClass }),
     ...topologySemantics,
-    classificationStatus: match ? 'classified' : 'review_required',
+    classificationStatus: categoryProposal || !match ? 'review_required' : 'classified',
+    ...(categoryProposal ? { categoryReview: {
+      key: categoryProposal.key,
+      proposedLabel: categoryProposal.label,
+      source: categoryProposal.source,
+      status: 'pending',
+    } } : {}),
     classificationScore: match?.score ?? 0,
     classificationEvidence: [...evidence, ...dimensions.semanticDimensionEvidence],
     classificationRuleSetVersion: CLASSIFICATION_RULE_SET_VERSION,
@@ -1406,6 +1437,7 @@ export function buildTopologyInputBundle({
   const eligible = classifiedObjects.filter((object) => (
     ['device_node', 'cable_path'].includes(object.objectRole)
     && object.networkFamily !== 'unknown'
+    && !object.categoryReview
     && (geometriesByFeature.get(object.sourceFeatureId) ?? []).some((geometry) => (
       geometry.valid && geometryMatchesRole(geometry, object.objectRole)
     ))
@@ -1553,6 +1585,7 @@ export function rebuildStoredTopologyInputBundle(record = {}) {
   const repairedObjects = classifiedObjects.map((object) => {
     const identity = identityItems.get(object.sourceFeatureId)
     const withIdentity = applyStoredIdentity(object, identity)
+    if (object.categoryReview?.status === 'approved') return withIdentity
     const classifierIsStale = object.classificationRuleSetVersion
       !== CLASSIFICATION_RULE_SET_VERSION
     const requiresClassification = classifierIsStale

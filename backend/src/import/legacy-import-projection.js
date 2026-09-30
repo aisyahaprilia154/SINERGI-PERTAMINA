@@ -221,9 +221,11 @@ export function projectCanonicalImport({
       identityAliases: structuredClone(identity?.aliases ?? {}),
       sourceFeatureId: feature.sourceFeatureId,
       name: metadata.assetName ?? classification?.assetName ?? feature.sourceName ?? `Placemark ${index + 1}`,
-      category: metadata.category ?? layer.category ?? classification?.category ?? 'uncategorized',
+      category: classification?.categoryReview
+        ? classification.category
+        : metadata.category ?? layer.category ?? classification?.category ?? 'uncategorized',
       type: metadata.assetType
-        ?? layer.name
+        ?? (classification?.categoryReview ? classification.assetType : layer.name)
         ?? classification?.assetType
         ?? 'unknown',
       branchId: datasetVersion.branchId,

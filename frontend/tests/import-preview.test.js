@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { renderPreviewMapCanvas, previewMapInternals } from '../src/pages/admin/preview-map-canvas.js'
-import { renderActivationBar } from '../src/pages/admin/preview-import-page.js'
+import { renderActivationBar, renderCategoryReviews } from '../src/pages/admin/preview-import-page.js'
 import { renderPreviewToolbar } from '../src/pages/admin/preview-toolbar.js'
 import { parseAttachmentFilename } from '../src/services/import-dataset-service.js'
 import {
@@ -149,6 +149,20 @@ test('version detail distinguishes original source download from validation expo
   assert.match(html, /Unduh file sumber/)
   assert.match(html, /bukan export dataset/)
   assert.match(html, /Unduh laporan/)
+})
+
+test('pending categories are reviewable and prevent activation in preview', () => {
+  const model = buildImportPreviewModel({
+    ...payload,
+    canActivate: false,
+    categoryReviews: [{
+      key: 'pc', proposedLabel: 'PC', source: 'folder', count: 3, status: 'pending',
+    }],
+  })
+  const state = createImportPreviewState(model)
+  assert.match(renderCategoryReviews(model.payload.categoryReviews), /PC · 3 aset · folder KMZ/)
+  assert.match(renderCategoryReviews(model.payload.categoryReviews), /data-category-key="pc"/)
+  assert.match(renderActivationBar(model, state), /data-request-activate\s+disabled/)
 })
 
 test('attachment filename prefers UTF-8 Content-Disposition safely', () => {

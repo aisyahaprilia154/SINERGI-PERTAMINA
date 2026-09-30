@@ -114,15 +114,18 @@ test('canonical evidence is deterministic, versioned, and topology bundle only c
   )))
   assert.equal(first.topologyInputBundle.classifiedPaths.length, 1)
   assert.equal(first.topologyInputBundle.classifiedNodes.length, 0)
-  assert.equal(first.topologyInputBundle.geometries.length, 1)
-  assert.equal(first.topologyInputBundle.geometries[0].geometryType, 'LineString')
+  assert.ok(first.topologyInputBundle.geometries.some(({ geometryType }) => (
+    geometryType === 'LineString'
+  )))
   assert.equal(first.topologyInputBundle.topologyReady, false)
   assert.equal(first.readiness.topologyReadiness, 'not_applicable')
   assert.equal(first.explicitRelationEvidence[0].validationStatus, (
     'pending_stable_identity_resolution'
   ))
   assert.ok(first.classifiedObjects.some(({ objectRole }) => objectRole === 'visual_only'))
-  assert.ok(first.classifiedObjects.some(({ objectRole }) => objectRole === 'unknown'))
+  assert.ok(first.classifiedObjects.some(({ categoryReview }) => (
+    categoryReview?.status === 'pending'
+  )))
   assert.ok(first.sourceGeometries.some(({ valid }) => valid === false))
 })
 
@@ -268,6 +271,36 @@ test('adding a new asset preserves every old feature and increments coverage exa
   assert.ok(before.sourceFeatures.every((feature) => (
     after.sourceFeatures.some(({ sourceFeatureId }) => sourceFeatureId === feature.sourceFeatureId)
   )))
+})
+
+test('new point types keep source categories and enter review without invented relations', () => {
+  const parserOutput = parseKmlText(`<?xml version="1.0"?>
+    <kml><Document>
+      <Folder><name>Printer</name>
+        <Placemark><name>PR-01</name><Point><coordinates>110,-7</coordinates></Point></Placemark>
+      </Folder>
+      <Folder><name>PC</name>
+        <Placemark><name>PC-01</name><Point><coordinates>111,-7</coordinates></Point></Placemark>
+      </Folder>
+      <Placemark><name>PS-01</name>
+        <ExtendedData><Data name="category"><value>Power Station</value></Data></ExtendedData>
+        <Point><coordinates>112,-7</coordinates></Point>
+      </Placemark>
+    </Document></kml>`)
+  const result = buildCanonicalParserResult({
+    parserOutput,
+    datasetVersion: DATASET_VERSION,
+    sourceSelection: { selectedKmlPath: 'doc.kml', resources: [] },
+  })
+  assert.deepEqual(result.classifiedObjects.map(({ category }) => category).sort(), [
+    'PC', 'Power Station', 'Printer',
+  ])
+  assert.equal(result.classifiedObjects.find(({ category }) => category === 'PC').assetType, 'PC')
+  assert.ok(result.classifiedObjects.every(({ objectRole, categoryReview }) => (
+    objectRole === 'device_node' && categoryReview?.status === 'pending'
+  )))
+  assert.equal(result.topologyInputBundle.classifiedNodes.length, 0)
+  assert.equal(result.explicitRelationEvidence.length, 0)
 })
 
 test('stored topology rebuild refreshes stale known classifications from source evidence', () => {

@@ -95,6 +95,20 @@ export async function loadImportPreview({
   )
 }
 
+export async function reviewImportCategories({
+  token,
+  datasetVersionId,
+  expectedRecordRevision,
+  decisions,
+  signal,
+  apiBase = '',
+}) {
+  return requestJson(
+    `${apiBase}/api/admin/imports/${encodeURIComponent(datasetVersionId)}/category-reviews`,
+    { token, signal, method: 'POST', body: { expectedRecordRevision, decisions } },
+  )
+}
+
 export async function autoAssignUniqueIdentityAssignments({
   token = getDefaultAdminToken(),
   datasetVersionId,

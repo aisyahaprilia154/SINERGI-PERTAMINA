@@ -2,6 +2,11 @@ import { createHash, randomUUID } from 'node:crypto'
 import { projectFacilityRecord } from '../topology/facility-record-projection.js'
 import { verifiedRootNodes, graphValidationErrorCount } from '../topology/verified-roots.js'
 import path from 'node:path'
+import {
+  categoryKey,
+  categoryReviewSummary,
+  hasPendingCategoryReview,
+} from '../domain/dynamic-asset-category.js'
 import { AppError } from '../errors.js'
 import {
   AUTOMATIC_IDENTITY_ACTOR,
@@ -17,6 +22,7 @@ import {
 
 import {
   buildReadinessContract as buildPublicationReadinessContract,
+  canonicalVocabularyValue,
   isProfilePublishable,
   normalizePublicationProfile,
   publicationCapabilities,
@@ -93,6 +99,7 @@ export class DatasetVersionLifecycleService {
       sourceOverlays: candidate.sourceOverlays ?? [],
       sourceResources: candidate.sourceResources ?? [],
       classifiedObjects: candidate.classifiedObjects ?? [],
+      categoryReviews: categoryReviewSummary(candidate),
       assetIdentityMap: candidate.assetIdentityMap
         ?? candidate.canonicalParser?.assetIdentityMap
         ?? null,
@@ -121,6 +128,99 @@ export class DatasetVersionLifecycleService {
         : null,
       canActivate: canActivate(candidate),
       readOnly: true,
+    }
+  }
+
+  async reviewCategories(datasetVersionId, actorId, {
+    decisions = [],
+    expectedRecordRevision,
+  } = {}) {
+    if (!Array.isArray(decisions) || decisions.length === 0 || decisions.length > 100) {
+      throw new AppError('Pilih 1 sampai 100 kategori untuk ditinjau.', {
+        code: 'invalid_category_review', statusCode: 400,
+      })
+    }
+    const normalized = decisions.map(({ key, label }) => ({
+      key: categoryKey(key), label: String(label ?? '').trim().replace(/\s+/g, ' '),
+    }))
+    if (normalized.some(({ key, label }) => !key || !label || label.length > 80)
+      || new Set(normalized.map(({ key }) => key)).size !== normalized.length) {
+      throw new AppError('Nama kategori atau keputusan duplikat tidak valid.', {
+        code: 'invalid_category_review', statusCode: 400,
+      })
+    }
+    const current = await this.repository.get(datasetVersionId)
+    if (current.datasetVersion.status !== 'valid'
+      || current.datasetVersion.publicationStatus === 'published') {
+      throw new AppError('Hanya kandidat valid yang dapat ditinjau.', {
+        code: 'category_review_not_allowed', statusCode: 409,
+      })
+    }
+    const pending = new Set(categoryReviewSummary(current)
+      .filter(({ status }) => status === 'pending').map(({ key }) => key))
+    if (normalized.some(({ key }) => !pending.has(key))) {
+      throw new AppError('Kategori yang dipilih tidak menunggu tinjauan.', {
+        code: 'category_review_not_pending', statusCode: 409,
+      })
+    }
+    const decisionsByKey = new Map(normalized.map((item) => [item.key, item.label]))
+    const reviewedAt = this.clock().toISOString()
+    const updated = await this.repository.update(datasetVersionId, (record) => {
+      const categoryByFeature = new Map()
+      const classifiedObjects = (record.classifiedObjects ?? []).map((object) => {
+        const review = object.categoryReview
+        const label = decisionsByKey.get(review?.key)
+        if (!label || review.status !== 'pending') return object
+        categoryByFeature.set(object.sourceFeatureId, label)
+        return {
+          ...object,
+          category: label,
+          categoryReview: { ...review, label, status: 'approved', actorId, reviewedAt },
+          classificationStatus: 'classified',
+        }
+      })
+      const assets = (record.assets ?? []).map((asset) => ({
+        ...asset,
+        category: categoryByFeature.get(asset.sourceFeatureId) ?? asset.category,
+      }))
+      const graph = record.topologyGraph
+        ? { ...record.topologyGraph, nodes: (record.topologyGraph.nodes ?? []).map((node) => ({
+          ...node,
+          category: categoryByFeature.get(node.sourceFeatureId) ?? node.category,
+        })) }
+        : null
+      const nextRecord = {
+        ...record,
+        classifiedObjects,
+        assets,
+        canonicalParser: record.canonicalParser
+          ? { ...record.canonicalParser, classifiedObjects }
+          : record.canonicalParser,
+        ...(graph ? { topologyGraph: graph } : {}),
+      }
+      if (record.readiness) nextRecord.readiness = buildPublicationReadinessContract({
+        datasetVersion: record.datasetVersion,
+        issues: record.issues ?? [],
+        parserCoverage: record.parserCoverage ?? {},
+        sourceFeatures: record.sourceFeatures ?? [],
+        sourceGeometries: record.sourceGeometries ?? [],
+        sourceOverlays: record.sourceOverlays ?? [],
+        classifiedObjects,
+        topologyReadiness: record.topologyReadiness ?? null,
+        topologyGraph: graph,
+        evaluatedAt: reviewedAt,
+      })
+      return nextRecord
+    }, { expectedRevision: expectedRecordRevision ?? current.recordRevision })
+    await this.auditLog.record('dataset_version.categories_reviewed', {
+      actorId, datasetVersionId, outcome: 'committed',
+      details: { decisions: normalized, recordRevision: updated.recordRevision },
+    })
+    return {
+      datasetVersionId,
+      recordRevision: updated.recordRevision,
+      categoryReviews: categoryReviewSummary(updated),
+      canActivate: canActivate(updated),
     }
   }
 
@@ -1428,6 +1528,8 @@ function toActiveMapDataset(resolved, {
     readiness: readinessContract,
   })
   const catalogByNodeId = new Map(catalog.map((item) => [item.nodeId, item]))
+  const classifiedByFeature = new Map((record.classifiedObjects ?? [])
+    .map((object) => [object.sourceFeatureId, object]))
   const baseAssets = (record.assets ?? []).map((asset) => {
     const identity = identityForAsset(asset, assetIdentityMap, resolver)
     const catalogItem = catalogByNodeId.get(asset.id)
@@ -1451,6 +1553,8 @@ function toActiveMapDataset(resolved, {
       identityStatus: identity?.identityStatus ?? asset.identityStatus ?? 'legacy',
       identityAliases: structuredClone(identity?.aliases ?? asset.identityAliases ?? {}),
       sourceFeatureId: asset.sourceFeatureId ?? asset.properties?.sourceFeatureId,
+      dynamicCategory: classifiedByFeature.get(asset.sourceFeatureId)?.categoryReview?.status
+        === 'approved' && !canonicalVocabularyValue('category', asset.category),
       sourceStyleId: sourceIcon?.styleId ?? null,
       sourceIconHref: sourceIcon?.href ?? null,
       sourceIconResourceId: sourceIcon?.resource?.resourceId ?? null,
@@ -2191,6 +2295,7 @@ function canActivate(record, {
   const statusValid = record.datasetVersion.status === 'valid'
     || (allowArchived && record.datasetVersion.status === 'archived')
   if (!statusValid) return false
+  if (hasPendingCategoryReview(record)) return false
   if (allowArchived
     && record.datasetVersion.status === 'archived'
     && record.datasetVersion.archiveReason

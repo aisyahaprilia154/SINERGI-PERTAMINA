@@ -3,6 +3,7 @@ import {
   downloadDatasetSource,
   getDefaultAdminToken,
   loadImportPreview,
+  reviewImportCategories,
   rejectDatasetVersion,
 } from '../../services/import-dataset-service.js'
 import { patraNiagaLogoMarkup } from '../brand-logo.js'
@@ -134,6 +135,27 @@ export function renderPreviewImportPage(container, datasetVersionId) {
     })
     container.querySelector('[data-download-report]')?.addEventListener('click', downloadReport)
     container.querySelector('[data-download-source]')?.addEventListener('click', downloadSource)
+    const categoryReviewForm = container.querySelector('[data-category-review-form]')
+    categoryReviewForm?.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const decisions = [...categoryReviewForm.querySelectorAll('[data-category-key]')]
+          .map((input) => ({ key: input.dataset.categoryKey, label: input.value.trim() }))
+        if (decisions.some(({ label }) => !label)) return
+        categoryReviewForm.querySelector('button').disabled = true
+        try {
+          await reviewImportCategories({
+            token: getDefaultAdminToken(),
+            datasetVersionId,
+            expectedRecordRevision: page.model.payload.datasetVersion.recordRevision,
+            decisions,
+          })
+          await load()
+        } catch (error) {
+          page.state.actionStatus = 'error'
+          page.state.actionMessage = error.message
+          render()
+        }
+    })
     container.querySelector('[data-request-activate]')?.addEventListener('click', () => {
       page.confirmAction = 'activate'
       rerender()
@@ -322,6 +344,7 @@ function renderReady(page, datasetVersionId) {
     <main class="import-preview-workspace ${state.selectedAssetId ? 'drawer-open' : ''}">
       ${renderPreviewSidebar({ model, state })}
       <section class="import-preview-main" aria-label="Peta preview import">
+        ${renderCategoryReviews(model.payload.categoryReviews)}
         ${renderPreviewToolbar({ model, state })}
         <div class="import-preview-map">
           ${renderPreviewMapCanvas({ visible, state })}
@@ -333,6 +356,23 @@ function renderReady(page, datasetVersionId) {
     ${renderActivationBar(model, state)}
     ${renderConfirmationDialog(page.confirmAction, model, state)}
   `
+}
+
+export function renderCategoryReviews(groups = []) {
+  const pending = groups.filter(({ status }) => status === 'pending')
+  if (!pending.length) return ''
+  return `<section class="preview-category-reviews" aria-label="Tinjau kategori baru">
+    <h2>Tinjau kategori baru</h2>
+    <p>Terima nama usulan atau ubah sebelum mengaktifkan dataset.</p>
+    <form data-category-review-form>
+      <div class="preview-category-review-list">${pending.map((group) => `
+        <label>${escapeHtml(group.proposedLabel)} · ${group.count} aset · ${group.source === 'metadata' ? 'metadata KMZ' : group.source === 'folder' ? 'folder KMZ' : 'nama aset'}
+          <input data-category-key="${escapeAttribute(group.key)}" maxlength="80" required value="${escapeAttribute(group.proposedLabel)}">
+        </label>
+      `).join('')}</div>
+      <button type="submit">Simpan semua kategori</button>
+    </form>
+  </section>`
 }
 
 function renderAdminHeader() {
@@ -381,7 +421,7 @@ export function renderActivationBar(model, state) {
   const { datasetVersion, validation, canActivate } = model.payload
   const publishableProfiles = model.payload.publishableProfiles
   const mapOnlyPublishable = Array.isArray(publishableProfiles)
-    ? publishableProfiles.includes('map_only')
+    ? publishableProfiles.includes('map_only') && canActivate === true
     : canActivate === true
   const blocking = validation?.summary?.blockingErrors
     ?? model.payload.issues.filter(({ canActivate: allowed }) => allowed === false).length

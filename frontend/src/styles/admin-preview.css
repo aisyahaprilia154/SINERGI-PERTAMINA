@@ -1388,3 +1388,18 @@
     display: none;
   }
 }
+.preview-category-reviews {
+  margin: 12px 18px;
+  padding: 16px;
+  border: 1px solid var(--admin-border);
+  border-radius: 12px;
+  background: var(--admin-surface);
+  color: var(--admin-text);
+}
+.preview-category-reviews h2 { margin: 0 0 4px; font-size: 18px; }
+.preview-category-reviews p { margin: 0 0 12px; }
+.preview-category-review-list { display: flex; flex-wrap: wrap; gap: 10px; }
+.preview-category-reviews form { display: grid; justify-items: start; gap: 12px; }
+.preview-category-review-list label { display: grid; gap: 5px; font-size: 13px; }
+.preview-category-review-list input { min-width: 180px; padding: 8px; border: 1px solid var(--admin-border-strong); border-radius: 6px; background: var(--admin-surface); color: inherit; }
+.preview-category-reviews button { padding: 9px 12px; border: 0; border-radius: 6px; background: var(--admin-primary); color: var(--admin-surface); cursor: pointer; }

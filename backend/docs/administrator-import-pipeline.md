@@ -212,3 +212,22 @@ Event yang dicatat:
 
 Audit log mencatat actor, waktu, branch, dataset version, checksum, hasil, dan
 summary tanpa menyimpan token atau Authorization header.
+
+# Kategori aset baru
+
+Titik aset yang belum dikenal tetap diimpor. Kategori diusulkan dari metadata
+`category`/`kategori`, lalu nama folder paling spesifik. Jika keduanya tidak
+memberi kategori, aset masuk kelompok sementara `Lainnya`; nama aset tetap
+dipakai sebagai jenisnya. Sistem tidak membuat relasi dari kedekatan titik.
+
+Pada halaman pratinjau, administrator meninjau setiap kelompok kategori baru.
+Nama usulan dapat diterima atau diganti sekali untuk seluruh aset dalam kelompok.
+Keputusan disimpan pada versi kandidat beserta waktu dan identitas administrator.
+Versi dengan kategori yang masih menunggu tinjauan tidak dapat diaktifkan,
+termasuk melalui mode penggantian otomatis. Dataset aktif lama tidak berubah.
+
+API `POST /api/admin/imports/:datasetVersionId/category-reviews` menerima
+`expectedRecordRevision` dan `decisions` berisi `{ "key": "pc", "label": "PC" }`.
+Revisi yang sudah berubah ditolak agar keputusan admin lain tidak tertimpa.
+Setelah aktivasi, kategori baru menjadi pilihan filter di peta dan asetnya
+muncul tanpa relasi di diagram sampai ada hubungan yang sah.

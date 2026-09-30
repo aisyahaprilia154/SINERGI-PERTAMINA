@@ -242,6 +242,7 @@ export async function renderMapPage(container) {
         ${renderNetworkSidebar(activeContext, selection.selectedNetworkIds.size, counts, {
           locationGroups,
           selectedArea,
+          networks,
           topologyReadiness,
           topologySummary,
         })}
@@ -1940,6 +1941,7 @@ function overlayMatchesArea(overlay, selectedArea) {
 }
 
 function networkMatchesPreset(network, preset) {
+  if (preset.startsWith('custom:')) return network.categoryKey === preset
   const source = `${network.category ?? ''} ${network.type ?? ''} ${network.name ?? ''}`.toLowerCase()
   if (preset === 'cctv') return /cctv|camera|kamera|nvr|junction/.test(source)
   if (preset === 'fiber') return /fiber|fibre|\bfo\b|otb/.test(source)

@@ -501,6 +501,31 @@ test('unmapped objects are preserved in a dedicated semantic network without war
   assert.equal(result.assets[0].sourceStatus, 'visible')
 })
 
+test('approved custom categories form separate networks and isolated diagram assets', () => {
+  const payload = activePayload({
+    layers: [layer('layer-devices', 'Perangkat', 'unmapped')],
+    assets: [{
+      ...asset('node-pc', 'PC-01', 'PC'),
+      type: 'Personal Computer',
+      layerId: 'layer-devices',
+      dynamicCategory: true,
+    }],
+    geometries: [point('point-pc', 'node-pc', 110, -7)],
+  })
+  const result = adaptActiveDatasetForMap(payload)
+  assert.equal(result.assets[0].category, 'PC')
+  assert.equal(result.networks[0].id, 'network:custom:pc')
+  assert.equal(result.networks[0].name, 'PC')
+  assert.equal(result.diagramAssets[0].category, 'PC')
+  assert.equal(result.topologyGraph.edges.length, 0)
+  const diagram = buildTopologyDiagramModel({
+    assets: result.diagramAssets,
+    graph: result.topologyGraph,
+  })
+  assert.equal(diagram.nodes[0].name, 'PC-01')
+  assert.equal(diagram.edges.length, 0)
+})
+
 test('hidden point Placemark remains discoverable while preserving source visibility status', () => {
   const payload = activePayload({
     layers: [layer('layer-cctv', 'CCTV', 'CCTV')],

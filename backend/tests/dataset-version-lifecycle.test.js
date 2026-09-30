@@ -54,6 +54,47 @@ test('comparison classifies new, updated, unchanged, and removed assets determin
   })
 })
 
+test('new category blocks activation until admin review is persisted', async () => {
+  const fixture = await createLifecycleFixture()
+  try {
+    const record = versionRecord('version-category', 'valid')
+    record.assets[0].sourceFeatureId = 'source-feature-version-category'
+    record.classifiedObjects = [{
+      sourceFeatureId: record.assets[0].sourceFeatureId,
+      category: 'PC',
+      categoryReview: {
+        key: 'pc', proposedLabel: 'PC', source: 'folder', status: 'pending',
+      },
+    }]
+    await fixture.repository.create(record)
+    const preview = await fixture.service.getPreview('version-category')
+    assert.equal(preview.categoryReviews[0].count, 1)
+    assert.equal(preview.canActivate, false)
+    await assert.rejects(
+      fixture.service.activate('version-category', 'admin-1'),
+      ({ code }) => code === 'dataset_version_not_activatable',
+    )
+    const review = await fixture.service.reviewCategories('version-category', 'admin-1', {
+      expectedRecordRevision: preview.datasetVersion.recordRevision,
+      decisions: [{ key: 'pc', label: 'Workstation' }],
+    })
+    assert.equal(review.categoryReviews[0].status, 'approved')
+    const stored = await fixture.repository.get('version-category')
+    assert.equal(stored.classifiedObjects[0].category, 'Workstation')
+    assert.equal(stored.assets[0].category, 'Workstation')
+    assert.equal(stored.classifiedObjects[0].categoryReview.actorId, 'admin-1')
+    assert.equal((await fixture.service.getPreview('version-category')).canActivate, true)
+    await fixture.service.activate('version-category', 'admin-1')
+    const map = await fixture.service.getActiveMapDataset({
+      datasetId: 'dataset-semarang', branchId: 'semarang',
+    })
+    assert.equal(map.assets[0].category, 'Workstation')
+    assert.equal(map.assets[0].dynamicCategory, true)
+  } finally {
+    await fixture.close()
+  }
+})
+
 test('active map and asset details reuse one aggregate until the revision changes', async () => {
   const fixture = await createLifecycleFixture()
   try {

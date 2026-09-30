@@ -28,6 +28,7 @@ import {
   normalizeTopologyRegenerationReason,
 } from './topology/topology-service.js'
 import { MAX_CANDIDATE_RESPONSE_BYTES } from './topology/topology-candidate-pagination.js'
+import { hasPendingCategoryReview } from './domain/dynamic-asset-category.js'
 import { MetricsRegistry, normalizeHttpRoute } from './observability/metrics.js'
 
 // 5,000 candidate IDs plus the review snapshot fit within this bounded body.
@@ -933,6 +934,19 @@ export function createApp({
           await lifecycleService.getPreview(previewMatch[1]),
         )
       }
+      const categoryReviewMatch = request.method === 'POST'
+        ? url.pathname.match(/^\/api\/admin\/imports\/([a-zA-Z0-9_-]+)\/category-reviews$/)
+        : null
+      if (categoryReviewMatch) {
+        const user = requireAdministrator(request, authenticator)
+        const body = await readJsonBody(request)
+        return sendJson(response, 200, await lifecycleService.reviewCategories(
+          categoryReviewMatch[1], user.id, {
+            decisions: body.decisions,
+            expectedRecordRevision: normalizeExpectedRecordRevision(body),
+          },
+        ))
+      }
       const comparisonMatch = request.method === 'GET'
         ? url.pathname.match(/^\/api\/admin\/imports\/([a-zA-Z0-9_-]+)\/comparison$/)
         : null
@@ -1762,7 +1776,8 @@ async function handleCreateImport({
             jobId: job.jobId,
             progressReporter: updateProgress,
           })
-          if (importMode !== 'replace_active' || imported.datasetVersion.status !== 'valid') {
+          if (importMode !== 'replace_active' || imported.datasetVersion.status !== 'valid'
+            || hasPendingCategoryReview(imported)) {
             return summarizeImportJobResult(imported)
           }
           try {

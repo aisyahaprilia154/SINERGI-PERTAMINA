@@ -3,6 +3,7 @@ import { formatAssetTypeLabel } from '../../domain/asset-type-label.js'
 export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, {
   locationGroups = [],
   selectedArea = null,
+  networks = [],
 } = {}) {
   const countSummary = `${formatDatasetCounts(counts)} di ${selectedArea?.name || 'dataset aktif'}`
   return `
@@ -67,6 +68,10 @@ export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, 
           <button type="button" data-category-preset="lan" aria-pressed="false">LAN</button>
           <button type="button" data-category-preset="infrastructure"
             aria-pressed="false">Infrastruktur</button>
+          ${networks.filter(({ categoryKey }) => categoryKey?.startsWith('custom:'))
+    .map(({ categoryKey, categoryLabel, name }) => `<button type="button"
+              data-category-preset="${escapeAttribute(categoryKey)}" aria-pressed="false">${escapeHtml(categoryLabel || name)}</button>`)
+    .join('')}
         </div>
         <div class="sidebar-list-header">
           <div class="selection-summary" aria-live="polite">

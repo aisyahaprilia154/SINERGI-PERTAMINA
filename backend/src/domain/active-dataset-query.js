@@ -125,6 +125,7 @@ export function buildActiveAssetCatalog({
         ?? 0,
       junctionFamily: cloneValue(classified.junctionFamily ?? null),
       category: String(firstValue(
+        classified.categoryReview?.status === 'approved' ? classified.category : null,
         classified.canonicalCategory,
         classified.category,
         asset.category,
