@@ -12,7 +12,9 @@ Aplikasi peta aset jaringan, impor KML/KMZ, dan peninjauan topologi. Frontend me
    docker compose --env-file .env.docker up --build -d
    ```
 
-Buka `http://localhost:5173/` untuk masuk. Buat akun database dengan langkah pada [pengaturan Docker](docs/DOCKER-SETUP.md). Jika port 5173 atau 5000 sudah dipakai, ubah `SINERGI_HTTP_PORT` atau `SINERGI_API_PORT` di `.env.docker` sebelum menjalankan perintah. Lihat status dengan `docker compose --env-file .env.docker ps`.
+Buka alamat sesuai `SINERGI_HTTP_PORT` di `.env.docker` untuk masuk (misalnya `http://localhost:5174/`). Buat akun database dengan langkah pada [pengaturan Docker](docs/DOCKER-SETUP.md). Jika port sudah dipakai, ubah `SINERGI_HTTP_PORT` atau `SINERGI_API_PORT` di `.env.docker` sebelum menjalankan perintah. Lihat status dengan `docker compose --env-file .env.docker ps`.
+
+Server Vite di port 5173 adalah lingkungan pengembangan terpisah. Agar form login di sana memakai akun database Docker, buat `frontend/.env.local` berisi `SINERGI_API_TARGET=http://127.0.0.1:5001` (sesuaikan angka dengan `SINERGI_API_PORT`), lalu mulai ulang `npm run dev`. Tanpa pengaturan ini, Vite memakai backend pengembangan di port 5000 yang tidak menyediakan login akun database.
 
 ## Dokumentasi
 

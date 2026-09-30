@@ -51,8 +51,6 @@ const services = [
     ],
     env: {
       ...process.env,
-      SINERGI_API_TARGET: process.env.SINERGI_API_TARGET
-        ?? `http://127.0.0.1:${backendPort}`,
       VITE_SINERGI_ADMIN_TOKEN: localAdminToken,
     },
   },

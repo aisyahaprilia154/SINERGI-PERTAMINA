@@ -93,7 +93,7 @@ export function createApp({
       if (request.method === 'POST' && url.pathname === '/api/auth/login') {
         if (!accountStore) {
           throw new AppError('Login akun database belum tersedia.', {
-            code: 'account_login_unavailable', statusCode: 503,
+            code: 'account_login_unavailable', statusCode: 503, expose: true,
           })
         }
         const body = await readJsonBody(request, 4096)
