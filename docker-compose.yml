@@ -38,7 +38,7 @@ services:
       SINERGI_DATA_ROOT: /app/.data
       SINERGI_STORAGE_MODE: postgres
       SINERGI_DATABASE_URL: "postgresql://${POSTGRES_USER:-sinergi}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}@db:5432/${POSTGRES_DB:-sinergi}"
-      SINERGI_AUTH_TOKENS: '${SINERGI_AUTH_TOKENS:?Set SINERGI_AUTH_TOKENS in .env.docker}'
+      SINERGI_AUTH_TOKENS: '${SINERGI_AUTH_TOKENS:-{}}'
       SINERGI_TOPOLOGY_DRAFT_REQUIRED: "true"
       SINERGI_BRANCH_IDS: "${SINERGI_BRANCH_IDS:-semarang}"
       SINERGI_BRANCH_DATASETS: '${SINERGI_BRANCH_DATASETS:-{"semarang":"dataset-semarang"}}'

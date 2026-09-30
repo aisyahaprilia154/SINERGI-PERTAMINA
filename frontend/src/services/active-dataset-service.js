@@ -1,10 +1,7 @@
-import { getDefaultAdminToken } from './import-dataset-service.js'
+import { getSessionToken } from './account-session.js'
 
 export function getDefaultMapToken() {
-  if (typeof window === 'undefined') return ''
-  return window.sessionStorage.getItem('sinergiViewerToken')
-    || window.localStorage.getItem('sinergiViewerToken')
-    || getDefaultAdminToken()
+  return typeof window === 'undefined' ? '' : getSessionToken()
 }
 
 export async function saveTopologyDiagram({ datasetVersionId, changes, expectedRecordRevision,

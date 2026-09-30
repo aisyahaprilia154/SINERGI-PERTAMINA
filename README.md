@@ -5,14 +5,14 @@ Aplikasi peta aset jaringan, impor KML/KMZ, dan peninjauan topologi. Frontend me
 ## Jalankan dengan Docker
 
 1. Salin `.env.docker.example` menjadi `.env.docker`.
-2. Ganti `POSTGRES_PASSWORD` dan `SINERGI_AUTH_TOKENS` di `.env.docker`.
+2. Ganti `POSTGRES_PASSWORD` di `.env.docker`.
 3. Jalankan:
 
    ```powershell
    docker compose --env-file .env.docker up --build -d
    ```
 
-Buka `http://localhost:5173/map`. Jika port 5173 atau 5000 sudah dipakai, ubah `SINERGI_HTTP_PORT` atau `SINERGI_API_PORT` di `.env.docker` sebelum menjalankan perintah. Lihat status dengan `docker compose --env-file .env.docker ps`.
+Buka `http://localhost:5173/` untuk masuk. Buat akun database dengan langkah pada [pengaturan Docker](docs/DOCKER-SETUP.md). Jika port 5173 atau 5000 sudah dipakai, ubah `SINERGI_HTTP_PORT` atau `SINERGI_API_PORT` di `.env.docker` sebelum menjalankan perintah. Lihat status dengan `docker compose --env-file .env.docker ps`.
 
 ## Dokumentasi
 

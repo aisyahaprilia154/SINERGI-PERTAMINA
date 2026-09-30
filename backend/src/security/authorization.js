@@ -1,4 +1,7 @@
 import { AppError } from '../errors.js'
+import { randomBytes } from 'node:crypto'
+
+const SESSION_LIFETIME_MS = 8 * 60 * 60 * 1000
 
 export class TokenAuthenticator {
   constructor(tokenConfiguration = {}) {
@@ -15,21 +18,36 @@ export class TokenAuthenticator {
         },
       ]),
     )
+    this.sessions = new Map()
+  }
+
+  issueSession(user) {
+    const token = randomBytes(32).toString('base64url')
+    this.sessions.set(token, { user, expiresAt: Date.now() + SESSION_LIFETIME_MS })
+    for (const [key, session] of this.sessions) {
+      if (session.expiresAt <= Date.now() || this.sessions.size > 1024) this.sessions.delete(key)
+    }
+    return { token, expiresInSeconds: SESSION_LIFETIME_MS / 1000 }
+  }
+
+  revoke(request) {
+    const token = bearerToken(request)
+    if (token) this.sessions.delete(token)
   }
 
   authenticate(request) {
-    const authorization = request.headers.authorization
-    const match = typeof authorization === 'string'
-      ? authorization.match(/^Bearer\s+(.+)$/i)
-      : null
-    if (!match) {
+    const token = bearerToken(request)
+    if (!token) {
       throw new AppError('Autentikasi diperlukan.', {
         code: 'authentication_required',
         statusCode: 401,
       })
     }
 
-    const user = this.usersByToken.get(match[1])
+    const session = this.sessions.get(token)
+    if (session && session.expiresAt <= Date.now()) this.sessions.delete(token)
+    const user = session?.expiresAt > Date.now()
+      ? session.user : this.usersByToken.get(token)
     if (!user?.id) {
       throw new AppError('Token autentikasi tidak valid.', {
         code: 'invalid_token',
@@ -38,6 +56,13 @@ export class TokenAuthenticator {
     }
     return user
   }
+}
+
+function bearerToken(request) {
+  const authorization = request.headers.authorization
+  return typeof authorization === 'string'
+    ? authorization.match(/^Bearer\s+(.+)$/i)?.[1] ?? null
+    : null
 }
 
 export function requireAdministrator(request, authenticator) {

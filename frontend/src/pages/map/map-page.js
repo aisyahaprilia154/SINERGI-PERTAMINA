@@ -42,6 +42,7 @@ import { searchMatchScore } from '../../domain/search-normalization.js'
 import { branchNameForFacility } from '../../domain/facility-branch.js'
 import { formatAssetTypeLabel } from '../../domain/asset-type-label.js'
 import { bindThemeToggle } from '../../theme.js'
+import { getSessionUser, logout } from '../../services/account-session.js'
 
 export async function renderMapPage(container) {
   document.title = 'Peta Jaringan — SINERGI'
@@ -1517,8 +1518,19 @@ function renderDatasetState(container, {
 let userAccountMenuInteractionsBound = false
 
 export function bindUserAccountMenu() {
+  if (typeof document === 'undefined') return
   bindThemeToggle()
-  if (userAccountMenuInteractionsBound || typeof document === 'undefined') return
+  const account = getSessionUser()
+  document.querySelectorAll('[data-user-account-menu]').forEach((menu) => {
+    menu.querySelector('.user-menu-identity strong').textContent = account?.name || 'Pengguna'
+    menu.querySelector('.user-menu-identity small').textContent =
+      account?.role === 'Administrator' ? 'Administrator' : 'Pengguna'
+    menu.querySelector('.user-menu-avatar').textContent =
+      String(account?.name || 'SI').slice(0, 2).toUpperCase()
+    menu.querySelector('[data-user-account-trigger]').setAttribute('aria-label',
+      `Menu akun ${account?.name || 'Pengguna'}`)
+  })
+  if (userAccountMenuInteractionsBound) return
   userAccountMenuInteractionsBound = true
 
   document.addEventListener('click', (event) => {
@@ -1536,7 +1548,7 @@ export function bindUserAccountMenu() {
 
     if (target?.closest?.('[data-user-account-logout]')) {
       closeUserAccountMenus()
-      window.location.assign('/')
+      void logout().finally(() => window.location.assign('/'))
       return
     }
 
@@ -1953,10 +1965,10 @@ export function renderTopNavigation(activeView = 'map', context = null) {
         </button>
         <div class="user-account-menu" data-user-account-menu>
           <button class="user-menu" data-user-account-trigger type="button"
-            aria-label="Menu akun SSC ICT" aria-haspopup="menu" aria-expanded="false"
+            aria-label="Menu akun" aria-haspopup="menu" aria-expanded="false"
             aria-controls="user-account-dropdown">
             <span class="user-menu-avatar" aria-hidden="true">SI</span>
-            <span class="user-menu-identity"><strong>SSC ICT</strong><small>Administrator</small></span>
+            <span class="user-menu-identity"><strong>Pengguna</strong><small>Pengguna</small></span>
             <span class="material-symbols-outlined user-menu-chevron" aria-hidden="true">expand_more</span>
           </button>
           <div class="user-menu-dropdown" data-user-account-dropdown id="user-account-dropdown"

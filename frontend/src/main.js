@@ -1,5 +1,6 @@
 import './style.css'
 import { initializeTheme } from './theme.js'
+import { clearSession, getSessionToken, loadCurrentUser } from './services/account-session.js'
 
 initializeTheme()
 
@@ -46,8 +47,26 @@ const previewRoute = {
   render: 'renderPreviewImportPage',
 }
 const routePath = { '/peta': '/map', '/topologi': '/topology' }[normalizedPath] ?? normalizedPath
+const isLoginRoute = !previewMatch && !routeLoaders[routePath]
+let destination = null
+if (getSessionToken()) {
+  try {
+    const user = await loadCurrentUser()
+    if (isLoginRoute) destination = '/map'
+    else if (routePath.startsWith('/admin/') && user.role !== 'Administrator') destination = '/map'
+  } catch {
+    clearSession()
+    if (!isLoginRoute) destination = '/'
+  }
+} else if (!isLoginRoute) {
+  destination = '/'
+}
+if (destination) window.location.replace(destination)
+
 const { loadStyle, loadPage, render } = previewMatch
   ? previewRoute
   : routeLoaders[routePath] ?? fallbackRoute
-const [, page] = await Promise.all([loadStyle(), loadPage()])
-page[render](app, ...(previewMatch ? [decodeURIComponent(previewMatch[1])] : []))
+if (!destination) {
+  const [, page] = await Promise.all([loadStyle(), loadPage()])
+  page[render](app, ...(previewMatch ? [decodeURIComponent(previewMatch[1])] : []))
+}

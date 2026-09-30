@@ -10,6 +10,7 @@ import { DurableJobQueue } from './jobs/durable-job-queue.js'
 import { JsonDurableJobRepository } from './jobs/durable-job-repository.js'
 import { PostgresDurableJobRepository } from './jobs/postgres-durable-job-repository.js'
 import { TokenAuthenticator } from './security/authorization.js'
+import { PostgresAccountStore } from './security/account-store.js'
 import { JsonLinesAuditLog } from './storage/audit-log.js'
 import { ImportFileStore } from './storage/file-store.js'
 import { PostgresAuditLog } from './storage/postgres-audit-log.js'
@@ -27,10 +28,14 @@ const config = createConfig(process.env, {
   dataRoot: process.env.SINERGI_DATA_ROOT
     ?? path.resolve(moduleDirectory, '../.data'),
 })
-const authenticator = new TokenAuthenticator(config.authTokens)
 const fileStore = new ImportFileStore(config.dataRoot)
 const repositoryRuntime = await createDatasetVersionRepositoryRuntime({ config })
 const repository = repositoryRuntime.repository
+const accountStore = repositoryRuntime.mode === 'postgres'
+  ? new PostgresAccountStore(repositoryRuntime.pool) : null
+const authenticator = new TokenAuthenticator(
+  accountStore && process.env.NODE_ENV === 'production' ? {} : config.authTokens,
+)
 const auditLog = repositoryRuntime.mode === 'postgres'
   ? new PostgresAuditLog(repositoryRuntime.pool)
   : new JsonLinesAuditLog(path.join(config.dataRoot, 'audit', 'imports.jsonl'))
@@ -103,6 +108,7 @@ await fileStore.initialize()
 const app = createApp({
   config,
   authenticator,
+  accountStore,
   repository,
   fileStore,
   auditLog,

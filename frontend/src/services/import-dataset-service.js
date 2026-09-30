@@ -1,17 +1,7 @@
+import { getSessionToken } from './account-session.js'
+
 export function getDefaultAdminToken() {
-  if (typeof window === 'undefined') return ''
-  const isLocalhost = ['localhost', '127.0.0.1'].includes(
-    window.location.hostname,
-  )
-  const configured = String(
-    import.meta.env?.VITE_SINERGI_ADMIN_TOKEN ?? '',
-  ).trim()
-  if (configured) return configured
-  if (import.meta.env?.DEV && isLocalhost) return 'local-admin'
-  const stored = window.sessionStorage.getItem('sinergiAdminToken')
-    || window.localStorage.getItem('sinergiAdminToken')
-  if (stored) return stored
-  return isLocalhost ? 'local-admin' : ''
+  return typeof window === 'undefined' ? '' : getSessionToken()
 }
 
 export async function loadImportConfig({

@@ -37,6 +37,7 @@ const MAX_JSON_BODY_BYTES = 256 * 1024
 export function createApp({
   config,
   authenticator,
+  accountStore = null,
   repository,
   fileStore,
   auditLog,
@@ -89,6 +90,32 @@ export function createApp({
     response.once('close', recordRequestMetric)
 
     try {
+      if (request.method === 'POST' && url.pathname === '/api/auth/login') {
+        if (!accountStore) {
+          throw new AppError('Login akun database belum tersedia.', {
+            code: 'account_login_unavailable', statusCode: 503,
+          })
+        }
+        const body = await readJsonBody(request, 4096)
+        const user = await accountStore.verify(body.identifier, body.password)
+        if (!user) {
+          throw new AppError('Username atau kata sandi salah.', {
+            code: 'invalid_credentials', statusCode: 401,
+          })
+        }
+        return sendJson(response, 200, {
+          ...authenticator.issueSession(user),
+          user: publicAccount(user),
+        })
+      }
+      if (request.method === 'GET' && url.pathname === '/api/auth/me') {
+        return sendJson(response, 200, { user: publicAccount(authenticator.authenticate(request)) })
+      }
+      if (request.method === 'POST' && url.pathname === '/api/auth/logout') {
+        authenticator.authenticate(request)
+        authenticator.revoke(request)
+        return sendJson(response, 200, { loggedOut: true })
+      }
       if (request.method === 'GET' && url.pathname === '/metrics') {
         if (config?.observability?.metricsEnabled !== true) {
           throw new AppError('Endpoint metrics belum diaktifkan.', {
@@ -2201,6 +2228,16 @@ function toStatusResponse(record) {
 function withoutInternalStorage(datasetVersion) {
   const { sourceStorageKey, ...publicVersion } = datasetVersion
   return publicVersion
+}
+
+function publicAccount(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    role: user.role,
+    branchIds: user.branchIds,
+    datasetIds: user.datasetIds,
+  }
 }
 
 function sendJson(response, statusCode, body, {
