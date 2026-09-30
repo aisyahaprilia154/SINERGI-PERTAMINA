@@ -19,6 +19,7 @@ export function renderAssetDetailDrawer({
   activeContext,
   diagramAvailable = true,
   relationOptions = [],
+  relationControlsAvailable = false,
   relationEditorOpen = false,
   relationReplaceId = null,
   relationSearch = '',
@@ -76,7 +77,7 @@ export function renderAssetDetailDrawer({
           <h3 id="asset-topology-title">Relasi aset</h3>
           <div class="drawer-section-heading-actions">
             <span class="count-badge">${connectedAssets.length}</span>
-            ${relationOptions.length ? `
+            ${relationControlsAvailable && relationOptions.length ? `
               <button class="drawer-relation-add" type="button" data-open-relation-picker
                 aria-label="${relationEditorOpen && !relationReplaceId
                   ? 'Tutup pencarian relasi'
@@ -107,10 +108,10 @@ export function renderAssetDetailDrawer({
         ${relationStatus === 'error' && !relationEditorOpen && relationError ? `
           <p class="drawer-relation-feedback error" role="alert">${escapeHtml(relationError)}</p>
         ` : ''}
-        ${!relationOptions.length ? `
+        ${relationControlsAvailable && !relationOptions.length ? `
           <small class="drawer-relation-hint">Tidak ada aset kompatibel lain yang tersedia di area ini.</small>
         ` : ''}
-        ${relationEditorOpen ? renderRelationEditor({
+        ${relationControlsAvailable && relationEditorOpen ? renderRelationEditor({
           relationOptions,
           relationReplaceId,
           relationSearch,
@@ -130,7 +131,7 @@ export function renderAssetDetailDrawer({
                     </span>
                     <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
                   </button>
-                  ${relation?.id || relation?.edgeId ? `
+                  ${relationControlsAvailable && (relation?.id || relation?.edgeId) ? `
                     <button class="relation-action-button relation-replace-button" type="button"
                       data-replace-relation="${escapeAttribute(relation.id)}"
                       data-replace-edge="${escapeAttribute(relation.edgeId)}"

@@ -111,6 +111,7 @@ test('drawer shows both footer actions when the asset has a map position', () =>
 
 test('drawer keeps missing relations actionable without the retired review warning', () => {
   const html = renderAssetDetailDrawer({
+    relationControlsAvailable: true,
     asset,
     assetNetworks: [network],
     connectedAssets: [],
@@ -135,6 +136,7 @@ test('drawer keeps missing relations actionable without the retired review warni
 
 test('drawer renders searchable relation targets and replacement actions', () => {
   const html = renderAssetDetailDrawer({
+    relationControlsAvailable: true,
     asset,
     connectedAssets: [{
       asset: { id: 'jb-01', name: 'JB-01', type: 'Junction box' },
@@ -163,6 +165,20 @@ test('drawer renders searchable relation targets and replacement actions', () =>
   assert.match(html, /data-remove-relation=""[\s\S]*?data-remove-edge="edge-01"/)
   assert.ok(html.indexOf('data-remove-edge="edge-01"') > html.indexOf('data-replace-edge="edge-01"'))
   assert.match(html, /aria-label="Hapus relasi dengan JB-01"[\s\S]*?>\s*<span class="material-symbols-outlined" aria-hidden="true">close<\/span>/)
+})
+
+test('viewer sees relation details without mutation controls', () => {
+  const html = renderAssetDetailDrawer({
+    asset,
+    connectedAssets: [{
+      asset: { id: 'jb-01', name: 'JB-01', type: 'Junction box' },
+      relation: { edgeId: 'edge-01' },
+    }],
+    relationOptions: [{ asset: { id: 'jb-02', name: 'JB-02' } }],
+    relationEditorOpen: true,
+  })
+  assert.match(html, /Relasi aset|JB-01/)
+  assert.doesNotMatch(html, /data-open-relation-picker|data-replace-relation|data-remove-relation|data-relation-target/)
 })
 
 test('drawer confirms that a saved relation is already visible on the map', () => {

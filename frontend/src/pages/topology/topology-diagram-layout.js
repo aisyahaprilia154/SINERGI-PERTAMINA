@@ -121,7 +121,6 @@ export function calculateTopologyDiagramLayout(model, options = {}) {
         nodeById,
         edges: model.edges,
         mountingGroups: model.mountingGroups,
-        physicalMounts: model.physicalMounts,
         frameAssignments: settings.frameAssignments,
         customFrames: settings.customFrames,
         settings,
@@ -623,17 +622,12 @@ function buildLaneSpec(args) {
   return buildSemanticLaneSpec(args)
 }
 
-function isGeneratedPoleName(name, id) {
-  return /^AUTO-[0-9A-F]+$/i.test(String(name || id || ''))
-}
-
 function buildPoleBackboneAreaLaneSpec({
   area,
   components,
   nodeById,
   edges,
   mountingGroups = [],
-  physicalMounts = [],
   frameAssignments = {},
   customFrames = {},
   settings,
@@ -666,49 +660,31 @@ function buildPoleBackboneAreaLaneSpec({
     .map(({ id }) => id))
   presentationExcludedNodeIds.forEach((id) => assignedNodeIds.add(id))
   const confirmedGroups = [...mountingGroups]
-    .filter((group) => !(group.childIds ?? []).length
-      || (group.childIds ?? []).some((id) => connectedIds.has(id)))
+    .filter((group) => (group.childIds ?? []).some((id) => connectedIds.has(id)))
     .sort((left, right) => String(left.hostName ?? left.hostId).localeCompare(
       String(right.hostName ?? right.hostId),
       'id',
     ) || String(left.id).localeCompare(String(right.id), 'id'))
     .flatMap((group) => {
-      const emptyMount = !(group.childIds ?? []).length
       const nodeIds = (group.childIds ?? []).filter((id) => (
         connectedIds.has(id)
           && !assignedNodeIds.has(id)
           && !presentationExcludedNodeIds.has(id)
       ))
-      if (!nodeIds.length && !emptyMount) return []
+      if (!nodeIds.length) return []
       nodeIds.forEach((id) => assignedNodeIds.add(id))
       return [{
         id: group.id,
         hostId: group.hostId,
         hostName: group.hostName || group.hostId,
         hostType: group.hostType || 'Tiang',
-        kind: emptyMount ? 'empty' : 'confirmed',
+        kind: 'confirmed',
         nodeIds,
         mountingConflict: nodeIds.some((id) => (
           (nodeById.get(id)?.mountingGroupIds ?? []).length > 1
         )),
       }]
     })
-  const confirmedPoleIds = new Set(confirmedGroups
-    .map((group) => group.hostId)
-    .filter(Boolean))
-  const emptyPhysicalGroups = physicalMounts
-    .filter((pole) => (pole.areaKey ?? pole.locationGroupKey) === area.key
-      && !confirmedPoleIds.has(pole.id)
-      && !isGeneratedPoleName(pole.name, pole.id))
-    .map((pole) => ({
-      id: `pole-group:${pole.id}`,
-      hostId: pole.id,
-      hostName: pole.name,
-      hostType: 'Tiang',
-      kind: 'empty',
-      nodeIds: [],
-      mountingConflict: false,
-    }))
   const edgeAdjacency = buildLayoutEdgeAdjacency(connectedNodes, edges)
   const junctionGroups = buildEndpointJunctionGroups({
     confirmedGroups,
@@ -742,13 +718,11 @@ function buildPoleBackboneAreaLaneSpec({
   })
   const builtGroupIds = new Set([
     ...confirmedGroups,
-    ...emptyPhysicalGroups,
     ...junctionGroups,
     ...excludedGroupSpecs,
   ].map(({ id }) => id))
   const groupSpecs = [
     ...confirmedGroups,
-    ...emptyPhysicalGroups,
     ...junctionGroups,
     ...(needsMountingNodeIds.length ? [{
       id: `needs-mounting:${area.key}`,
@@ -793,7 +767,6 @@ function buildPoleBackboneAreaLaneSpec({
     return group.nodeIds.length > 0
       || retainedEmptyFrameIds.has(group.id)
       || group.custom
-      || (group.kind === 'empty' && !isGeneratedPoleName(group.hostName, group.hostId))
   })
   const mountingBoxes = logicalGroupSpecs.map((group) => buildMountingBoxSpec({
     group,

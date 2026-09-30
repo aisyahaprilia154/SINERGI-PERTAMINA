@@ -156,8 +156,42 @@
   .topology-body #app .topology-stitch-graph-frame svg .topology-drop-slot rect { animation: none; }
   .topology-body #app .topology-stitch-graph-frame svg .topology-mounting-group.drop-target .topology-mounting-bubble { transform: none; transition: none; }
 }
-.topology-draft-required{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:8px 0;padding:9px 13px;border:1px solid #d7e5f2;border-radius:12px;background:#f1f7fd;color:#375a79;font-size:12px;font-weight:600}
-.topology-draft-required a{color:inherit;text-decoration:underline;font-weight:750;white-space:nowrap}
-.topology-draft-required.is-draft{background:#f6f0ff;border-color:#e4d5fa;color:#6b4e95}
-:root[data-theme=dark] .topology-draft-required{background:#1b2d3a;border-color:#36516a;color:#b7d7ed}
-:root[data-theme=dark] .topology-draft-required.is-draft{background:#2b2538;border-color:#57476e;color:#dcc6f6}
+.topology-body #app .topology-draft-required {
+  position: absolute;
+  top: 116px;
+  left: 24px;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  box-sizing: border-box;
+  width: min(420px, calc(100% - 48px));
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 12px;
+  background: var(--workspace-surface);
+  box-shadow: var(--shadow-floating);
+  color: var(--workspace-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.topology-body #app .topology-draft-required a {
+  color: var(--workspace-accent);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.topology-body #app .topology-stitch-app:not(.topology-sidebar-collapsed) .topology-draft-required {
+  left: 368px;
+  width: min(420px, calc(100% - 384px));
+}
+@container (max-width: 820px) {
+  .topology-body #app .topology-draft-required { top: 168px; left: 16px; width: min(420px, calc(100% - 32px)); }
+}
+@container (max-width: 620px) {
+  .topology-body #app .topology-draft-required { top: 146px; }
+}
+@media (max-width: 960px) {
+  .topology-body #app .topology-stitch-app:not(.topology-sidebar-collapsed) .topology-draft-required { visibility: hidden; }
+}

@@ -24,7 +24,9 @@ import {
 import {
   BASEMAP_LOAD_TIMEOUT_MS,
   BASEMAP_RETRY_DELAYS_MS,
+  DEFAULT_IMAGERY_ATTRIBUTION,
   DEFAULT_IMAGERY_MAX_ZOOM,
+  DEFAULT_IMAGERY_TILES,
   applyBaseStyleTheme,
   basemapErrorMessage,
   createBaseStyle,
@@ -132,10 +134,8 @@ export function createMapLibreSurface(element, {
   let clusterLookup = new Map()
   let groundOverlayLayers = []
   const initialBounds = boundsForGeometries(geometries)
-  // Vite injects an empty string when Docker passes an unset build arg. Treat
-  // that the same as an omitted value so the same-origin proxy remains the
-  // safe default instead of rendering only the neutral canvas.
-  const imageryTiles = String(import.meta.env.VITE_SINERGI_BASEMAP_TILES ?? '').trim()
+  const configuredImageryTiles = String(import.meta.env.VITE_SINERGI_BASEMAP_TILES ?? '').trim()
+  const imageryTiles = configuredImageryTiles || DEFAULT_IMAGERY_TILES
   const imageryMaxZoom = String(
     import.meta.env.VITE_SINERGI_BASEMAP_MAX_ZOOM ?? DEFAULT_IMAGERY_MAX_ZOOM,
   ).trim() || DEFAULT_IMAGERY_MAX_ZOOM
@@ -143,6 +143,7 @@ export function createMapLibreSurface(element, {
     import.meta.env.VITE_SINERGI_VECTOR_TILES_URL ?? '',
   ).trim() || '/api/basemap/openfreemap/planet'
   const basemapAttribution = String(import.meta.env.VITE_SINERGI_BASEMAP_ATTRIBUTION ?? '').trim()
+    || (configuredImageryTiles ? '' : DEFAULT_IMAGERY_ATTRIBUTION)
   const darkMode = document.documentElement.dataset.theme === 'dark'
   let basemapMode = vectorTiles ? 'street' : 'satellite'
   const loadedBasemapSourceIds = new Set()

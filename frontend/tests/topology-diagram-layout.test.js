@@ -498,11 +498,10 @@ test('legacy pole frame assignments cannot override stored mounting', () => {
     'jb-1': 'pole-group:pole-2:branch:jb-1',
     'cam-9': 'pole-group:pole-2:junction:jb-1',
   } })
-  assert.deepEqual(new Set(layout.mountingBoxes.find(box => box.id === 'pole-group:pole-2').nodeIds),
-    new Set())
+  assert.equal(layout.mountingBoxes.some(box => box.id === 'pole-group:pole-2'), false)
   assert.deepEqual(new Set(layout.mountingBoxes.find(box => box.id === 'pole-group:pole-1').nodeIds),
     new Set(['jb-1', 'cam-9']))
-  assert.equal(layout.mountingBoxes.filter(box => box.hostId === 'pole-2').length, 1)
+  assert.equal(layout.mountingBoxes.filter(box => box.hostId === 'pole-2').length, 0)
   assert.deepEqual(model.mountingGroups.find(group => group.hostId === 'pole-1').childIds,
     ['cam-9', 'jb-1'])
 })
@@ -605,7 +604,7 @@ test('custom Indoor and selected empty-pole frames stay visible before assets ar
   assert.equal(pole?.hostId, 'pole-empty')
 })
 
-test('generated empty AUTO pole frames do not occupy diagram space', () => {
+test('empty physical poles do not occupy diagram space', () => {
   const area = 'area-a'
   const emptyId = 'AUTO-007734B664CBEB6C412ABF58'
   const usedId = 'AUTO-020E63BADB88C81A3E605E1A'
@@ -630,7 +629,7 @@ test('generated empty AUTO pole frames do not occupy diagram space', () => {
   assert.equal(layout.mountingBoxes.some(({ hostId }) => hostId === emptyId), false)
   assert.equal(layout.mountingBoxes.some(({ hostId, nodeIds }) => (
     hostId === usedId && nodeIds.includes('camera'))), true)
-  assert.equal(layout.mountingBoxes.some(({ hostId }) => hostId === 'named-pole'), true)
+  assert.equal(layout.mountingBoxes.some(({ hostId }) => hostId === 'named-pole'), false)
 })
 
 test('a camera stays in its physical pole frame even when its network owner is elsewhere', () => {
@@ -837,11 +836,10 @@ test('pole backbone aligns one entry JB per mounting box and stacks descendants'
   const byId = new Map(layout.nodes.map((node) => [node.id, node]))
   const boxes = new Map(layout.mountingBoxes.map((box) => [box.id, box]))
 
-  assert.equal(boxes.size, 4)
+  assert.equal(boxes.size, 3)
   assert.equal(boxes.get('pole-group:pole-a').kind, 'confirmed')
   assert.equal(boxes.get('pole-group:pole-b').kind, 'confirmed')
-  assert.equal(boxes.get('pole-group:pole-empty').kind, 'empty')
-  assert.deepEqual(boxes.get('pole-group:pole-empty').nodeIds, [])
+  assert.equal(boxes.has('pole-group:pole-empty'), false)
   assert.equal(boxes.get('needs-mounting:area-a').kind, 'needs-mounting')
   assert.equal(byId.get('jb-a').diagram.y, byId.get('jb-b').diagram.y)
   assert.equal(byId.get('jb-b').diagram.y, byId.get('jb-unknown').diagram.y)
@@ -1258,7 +1256,7 @@ test('DPPU YIA orders poles and preserves cross-pole JB parent families', () => 
   const byId = new Map(layout.nodes.map((node) => [node.id, node]))
   const boxes = new Map(layout.mountingBoxes.map((box) => [box.label, box]))
   assert.deepEqual(
-    ['T-001', 'T-002', 'T-003', 'T-004', 'T-005', 'T-006', 'T-007', 'T-008', 'T-016'],
+    ['T-004', 'T-005', 'T-006', 'T-007', 'T-008', 'T-016'],
     layout.mountingBoxes.filter((box) => /^T-\d+$/.test(box.label)).map((box) => box.label),
   )
   assert.equal(boxes.get('T-016').kind, 'confirmed')

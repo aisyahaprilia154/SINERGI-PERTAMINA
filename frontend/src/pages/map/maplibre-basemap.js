@@ -2,6 +2,8 @@
 // A slow but successful tile must not be reported as an unavailable basemap.
 export const BASEMAP_LOAD_TIMEOUT_MS = 25_000
 export const BASEMAP_RETRY_DELAYS_MS = Object.freeze([600, 1_800])
+export const DEFAULT_IMAGERY_TILES = 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+export const DEFAULT_IMAGERY_ATTRIBUTION = 'Sources: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
 // ArcGIS World Imagery returns a placeholder tile above this level for many
 // locations. Keeping the map zoomable beyond it lets MapLibre overzoom the
 // last real image instead of showing the provider's "not yet available" tile.

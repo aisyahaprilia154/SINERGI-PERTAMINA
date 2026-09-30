@@ -128,6 +128,7 @@ export async function renderMapPage(container) {
     diagramAvailable: true,
     message: '',
   }
+  const canEditTopology = getSessionUser()?.role === 'Administrator'
   // The map is source-first. A not-ready legacy review contract must not
   // replace the confirmed graph with an empty graph or hide KML/KMZ evidence.
   const operationalTopologyGraph = fullTopologyGraph
@@ -608,13 +609,13 @@ export async function renderMapPage(container) {
         relation,
       }))
       .filter((item) => item.asset)
-    const relationOptions = buildRelationOptions({
+    const relationOptions = canEditTopology ? buildRelationOptions({
       sourceAsset: asset,
       assets,
       connectedAssets,
       locationKey: selectedArea?.key,
       limit: assets.length,
-    })
+    }) : []
     drawer.innerHTML = renderAssetDetailDrawer({
       status: state.assetDetailStatus,
       errorMessage: state.assetDetailError,
@@ -629,13 +630,15 @@ export async function renderMapPage(container) {
       mountingActionStatus: state.mountingActionStatus,
       mountingActionError: state.mountingActionError,
       mountingSearch: state.mountingSearch,
-      mountingControlsAvailable: topologyReadiness.capabilities?.editAssetMounting === true,
+      mountingControlsAvailable: canEditTopology
+        && topologyReadiness.capabilities?.editAssetMounting === true,
       activeContext: {
         ...activeContext,
         branchName: branchNameForFacility(selectedArea, activeContext.branchName),
       },
       diagramAvailable,
       relationOptions,
+      relationControlsAvailable: canEditTopology,
       relationEditorOpen: state.relationEditorOpen,
       relationReplaceId: state.relationReplaceId,
       relationSearch: state.relationSearch,
@@ -742,6 +745,7 @@ export async function renderMapPage(container) {
   }
 
   async function updateMountingAssignment(assetId, poleAssetId) {
+    if (!canEditTopology) return
     state.mountingActionStatus = 'loading'
     state.mountingActionError = null
     renderDrawer()
@@ -822,6 +826,7 @@ export async function renderMapPage(container) {
     replaceRelationId = null,
     replaceEdgeId = null,
   ) {
+    if (!canEditTopology) return
     if (!sourceAssetId || !targetAssetId || sourceAssetId === targetAssetId) return
     state.relationStatus = 'saving'
     state.relationError = null
@@ -963,6 +968,7 @@ export async function renderMapPage(container) {
   }
 
   async function removeAssetRelation(relationId, edgeId = null) {
+    if (!canEditTopology) return
     if ((!relationId && !edgeId) || ['saving', 'removing'].includes(state.relationStatus)) return
     const sourceAssetId = selection.selectedAssetId
     state.relationStatus = 'removing'

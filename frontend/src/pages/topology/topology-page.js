@@ -23,6 +23,7 @@ import {
 import { downloadSchematicPng, downloadSchematicSvg } from '../map/schematic-export.js'
 import { bindUserAccountMenu, renderTopNavigation } from '../map/map-page.js'
 import { bindThemeToggle } from '../../theme.js'
+import { getSessionUser } from '../../services/account-session.js'
 import { calculateTopologyDiagramLayout } from './topology-diagram-layout.js'
 import { loadTopologyDraft } from '../../services/topology-sync-service.js'
 import { renderTopologyDiagramSvg } from './topology-diagram-svg.js'
@@ -145,6 +146,7 @@ function mountTopologyWorkspace(container, {
   roots,
   context,
 }) {
+  const canEditTopology = getSessionUser()?.role === 'Administrator'
   const activeContext = mapData.activeContext
   const query = new URLSearchParams(window.location.search)
   const validAreaKeys = new Set(mapData.locationGroups.map(({ key }) => key))
@@ -276,6 +278,7 @@ function mountTopologyWorkspace(container, {
     context,
     state,
     model,
+    canEditTopology,
   })
   bindThemeToggle()
   bindWorkspaceEvents()
@@ -415,6 +418,10 @@ function mountTopologyWorkspace(container, {
     }
 
     const action = event.target?.closest?.('[data-action]')?.dataset.action
+    if (!canEditTopology && [
+      'open-sync', 'save-diagram', 'cancel-diagram', 'add-pole-frame',
+      'toggle-actions', 'rename-selected-frame', 'remove-relation',
+    ].includes(action)) return
     if (action === 'open-sync') {
       const draftId = new URLSearchParams(window.location.search).get('draftVersionId')
       window.location.assign(draftId
@@ -524,11 +531,12 @@ function mountTopologyWorkspace(container, {
 
     const relationTarget = event.target?.closest?.('[data-relation-target]')
     if (relationTarget?.dataset.relationTarget) {
+      if (!canEditTopology) return
       void addRelation(state.selectedAssetId, relationTarget.dataset.relationTarget)
       return
     }
     const frameOption = event.target?.closest?.('[data-frame-option]')
-    if (frameOption) return chooseFrameOption(frameOption.dataset.frameOption)
+    if (frameOption) return canEditTopology ? chooseFrameOption(frameOption.dataset.frameOption) : undefined
 
     const exportButton = event.target?.closest?.('[data-export]')
     if (exportButton?.dataset.export) {
@@ -548,6 +556,7 @@ function mountTopologyWorkspace(container, {
   function handleChange(event) {
     const target = event.target
     if (target.matches('[data-asset-frame-select]')) {
+      if (!canEditTopology) return
       const box = layout?.mountingBoxes?.find(item => item.id === target.value)
       if (box && state.selectedAssetId) void moveAssetToFrame(state.selectedAssetId, box)
       return
@@ -619,6 +628,7 @@ function mountTopologyWorkspace(container, {
     if (event.key !== 'Enter' && event.key !== ' ') return
     const frameLabel = event.target?.closest?.('[data-frame-label]')
     if (frameLabel) {
+      if (!canEditTopology) return
       event.preventDefault()
       openFrameNameEditor(frameLabel.dataset.frameLabel, frameLabel)
       return
@@ -639,6 +649,7 @@ function mountTopologyWorkspace(container, {
   }
 
   function handleDoubleClick(event) {
+    if (!canEditTopology) return
     const label = event.target?.closest?.('[data-frame-label]')
     if (!label?.dataset.frameLabel) return
     event.preventDefault()
@@ -648,6 +659,7 @@ function mountTopologyWorkspace(container, {
   function handleSubmit(event) {
     if (!event.target?.matches?.('[data-frame-name-form]')) return
     event.preventDefault()
+    if (!canEditTopology) return
     const form = event.target
     const groupId = form.dataset.groupId
     const input = form.querySelector('[data-frame-name-input]')
@@ -1165,8 +1177,13 @@ function mountTopologyWorkspace(container, {
     const frameLeft = numericStyle(frame.style.left, frame.offsetLeft)
     const frameTop = numericStyle(frame.style.top, frame.offsetTop)
     const safe = graphSafeViewport(viewport)
+    const root = !wholeContent && layout.nodes?.find((node) => (
+      node.diagramClass === 'rack-root' && node.diagram
+    ))
     const contentWidth = (content.right - content.left) * state.zoom
-    const left = contentWidth <= viewport.clientWidth - 64
+    const left = root
+      ? frameLeft + root.diagram.centerX * state.zoom - (safe.left + safe.width / 2)
+      : contentWidth <= viewport.clientWidth - 64
       ? frameLeft + (content.left + content.right) * state.zoom / 2 - viewport.clientWidth / 2
       : frameLeft + content.left * state.zoom - 32
     const visibleContent = boxes.filter((box) => (
@@ -1181,7 +1198,9 @@ function mountTopologyWorkspace(container, {
       : (visibleTop + visibleBottom) / 2
     const targetY = wholeContent ? safe.top + safe.height / 2
       : safe.top + safe.height * .43
-    const top = frameTop + focusY * state.zoom - targetY
+    const top = root
+      ? frameTop + root.diagram.centerY * state.zoom - (safe.top + safe.height * .28)
+      : frameTop + focusY * state.zoom - targetY
     viewport.scrollTo({
       left: Math.max(0, Math.min(left, viewport.scrollWidth - viewport.clientWidth)),
       top: Math.max(0, Math.min(top, viewport.scrollHeight - viewport.clientHeight)),
@@ -1211,7 +1230,7 @@ function mountTopologyWorkspace(container, {
   function beginPan(event) {
     if (event.button !== 0 || state.mutationBusy || dragState || panState) return
     const node = event.target.closest('[data-node-id]')
-    if (node?.dataset.nodeId && !state.mutationBusy) {
+    if (canEditTopology && node?.dataset.nodeId && !state.mutationBusy) {
       node.setPointerCapture(event.pointerId)
       dragState = {
         viewport: event.currentTarget,
@@ -1242,6 +1261,7 @@ function mountTopologyWorkspace(container, {
   }
 
   function beginTrayAssetDrag(event) {
+    if (!canEditTopology) return
     if (event.button !== 0 || state.mutationBusy || dragState || panState) return
     const item = event.target.closest('[data-tray-asset]')
     if (!item || !model?.nodeById.has(item.dataset.trayAsset)) return
@@ -1395,6 +1415,7 @@ function mountTopologyWorkspace(container, {
   }
 
   async function moveAssetToFrame(assetId, box, feedback = null) {
+    if (!canEditTopology) { feedback?.cancel(); return }
     const node = model.nodeById.get(assetId)
     if (!node || !box || state.mutationBusy) { feedback?.cancel(); return }
     if (box.kind !== 'excluded' && !box.hostId) { feedback?.cancel(); return }
@@ -1443,6 +1464,7 @@ function mountTopologyWorkspace(container, {
   }
 
   async function removeRelation(edgeId) {
+    if (!canEditTopology) return
     const edge = model.edgeById.get(edgeId)
     if (!edge || state.mutationBusy) return
     const added = state.changes.find(change => change.type === 'add-relation' && change.draftEdgeId === edgeId)
@@ -1455,6 +1477,7 @@ function mountTopologyWorkspace(container, {
   }
 
   async function addRelation(sourceAssetId, targetAssetId) {
+    if (!canEditTopology) return
     if (!sourceAssetId || !targetAssetId || sourceAssetId === targetAssetId || state.mutationBusy) return
     const target = model.nodeById.get(targetAssetId)
     if (!target) return
@@ -1495,6 +1518,7 @@ function mountTopologyWorkspace(container, {
   }
 
   function stageChange(change) {
+    if (!canEditTopology) return
     if (['mount', 'move-frame', 'rename-frame'].includes(change.type)) {
       state.changes = state.changes.filter(item => item.type !== change.type || item.assetId !== change.assetId)
     }
@@ -1523,6 +1547,7 @@ function mountTopologyWorkspace(container, {
   }
 
   async function saveDraft() {
+    if (!canEditTopology) return
     if (!state.changes.length || state.mutationBusy) return
     if (mapData.editingRequiresDraft && !mapData.isDraft) {
       showToast('Buat draft dari menu Sinkronisasi data sebelum menyimpan koreksi.')
@@ -1633,6 +1658,7 @@ function mountTopologyWorkspace(container, {
   }
 
   function openFrameNameEditor(groupId, labelElement) {
+    if (!canEditTopology) return
     const form = container.querySelector('[data-frame-name-form]')
     const input = form?.querySelector('[data-frame-name-input]')
     const box = layout?.mountingBoxes?.find(({ id }) => id === groupId)
@@ -1657,6 +1683,7 @@ function mountTopologyWorkspace(container, {
   }
 
   function openFrameComposer() {
+    if (!canEditTopology) return
     if (state.mutationBusy || state.frameComposerOpen) return
     const areaKey = state.area ?? model.areas?.[0]?.key ?? mapData.locationGroups?.[0]?.key
     if (!areaKey) { showToast('Area untuk frame belum tersedia.'); return }
@@ -1730,6 +1757,7 @@ function mountTopologyWorkspace(container, {
   }
 
   function chooseFrameOption(value) {
+    if (!canEditTopology) return
     const pendingId = state.pendingFrameId
     const pending = mapData.topologyFrames?.[pendingId]
     if (!pending || state.mutationBusy) return
@@ -1855,12 +1883,12 @@ function mountTopologyWorkspace(container, {
             <span>${escapeHtml(node.type || node.assetType || 'Aset')}</span>
           </div>
         </div>
-        ${needsPrimaryReview ? `<p class="topology-primary-review" role="status">Beberapa kandidat JB memiliki bukti setara. Pilih satu relasi utama untuk kamera ini.</p>` : ''}
+        ${needsPrimaryReview && canEditTopology ? `<p class="topology-primary-review" role="status">Beberapa kandidat JB memiliki bukti setara. Pilih satu relasi utama untuk kamera ini.</p>` : ''}
         <section class="topology-stitch-inspector-card">
           <div class="topology-stitch-section-label"><span class="material-symbols-outlined" aria-hidden="true">location_on</span>Lokasi Fisik</div>
           <p>${escapeHtml(physicalLocation(node, group))}</p>
         </section>
-        <section class="topology-stitch-inspector-section topology-frame-picker">
+        ${canEditTopology ? `<section class="topology-stitch-inspector-section topology-frame-picker">
           <label for="topology-asset-frame">Pindahkan ke frame</label>
           <select id="topology-asset-frame" data-asset-frame-select ${state.mutationBusy ? 'disabled' : ''}>
             <option value="">Pilih frame tujuan…</option>
@@ -1872,7 +1900,7 @@ function mountTopologyWorkspace(container, {
           ${['junction-peer', 'junction-extended'].includes(node.diagramClass)
             ? '<small>Turunan di frame yang sama ikut pindah. Setelahnya, tiap aset dapat dipindahkan sendiri.</small>'
             : ''}
-        </section>
+        </section>` : ''}
         <section class="topology-stitch-inspector-section">
           <label>Jalur Jaringan</label>
           <div class="topology-stitch-path">${path.map((item, index) => `
@@ -1883,7 +1911,7 @@ function mountTopologyWorkspace(container, {
         <section class="topology-stitch-inspector-section">
           <div class="topology-stitch-section-heading">
             <label>Relasi (${relations.length})</label>
-            <span>Perubahan masuk ke draft</span>
+            ${canEditTopology ? '<span>Perubahan masuk ke draft</span>' : ''}
           </div>
           <div class="topology-stitch-relations">
             ${relations.length ? relations.map(({ other, edge }) => `
@@ -1892,15 +1920,15 @@ function mountTopologyWorkspace(container, {
                   <span class="topology-stitch-relation-main"><span class="material-symbols-outlined" aria-hidden="true">${iconForNode(other)}</span><strong>${escapeHtml(other.name || other.id)}</strong></span>
                   <span class="topology-stitch-relation-meta">${escapeHtml(edge.networkFamilyLabel || networkFamilyLabel(other.networkFamily))}<i class="${other.connectivityStatus === 'disconnected' ? 'offline' : ''}"></i></span>
                 </button>
-                <button type="button" class="topology-stitch-relation-remove" data-action="remove-relation"
+                ${canEditTopology ? `<button type="button" class="topology-stitch-relation-remove" data-action="remove-relation"
                   data-relation-id="${escapeAttribute(edge.id)}" aria-label="Hapus relasi dengan ${escapeAttribute(other.name || other.id)}"
                   title="Hapus relasi" ${state.mutationBusy ? 'disabled' : ''}>
                   <span class="material-symbols-outlined" aria-hidden="true">close</span>
-                </button>
+                </button>` : ''}
               </div>
             `).join('') : '<p class="topology-stitch-muted">Belum ada relasi terkonfirmasi pada perangkat ini.</p>'}
           </div>
-          <div class="topology-relation-editor">
+          ${canEditTopology ? `<div class="topology-relation-editor">
             <label class="topology-stitch-search-field search-control" for="topology-relation-search">
               <span class="material-symbols-outlined" aria-hidden="true">search</span>
               <input id="topology-relation-search" data-relation-search type="search"
@@ -1910,7 +1938,7 @@ function mountTopologyWorkspace(container, {
             <div class="topology-relation-search-results" data-relation-search-results
               role="listbox" aria-label="Aset yang dapat dihubungkan" hidden></div>
             <small>Pilih aset dan garis akan dibuat otomatis.</small>
-          </div>
+          </div>` : ''}
         </section>
       </div>
       <div class="topology-stitch-inspector-footer">
@@ -1963,7 +1991,7 @@ function mountTopologyWorkspace(container, {
     tray.innerHTML = `
       <div class="topology-stitch-tray-title"><span class="material-symbols-outlined" aria-hidden="true">link_off</span><span>Belum terhubung</span><strong>${isolated.length}</strong></div>
       <div class="topology-stitch-tray-list">
-        ${isolated.map((node) => `<button type="button" class="topology-stitch-tray-item" data-tray-asset="${escapeAttribute(node.id)}" title="Klik untuk memilih, atau tarik ke frame: ${escapeAttribute(node.name || node.id)}"><span class="topology-stitch-tray-icon"><span class="material-symbols-outlined" aria-hidden="true">${iconForNode(node)}</span></span><span>${escapeHtml(node.name || node.id)}</span></button>`).join('')}
+        ${isolated.map((node) => `<button type="button" class="topology-stitch-tray-item" data-tray-asset="${escapeAttribute(node.id)}" title="${canEditTopology ? 'Klik untuk memilih, atau tarik ke frame' : 'Klik untuk memilih'}: ${escapeAttribute(node.name || node.id)}"><span class="topology-stitch-tray-icon"><span class="material-symbols-outlined" aria-hidden="true">${iconForNode(node)}</span></span><span>${escapeHtml(node.name || node.id)}</span></button>`).join('')}
       </div>
     `
   }
@@ -2244,7 +2272,7 @@ function canMountAssetOnPole(node) {
     && /junction\s*box|\bjb\b|cctv|camera|kamera/i.test(identity)
 }
 
-function renderWorkspaceShell({ activeContext, mapData, state, model }) {
+function renderWorkspaceShell({ activeContext, mapData, state, model, canEditTopology }) {
   const branchLabel = branchNameForFacility(
     mapData.locationGroups.find(({ key }) => key === state.area),
     activeContext.branchName,
@@ -2263,29 +2291,30 @@ function renderWorkspaceShell({ activeContext, mapData, state, model }) {
             branchName: branchLabel,
             areaName: areaName(state.area, mapData.locationGroups),
           })}
-          ${mapData.editingRequiresDraft && !mapData.isDraft ? `<div class="topology-draft-required" role="status">
-            <span>Versi aktif hanya untuk dilihat. Buat draft untuk mengedit.</span>
+          ${canEditTopology && mapData.editingRequiresDraft && !mapData.isDraft ? `<div class="topology-draft-required" role="status">
+            <span>Versi aktif. Buat draft untuk mengubah diagram.</span>
             <a href="/admin/topology-sync">Buat draft</a>
           </div>` : ''}
-          ${mapData.isDraft ? `<div class="topology-draft-required is-draft" role="status">
+          ${canEditTopology && mapData.isDraft ? `<div class="topology-draft-required is-draft" role="status">
             <span>Ini diagram draft. Simpan koreksi, lalu terbitkan agar muncul di diagram aktif.</span>
             <a data-publish-draft href="/admin/topology-sync?draftVersionId=${encodeURIComponent(activeContext.draftVersionId || activeContext.datasetVersionId)}">Tinjau &amp; terbitkan</a>
           </div>` : ''}
           <div class="topology-stitch-toolbar" role="group" aria-label="Alat diagram">
             <div class="topology-stitch-toolbar-actions">
               <div class="topology-toolbar-group topology-toolbar-edit-actions" aria-label="Edit diagram">
-                <button type="button" class="topology-stitch-toolbar-button topology-toolbar-labeled topology-toolbar-primary" data-action="add-pole-frame"
+                ${canEditTopology ? `<button type="button" class="topology-stitch-toolbar-button topology-toolbar-labeled topology-toolbar-primary" data-action="add-pole-frame"
                   title="Tambah frame Indoor, Non-tiang, atau tiang" aria-label="Tambah frame"><span class="material-symbols-outlined" aria-hidden="true">add_box</span><span>Tambah frame</span></button>
+                ` : ''}
                 <button type="button" class="topology-stitch-toolbar-button topology-toolbar-labeled" data-action="toggle-export" title="Ekspor diagram" aria-label="Ekspor diagram"><span class="material-symbols-outlined" aria-hidden="true">ios_share</span><span>Ekspor</span></button>
-                <button type="button" class="topology-stitch-toolbar-button topology-toolbar-labeled" data-action="toggle-actions" aria-label="Tindakan lainnya" aria-controls="topology-actions-menu" aria-expanded="false" title="Tindakan lainnya"><span class="material-symbols-outlined" aria-hidden="true">more_horiz</span><span>Lainnya</span></button>
+                ${canEditTopology ? `<button type="button" class="topology-stitch-toolbar-button topology-toolbar-labeled" data-action="toggle-actions" aria-label="Tindakan lainnya" aria-controls="topology-actions-menu" aria-expanded="false" title="Tindakan lainnya"><span class="material-symbols-outlined" aria-hidden="true">more_horiz</span><span>Lainnya</span></button>` : ''}
               </div>
             </div>
           </div>
-          <div class="topology-actions-menu" id="topology-actions-menu" data-topology-actions-menu hidden>
+          ${canEditTopology ? `<div class="topology-actions-menu" id="topology-actions-menu" data-topology-actions-menu hidden>
             <span class="topology-actions-heading">Tindakan diagram</span>
             <button type="button" data-action="rename-selected-frame" title="Pilih frame terlebih dahulu" disabled><span class="material-symbols-outlined" aria-hidden="true">edit</span><span>Ubah nama frame</span></button>
             <button type="button" data-action="open-sync"><span class="material-symbols-outlined" aria-hidden="true">sync_alt</span><span>Sinkronisasi data</span></button>
-          </div>
+          </div>` : ''}
           <div class="topology-stitch-viewport" data-topology-viewport tabindex="0" aria-label="Canvas diagram topologi">
             <div class="topology-stitch-canvas"><div class="topology-stitch-graph-frame" data-topology-frame></div></div>
           </div>
@@ -2303,11 +2332,11 @@ function renderWorkspaceShell({ activeContext, mapData, state, model }) {
               </div>
           </div>
           <div class="topology-stitch-tray" data-topology-tray></div>
-          <div class="topology-draft-bar" data-draft-bar hidden role="status" aria-live="polite">
+          ${canEditTopology ? `<div class="topology-draft-bar" data-draft-bar hidden role="status" aria-live="polite">
             <span class="topology-draft-indicator"></span><div><strong data-draft-count></strong><small data-draft-error></small></div>
             <button type="button" data-action="cancel-diagram">Batal</button>
             <button type="button" class="topology-save-button" data-action="save-diagram">Simpan ke draft</button>
-          </div>
+          </div>` : ''}
           <aside class="topology-legend-popover" id="topology-legend" data-topology-legend hidden>
             <header><strong>Legenda diagram</strong><button type="button" data-action="close-legend" aria-label="Tutup legenda"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></header>
             <section><small>Frame</small><span><i class="topology-legend-frame pole"></i>Tiang</span><span><i class="topology-legend-frame indoor"></i>Indoor</span><span><i class="topology-legend-frame standalone"></i>Non-tiang</span></section>
@@ -2323,7 +2352,7 @@ function renderWorkspaceShell({ activeContext, mapData, state, model }) {
         <button type="button" class="topology-stitch-export-option" data-export="svg"><span class="material-symbols-outlined" aria-hidden="true">code</span><span><strong>SVG resolusi tinggi</strong><small>Vektor lengkap dengan susunan frame dan legenda.</small></span></button>
         <button type="button" class="topology-stitch-export-option" data-export="png"><span class="material-symbols-outlined" aria-hidden="true">image</span><span><strong>PNG resolusi tinggi</strong><small>Gambar 2× dengan kartu dan teks tetap tajam.</small></span></button>
       </aside>
-      <section class="topology-frame-composer" data-frame-composer aria-labelledby="frame-composer-title" hidden>
+      ${canEditTopology ? `<section class="topology-frame-composer" data-frame-composer aria-labelledby="frame-composer-title" hidden>
         <header><div><span class="material-symbols-outlined" aria-hidden="true">add_box</span><div><h2 id="frame-composer-title">Frame baru</h2><p>Frame sudah terlihat di kanvas. Pilih jenis atau tiangnya.</p></div></div>
           <button type="button" data-action="close-frame-composer" aria-label="Batalkan frame baru"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></header>
         <label class="topology-frame-search"><span class="material-symbols-outlined" aria-hidden="true">search</span>
@@ -2338,7 +2367,7 @@ function renderWorkspaceShell({ activeContext, mapData, state, model }) {
           <button type="submit" aria-label="Terapkan nama ke draft"><span class="material-symbols-outlined" aria-hidden="true">check</span></button>
         </div>
         <small>Nama tampilan saja; nama aset KMZ tetap. Tekan Enter, lalu Simpan draft.</small>
-      </form>
+      </form>` : ''}
       <div class="topology-stitch-toast" data-topology-toast role="status" aria-live="polite"></div>
     </div>
   `

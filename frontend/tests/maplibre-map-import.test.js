@@ -58,8 +58,9 @@ test('operational network lines use a restrained contrast casing', async () => {
 
 test('Vite leaves MapLibre out of dependency optimization so its worker URL stays valid', async () => {
   const { default: config } = await import('../vite.config.js')
-  assert.deepEqual(config.optimizeDeps?.exclude, ['maplibre-gl'])
-  assert.equal(config.server?.strictPort, true)
+  const resolved = typeof config === 'function' ? config({ mode: 'test' }) : config
+  assert.deepEqual(resolved.optimizeDeps?.exclude, ['maplibre-gl'])
+  assert.equal(resolved.server?.strictPort, true)
 })
 
 test('user map mounts MapLibre with area scope and never loads review candidates', async () => {
