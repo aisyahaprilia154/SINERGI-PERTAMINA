@@ -2,6 +2,25 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { PostgresDatasetVersionRepository } from '../src/storage/postgres-dataset-version-repository.js'
 import { PostgresAuditLog } from '../src/storage/postgres-audit-log.js'
+import { createActiveMapProjection } from '../src/import/dataset-version-lifecycle-service.js'
+
+test('dataset writes prepare separate map and detail views before the aggregate transaction commits', async () => {
+  const pool = new FakePool()
+  const repository = new PostgresDatasetVersionRepository(pool, { mapProjection:createActiveMapProjection() })
+  const original = datasetRecord('version-read-views')
+  original.canonicalParser = {sourceSelection:{selectedKmlPath:'doc.kml'},archive:'large parser archive'}
+  await repository.create(original)
+  const views = pool.parameters.filter(p=>p.command.includes('INSERT INTO dataset_version_active_reads'))
+  assert.deepEqual(views.map(p=>p.values[4]),['active-read','map-read'])
+  const map = JSON.parse(views[1].values[2])
+  assert.equal(map.datasetVersion.status,'valid')
+  assert.equal(map.activeMapDataset.mapView,true)
+  assert.equal(Object.hasOwn(map,'canonicalParser'),false)
+  assert.deepEqual(await repository.get(original.datasetVersion.id),original)
+  const commit = pool.commands.indexOf('COMMIT')
+  assert.ok(pool.commands.indexOf(views[1].command) < commit)
+  assert.match(views[1].command,/SELECT id, xmin::text/)
+})
 
 test('PostgreSQL adapter preserves aggregate CRUD and writes projections in one transaction', async () => {
   const pool = new FakePool()
@@ -353,6 +372,22 @@ test('PostgreSQL adapter rolls activation back after a pre-pointer failure', asy
     })).record.datasetVersion.id,
     'version-old',
   )
+})
+
+test('PostgreSQL activation checks corrected baseline revision inside the locked transaction', async () => {
+  const pool = new FakePool(), repository = new PostgresDatasetVersionRepository(pool)
+  const baseline = datasetRecord('version-old', 'active')
+  baseline.recordRevision = 3
+  await repository.create(baseline)
+  const candidate = datasetRecord('version-new', 'valid')
+  candidate.datasetVersion.contentMode = 'additions_only'
+  candidate.importAdditions = { baseDatasetVersionId: 'version-old', baseRecordRevision: 2 }
+  await repository.create(candidate)
+  await assert.rejects(repository.activateVersionAtomically({
+    datasetVersionId: 'version-new', actorId: 'test', activatedAt: '2026-10-01T00:00:00Z', validateTarget() {},
+  }), { code: 'additions_baseline_changed' })
+  assert.equal((await repository.get('version-old')).datasetVersion.status, 'active')
+  assert.equal((await repository.get('version-new')).datasetVersion.status, 'valid')
 })
 
 function datasetRecord(id, status = 'valid') {

@@ -6,7 +6,8 @@ import { branchNameForFacility } from '../../domain/facility-branch.js'
 import { renderLocationContextPanel } from '../../components/location-context-panel.js'
 import { stageCameraRelationReplacement } from '../../domain/camera-relation-draft.js'
 import { createSourceIconLoader } from '../../domain/source-icon-loader.js'
-import { isJunctionBoxAsset, JUNCTION_BOX_ICON_URL } from '../../domain/junction-box-icon.js'
+import { JUNCTION_BOX_ICON_URL } from '../../domain/junction-box-icon.js'
+import { assetIconUrl } from '../../domain/asset-icon.js'
 import { CONNECTION_STYLES } from './topology-connection-style.js'
 import {
   buildTopologyDiagramModel,
@@ -941,7 +942,7 @@ function mountTopologyWorkspace(container, {
     }
     const sourceIconPreload = sourceIconLoader.preload(
       layout.nodes.map((node) => (
-        isJunctionBoxAsset(node) ? JUNCTION_BOX_ICON_URL : node.sourceIconUrl
+        assetIconUrl(node)
       )),
     )
     if (sourceIconPreload) {
@@ -1805,7 +1806,7 @@ function mountTopologyWorkspace(container, {
   }
 
   function renderNodeIcon(node) {
-    const iconUrl = isJunctionBoxAsset(node) ? JUNCTION_BOX_ICON_URL : node?.sourceIconUrl
+    const iconUrl = assetIconUrl(node)
     const imageUrl = sourceIconLoader.dataByUrl.get(iconUrl)
       || (iconUrl === JUNCTION_BOX_ICON_URL ? iconUrl : null)
     if (imageUrl) {

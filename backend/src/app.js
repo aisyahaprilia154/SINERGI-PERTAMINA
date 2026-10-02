@@ -49,9 +49,12 @@ export function createApp({
   clock = () => new Date(),
   metrics,
 }) {
-  const openFreeMapProxy = createOpenFreeMapProxy({ fetchImpl: basemapFetch })
+  const openFreeMapProxy = createOpenFreeMapProxy({ fetchImpl: basemapFetch,
+    directory: config?.dataRoot ? path.join(config.dataRoot, 'basemap-cache') : null })
   const metricsRegistry = metrics ?? new MetricsRegistry({ clock })
-  const sendActiveView = createRevisionResponseCache()
+  const sendActiveView = createRevisionResponseCache({
+    directory: config?.dataRoot ? path.join(config.dataRoot, 'read-views') : null,
+  })
   return http.createServer(async (request, response) => {
     setSecurityHeaders(response)
     const correlationId = resolveCorrelationId(request)
@@ -130,7 +133,7 @@ export function createApp({
       }
       if (request.method === 'GET'
         && url.pathname.startsWith('/api/basemap/openfreemap/')
-        && await openFreeMapProxy.handle(url.pathname, response)) {
+        && await openFreeMapProxy.handle(url.pathname, response, request)) {
         return
       }
       if (request.method === 'GET' && url.pathname === '/api/admin/import-config') {
@@ -227,6 +230,40 @@ export function createApp({
         })
         return sendActiveKml(response, exported)
       }
+      const assetIconResourceMatch = request.method === 'GET'
+        ? url.pathname.match(/^\/api\/dataset-versions\/([a-zA-Z0-9_-]+)\/asset-icons\/([^/]+)$/)
+        : null
+      if (assetIconResourceMatch) {
+        const user = authenticator.authenticate(request)
+        const { bytes, datasetVersion } = await lifecycleService.getAssetIconResource({
+          datasetVersionId: assetIconResourceMatch[1],
+          assetId: normalizeAssetId(decodePathSegment(assetIconResourceMatch[2])),
+        })
+        requireBranchAccess(user, datasetVersion)
+        response.writeHead(200, { 'Content-Type': 'image/png',
+          'Content-Length': bytes.length, 'Cache-Control': 'private, no-store',
+          'X-Content-Type-Options': 'nosniff' })
+        response.end(bytes)
+        return
+      }
+      const activeAssetIconMatch = ['PUT', 'DELETE'].includes(request.method)
+        ? url.pathname.match(/^\/api\/datasets\/([a-zA-Z0-9_-]+)\/active\/assets\/([^/]+)\/icon$/)
+        : null
+      if (activeAssetIconMatch) {
+        const user = authenticator.authenticate(request)
+        const datasetId = activeAssetIconMatch[1]
+        const body = await readJsonBody(request, 185 * 1024)
+        const branchId = normalizeRequiredActiveBranch(body.branchId, config)
+        requireBranchAccess(user, { datasetId, branchId })
+        return sendJson(response, 200, await lifecycleService.setActiveAssetIcon({
+          datasetId, branchId,
+          assetId: normalizeAssetId(decodePathSegment(activeAssetIconMatch[2])),
+          datasetVersionId: body.datasetVersionId,
+          expectedRecordRevision: body.expectedRecordRevision,
+          dataUrl: request.method === 'DELETE' ? null : body.dataUrl,
+          actorId: user.id, correlationId,
+        }))
+      }
       const activeAssetMatch = request.method === 'GET'
         ? url.pathname.match(/^\/api\/datasets\/([a-zA-Z0-9_-]+)\/active\/assets\/([^/]+)$/)
         : null
@@ -315,16 +352,22 @@ export function createApp({
             },
           )
         }
-        if (!String(record.datasetVersion.sourceFilename ?? '').toLowerCase().endsWith('.kmz')) {
+        const sourceRecord = resource.originDatasetVersionId
+          ? await repository.get(resource.originDatasetVersionId) : record
+        if (sourceRecord.datasetVersion.datasetId !== record.datasetVersion.datasetId
+          || sourceRecord.datasetVersion.branchId !== record.datasetVersion.branchId) {
+          throw new AppError('Resource berasal dari dataset lain.', { code: 'source_resource_scope_mismatch', statusCode: 404 })
+        }
+        if (!String(sourceRecord.datasetVersion.sourceFilename ?? '').toLowerCase().endsWith('.kmz')) {
           throw new AppError('Resource overlay hanya tersedia dari package KMZ.', {
             code: 'overlay_resource_package_unavailable',
             statusCode: 404,
           })
         }
         const source = await fileStore.readVerifiedOriginal({
-          storageKey: record.datasetVersion.sourceStorageKey,
-          expectedSize: record.datasetVersion.sourceSize,
-          expectedChecksum: record.datasetVersion.checksum,
+          storageKey: sourceRecord.datasetVersion.sourceStorageKey,
+          expectedSize: sourceRecord.datasetVersion.sourceSize,
+          expectedChecksum: sourceRecord.datasetVersion.checksum,
         })
         const extracted = await readKmzResourceBuffer(
           source.bytes,
@@ -1697,6 +1740,15 @@ async function handleCreateImport({
         && record.datasetVersion?.checksum === upload.checksum
     ))
     const activeAtUpload = await repository.findActive(datasetId, { branchId })
+    const contentMode = upload.fields.contentMode ?? (activeAtUpload ? 'additions_only' : 'full')
+    if (!['additions_only', 'full'].includes(contentMode)) {
+      throw new AppError('Content mode import tidak valid.', { code: 'invalid_content_mode', statusCode: 400 })
+    }
+    if (contentMode === 'additions_only' && importMode === 'replace_active') {
+      throw new AppError('Import tambahan harus disimpan untuk ditinjau sebelum aktivasi.', {
+        code: 'additions_requires_staging', statusCode: 400,
+      })
+    }
 
     const datasetVersionId = `dv-${crypto.randomUUID()}`
     const importedAt = clock().toISOString()
@@ -1715,7 +1767,9 @@ async function handleCreateImport({
       ...(versionNote ? { versionNote } : {}),
       officialSourceConfirmed,
       importMode,
+      contentMode: activeAtUpload ? contentMode : 'full',
       baseDatasetVersionId: activeAtUpload?.datasetVersion?.id ?? null,
+      baseRecordRevision: Number(activeAtUpload?.recordRevision ?? 0),
       sourceFilename: validated.sourceFilename,
       sourceMimeType: validated.sourceMimeType,
       sourceSize: upload.size,

@@ -1,6 +1,11 @@
 .git
 .github
 .runtime
+.local-runtime
+output
+tmp
+**/__pycache__
+**/*.py[cod]
 docs
 **/node_modules
 **/dist

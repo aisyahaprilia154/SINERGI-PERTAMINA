@@ -72,6 +72,7 @@ function consumeMultipart(request, { temporaryPath, maxFileSize }) {
         'versionName',
         'versionNote',
         'importMode',
+        'contentMode',
         'officialSourceConfirmed',
       ].includes(name)) {
         fields[name] = value

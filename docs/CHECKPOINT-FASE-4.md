@@ -1,7 +1,7 @@
 # Checkpoint Implementasi Fase 4
 
 Tanggal: 2026-08-12  
-Branch: `phase-1-5-integration`  
+Branch: `phase-1-5-integration`
 Spesifikasi: [`SPESIFIKASI-IMPLEMENTASI-FUNGSIONAL-FASE-1-5.md`](./SPESIFIKASI-IMPLEMENTASI-FUNGSIONAL-FASE-1-5.md)
 
 ## Status

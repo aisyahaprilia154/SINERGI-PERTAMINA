@@ -18,6 +18,7 @@ import {
  */
 export async function createDatasetVersionRepositoryRuntime({
   config,
+  mapProjection = null,
   logger = console,
   poolFactory = createPostgresPool,
 } = {}) {
@@ -74,7 +75,7 @@ export async function createDatasetVersionRepositoryRuntime({
       await verifyOperationalSchema(pool, {
         requiredColumns: POSTGRES_RUNTIME_REQUIRED_COLUMNS,
       })
-      const repository = new PostgresDatasetVersionRepository(pool)
+      const repository = new PostgresDatasetVersionRepository(pool, { mapProjection })
       return {
         mode: 'postgres',
         pool,

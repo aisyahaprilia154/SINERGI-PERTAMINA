@@ -205,6 +205,7 @@ export function renderImportDatasetPage(container) {
           branchId: state.values.branchId,
           datasetId: branch?.datasetId,
           importMode: state.values.importMode,
+          contentMode: 'additions_only',
           versionName: state.values.versionName,
           versionNote: state.values.versionNote,
           officialSourceConfirmed: state.values.officialSourceConfirmed,

@@ -4,6 +4,19 @@ export function getDefaultMapToken() {
   return typeof window === 'undefined' ? '' : getSessionToken()
 }
 
+export async function saveActiveAssetIcon({ datasetId, branchId, datasetVersionId,
+  assetId, expectedRecordRevision, dataUrl = null, token = getDefaultMapToken(),
+  signal, apiBase = '' } = {}) {
+  if (!datasetId || !branchId || !datasetVersionId || !assetId) {
+    throw new TypeError('Konteks aset wajib tersedia.')
+  }
+  return topologyRequest(
+    `${apiBase}/api/datasets/${encodeURIComponent(datasetId)}/active/assets/${encodeURIComponent(assetId)}/icon`,
+    { token, signal, method: dataUrl === null ? 'DELETE' : 'PUT',
+      body: { branchId, datasetVersionId, expectedRecordRevision, dataUrl } },
+  )
+}
+
 export async function saveTopologyDiagram({ datasetVersionId, changes, expectedRecordRevision,
   token = getDefaultMapToken(), signal, apiBase = '' } = {}) {
   if (!datasetVersionId) throw new TypeError('Dataset version wajib tersedia.')

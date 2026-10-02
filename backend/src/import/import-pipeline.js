@@ -13,6 +13,7 @@ import { extractKmzArchive, orderKmlCandidates } from './kmz-extractor.js'
 import { parseKmlFile } from './kml-parser.js'
 import { mergeKmlParserOutputs } from './kml-parser-output-merger.js'
 import { projectCanonicalImport } from './legacy-import-projection.js'
+import { mergeAdditionsOnlyImport, assertAdditionsBaseline } from './additions-only-import.js'
 
 export class ImportPipeline {
   constructor({
@@ -133,7 +134,11 @@ export class ImportPipeline {
         resources,
         ...packageInfo,
       }
-      const canonicalParser = buildCanonicalParserResult({
+      const contentMode = current.datasetVersion.contentMode ?? (activeRecord ? 'additions_only' : 'full')
+      if (contentMode === 'additions_only' && current.datasetVersion.baseDatasetVersionId) {
+        assertAdditionsBaseline(current, activeRecord)
+      }
+      let canonicalParser = buildCanonicalParserResult({
         parserOutput,
         datasetVersion: current.datasetVersion,
         sourceSelection,
@@ -152,16 +157,25 @@ export class ImportPipeline {
           ? { publicationPolicyVersion: this.publicationPolicyVersion }
           : {}),
       })
-      const adaptedResult = projectCanonicalImport({
+      let adaptedResult = projectCanonicalImport({
         parserOutput,
         canonicalParser,
         datasetVersion: current.datasetVersion,
         sourceIdentityFallback: this.sourceIdentityFallback,
       })
+      adaptedResult.datasetVersion.contentMode = activeRecord ? contentMode : 'full'
+      if (contentMode === 'additions_only' && activeRecord) {
+        const merged = mergeAdditionsOnlyImport({ canonicalParser, projection: adaptedResult,
+          baseline: activeRecord, parserOutput })
+        canonicalParser = merged.canonicalParser
+        adaptedResult = merged.projection
+      }
       const topologyArtifacts = generateRelationArtifacts(
         canonicalParser.topologyInputBundle,
         {
           config: this.topology,
+          previousInterfaceRegistry: Array.isArray(activeRecord?.topologyInterfaceRegistry)
+            ? activeRecord.topologyInterfaceRegistry : activeRecord?.topologyInterfaceRegistry?.interfaces ?? [],
           previousMountingRelations: activeRecord?.mountingRelations ?? [],
           previousMountingOverrides: activeRecord?.mountingOverrides ?? [],
           previousMountingExpectations: activeRecord?.mountingExpectations ?? [],
@@ -246,6 +260,16 @@ export class ImportPipeline {
           stage: result.datasetVersion.status,
           completedAt,
         },
+      }
+      if (record.importAdditions) {
+        record.datasetVersion.summary = { ...record.datasetVersion.summary,
+          newAssets: record.importAdditions.addedAssets, updatedAssets: 0, removedAssets: 0,
+          unchangedAssets: record.importAdditions.preservedAssets }
+        const protectedIds = new Set(canonicalParser.topologyInputBundle.additionsOnly.protectedAssetIds)
+        record.importAdditions.unresolvedRelations = topologyArtifacts.unresolved
+          .filter(item => !protectedIds.has(item.sourcePathAssetId)).length
+        record.importAdditions.ambiguousMounting = topologyArtifacts.mountingCandidates
+          .filter(item => !protectedIds.has(item.assetId)).length
       }
       await this.repository.update(datasetVersionId, () => record)
       await this.auditLog.record('dataset_import.processing_completed', {

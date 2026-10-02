@@ -475,9 +475,12 @@ export class TopologyService {
     jobId = null,
     expectedRecordRevision = undefined,
     autoPublish = true,
+    automatic = false,
   } = {}) {
     return this.#withMutationTransaction(async ({ repository, auditLog }) => {
       const current = await repository.get(datasetVersionId)
+      if (automatic && (['active', 'archived'].includes(current.datasetVersion?.status)
+        || String(reason ?? '').startsWith('Topology rules berubah'))) return current
       assertTopologyBundle(current)
       if (expectedRecordRevision !== undefined
         && expectedRecordRevision !== recordRevision(current)) {
@@ -3535,7 +3538,7 @@ export function createFullTopologyRegenerationJobHandler(topologyService) {
     throw new TypeError('Topology service untuk durable regeneration tidak valid.')
   }
   return async (
-    { actorId, reason, correlationId, expectedRecordRevision } = {},
+    { actorId, reason, correlationId, expectedRecordRevision, automatic = false } = {},
     { job, updateProgress } = {},
   ) => {
     const datasetVersionId = String(job?.datasetVersionId ?? '').trim()
@@ -3548,6 +3551,9 @@ export function createFullTopologyRegenerationJobHandler(topologyService) {
       correlationId,
       jobId: job?.jobId ?? null,
       expectedRecordRevision,
+      automatic: automatic || actorId === 'topology-autonomous-worker'
+        || String(job?.idempotencyKey ?? '').startsWith('autonomous-topology:')
+        || /^(Topology rules berubah|Import selesai;|Dataset diaktifkan;)/.test(String(reason ?? '')),
     })
     await updateProgress?.(90, 'topology_persisting')
     return summarizeTopologyRegeneration(regenerated)

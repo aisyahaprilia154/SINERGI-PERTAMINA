@@ -1,5 +1,6 @@
 const DEFAULT_OPERATIONAL_TABLES = Object.freeze([
   'dataset_versions',
+  'dataset_version_active_reads',
   'source_features',
   'source_geometries',
   'classified_objects',

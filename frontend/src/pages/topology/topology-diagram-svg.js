@@ -7,7 +7,7 @@ import { assetDescription } from '../../domain/asset-description.js'
 import { lineJumpPaths } from './topology-line-jumps.js'
 import { topologyDocumentMeta } from './topology-document-meta.js'
 import { CONNECTION_STYLES, connectionStyle } from './topology-connection-style.js'
-import { isJunctionBoxAsset, JUNCTION_BOX_ICON_URL } from '../../domain/junction-box-icon.js'
+import { assetIconUrl } from '../../domain/asset-icon.js'
 
 const THEME = Object.freeze({
   background: '#f5f5f7',
@@ -1062,7 +1062,7 @@ function renderAdminLayer(model, layout, { selectedCandidateId, selectedUnresolv
 
 function renderNodeGlyph(node, x, y, color, sourceIconDataByUrl = null) {
   const sourceIcon = sourceIconDataByUrl?.get?.(
-    isJunctionBoxAsset(node) ? JUNCTION_BOX_ICON_URL : node.sourceIconUrl,
+    assetIconUrl(node),
   ) ?? null
   if (sourceIcon) return renderSourceIcon(sourceIcon, x, y, node)
   const role = normalizeTopologyRole(node.topologyRole)

@@ -58,12 +58,13 @@ export function renderImportDatasetForm({
                 ${importMode === 'stage_only' ? 'selected' : ''}>
                 Jangan timpa — simpan sebagai versi untuk ditinjau
               </option>
-              ${(!Array.isArray(config?.workflow?.importModes)
+              ${config?.workflow?.contentModes?.includes('full') && (!Array.isArray(config?.workflow?.importModes)
                 || config.workflow.importModes.includes('replace_active')) ? `<option value="replace_active"
                 ${importMode === 'replace_active' ? 'selected' : ''}>
                 Timpa data aktif dan langsung gunakan
               </option>` : ''}
             </select>
+            <small>KMZ lengkap dibaca untuk mengambil aset dan jalur baru saja. Data, relasi, dan tiang yang sudah dikoreksi tetap dipertahankan.</small>
             <small>${importMode === 'replace_active'
               ? 'Setelah validasi berhasil, versi lama diarsipkan dan diagram topologi baru langsung ditampilkan.'
               : 'Data aktif dan diagram yang sekarang tetap digunakan sampai versi baru diaktifkan manual.'}</small>

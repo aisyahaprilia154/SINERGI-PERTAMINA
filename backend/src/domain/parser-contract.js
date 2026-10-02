@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import path from 'node:path'
+import { networkFromKmlLineColor } from '../../../shared/kml-network-color.mjs'
 import { proposeAssetCategory } from './dynamic-asset-category.js'
 import {
   buildCanonicalAssetIdentityMap,
@@ -17,10 +18,10 @@ export const PARSER_VERSION = 'evidence-parser/1.1.0'
 export const NORMALIZER_VERSION = 'canonical-normalizer/1.0.0'
 // Bumped to force stored imports through the current vocabulary. Historical
 // records exist whose classifier output changed while still carrying 1.1.x.
-export const CLASSIFICATION_RULE_SET_VERSION = 'semantic-classifier/2.0.0'
+export const CLASSIFICATION_RULE_SET_VERSION = 'semantic-classifier/2.1.0'
 export const METADATA_ALIAS_VERSION = 'metadata-aliases/1.1.0'
 export const FOLDER_MAPPING_VERSION = 'folder-mappings/1.0.0'
-export const STYLE_MAPPING_VERSION = 'style-mappings/1.0.0'
+export const STYLE_MAPPING_VERSION = 'style-mappings/1.1.0'
 
 const DEFAULT_ALIASES = Object.freeze({
   asset_id: ['asset_id', 'assetid', 'asset id', 'kode_aset'],
@@ -294,6 +295,7 @@ export function buildCanonicalParserResult({
         sourceDocumentPath: placemark.sourceDocumentPath,
         sourceStyleUrl: placemark.properties?.styleUrl,
         resolvedStyleId: placemark.resolvedStyle?.resolvedStyleId,
+        resolvedLineColor: placemark.resolvedStyle?.resolvedLineColor,
         sourceIconHref: placemark.resolvedStyle?.resolvedIconHref,
       }),
       visibility: placemark.properties?.visibility !== false,
@@ -702,6 +704,9 @@ function aliasTarget(sourceKey, aliases) {
 
 function classifyFeature({ feature, placemark, metadata, geometries, datasetVersion }) {
   const evidence = []
+  const lineColor = placemark.resolvedStyle?.resolvedLineColor ?? feature.resolvedLineColor
+  const colorFamily = geometries.some(({ geometryType }) => geometryType === 'LineString')
+    ? networkFromKmlLineColor(lineColor) : null
   const candidates = [
     {
       source: 'metadata',
@@ -711,6 +716,9 @@ function classifyFeature({ feature, placemark, metadata, geometries, datasetVers
       ].filter(Boolean).join(' '),
       weight: 1,
       rulePrefix: 'metadata',
+    },
+    {
+      source: 'line_color', value: lineColor, weight: 0.9, rulePrefix: 'line-color',
     },
     {
       source: 'folder',
@@ -736,7 +744,10 @@ function classifyFeature({ feature, placemark, metadata, geometries, datasetVers
   ]
   let match = null
   for (const candidate of candidates) {
-    const rule = candidate.source === 'name'
+    const rule = candidate.source === 'line_color'
+      ? colorFamily ? ROLE_RULES.find(rule => rule.objectRole === 'cable_path'
+        && rule.networkFamily === colorFamily) : null
+      : candidate.source === 'name'
       && isRackServerAlias(candidate.value)
       && geometries.some(({ geometryType }) => geometryType === 'Point')
       ? ROLE_RULES.find(({ tokens }) => tokens.includes('server rack'))
@@ -779,7 +790,11 @@ function classifyFeature({ feature, placemark, metadata, geometries, datasetVers
     metadataCategory: metadata.semanticValues.category,
     folderPath: feature.sourceFolderPath,
     objectRole,
-    matchedRole: Boolean(findRoleRule(feature.sourceFolderPath?.split('/').at(-1), geometries)),
+    // A subtype/status subfolder inherits the recognized parent asset class.
+    // Treating only the leaf (e.g. Extended or Rekomendasi) as a new category
+    // removed valid cameras, junctions, and poles from topology altogether.
+    matchedRole: match?.evidenceSource === 'folder'
+      || Boolean(findRoleRule(feature.sourceFolderPath?.split('/').at(-1), geometries)),
   }) ?? (genericPoint && !knownSourceCategory ? {
     key: 'lainnya', label: 'Lainnya', source: 'unspecified',
   } : null)
@@ -806,8 +821,10 @@ function classifyFeature({ feature, placemark, metadata, geometries, datasetVers
     category: rawCategory,
     sourceName: feature.sourceName,
     sourceFolderPath: feature.sourceFolderPath,
-    serviceDomain: metadata.semanticValues.service_domain,
-    mediaType: metadata.semanticValues.media_type,
+    serviceDomain: metadata.semanticValues.service_domain
+      ?? (match?.evidenceSource === 'line_color' ? 'data' : undefined),
+    mediaType: metadata.semanticValues.media_type
+      ?? (match?.evidenceSource === 'line_color' ? colorFamily === 'fiber_optic' ? 'fiber' : 'copper_lan' : undefined),
     cableRole: metadata.semanticValues.cable_role,
   })
   const canonicalAssetType = canonicalVocabularyValue(
@@ -1585,6 +1602,9 @@ export function rebuildStoredTopologyInputBundle(record = {}) {
   const repairedObjects = classifiedObjects.map((object) => {
     const identity = identityItems.get(object.sourceFeatureId)
     const withIdentity = applyStoredIdentity(object, identity)
+    if (record.topologyInputBundle?.additionsOnly?.protectedAssetIds?.includes(
+      object.canonicalAssetId ?? object.stableAssetId ?? object.assetId,
+    )) return withIdentity
     if (object.categoryReview?.status === 'approved') return withIdentity
     const classifierIsStale = object.classificationRuleSetVersion
       !== CLASSIFICATION_RULE_SET_VERSION
@@ -1599,7 +1619,7 @@ export function rebuildStoredTopologyInputBundle(record = {}) {
     if (!feature || !geometries.length) return withIdentity
     const classification = classifyFeature({
       feature,
-      placemark: {},
+      placemark: { resolvedStyle: { resolvedLineColor: feature.resolvedLineColor } },
       metadata: {
         semanticValues: semanticValuesByFeature.get(object.sourceFeatureId) ?? {},
       },
@@ -1649,6 +1669,21 @@ export function rebuildStoredTopologyInputBundle(record = {}) {
     jbProfiles,
     internalConnections,
   })
+  if (record.topologyInputBundle?.additionsOnly) {
+    topologyInputBundle.additionsOnly = structuredClone(record.topologyInputBundle.additionsOnly)
+    const protectedIds = new Set(topologyInputBundle.additionsOnly.protectedAssetIds)
+    for (const key of ['classifiedNodes', 'classifiedPaths']) {
+      topologyInputBundle[key] = [
+        ...structuredClone((record.topologyInputBundle[key] ?? []).filter(item => protectedIds.has(item.assetId))),
+        ...topologyInputBundle[key].filter(item => !protectedIds.has(item.assetId)),
+      ]
+    }
+    const oldGeometryIds = new Set((record.topologyInputBundle.geometries ?? []).map(item => item.geometryId))
+    topologyInputBundle.geometries = [
+      ...structuredClone(record.topologyInputBundle.geometries ?? []),
+      ...topologyInputBundle.geometries.filter(item => !oldGeometryIds.has(item.geometryId)),
+    ]
+  }
   return {
     topologyInputBundle,
     classifiedObjects: repairedObjects,
@@ -1801,7 +1836,7 @@ function identityIssues(identityMap, classifiedObjects = []) {
 
 export const buildIdentityIssues = identityIssues
 
-function buildCoverage({
+export function buildCoverage({
   parserOutput,
   sourceFeatures,
   sourceGeometries,

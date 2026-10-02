@@ -1,5 +1,6 @@
 import { formatAssetTypeLabel } from '../../domain/asset-type-label.js'
 import { isJunctionBoxAsset, JUNCTION_BOX_ICON_URL } from '../../domain/junction-box-icon.js'
+import { assetIconUrl, assetIconCanReset, assetIconGlyph } from '../../domain/asset-icon.js'
 
 export function renderAssetDetailDrawer({
   status = 'ready',
@@ -26,6 +27,8 @@ export function renderAssetDetailDrawer({
   relationStatus = 'idle',
   relationError = null,
   sourceIconDataByUrl = null,
+  iconControlsAvailable = false,
+  iconFeedback = null,
 }) {
   if (status === 'loading' && !asset) return renderLoadingState()
   if (status === 'error') return renderErrorState(errorMessage, asset)
@@ -56,12 +59,15 @@ export function renderAssetDetailDrawer({
     ${status === 'loading' ? `<p class="drawer-detail-loading" role="status" aria-live="polite">Memuat data tambahan aset…</p>` : ''}
 
     <div class="drawer-scroll-content">
-      <section class="drawer-title">
+      <section class="drawer-title drawer-asset-identity">
+        ${renderAssetIconControl(asset, { iconControlsAvailable, sourceIconDataByUrl })}
         <div class="asset-badge-row">
           <span class="category-badge category-${category.token}">${escapeHtml(category.label)}</span>
         </div>
         <p>${escapeHtml(assetTypeLabel)}</p>
         ${asset.location ? `<small class="drawer-asset-location">${escapeHtml(asset.location)}</small>` : ''}
+        ${iconFeedback ? `<p class="asset-icon-feedback${iconFeedback.error ? ' error' : ''}"
+          role="${iconFeedback.error ? 'alert' : 'status'}">${escapeHtml(iconFeedback.message)}</p>` : ''}
       </section>
 
       ${poleAsset || (!hasDirectRelations && !relationOptions.length && !['saved', 'removed', 'removing', 'error'].includes(relationStatus)) ? '' : `<section class="drawer-section drawer-topology-summary" aria-labelledby="asset-topology-title">
@@ -541,13 +547,32 @@ function assetIcon(type = '') {
 }
 
 function renderRelationAssetIcon(asset, sourceIconDataByUrl = null) {
-  const iconUrl = isJunctionBoxAsset(asset) ? JUNCTION_BOX_ICON_URL : asset?.sourceIconUrl
+  const iconUrl = assetIconUrl(asset)
   const sourceIcon = sourceIconDataByUrl?.get?.(iconUrl)
   if (sourceIcon) return `<img class="relation-icon relation-icon-image" src="${escapeAttribute(sourceIcon)}" alt="" aria-hidden="true">`
   if (isJunctionBoxAsset(asset)) {
     return `<img class="relation-icon relation-icon-image" src="${JUNCTION_BOX_ICON_URL}" alt="" aria-hidden="true">`
   }
   return `<span class="relation-icon material-symbols-outlined" aria-hidden="true">${assetIcon(`${asset?.type || ''} ${asset?.category || ''}`)}</span>`
+}
+
+function renderAssetIconControl(asset, { iconControlsAvailable, sourceIconDataByUrl }) {
+  const url = assetIconUrl(asset)
+  const source = sourceIconDataByUrl?.get?.(url)
+    || (url === JUNCTION_BOX_ICON_URL ? url : null)
+  const preview = source
+    ? `<img src="${escapeAttribute(source)}" alt="" class="asset-icon-image">`
+    : `<span class="material-symbols-outlined" aria-hidden="true">${assetIconGlyph(asset)}</span>`
+  return `<div class="asset-icon-control">
+    ${iconControlsAvailable ? `<button class="asset-icon-preview" type="button" data-asset-icon-trigger
+      aria-label="Ubah ikon aset" aria-expanded="false" aria-controls="asset-icon-actions" title="Ubah ikon aset">
+      ${preview}<span class="asset-icon-edit material-symbols-outlined" aria-hidden="true">edit</span>
+    </button>
+    <div class="asset-icon-actions" id="asset-icon-actions" hidden>
+      <button type="button" data-change-asset-icon><span class="material-symbols-outlined" aria-hidden="true">image</span>Ganti ikon</button>
+      ${assetIconCanReset(asset) ? `<button type="button" data-reset-asset-icon><span class="material-symbols-outlined" aria-hidden="true">delete</span>Hapus ikon</button>` : ''}
+    </div>` : `<div class="asset-icon-preview">${preview}</div>`}
+  </div>`
 }
 
 function networkDisplayName(network = {}) {

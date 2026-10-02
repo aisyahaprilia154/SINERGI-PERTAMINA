@@ -1,22 +1,28 @@
 import { createHash } from 'node:crypto'
 import { promisify } from 'node:util'
 import { gzip } from 'node:zlib'
+import { createDiskRepresentationCache } from './disk-representation-cache.js'
 
 const compress = promisify(gzip)
 
 // Cache representations, not mutable aggregates. Every hit requires a fresh
 // storage revision and authorization by the caller. Bound retained memory.
-export function createRevisionResponseCache({ maxBytes = 96 * 1024 * 1024 } = {}) {
+export function createRevisionResponseCache({ maxBytes = 96 * 1024 * 1024, directory = null } = {}) {
   const entries = new Map()
+  const disk = directory ? createDiskRepresentationCache({ directory, maxBytes }) : null
   let retainedBytes = 0
   return async function send(request, response, { key, revision, load }) {
     const cacheKey = revision == null ? null : JSON.stringify([key, revision])
     let pending = cacheKey && entries.get(cacheKey)
     if (!pending) {
       pending = Promise.resolve().then(async () => {
+        const stored = cacheKey && await disk?.read(key, cacheKey)
+        if (stored) return stored
         const plain = Buffer.from(JSON.stringify(await load()))
         const compressed = await compress(plain)
-        return { plain, compressed, etag: `"${createHash('sha256').update(plain).digest('hex')}"` }
+        const result = { plain, compressed, etag: `"${createHash('sha256').update(plain).digest('hex')}"` }
+        if (cacheKey) await disk?.write(key, cacheKey, result)
+        return result
       })
       if (cacheKey) entries.set(cacheKey, pending)
       try {

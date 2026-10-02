@@ -90,8 +90,14 @@ restart.
 
 Dataset tetap `not_ready` bila stable ID belum valid, terdapat dangling
 reference, graph invalid, atau hasil held-out belum membuktikan ambang akurasi.
-Spatial auto-confirm default-nya mati. Mengaktifkannya memerlukan precision
+Mode legacy `autoConfirmSpatialInference` default-nya mati. Mengaktifkannya memerlukan precision
 held-out minimal 99%, path accuracy sesuai konfigurasi, dan approval policy.
+
+Mode operasional `automaticRelationConfirmation` aktif secara default melalui
+konfigurasi aplikasi untuk match kuat dan unik. Aturan import tambahan,
+evidence warna FO/LAN, dan perlindungan data terkoreksi dijelaskan di
+[additions-only-import.md](additions-only-import.md). Upgrade rule-set tidak
+memicu regenerasi otomatis dataset lama saat server restart.
 
 `evaluateTopologyAccuracy` menerima gold set versioned dengan split
 `calibration` dan `held_out`. Laporannya mencakup precision, recall, automatic

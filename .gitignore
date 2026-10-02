@@ -18,6 +18,19 @@ backend/artifacts/database-backup/
 *.sinergi-sync.json
 .env.docker
 
+# Local configuration (keep documented examples)
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Local inspection, generated previews, and Python bytecode
+.runtime/
+output/
+tmp/
+__pycache__/
+*.py[cod]
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -7,7 +7,7 @@ import {
   MIN_SCHEMATIC_ZOOM,
 } from './schematic-viewport.js'
 import { searchMatchScore } from '../../domain/search-normalization.js'
-import { isJunctionBoxAsset, JUNCTION_BOX_ICON_URL } from '../../domain/junction-box-icon.js'
+import { assetIconUrl } from '../../domain/asset-icon.js'
 
 export function openSchematicDialog({
   diagrams,
@@ -312,7 +312,7 @@ function bindDialogEvents({
   const preloadSourceIcons = async (diagram, sequence) => {
     const urls = [...new Set(
       (diagram?.layout?.nodes ?? []).map((node) => (
-        isJunctionBoxAsset(node) ? JUNCTION_BOX_ICON_URL : node.sourceIconUrl
+        assetIconUrl(node)
       )).filter(Boolean),
     )]
     if (!urls.length) return

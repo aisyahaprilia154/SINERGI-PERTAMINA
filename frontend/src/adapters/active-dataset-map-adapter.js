@@ -524,8 +524,11 @@ function confirmedTopologyProjection(payload) {
         }]
       }), nodes, { mountingRelations })
     const edges = filterDppuYiaPresentationEdges(cameraResolution.edges, payload.assets)
+    // Nodes and edges were already copied above. Avoid copying them a second
+    // time just to overwrite them, especially with older unslimmed API payloads.
+    const { nodes: sourceNodes, edges: sourceEdges, ...graphMetadata } = source
     return {
-      ...structuredClone(source),
+      ...structuredClone(graphMetadata),
       nodes,
       edges,
       cameraRelationReview: cameraResolution.suppressedEdges.filter(item =>
@@ -799,6 +802,8 @@ export function adaptActiveAssetDetail(payload, mapAsset) {
   )
   return {
     ...mapAsset,
+    customIconUrl: asset.customIconUrl === undefined ? mapAsset.customIconUrl ?? null : asset.customIconUrl,
+    iconReset: asset.iconReset ?? mapAsset.iconReset ?? false,
     name: asset.name || mapAsset.name,
     category: asset.category || mapAsset.category,
     type: normalizeAssetType(asset.type, asset.category),
@@ -866,6 +871,8 @@ function createOwnerFeature({ asset, layer, geometries }) {
       ?? readProperty(asset, 'sourceIconResourceId')
       ?? null,
     sourceIconUrl: asset.sourceIconUrl ?? readProperty(asset, 'sourceIconUrl') ?? null,
+    customIconUrl: asset.customIconUrl ?? null,
+    iconReset: asset.iconReset ?? false,
     name: asset.name || asset.assetId,
     type,
     assetType: type,

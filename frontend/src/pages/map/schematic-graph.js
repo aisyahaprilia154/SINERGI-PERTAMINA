@@ -234,6 +234,8 @@ export function buildSchematicGraph({
       ip: normalizeIp(asset.ip),
       status: asset.status || '',
       sourceIconUrl: asset.sourceIconUrl || null,
+      customIconUrl: asset.customIconUrl || null,
+      iconReset: asset.iconReset ?? false,
       sourceIconResourceId: asset.sourceIconResourceId || null,
       sourcePosition: getSourceDisplayPosition(asset),
       isAnchor: asset.id === anchorAssetId,

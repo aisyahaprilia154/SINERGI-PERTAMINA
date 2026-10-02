@@ -1,4 +1,5 @@
 import { AppError } from '../errors.js'
+import { createBasemapResourceCache } from './basemap-resource-cache.js'
 
 const TILEJSON_URL = 'https://tiles.openfreemap.org/planet'
 const FONT_BASE_URL = 'https://tiles.openfreemap.org/fonts'
@@ -14,58 +15,63 @@ const UPSTREAM_RETRY_DELAY_MS = 120
 export function createOpenFreeMapProxy({
   fetchImpl = globalThis.fetch,
   now = () => Date.now(),
+  directory = null,
 } = {}) {
   let metadataCache = null
+  const resources = createBasemapResourceCache({ directory, now })
+
+  async function loadResource(url, maxBytes, ttlMs, validate = () => {}) {
+    return resources.get(url, { maxBytes, ttlMs, load: async () => {
+      const upstream = await fetchUpstream(url, fetchImpl)
+      const bytes = await readBoundedBody(upstream, maxBytes)
+      validate(bytes)
+      return bytes
+    } })
+  }
 
   async function loadMetadata() {
     if (metadataCache?.expiresAt > now()) return metadataCache
-    const response = await fetchUpstream(TILEJSON_URL, fetchImpl)
-    const bytes = await readBoundedBody(response, MAX_TILEJSON_BYTES)
-    let metadata
-    try {
-      metadata = JSON.parse(bytes.toString('utf8'))
-    } catch {
-      throw upstreamError('Metadata basemap tidak valid.')
-    }
-    const tileTemplate = metadata?.tiles?.find((template) => (
-      isApprovedTileTemplate(template)
-    ))
-    if (!tileTemplate) {
-      throw upstreamError('Template tile basemap tidak tersedia.')
-    }
+    const { plain } = await loadResource(TILEJSON_URL, MAX_TILEJSON_BYTES,
+      METADATA_CACHE_MS, decodeMetadata)
+    const { metadata, tileTemplate } = decodeMetadata(plain)
     metadataCache = {
       metadata,
       tileTemplate,
-      expiresAt: now() + METADATA_CACHE_MS,
+      expiresAt: (Math.floor(now() / METADATA_CACHE_MS) + 1) * METADATA_CACHE_MS,
     }
     return metadataCache
   }
 
   return {
-    async handle(pathname, response) {
+    async handle(pathname, response, request = { headers: {} }) {
       if (pathname === `${LOCAL_BASE_PATH}/planet`) {
-        const { metadata } = await loadMetadata()
+        const { metadata, tileTemplate } = await loadMetadata()
+        const snapshot = snapshotFromTemplate(tileTemplate)
         return sendJson(response, {
           ...metadata,
-          tiles: [`${LOCAL_BASE_PATH}/tiles/{z}/{x}/{y}.pbf`],
+          tiles: [`${LOCAL_BASE_PATH}/tiles/${snapshot}/{z}/{x}/{y}.pbf`],
         }, 300)
       }
 
       const tileMatch = pathname.match(
-        /^\/api\/basemap\/openfreemap\/tiles\/(\d{1,2})\/(\d+)\/(\d+)\.pbf$/,
+        /^\/api\/basemap\/openfreemap\/tiles\/(?:([A-Za-z0-9_-]{1,100})\/)?(\d{1,2})\/(\d+)\/(\d+)\.pbf$/,
       )
       if (tileMatch) {
-        const [zoom, x, y] = tileMatch.slice(1).map(Number)
+        const snapshot = tileMatch[1]
+        const [zoom, x, y] = tileMatch.slice(2).map(Number)
         assertTileCoordinate(zoom, x, y)
-        const { tileTemplate } = await loadMetadata()
+        const tileTemplate = snapshot
+          ? `https://tiles.openfreemap.org/planet/${snapshot}/{z}/{x}/{y}.pbf`
+          : (await loadMetadata()).tileTemplate
         const upstreamUrl = tileTemplate
           .replace('{z}', String(zoom))
           .replace('{x}', String(x))
           .replace('{y}', String(y))
-        return proxyBinary(response, upstreamUrl, fetchImpl, {
-          maxBytes: MAX_TILE_BYTES,
+        const result = await loadResource(upstreamUrl, MAX_TILE_BYTES, 7 * 86_400_000)
+        return sendBinary(request, response, result, {
           contentType: 'application/vnd.mapbox-vector-tile',
-          cacheSeconds: 86_400,
+          cacheSeconds: snapshot ? 31_536_000 : 300,
+          immutable: Boolean(snapshot),
         })
       }
 
@@ -79,10 +85,10 @@ export function createOpenFreeMapProxy({
         assertFontRange(rangeStart, rangeEnd)
         const upstreamUrl = `${FONT_BASE_URL}/${encodeURIComponent(fontStack)}/`
           + `${rangeStart}-${rangeEnd}.pbf`
-        return proxyBinary(response, upstreamUrl, fetchImpl, {
-          maxBytes: MAX_FONT_BYTES,
+        const result = await loadResource(upstreamUrl, MAX_FONT_BYTES, 7 * 86_400_000)
+        return sendBinary(request, response, result, {
           contentType: 'application/x-protobuf',
-          cacheSeconds: 86_400,
+          cacheSeconds: 604_800,
         })
       }
 
@@ -91,18 +97,32 @@ export function createOpenFreeMapProxy({
   }
 }
 
-async function proxyBinary(response, upstreamUrl, fetchImpl, {
-  maxBytes,
+function sendBinary(request, response, result, {
   contentType,
   cacheSeconds,
+  immutable = false,
 }) {
-  const upstream = await fetchUpstream(upstreamUrl, fetchImpl)
-  const bytes = await readBoundedBody(upstream, maxBytes)
+  const headers = {
+    'content-type': contentType,
+    'cache-control': `public, max-age=${cacheSeconds}${immutable ? ', immutable' : ''}`,
+    vary: 'Accept-Encoding',
+    etag: `W/${result.etag}`,
+  }
+  if (request.headers['if-none-match']?.split(',').some(value => (
+    value.trim().replace(/^W\//, '') === result.etag || value.trim() === '*'
+  ))) {
+    response.writeHead(304, headers)
+    response.end()
+    return true
+  }
+  const acceptsGzip = String(request.headers['accept-encoding'] ?? '').split(',')
+    .some(value => /^gzip(?:\s*;|\s*$)/i.test(value.trim())
+      && !/;\s*q=0(?:\.0*)?\s*$/i.test(value))
+  const bytes = acceptsGzip ? result.compressed : result.plain
   response.writeHead(200, {
-    'content-type': upstream.headers.get('content-type') || contentType,
+    ...headers,
+    ...(acceptsGzip ? { 'content-encoding': 'gzip' } : {}),
     'content-length': String(bytes.length),
-    'cache-control': upstream.headers.get('cache-control')
-      || `public, max-age=${cacheSeconds}`,
   })
   response.end(bytes)
   return true
@@ -178,11 +198,24 @@ function isApprovedTileTemplate(value) {
     const pathname = decodeURIComponent(url.pathname)
     return url.protocol === 'https:'
       && url.hostname === 'tiles.openfreemap.org'
-      && pathname.startsWith('/planet/')
-      && pathname.endsWith('/{z}/{x}/{y}.pbf')
+      && /^\/planet\/[A-Za-z0-9_-]{1,100}\/\{z\}\/\{x\}\/\{y\}\.pbf$/.test(pathname)
+      && !url.port && !url.username && !url.password && !url.search && !url.hash
   } catch {
     return false
   }
+}
+
+function decodeMetadata(bytes) {
+  let metadata
+  try { metadata = JSON.parse(bytes.toString('utf8')) }
+  catch { throw upstreamError('Metadata basemap tidak valid.') }
+  const tileTemplate = metadata?.tiles?.find(isApprovedTileTemplate)
+  if (!tileTemplate) throw upstreamError('Template tile basemap tidak tersedia.')
+  return { metadata, tileTemplate }
+}
+
+function snapshotFromTemplate(template) {
+  return decodeURIComponent(new URL(template).pathname).split('/')[2]
 }
 
 function assertTileCoordinate(zoom, x, y) {

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { createApp } from './app.js'
 import { createConfig } from './config.js'
 import { DatasetVersionValidationService } from './import/dataset-validation-service.js'
-import { DatasetVersionLifecycleService } from './import/dataset-version-lifecycle-service.js'
+import { DatasetVersionLifecycleService, createActiveMapProjection } from './import/dataset-version-lifecycle-service.js'
 import { ImportPipeline, summarizeImportJobResult } from './import/import-pipeline.js'
 import { createDatasetVersionRepositoryRuntime } from './database/repository-runtime.js'
 import { DurableJobQueue } from './jobs/durable-job-queue.js'
@@ -29,7 +29,9 @@ const config = createConfig(process.env, {
     ?? path.resolve(moduleDirectory, '../.data'),
 })
 const fileStore = new ImportFileStore(config.dataRoot)
-const repositoryRuntime = await createDatasetVersionRepositoryRuntime({ config })
+const repositoryRuntime = await createDatasetVersionRepositoryRuntime({
+  config, mapProjection: createActiveMapProjection(config.siteBoundaries),
+})
 const repository = repositoryRuntime.repository
 const accountStore = repositoryRuntime.mode === 'postgres'
   ? new PostgresAccountStore(repositoryRuntime.pool) : null
@@ -137,7 +139,8 @@ process.once('SIGTERM', () => void shutdown())
 
 try {
   await jobQueue.start()
-  await queueStaleTopologyRuleSets()
+  // Rule upgrades apply to new staged imports. Existing corrected datasets
+  // must never be regenerated merely because this process restarts.
 } catch (error) {
   await shutdown()
   throw error
@@ -161,7 +164,7 @@ async function queueAutonomousTopologyJob(datasetVersionId, {
     inputFingerprint,
     ruleSetVersion: TOPOLOGY_RULE_SET_VERSION,
     idempotencyKey: `autonomous-topology:${inputFingerprint}`,
-    payload: { actorId, correlationId, reason },
+    payload: { actorId, correlationId, reason, automatic: true },
     handler: createFullTopologyRegenerationJobHandler(topologyService),
   })
   await auditLog.record('topology.regeneration_queued', {
@@ -178,22 +181,4 @@ async function queueAutonomousTopologyJob(datasetVersionId, {
     },
   })
   return queued
-}
-
-async function queueStaleTopologyRuleSets() {
-  const records = await repository.list()
-  for (const record of records) {
-    if (!record.topologyInputBundle
-      || record.topologyRuleSetVersion === TOPOLOGY_RULE_SET_VERSION) continue
-    // A failed shadow run is already durable in topologyPublication. Do not
-    // enqueue the same stale dataset again on every dev-server restart; that
-    // creates a regeneration storm while the active graph correctly remains
-    // protected behind the publication gate. Operators can explicitly retry
-    // after resolving the recorded gate blockers.
-    if (record.topologyPublication?.ruleSetVersion === TOPOLOGY_RULE_SET_VERSION
-      && record.topologyPublication?.lastShadowRunId) continue
-    await queueAutonomousTopologyJob(record.datasetVersion.id, {
-      reason: `Topology rules berubah ke ${TOPOLOGY_RULE_SET_VERSION}.`,
-    })
-  }
 }

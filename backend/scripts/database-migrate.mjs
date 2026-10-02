@@ -17,6 +17,8 @@ const migrationIds = Object.freeze([
   '0004_phase_one_publication_identity_diff',
   '0005_topology_interface_registry',
   '0006_app_users',
+  '0007_dataset_active_reads',
+  '0008_dataset_read_views',
 ])
 
 export async function runDatabaseMigrations({

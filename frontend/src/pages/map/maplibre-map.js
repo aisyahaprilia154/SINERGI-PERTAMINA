@@ -35,7 +35,8 @@ import {
 } from './maplibre-basemap.js'
 import { assetPointRadiusExpression } from './maplibre-style-expressions.js'
 import { OPERATIONAL_NETWORK_COLORS } from '../../domain/network-colors.js'
-import { isJunctionBoxAsset, JUNCTION_BOX_ICON_URL } from '../../domain/junction-box-icon.js'
+import { isJunctionBoxAsset } from '../../domain/junction-box-icon.js'
+import { assetIconUrl } from '../../domain/asset-icon.js'
 import {
   assetVisibleAtZoom,
   assetVisualTier,
@@ -157,10 +158,10 @@ export function createMapLibreSurface(element, {
       attribution: basemapAttribution,
       darkMode,
     }),
-    center: initialBounds
-      ? [(initialBounds[0] + initialBounds[2]) / 2, (initialBounds[1] + initialBounds[3]) / 2]
-      : [117, -2],
-    zoom: initialBounds ? 14 : 3,
+    ...(initialBounds ? {
+      bounds: [[initialBounds[0], initialBounds[1]], [initialBounds[2], initialBounds[3]]],
+      fitBoundsOptions: mapFitOptions(),
+    } : { center: [117, -2], zoom: 3 }),
     minZoom: 1,
     maxZoom: 22,
     attributionControl: false,
@@ -306,7 +307,6 @@ export function createMapLibreSurface(element, {
     syncSources()
     addOperationalLayers(map)
     syncAdaptiveMarkers()
-    if (initialBounds) fitBounds(initialBounds)
   }
 
   // Local KML must not wait for remote basemap tiles or glyphs. MapLibre's
@@ -483,9 +483,7 @@ export function createMapLibreSurface(element, {
       .map((asset) => {
         const isJunctionBox = isJunctionBoxAsset(asset)
         const assetIcon = iconForAsset(asset)
-        const sourceIconUrl = isJunctionBox
-          ? JUNCTION_BOX_ICON_URL
-          : asset.sourceIconUrl || null
+        const sourceIconUrl = assetIconUrl(asset)
         const networkFocused = Boolean(
           state.focusedNetworkId && asset.networkIds?.includes(state.focusedNetworkId),
         )
@@ -845,14 +843,19 @@ export function createMapLibreSurface(element, {
     if (tooltip) tooltip.hidden = true
   }
 
-  function fitBounds(bounds, { duration = 0 } = {}) {
+  function mapFitOptions() {
     // Keep the route away from the left edge. On mobile the sidebar overlays
     // the map, while on desktop this also leaves room for the map controls.
     const leftPadding = window.matchMedia?.('(max-width: 960px)').matches ? 168 : 144
-    map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], {
+    return {
       padding: { top: 84, right: 84, bottom: 72, left: leftPadding },
-      duration,
       maxZoom: 18,
+    }
+  }
+
+  function fitBounds(bounds, { duration = 0 } = {}) {
+    map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], {
+      ...mapFitOptions(), duration,
     })
   }
 
@@ -908,6 +911,9 @@ export function createMapLibreSurface(element, {
   }
 
   return {
+    refreshAssetIcons() {
+      syncAdaptiveMarkers()
+    },
     invalidateSize() {
       map.resize()
     },

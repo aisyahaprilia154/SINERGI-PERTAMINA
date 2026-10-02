@@ -15,7 +15,7 @@ import { demoteConflictingCameraCandidates } from './device-edge-policy.js'
 
 const EARTH_RADIUS_METERS = 6371008.8
 
-export const TOPOLOGY_RULE_SET_VERSION = 'semantic-relation-engine/3.0.0'
+export const TOPOLOGY_RULE_SET_VERSION = 'semantic-relation-engine/3.1.0'
 export const TOPOLOGY_POLICY_VERSION = 'topology-policy/1.0.0'
 
 export const DEFAULT_TOPOLOGY_POLICY = Object.freeze({
@@ -110,6 +110,10 @@ export function generateRelationArtifacts(topologyInputBundle, {
 } = {}) {
   const settings = normalizeConfig(config)
   const bundle = normalizeAndValidateBundle(correctFacilityBundle(topologyInputBundle))
+  const baseline = bundle.additionsOnly ?? null
+  const protectedIds = new Set(baseline?.protectedAssetIds ?? [])
+  const preservedRelations = baseline?.confirmedRelations ?? []
+  previousRelations = [...preservedRelations, ...previousRelations]
   const topologyPolicy = normalizeTopologyPolicy(
     bundle.topologyPolicy ?? settings.topologyPolicy,
   )
@@ -123,6 +127,15 @@ export function generateRelationArtifacts(topologyInputBundle, {
     previousInterfaceRegistry,
     generatedAt,
   })
+  const preservedInterfaces = new Map(baseline ? asArray(bundle.interfaceRegistry)
+    .filter(item => protectedIds.has(item.ownerAssetId)).map(item => [item.interfaceId, item]) : [])
+  if (baseline) {
+    interfaceRegistry.interfaces = interfaceRegistry.interfaces.map(item =>
+      structuredClone(preservedInterfaces.get(item.interfaceId) ?? item))
+    const oldComponents = new Map(asArray(baseline.components).map(item => [item.componentId, item]))
+    interfaceRegistry.components = [...oldComponents.values(),
+      ...interfaceRegistry.components.filter(item => !oldComponents.has(item.componentId))]
+  }
   const interfaceContext = createInterfaceContext({
     bundle,
     nodes,
@@ -134,12 +147,19 @@ export function generateRelationArtifacts(topologyInputBundle, {
   detectDuplicateAndOverlappingLinework(paths, lineworkIssues, bundle, settings)
   assertGenerationBudget(candidateBudget, 'linework_validation')
   const spatialIndexes = buildSpatialIndexes(nodes, paths, settings)
+  const inferenceNodes = baseline ? nodes.filter(node => !protectedIds.has(node.id)) : nodes
+  const touchedPaths = new Set(paths.filter(path => !protectedIds.has(path.id)).map(path => path.geometryId))
+  if (baseline) inferenceNodes.forEach(node => {
+    spatialIndexes.segments.queryPoint(node.coordinate, settings.searchRadiusMeters)
+      .forEach(path => touchedPaths.add(path.geometryId))
+  })
+  const discoveryPaths = baseline ? paths.filter(path => touchedPaths.has(path.geometryId)) : paths
   assertGenerationBudget(candidateBudget, 'spatial_index')
   const accuracyGate = evaluateTopologyAccuracyGate(bundle, nodes, paths, settings, generatedAt)
 
-  const rawCandidates = [
+  let rawCandidates = [
     ...generateCableTerminationCandidates(
-      paths,
+      discoveryPaths,
       spatialIndexes,
       settings,
       interfaceContext,
@@ -149,14 +169,14 @@ export function generateRelationArtifacts(topologyInputBundle, {
       paths,
       spatialIndexes,
       settings,
-      interfaceContext,
+      { ...interfaceContext, nodes: inferenceNodes },
       candidateBudget,
     ),
-    ...generateMountingCandidates(nodes, spatialIndexes, settings, interfaceContext, candidateBudget),
+    ...generateMountingCandidates(inferenceNodes, spatialIndexes, settings, interfaceContext, candidateBudget),
     ...generateNamedJunctionFamilyCandidates(nodes, candidateBudget),
     ...(settings.automaticRelationConfirmation
       ? generateNearestJunctionDeviceCandidates(
-        nodes,
+        inferenceNodes,
         spatialIndexes,
         settings,
         candidateBudget,
@@ -171,7 +191,7 @@ export function generateRelationArtifacts(topologyInputBundle, {
     ),
     ...generateLineLabelAttachmentCandidates(
       nodes,
-      paths,
+      discoveryPaths,
       settings,
       interfaceContext,
       candidateBudget,
@@ -186,13 +206,37 @@ export function generateRelationArtifacts(topologyInputBundle, {
       candidateBudget,
     ),
   ]
+  // Cable evidence (including ambiguous evidence) prevents a nearest-JB
+  // shortcut from inventing a different connection for the same camera.
+  const cableTargets = new Set(rawCandidates.filter(candidate => candidate.candidateType === 'cable_termination')
+    .map(candidate => candidate.targetAssetId))
+  rawCandidates = rawCandidates.filter(candidate => {
+    if (candidate.candidateType !== 'device_nearest_junction') return true
+    if (cableTargets.has(candidate.sourceAssetId)) return false
+    const camera = interfaceContext.nodeById.get(candidate.sourceAssetId)
+    return !spatialIndexes.segments.queryPoint(camera.coordinate, settings.inlineSearchRadiusMeters)
+      .some(path => sameFacilityScope(path, camera)
+        && nearestPointOnLine(camera.coordinate, path).distanceMeters <= settings.inlineSearchRadiusMeters)
+  })
+  if (baseline) {
+    const reservedEndpoints = new Set(preservedRelations.map(relation => relation.sourceEndpointId).filter(Boolean))
+    const occupiedCameras = new Set(preservedRelations.flatMap(relation =>
+      [relation.sourceAssetId, relation.targetAssetId].filter(id => isCameraNode(interfaceContext.nodeById.get(id)))))
+    rawCandidates = rawCandidates.filter(candidate =>
+      [candidate.sourceAssetId, candidate.targetAssetId, candidate.targetPathAssetId]
+        .filter(Boolean).some(id => !protectedIds.has(id))
+      && !(protectedIds.has(candidate.sourcePathAssetId) && reservedEndpoints.has(candidate.sourceEndpointId))
+      && !occupiedCameras.has(candidate.targetAssetId)
+      && !occupiedCameras.has(candidate.sourceAssetId))
+  }
+  const inferencePaths = baseline ? paths.filter(path => !protectedIds.has(path.id)) : paths
   const terminationEndpointIds = new Set(rawCandidates
     .filter(({ candidateType, targetInterfaceId, targetInterface }) => (
       candidateType === 'cable_termination'
         && Boolean(targetInterfaceId ?? targetInterface?.interfaceId)
     ))
     .map(({ sourceEndpointId }) => sourceEndpointId))
-  paths.flatMap(lineEndpoints).filter(({ id }) => !terminationEndpointIds.has(id))
+  inferencePaths.flatMap(lineEndpoints).filter(({ id }) => !terminationEndpointIds.has(id))
     .forEach((endpoint) => {
       pushCandidate(rawCandidates, unresolvedTerminationCandidate(endpoint), candidateBudget, 'unresolved_termination')
     })
@@ -213,7 +257,7 @@ export function generateRelationArtifacts(topologyInputBundle, {
   })
   applyTopologyPolicyConstraints(
     candidates,
-    paths,
+    inferencePaths,
     interfaceContext,
     settings,
     eligibilityIssues,
@@ -234,6 +278,20 @@ export function generateRelationArtifacts(topologyInputBundle, {
     previousExpectations: previousMountingExpectations,
     generatedAt,
   })
+  if (baseline) {
+    for (const key of ['relations', 'candidates', 'options', 'overrides', 'expectations', 'reviewItems']) {
+      const assetId = item => item.sourceAssetId ?? item.assetId
+      mounting[key] = [
+        ...(baseline.mounting?.[key] ?? []),
+        ...(mounting[key] ?? []).filter(item => !protectedIds.has(assetId(item))),
+      ]
+    }
+    mounting.summary = { ...mounting.summary, relationCount: mounting.relations.length,
+      automaticRelationCount: mounting.relations.filter(item => item.provenance === 'spatial_inference').length,
+      manualRelationCount: mounting.relations.filter(item => item.provenance === 'manual_admin').length,
+      candidateCount: mounting.candidates.length, optionCount: mounting.options.length,
+      ambiguousAssetCount: new Set(mounting.candidates.map(item => item.assetId)).size }
+  }
   const resolvedCandidates = demoteConflictingCameraCandidates(candidates, nodes, {
     mountingRelations: mounting.relations,
   })
@@ -247,7 +305,23 @@ export function generateRelationArtifacts(topologyInputBundle, {
     generatedAt,
     interfaceContext,
   })
+  const addedRelations = baseline ? confirmedRelations.slice() : []
+  if (baseline) {
+    confirmedRelations.push(...structuredClone(preservedRelations))
+    candidates.push(...structuredClone(baseline.candidates ?? []))
+  }
   refreshInterfaceOccupancy(interfaceRegistry, confirmedRelations)
+  if (baseline) {
+    const usedByAdditions = new Map()
+    addedRelations.filter(relation => relation.relationKind === 'path_termination' && relation.targetInterfaceId)
+      .forEach(relation => usedByAdditions.set(relation.targetInterfaceId,
+        (usedByAdditions.get(relation.targetInterfaceId) ?? 0) + 1))
+    interfaceRegistry.interfaces = interfaceRegistry.interfaces.map(item => {
+      const original = preservedInterfaces.get(item.interfaceId)
+      return original ? { ...structuredClone(original),
+        occupancy: Math.max(Number(original.occupancy ?? 0) + (usedByAdditions.get(item.interfaceId) ?? 0), item.occupancy) } : item
+    })
+  }
   const graph = buildConfirmedGraph({
     bundle,
     nodes,
@@ -1769,7 +1843,7 @@ function generateCableTerminationCandidates(
         settings.searchRadiusMeters,
       ).forEach((node) => {
         const distanceMeters = geographicDistanceMeters(endpoint.coordinate, node.coordinate)
-        if (distanceMeters > settings.searchRadiusMeters) return
+        if (distanceMeters > settings.searchRadiusMeters || !sameFacilityScope(path, node)) return
         if (isPoleNode(node) && interfaceContext.topologyPolicy.allowCableToPole !== true) {
           recordForbiddenTargetDiagnostic(interfaceContext, {
             path,
@@ -1857,6 +1931,7 @@ function generateInlineCableTerminationCandidates(
       .filter((path) => !path.duplicateOfGeometryId)
       .forEach((path) => {
         const nearest = nearestPointOnLine(node.coordinate, path)
+        if (!sameFacilityScope(path, node)) return
         if (nearest.distanceMeters > settings.inlineSearchRadiusMeters) return
         if (nearest.measureMeters <= settings.minimumInlineEndpointDistanceMeters
           || path.totalLengthMeters - nearest.measureMeters
@@ -2540,6 +2615,7 @@ function generateEndpointEndpointCandidates(spatialIndexes, settings, candidateB
       seenPairs.add(pairKey)
       if (left.path.id === right.path.id
         || left.path.siteId !== right.path.siteId
+        || !sameFacilityScope(left.path, right.path)
         || left.path.networkFamily !== right.path.networkFamily) return
       const distanceMeters = geographicDistanceMeters(left.coordinate, right.coordinate)
       if (distanceMeters > settings.searchRadiusMeters) return
@@ -3838,6 +3914,23 @@ function scoreAndProposeCandidates(
       }
       return
     }
+    // Rank target assets by physical endpoint evidence before using labels.
+    // Multiple provenance records for the same target are not ambiguity.
+    const physicalTargets = new Map()
+    group.filter(candidate => candidate.candidateType === 'cable_termination')
+      .forEach(candidate => {
+        const previous = physicalTargets.get(candidate.targetAssetId)
+        if (!previous || candidate.distanceMeters < previous.distanceMeters) {
+          physicalTargets.set(candidate.targetAssetId, candidate)
+        }
+      })
+    const physical = [...physicalTargets.values()].sort((a, b) => a.distanceMeters - b.distanceMeters)
+    if (physical.length > 1 && physical[0].distanceMeters + Math.max(0.5, physical[0].distanceMeters * 0.5)
+      < physical[1].distanceMeters && physical[0].score >= settings.acceptanceThreshold) {
+      group.forEach(candidate => { candidate.proposalStatus = 'not_selected' })
+      physical[0].proposalStatus = 'recommended'
+      return
+    }
     const lineLabelCandidates = group.filter(isLineLabelCandidate)
     const lineLabelCandidate = lineLabelCandidates.length === 1
       ? lineLabelCandidates[0]
@@ -3962,7 +4055,8 @@ function applyCapacityConstraints(
   previousRelations = [],
 ) {
   const interfaceById = interfaceContext.interfaceById
-  const occupied = new Map([...interfaceById.keys()].map((interfaceId) => [interfaceId, 0]))
+  const occupied = new Map([...interfaceById].map(([interfaceId, item]) => [interfaceId,
+    interfaceContext.bundle?.additionsOnly ? Number(item.occupancy ?? 0) : 0]))
   const currentCandidateIds = new Set(candidates.map(({ candidateId }) => candidateId))
   const previousOccupancy = new Map()
   asArray(previousRelations)
@@ -5764,7 +5858,7 @@ class MeterGridIndex {
 }
 
 function compatiblePathNode(path, node) {
-  if (path.siteId !== node.siteId) {
+  if (path.siteId !== node.siteId || !sameFacilityScope(path, node)) {
     return { compatible: false, score: 0, ruleId: 'hard-gate.site' }
   }
   if (isPoleNode(node)) {
@@ -6126,6 +6220,7 @@ function normalizeTopologyPolicy(value = {}) {
 
 function compatibleInterfacesForPath(path, node, interfaceContext, endpointRole = null) {
   if (path.siteId !== node.siteId
+    || !sameFacilityScope(path, node)
     || (isPoleNode(node) && interfaceContext.topologyPolicy.allowCableToPole !== true)) return []
   const interfaces = interfaceContext.interfacesByAssetId.get(node.id) ?? []
   return interfaces.flatMap((item) => {

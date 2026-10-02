@@ -93,7 +93,7 @@ test('import form renders required workflow fields without automatic upload', ()
     },
     values: {
       branchId: 'semarang',
-      importMode: 'replace_active',
+      importMode: 'stage_only',
       versionName: 'Import Juli 2026',
       versionNote: '',
       officialSourceConfirmed: false,
@@ -105,9 +105,10 @@ test('import form renders required workflow fields without automatic upload', ()
   assert.match(html, /Kantor cabang/)
   assert.match(html, /Dataset tujuan/)
   assert.match(html, /Setelah import/)
-  assert.match(html, /Timpa data aktif dan langsung gunakan/)
+  assert.doesNotMatch(html, /Timpa data aktif dan langsung gunakan/)
   assert.match(html, /Jangan timpa/)
-  assert.match(html, /diagram topologi baru langsung ditampilkan/)
+  assert.match(html, /aset dan jalur baru saja/)
+  assert.match(html, /relasi, dan tiang yang sudah dikoreksi tetap dipertahankan/)
   assert.match(html, /Identitas versi/)
   assert.match(html, /Catatan versi/)
   assert.match(html, /berasal dari sumber resmi/)

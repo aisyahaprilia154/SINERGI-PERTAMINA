@@ -15,8 +15,7 @@ export function withTopologyGraphRevision(graph = {}) {
 }
 
 export function createTopologyGraphRevision(graph = {}) {
-  const content = structuredClone(graph)
-  delete content.graphRevision
+  const { graphRevision, ...content } = graph
   const digest = createHash('sha256')
     .update(stableStringify({
       revisionVersion: TOPOLOGY_GRAPH_REVISION_VERSION,

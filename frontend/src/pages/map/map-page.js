@@ -11,6 +11,7 @@ import {
   loadDatasetProjection,
   revokeTopologyRelation,
   saveTopologyDiagram,
+  saveActiveAssetIcon,
   setMountingRelation,
 } from '../../services/active-dataset-service.js'
 import {
@@ -42,6 +43,9 @@ import { searchMatchScore } from '../../domain/search-normalization.js'
 import { branchNameForFacility } from '../../domain/facility-branch.js'
 import { formatAssetTypeLabel } from '../../domain/asset-type-label.js'
 import { createSourceIconLoader } from '../../domain/source-icon-loader.js'
+import { assetIconUrl } from '../../domain/asset-icon.js'
+import { bindAssetIconControl } from './asset-icon-editor.js'
+import { preloadBasemapResources } from './basemap-preload.js'
 import { bindThemeToggle } from '../../theme.js'
 import { getSessionUser, logout } from '../../services/account-session.js'
 
@@ -49,6 +53,8 @@ export async function renderMapPage(container) {
   document.title = 'Peta Jaringan — SINERGI'
   document.body.className = 'map-body'
   const mapSurfacePromise = import('./maplibre-map.js')
+  void preloadBasemapResources(String(import.meta.env.VITE_SINERGI_VECTOR_TILES_URL ?? '').trim()
+    || '/api/basemap/openfreemap/planet')
 
   const requestedContext = readRequestedDatasetContext()
   renderDatasetState(container, {
@@ -208,6 +214,8 @@ export async function renderMapPage(container) {
     topologyGraph,
   })
   const assetDetailCache = new Map()
+  const assetIconEdits = new Map()
+  let cleanupAssetIconControl = null
   const pendingAssetDetails = new Map()
   let assetPrefetchTimer = null
   let assetDetailRequest = 0
@@ -473,6 +481,7 @@ export async function renderMapPage(container) {
       mobileAssetDetailExpanded = false
       state.relationStatus = 'idle'
       state.relationError = null
+      state.iconFeedback = null
     }
     selection.selectAsset(assetId)
     state.assetDetailStatus = assetDetailCache.has(assetId) ? 'ready' : 'loading'
@@ -527,6 +536,8 @@ export async function renderMapPage(container) {
   }
 
   function renderDrawer() {
+    cleanupAssetIconControl?.()
+    cleanupAssetIconControl = null
     const mapAsset = assetById[selection.selectedAssetId]
     if (!mapAsset) {
       drawer.classList.remove('open')
@@ -616,7 +627,7 @@ export async function renderMapPage(container) {
     const iconPreload = sourceIconLoader.preload([
       asset, mountedOnAsset, ...mountedAssets,
       ...connectedAssets.map(({ asset: connected }) => connected),
-    ].filter(Boolean).map(({ sourceIconUrl }) => sourceIconUrl))
+    ].filter(Boolean).map(assetIconUrl))
     if (iconPreload) void iconPreload.then(() => {
       if (selection.selectedAssetId === assetId && !state.relationEditorOpen
         && !state.showMountingCandidates) renderDrawer()
@@ -657,6 +668,8 @@ export async function renderMapPage(container) {
       relationStatus: state.relationStatus,
       relationError: state.relationError,
       sourceIconDataByUrl: sourceIconLoader.dataByUrl,
+      iconControlsAvailable: Boolean(activeContext.datasetVersionId),
+      iconFeedback: state.iconFeedback,
     })
     drawer.classList.add('open')
     drawer.setAttribute('aria-hidden', 'false')
@@ -665,6 +678,10 @@ export async function renderMapPage(container) {
     invalidateMapAfterPanelChange(drawer)
 
     drawer.querySelector('.close-drawer')?.addEventListener('click', closeAssetDrawer)
+    cleanupAssetIconControl = bindAssetIconControl(drawer, {
+      asset, sourceIconDataByUrl: sourceIconLoader.dataByUrl,
+      onSave: dataUrl => updateAssetIcon(assetId, dataUrl),
+    })
     bindDrawerMobileControls()
     drawer.querySelector('.retry-asset-detail')?.addEventListener('click', () => {
       loadAssetDetail(selection.selectedAssetId, { force: true })
@@ -756,6 +773,31 @@ export async function renderMapPage(container) {
         void updateMountingAssignment(asset.id, button.dataset.mountingPole)
       })
     })
+  }
+
+  async function updateAssetIcon(assetId, dataUrl) {
+    const result = await saveActiveAssetIcon({
+      datasetId: activeContext.datasetId, branchId: activeContext.branchId,
+      datasetVersionId: activeContext.datasetVersionId, assetId,
+      expectedRecordRevision: mapData.recordRevision ?? 0, dataUrl,
+    })
+    mapData.recordRevision = result.recordRevision
+    const icon = { customIconUrl: result.customIconUrl, iconReset: result.iconReset }
+    assetIconEdits.set(assetId, icon)
+    // Every projection shares this icon, including an already-open diagram.
+    for (const collection of [assets, allAssets, allDiagramAssets, mapData.assets, mapData.diagramAssets]) {
+      collection?.forEach(item => { if (item.id === assetId) Object.assign(item, icon) })
+    }
+    for (const cached of assetDetailCache.values()) {
+      if (cached.id === assetId) Object.assign(cached, icon)
+    }
+    const url = assetIconUrl(assetById[assetId])
+    if (url) await sourceIconLoader.load(url)
+    canvasApi.refreshAssetIcons()
+    if (selection.selectedAssetId === assetId) {
+      state.iconFeedback = { message: dataUrl ? 'Ikon diperbarui.' : 'Ikon bawaan digunakan.' }
+      renderDrawer()
+    }
   }
 
   async function updateMountingAssignment(assetId, poleAssetId) {
@@ -1064,6 +1106,8 @@ export async function renderMapPage(container) {
       branchId: activeContext.branchId,
       assetId,
     }).then((detailPayload) => {
+      const iconEdit = assetIconEdits.get(assetId)
+      if (iconEdit && detailPayload.asset) Object.assign(detailPayload.asset, iconEdit)
       if (detailPayload.activePointer?.revision !== activeContext.activePointerRevision) {
         throw new Error(
           'Dataset aktif berubah saat detail dimuat. Muat ulang peta untuk menggunakan versi terbaru.',

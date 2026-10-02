@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { AppError } from '../errors.js'
+import { assertAdditionsBaseline } from '../import/additions-only-import.js'
+import { ACTIVE_READ_RECORD_VERSION, projectActiveReadRecord } from './active-read-record.js'
 
 const PROJECTION_DELETE_ORDER = [
   'graph_edges',
@@ -18,6 +20,27 @@ const DATASET_VERSION_SELECT = `
   SELECT payload
   FROM dataset_versions
   WHERE id = $1
+`
+
+// Operational reads retain source metadata and topology evidence for detail,
+// search and export. Parser snapshots, shadow runs and identity audit registries
+// belong to import/review reads and must not be decoded on a cold map request.
+const ACTIVE_READ_SELECT = `
+  SELECT v.xmin::text AS storage_revision, jsonb_object_agg(k, CASE
+    WHEN k = 'canonicalParser' THEN jsonb_build_object('sourceSelection', val->'sourceSelection')
+    WHEN k = 'assetIdentityMap' THEN val - 'identityRegistry'
+    WHEN k = 'topologyCandidates' AND jsonb_typeof(val) = 'array' THEN (
+      SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'sourceAssetId', item->'sourceAssetId', 'sourceNodeId', item->'sourceNodeId',
+        'sourceFeatureId', item->'sourceFeatureId', 'targetAssetId', item->'targetAssetId',
+        'targetNodeId', item->'targetNodeId', 'targetSourceFeatureId', item->'targetSourceFeatureId',
+        'status', item->'status'
+      )), '[]'::jsonb) FROM jsonb_array_elements(val) item
+    )
+    ELSE val END) AS payload
+  FROM dataset_versions v CROSS JOIN LATERAL jsonb_each(v.payload) e(k, val)
+  WHERE v.id = $1 AND k NOT IN ('topologyShadowArtifacts', 'identityRegistry', 'assetIdentityRegistry')
+  GROUP BY v.xmin
 `
 
 async function replaceTopologyInterfaceProjection(client, record) {
@@ -100,6 +123,7 @@ export class PostgresDatasetVersionRepository {
   constructor(pool, {
     activationHooks = {},
     clock = () => new Date(),
+    mapProjection = null,
   } = {}) {
     if (typeof pool?.query !== 'function' || typeof pool?.connect !== 'function') {
       throw new TypeError('PostgreSQL pool harus menyediakan query() dan connect().')
@@ -107,6 +131,7 @@ export class PostgresDatasetVersionRepository {
     this.pool = pool
     this.activationHooks = activationHooks
     this.clock = clock
+    this.mapProjection = mapProjection
   }
 
   /**
@@ -143,7 +168,8 @@ export class PostgresDatasetVersionRepository {
     const normalized = assertRecord(record)
     return this.#withTransaction(async (client) => {
       try {
-        await insertDatasetVersion(client, normalized, this.clock)
+        const readModel = await insertDatasetVersion(client, normalized, this.clock)
+        await this.#storeMapRead(client, readModel)
         await replaceProjections(client, normalized)
       } catch (error) {
         throw mapDatabaseError(error)
@@ -217,6 +243,7 @@ export class PostgresDatasetVersionRepository {
   async resolveActiveVersion({
     datasetId,
     branchId,
+    projection = 'full',
   } = {}) {
     assertDatasetContext(datasetId)
     const pointerResult = await this.pool.query(
@@ -234,7 +261,9 @@ export class PostgresDatasetVersionRepository {
     }
     const pointerRow = pointerResult.rows?.[0]
     if (pointerRow) {
-      const record = await this.get(pointerRow.dataset_version_id)
+      const record = await this.#getWithExecutor(this.pool, pointerRow.dataset_version_id, {
+        projection,
+      })
       const pointer = pointerFromRow(pointerRow)
       assertPointerIntegrity(pointer, record, { datasetId, branchId })
       return { pointer, record }
@@ -366,6 +395,7 @@ export class PostgresDatasetVersionRepository {
           : activeRecords[0] ?? null
         if (pointerRow && !previous) throw activeVersionIntegrityError()
         const previousVersionId = previous?.datasetVersion.id ?? null
+        assertAdditionsBaseline(lockedTarget, previous)
         activationContext.previousVersionId = previousVersionId
         const currentPointerRevision = pointerRow?.revision
           ?? (previous ? 'legacy' : null)
@@ -406,7 +436,8 @@ export class PostgresDatasetVersionRepository {
             activePointerRevision: null,
           })
           archived.recordRevision = normalizeRecordRevision(record.recordRevision) + 1
-          await updateDatasetVersion(client, archived, this.clock)
+          const archivedRead = await updateDatasetVersion(client, archived, this.clock)
+          await this.#storeMapRead(client, archivedRead)
           await setGraphRevisionStatus(client, archived, 'superseded')
           archivedRecords.push(archived)
         }
@@ -420,7 +451,8 @@ export class PostgresDatasetVersionRepository {
           archiveReason: null,
         })
         activated.recordRevision = normalizeRecordRevision(lockedTarget.recordRevision) + 1
-        await updateDatasetVersion(client, activated, this.clock)
+        const activatedRead = await updateDatasetVersion(client, activated, this.clock)
+        await this.#storeMapRead(client, activatedRead)
         await setGraphRevisionStatus(client, activated, 'active')
         await this.activationHooks.beforePointerCommit?.({
           datasetId,
@@ -479,13 +511,49 @@ export class PostgresDatasetVersionRepository {
     }
   }
 
-  async #getWithExecutor(executor, id, { forUpdate = false } = {}) {
+  async #getWithExecutor(executor, id, { forUpdate = false, projection = 'full' } = {}) {
     assertSafeId(id)
+    if (!forUpdate && projection === 'map-read' && this.mapProjection) {
+      const stored = await executor.query(
+        `SELECT v.xmin::text AS storage_revision, r.payload
+         FROM dataset_versions v LEFT JOIN dataset_version_active_reads r
+           ON v.id = r.dataset_version_id AND r.read_view = 'map-read'
+           AND r.storage_revision = v.xmin::text AND r.projection_version = $2
+         WHERE v.id = $1`,
+        [id, this.mapProjection.version],
+      )
+      if (!stored.rows?.length) throw datasetVersionNotFound()
+      let model = stored.rows[0].payload
+      if (!model) {
+        const operational = await this.#getWithExecutor(executor, id, { projection: 'active-read' })
+        model = await this.#storeMapRead(executor, operational, stored.rows[0].storage_revision)
+      }
+      return model
+    }
+    if (projection === 'map-read') projection = 'active-read'
+    if (!forUpdate && projection === 'active-read') {
+      const stored = await executor.query(
+        `SELECT r.payload FROM dataset_version_active_reads r
+         JOIN dataset_versions v ON v.id = r.dataset_version_id
+         WHERE v.id = $1 AND r.storage_revision = v.xmin::text
+           AND r.projection_version = $2 AND r.read_view = 'active-read'`,
+        [id, ACTIVE_READ_RECORD_VERSION],
+      )
+      if (stored.rows?.[0]?.payload) return payloadFromRow(stored.rows[0])
+      const result = await executor.query(ACTIVE_READ_SELECT, [id])
+      if (!result.rows?.[0]?.payload) throw datasetVersionNotFound()
+      const { payload, storage_revision: revision } = result.rows[0]
+      // A concurrent publication/edit must never label an old projection with
+      // the new row revision. Only retain the exact source snapshot just read.
+      const prepared = projectActiveReadRecord(payload)
+      await storeActiveReadRecord(executor, prepared, { revision, projected: true })
+      return prepared
+    }
     const query = forUpdate
       ? `${DATASET_VERSION_SELECT.trim()} FOR UPDATE`
       : DATASET_VERSION_SELECT
     const result = await executor.query(query, [id])
-    if (!result.rows?.length) throw datasetVersionNotFound()
+    if (!result.rows?.length || result.rows[0].payload == null) throw datasetVersionNotFound()
     return payloadFromRow(result.rows[0])
   }
 
@@ -512,16 +580,28 @@ export class PostgresDatasetVersionRepository {
       throw staleRecordRevision(id, expectedRevision, currentRevision)
     }
     const next = typeof updater === 'function'
-      ? await updater(updateDraft(current, projectionMode))
+      ? await updater(projectionMode === 'asset-icons' ? { ...current } : updateDraft(current, projectionMode))
       : { ...current, ...updater }
     const normalized = assertRecord({
       ...next,
       recordRevision: currentRevision + 1,
-    }, id, { clone: projectionMode !== 'topology-review' })
+    }, id, { clone: !['topology-review', 'asset-icons'].includes(projectionMode) })
     try {
-      await updateDatasetVersion(executor, normalized, this.clock, {
+      if (projectionMode === 'asset-icons') {
+        // Presentation-only edits leave all source and topology projections intact.
+        await executor.query(
+          'UPDATE dataset_versions SET payload = payload || $2::jsonb, updated_at = $3 WHERE id = $1',
+          [id, JSON.stringify({ recordRevision: normalized.recordRevision,
+            assetIconOverrides: normalized.assetIconOverrides }), this.clock().toISOString()],
+        )
+        const readModel = await storeActiveReadRecord(executor, normalized)
+        await this.#storeMapRead(executor, readModel)
+        return normalized
+      }
+      const readModel = await updateDatasetVersion(executor, normalized, this.clock, {
         topologyReview: projectionMode === 'topology-review',
       })
+      await this.#storeMapRead(executor, readModel)
       if (projectionMode === 'topology-review') {
         await replaceTopologyReviewProjections(executor, current, normalized)
       } else {
@@ -553,6 +633,17 @@ export class PostgresDatasetVersionRepository {
       client.release?.()
     }
   }
+
+  async #storeMapRead(executor, record, revision = null) {
+    if (!this.mapProjection) return null
+    const operational = record.activeTopologyProjection ? record : projectActiveReadRecord(record)
+    const map = await this.mapProjection.project(operational)
+    const model = { datasetVersion: record.datasetVersion, activeMapDataset: map }
+    await storeActiveReadRecord(executor, model, {
+      revision, projected: true, view: 'map-read', version: this.mapProjection.version,
+    })
+    return model
+  }
 }
 
 async function insertDatasetVersion(client, record, clock) {
@@ -568,6 +659,7 @@ async function insertDatasetVersion(client, record, clock) {
      )`,
     datasetVersionValues(record, clock),
   )
+  return storeActiveReadRecord(client, record)
 }
 
 async function updateDatasetVersion(client, record, clock, { topologyReview = false } = {}) {
@@ -595,6 +687,25 @@ async function updateDatasetVersion(client, record, clock, { topologyReview = fa
      WHERE id = $1`,
     datasetVersionValues(record, clock, payload),
   )
+  return storeActiveReadRecord(client, record)
+}
+
+async function storeActiveReadRecord(executor, record, {
+  revision = null, projected = false, view = 'active-read', version = ACTIVE_READ_RECORD_VERSION,
+} = {}) {
+  const model = projected ? record : projectActiveReadRecord(record)
+  await executor.query(
+    `INSERT INTO dataset_version_active_reads (dataset_version_id, storage_revision, projection_version, payload, read_view)
+     SELECT id, xmin::text, $2, $3::jsonb, $5 FROM dataset_versions
+     WHERE id = $1 AND ($4::text IS NULL OR xmin::text = $4)
+     ON CONFLICT (dataset_version_id, read_view) DO UPDATE SET
+       storage_revision = EXCLUDED.storage_revision,
+       projection_version = EXCLUDED.projection_version,
+       payload = EXCLUDED.payload`,
+    [record.datasetVersion.id, version,
+      JSON.stringify(model), revision, view],
+  )
+  return model
 }
 
 async function findTopologyMutationReceiptWithExecutor(executor, key) {

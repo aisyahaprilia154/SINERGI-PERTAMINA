@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import http from 'node:http'
-import { mkdtemp, rm, writeFile, rename } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, rename, readdir } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
@@ -60,6 +60,31 @@ test('failed reads are retryable and cache memory is bounded', async () => {
   await send(request, response, options)
   await send(request, response, options)
   assert.equal(loads, 2)
+})
+
+test('durable representations survive restart and reject changed revisions or damaged files', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'sinergi-read-view-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const request = { headers: {} }
+  let output
+  const response = { writeHead() {}, end(body) { output = JSON.parse(body) } }
+  let loads = 0
+  const options = { key: 'branch-map', revision: '1', load: () => ({ revision: '1', loads: ++loads }) }
+  await createRevisionResponseCache({ directory })(request, response, options)
+  await createRevisionResponseCache({ directory })(request, response, options)
+  assert.equal(loads, 1)
+  assert.equal(output.revision, '1')
+  await createRevisionResponseCache({ directory })(request, response, {
+    ...options, revision: '2', load: () => ({ revision: '2', loads: ++loads }),
+  })
+  assert.equal(loads, 2)
+  assert.equal(output.revision, '2')
+  const [filename] = await readdir(directory)
+  await writeFile(path.join(directory, filename), 'damaged')
+  await createRevisionResponseCache({ directory })(request, response, options)
+  assert.equal(loads, 3)
+  await createRevisionResponseCache({ directory })(request, response, { ...options, key: 'other-branch' })
+  assert.equal(loads, 4)
 })
 
 test('JSON view revisions change on writes, external replacements, and activation', async t => {

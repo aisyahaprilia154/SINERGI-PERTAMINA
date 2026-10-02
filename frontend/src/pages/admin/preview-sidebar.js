@@ -11,6 +11,7 @@ const CHANGE_LABELS = {
 export function renderPreviewSidebar({ model, state }) {
   const { payload } = model
   const summary = payload.comparison?.summary ?? payload.datasetVersion.summary ?? {}
+  const additions = payload.importAdditions
   const problematicAssets = model.candidate.assets
     .filter(({ issues }) => issues.length)
     .sort((left, right) => left.assetId.localeCompare(right.assetId, 'id'))
@@ -41,6 +42,13 @@ export function renderPreviewSidebar({ model, state }) {
             ${summaryMetric('check_circle', 'Tidak berubah', summary.unchangedAssets ?? 0, 'unchanged')}
             ${summaryMetric('remove_circle', 'Tidak tersedia', summary.removedAssets ?? 0, 'removed')}
           </dl>
+          ${additions ? `<p>Hanya tambahan: ${escapeHtml(additions.addedAssets)} aset baru;
+            ${escapeHtml(additions.preservedAssets)} aset terkoreksi dipertahankan.</p>
+            <dl class="preview-mini-summary">
+              ${summaryMetric('report', 'Konflik identitas', additions.identityConflicts?.length ?? 0, 'updated')}
+              ${summaryMetric('link_off', 'Endpoint belum jelas', additions.unresolvedRelations ?? 0, 'updated')}
+              ${summaryMetric('help', 'Kandidat tiang', additions.ambiguousMounting ?? 0, 'updated')}
+            </dl>` : ''}
           <div class="preview-validation-counts">
             <span><i class="material-symbols-outlined" aria-hidden="true">error</i>${issueCounts.error ?? 0} error</span>
             <span><i class="material-symbols-outlined" aria-hidden="true">warning</i>${issueCounts.warning ?? 0} warning</span>

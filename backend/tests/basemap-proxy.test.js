@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { mkdtemp, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import http from 'node:http'
 import { createApp } from '../src/app.js'
+import { createOpenFreeMapProxy } from '../src/http/openfreemap-proxy.js'
 
 test('OpenFreeMap proxy rewrites TileJSON and serves tiles and fonts from same origin', {
   timeout: 30_000,
@@ -50,7 +55,7 @@ test('OpenFreeMap proxy rewrites TileJSON and serves tiles and fonts from same o
   assert.equal(metadataResponse.headers.get('content-type'), 'application/json; charset=utf-8')
   const metadata = await metadataResponse.json()
   assert.deepEqual(metadata.tiles, [
-    '/api/basemap/openfreemap/tiles/{z}/{x}/{y}.pbf',
+    '/api/basemap/openfreemap/tiles/20260621_080001_pt/{z}/{x}/{y}.pbf',
   ])
 
   const tileResponse = await fetch(
@@ -75,6 +80,79 @@ test('OpenFreeMap proxy rewrites TileJSON and serves tiles and fonts from same o
     1,
     'TileJSON metadata should be cached for subsequent tile requests',
   )
+})
+
+test('tile requests share one download, use gzip/ETag, and survive backend restart without upstream access', async t => {
+  const root=await mkdtemp(path.join(os.tmpdir(),'sinergi-basemap-'))
+  t.after(()=>rm(root,{recursive:true,force:true}))
+  const payload=Buffer.from('vector tile geometry '.repeat(5000))
+  let downloads=0
+  const options={config:{dataRoot:root},auditLog:{record:async()=>{}},basemapFetch:async url=>{
+    assert.equal(url,'https://tiles.openfreemap.org/planet/snapshot_1/14/13217/8511.pbf')
+    downloads++
+    return new Response(payload)
+  }}
+  const open=async options=>{
+    const app=createApp(options)
+    await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve))
+    t.after(async()=>{app.closeAllConnections();await new Promise(resolve=>app.close(resolve))})
+    return {app,url:`http://127.0.0.1:${app.address().port}/api/basemap/openfreemap/tiles/snapshot_1/14/13217/8511.pbf`}
+  }
+  const first=await open(options)
+  const responses=await Promise.all(Array.from({length:8},()=>fetch(first.url)))
+  for(const response of responses){
+    assert.equal(response.status,200)
+    assert.equal(response.headers.get('content-encoding'),'gzip')
+    assert.ok(Number(response.headers.get('content-length')) < payload.length/10)
+    assert.equal(response.headers.get('vary'),'Accept-Encoding')
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()),payload)
+  }
+  assert.equal(downloads,1)
+  const etag=responses[0].headers.get('etag')
+  const unchanged=await fetch(first.url,{headers:{'if-none-match':etag}})
+  assert.equal(unchanged.status,304)
+  assert.equal((await unchanged.arrayBuffer()).byteLength,0)
+  const identity=await fetch(first.url,{headers:{'accept-encoding':'gzip;q=0'}})
+  assert.equal(identity.headers.get('content-encoding'),null)
+  assert.equal(Number(identity.headers.get('content-length')),payload.length)
+  assert.deepEqual(Buffer.from(await identity.arrayBuffer()),payload)
+  first.app.closeAllConnections()
+  await new Promise(resolve=>first.app.close(resolve))
+  const second=await open({...options,basemapFetch:async()=>{throw new Error('upstream should not be needed')}})
+  const restored=await fetch(second.url)
+  assert.equal(restored.status,200)
+  assert.deepEqual(Buffer.from(await restored.arrayBuffer()),payload)
+  assert.equal(restored.headers.get('etag'),etag)
+})
+
+test('metadata rollover changes the local tile URL while old snapshot requests remain consistent', async t=>{
+  let timestamp=0,revision=1,metadataDownloads=0
+  const proxy=createOpenFreeMapProxy({now:()=>timestamp,fetchImpl:async url=>{
+    if(url==='https://tiles.openfreemap.org/planet'){
+      metadataDownloads++
+      return new Response(JSON.stringify({tiles:[`https://tiles.openfreemap.org/planet/snapshot_${revision}/{z}/{x}/{y}.pbf`]}))
+    }
+    return new Response(Buffer.from(url))
+  }})
+  const app=http.createServer((request,response)=>{
+    proxy.handle(new URL(request.url,'http://localhost').pathname,response,request)
+      .catch(()=>{response.writeHead(502);response.end()})
+  })
+  await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve))
+  t.after(async()=>{app.closeAllConnections();await new Promise(resolve=>app.close(resolve))})
+  const origin=`http://127.0.0.1:${app.address().port}`
+  const first=await Promise.all(Array.from({length:4},async()=> (await fetch(origin+'/api/basemap/openfreemap/planet')).json()))
+  assert.equal(metadataDownloads,1)
+  const old=first[0].tiles[0].replace('{z}','1').replace('{x}','0').replace('{y}','0')
+  revision=2;timestamp=6*60*60*1000+1
+  const current=await (await fetch(origin+'/api/basemap/openfreemap/planet')).json()
+  assert.notEqual(current.tiles[0],first[0].tiles[0])
+  const tile=await fetch(origin+old)
+  assert.match(await tile.text(),/snapshot_1/)
+  assert.match(tile.headers.get('cache-control'),/immutable/)
+  const legacy=await fetch(origin+'/api/basemap/openfreemap/tiles/1/0/0.pbf')
+  assert.match(await legacy.text(),/snapshot_2/)
+  assert.equal(legacy.headers.get('cache-control'),'public, max-age=300')
 })
 
 test('OpenFreeMap proxy rejects invalid tile coordinates without contacting upstream', {

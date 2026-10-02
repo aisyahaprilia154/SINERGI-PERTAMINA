@@ -2,7 +2,7 @@
   "fixtureVersion": "topology-baseline-fixture/1.0.0",
   "datasetVersionId": "dv-baseline-fixture",
   "siteId": "site-baseline",
-  "topologyRuleSetVersion": "semantic-relation-engine/3.0.0",
+  "topologyRuleSetVersion": "semantic-relation-engine/3.1.0",
   "semanticRuleSetVersion": "semantic-classifier/1.0.0",
   "summary": {
     "candidateCount": 2,

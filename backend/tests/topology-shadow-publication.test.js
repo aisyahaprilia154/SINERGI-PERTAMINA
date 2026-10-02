@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   applyArtifacts,
   TopologyService,
+  createFullTopologyRegenerationJobHandler,
 } from '../src/topology/topology-service.js'
 import { generateRelationArtifacts } from '../src/topology/semantic-relation-engine.js'
 import { createBaselineTopologyBundle } from './fixtures/topology-baseline-fixture.js'
@@ -114,4 +115,18 @@ test('manual shadow publication rejects a stale active graph revision', async ()
     service.publishGenerationRun(bundle.datasetVersion.id, run.runId, 'admin'),
     (error) => error.code === 'topology_graph_stale_revision',
   )
+})
+
+test('queued automatic jobs cannot regenerate a corrected active dataset or upgrade a historical rule set', async () => {
+  for (const [status, reason] of [['active', 'Import selesai; shadow topology dibuat otomatis.'],
+    ['valid', 'Topology rules berubah ke semantic-relation-engine/3.1.0.']]) {
+    const record = recordFor(createBaselineTopologyBundle())
+    record.datasetVersion.status = status
+    const repository = new MemoryRepository(record), auditLog = new MemoryAuditLog()
+    const before = await repository.get()
+    const handler = createFullTopologyRegenerationJobHandler(new TopologyService({ repository, auditLog }))
+    await handler({ actorId: 'admin', reason }, { job: { datasetVersionId: record.datasetVersion.id } })
+    assert.deepEqual(await repository.get(), before)
+    assert.equal(auditLog.entries.length, 0)
+  }
 })

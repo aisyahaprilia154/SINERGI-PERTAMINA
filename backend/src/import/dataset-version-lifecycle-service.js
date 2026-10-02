@@ -8,6 +8,8 @@ import {
   hasPendingCategoryReview,
 } from '../domain/dynamic-asset-category.js'
 import { AppError } from '../errors.js'
+import { decodeAssetIcon, projectAssetIcon, assetIconRevision } from '../domain/asset-icon.js'
+import { assertAdditionsBaseline } from './additions-only-import.js'
 import {
   AUTOMATIC_IDENTITY_ACTOR,
   buildCanonicalAssetIdentityMap,
@@ -40,8 +42,8 @@ import {
   normalizeMountingOptions,
   normalizeMountingRelations,
 } from '../topology/mounting-relations.js'
+import { ACTIVE_TOPOLOGY_PROJECTION_VERSION, normalizeTopologyGraph } from '../domain/active-topology-projection.js'
 import { filterConflictingCameraEdges } from '../topology/device-edge-policy.js'
-import { withTopologyGraphRevision } from '../topology/topology-graph-revision.js'
 import {
   buildActiveAssetCatalog,
   buildActiveCapabilities,
@@ -110,6 +112,7 @@ export class DatasetVersionLifecycleService {
       sourceSelection: candidate.sourceSelection ?? null,
       comparison,
       comparisonSummary: comparison.summary,
+      importAdditions: candidate.importAdditions ?? null,
       publishableProfiles: candidate.readiness?.publishableProfiles ?? [],
       publicationStatus: candidate.datasetVersion.publicationStatus ?? 'unpublished',
       publicationProfile: candidate.datasetVersion.publicationProfile ?? null,
@@ -481,7 +484,14 @@ export class DatasetVersionLifecycleService {
   }
 
   async getActiveMapDataset({ datasetId, branchId, siteId = null } = {}) {
-    const resolved = await this.#resolveActive(datasetId, branchId)
+    const projectionKind = !siteId && this.repository.mapProjection ? 'map-read' : 'active-read'
+    const resolved = await this.#resolveActive(datasetId, branchId, projectionKind)
+    if (resolved.record.activeMapDataset) {
+      const map = resolved.record.activeMapDataset
+      return { ...map, activePointer: resolved.pointer,
+        datasetVersion: publicDatasetVersion(resolved.record.datasetVersion, resolved.pointer),
+        context: { ...map.context, activePointerRevision: resolved.pointer.revision } }
+    }
     const projection = buildActiveProjection(resolved)
     this.activeProjectionCache = {
       key: activeProjectionKey(resolved),
@@ -573,6 +583,7 @@ export class DatasetVersionLifecycleService {
       datasetVersion: publicDatasetVersion(record.datasetVersion, resolved.pointer),
       asset: sanitizePublicObject({
         ...projectAssetIdentity(asset, identityMap, resolver),
+        ...projectAssetIcon(record, canonicalAssetId),
         assetId: item.assetId,
         canonicalAssetId: item.canonicalAssetId,
         stableAssetId: item.stableAssetId,
@@ -759,15 +770,67 @@ export class DatasetVersionLifecycleService {
     }
   }
 
-  async #resolveActive(datasetId, branchId) {
+  async setActiveAssetIcon({ datasetId, branchId, assetId, datasetVersionId,
+    expectedRecordRevision, dataUrl, actorId, correlationId } = {}) {
+    if (!datasetVersionId || !Number.isSafeInteger(expectedRecordRevision)
+      || expectedRecordRevision < 0) {
+      throw new AppError('Versi dataset wajib tersedia. Muat ulang peta dan coba lagi.', {
+        code: 'asset_icon_revision_required', statusCode: 400,
+      })
+    }
+    const bytes = dataUrl === null ? null : decodeAssetIcon(dataUrl)
+    const resolved = await this.#resolveActive(datasetId, branchId)
+    if (resolved.record.datasetVersion.id !== datasetVersionId) {
+      throw new AppError('Dataset aktif berubah. Muat ulang peta sebelum mengganti ikon.', {
+        code: 'asset_icon_active_version_changed', statusCode: 409,
+      })
+    }
+    const projection = buildActiveProjection(resolved)
+    const item = projection.catalog.find(candidate => candidate._aliases.has(String(assetId)))
+    if (!item) throw new AppError('Aset tidak ditemukan pada dataset aktif.', {
+      code: 'asset_not_present_in_active_version', statusCode: 404,
+    })
+    const canonicalAssetId = item.canonicalAssetId
+    const updated = await this.repository.update(datasetVersionId, current => ({
+      ...current,
+      assetIconOverrides: {
+        ...(current.assetIconOverrides ?? {}),
+        [canonicalAssetId]: {
+          dataUrl, revision: bytes ? assetIconRevision(bytes) : 'default',
+          updatedAt: this.clock().toISOString(), updatedBy: actorId,
+        },
+      },
+    }), { expectedRevision: expectedRecordRevision, projectionMode: 'asset-icons' })
+    this.activeReadCache.clear()
+    this.activeProjectionCache = null
+    await this.auditLog.record(bytes ? 'asset.icon_updated' : 'asset.icon_reset', {
+      actorId, datasetVersionId, branchId, correlationId,
+      details: { assetId: canonicalAssetId },
+    })
+    return { assetId: canonicalAssetId, recordRevision: updated.recordRevision,
+      ...projectAssetIcon(updated, canonicalAssetId) }
+  }
+
+  async getAssetIconResource({ datasetVersionId, assetId } = {}) {
+    const record = await this.repository.get(datasetVersionId)
+    const override = Object.hasOwn(record.assetIconOverrides ?? {}, assetId)
+      ? record.assetIconOverrides[assetId] : null
+    if (!override?.dataUrl) throw new AppError('Ikon kustom tidak ditemukan.', {
+      code: 'asset_icon_not_found', statusCode: 404,
+    })
+    return { bytes: decodeAssetIcon(override.dataUrl), datasetVersion: record.datasetVersion }
+  }
+
+  async #resolveActive(datasetId, branchId, projection = 'active-read') {
     try {
       const revision = await this.repository.getActiveReadRevision?.({ datasetId, branchId })
-      const cacheKey = revision == null ? null : JSON.stringify([datasetId, branchId, revision])
+      const cacheKey = revision == null ? null : JSON.stringify([datasetId, branchId, revision, projection])
       const cached = cacheKey && this.activeReadCache.get(cacheKey)
       if (cached) return cached
       const resolved = await this.repository.resolveActiveVersion({
         datasetId,
         branchId,
+        projection,
       })
       if (!resolved) {
         throw new AppError('Dataset aktif belum tersedia.', {
@@ -777,7 +840,7 @@ export class DatasetVersionLifecycleService {
       }
       const projected = {
         ...resolved,
-        record: projectFacilityRecord(resolved.record),
+        record: resolved.record.activeMapDataset ? resolved.record : projectFacilityRecord(resolved.record),
         readRevision: revision,
       }
       if (cacheKey) {
@@ -822,6 +885,7 @@ export class DatasetVersionLifecycleService {
           branchId: target.datasetVersion.branchId,
         },
       )
+      assertAdditionsBaseline(target, active)
       const comparison = compareDatasetVersions(target, active)
       const normalizedProfile = normalizePublicationProfile(
         publicationProfile ?? target.datasetVersion.publicationProfile ?? 'map_only',
@@ -1234,6 +1298,7 @@ function toActiveTopologyDataset(resolved) {
       sourceIconHref: sourceIcon?.href ?? null,
       sourceIconResourceId: sourceIcon?.resource?.resourceId ?? null,
       sourceIconUrl,
+      ...projectAssetIcon(record, id),
       name: item.name,
       type: item.assetType,
       assetType: item.assetType,
@@ -1347,6 +1412,10 @@ export function projectTopologyGraph(graph = {}) {
     assetId: node.assetId ?? node.canonicalAssetId ?? node.id,
     sourceNodeId: node.sourceNodeId ?? node.id ?? null,
     sourceFeatureId: node.sourceFeatureId ?? null,
+    name: node.name ?? node.sourceName ?? null,
+    sourceFolderPath: node.sourceFolderPath ?? null,
+    branchId: node.branchId ?? null,
+    location: node.location ?? null,
     siteId: node.siteId ?? null,
     networkFamily: node.networkFamily ?? null,
     serviceDomain: node.serviceDomain ?? null,
@@ -1355,6 +1424,13 @@ export function projectTopologyGraph(graph = {}) {
     cableRole: node.cableRole ?? null,
     objectRole: node.objectRole ?? null,
     topologyRole: node.topologyRole ?? null,
+    diagramClass: node.diagramClass ?? node.properties?.classification?.diagramClass ?? null,
+    jbProfileId: node.jbProfileId ?? node.properties?.classification?.jbProfileId ?? null,
+    layoutRootId: node.layoutRootId ?? null,
+    layoutParentId: node.layoutParentId ?? null,
+    layoutRelationStatus: node.layoutRelationStatus ?? null,
+    layoutReasonCode: node.layoutReasonCode ?? null,
+    mountingExpectation: node.mountingExpectation ?? null,
     topologyRequired: node.topologyRequired ?? null,
     assetType: node.assetType ?? null,
     category: node.category ?? null,
@@ -1371,6 +1447,8 @@ export function projectTopologyGraph(graph = {}) {
     canonicalSourceAssetId: edge.canonicalSourceAssetId ?? null,
     canonicalTargetAssetId: edge.canonicalTargetAssetId ?? null,
     relationType: edge.relationType ?? null,
+    networkId: edge.networkId ?? null,
+    layerId: edge.layerId ?? null,
     direction: edge.direction ?? 'undirected',
     serviceDomain: edge.serviceDomain ?? null,
     mediaType: edge.mediaType ?? null,
@@ -1391,6 +1469,13 @@ export function projectTopologyGraph(graph = {}) {
     relationStatus: edge.relationStatus ?? null,
     relationSource: edge.relationSource ?? null,
     relationKind: edge.relationKind ?? null,
+    candidateType: edge.candidateType ?? null,
+    decisionSource: edge.decisionSource ?? null,
+    manualOrder: edge.manualOrder ?? null,
+    verifiedAt: edge.verifiedAt ?? null,
+    manualConfirmation: edge.manualConfirmation?.reviewedAt
+      ? { reviewedAt: edge.manualConfirmation.reviewedAt } : null,
+    review: edge.review?.reviewedAt ? { reviewedAt: edge.review.reviewedAt } : null,
     candidateIds: edge.candidateIds ?? [],
     sourceRelationIds: edge.sourceRelationIds ?? [],
   }))
@@ -1446,6 +1531,20 @@ function projectTopologyIdentityMap(identityMap = {}, assets = []) {
   }
 }
 
+// Retain every alias, including ambiguous aliases (null), without sending the
+// importer registry or duplicated source matching/audit evidence to the map.
+export function projectMapIdentityMap(identityMap = {}) {
+  return {
+    datasetVersionId: identityMap.datasetVersionId ?? null,
+    version: identityMap.version ?? null,
+    items: (identityMap.items ?? []).map(item => ({
+      canonicalAssetId: item.canonicalAssetId,
+      aliasValues: item.aliasValues ?? [],
+    })),
+    aliasToCanonicalAssetId: identityMap.aliasToCanonicalAssetId ?? {},
+  }
+}
+
 function activeProjectionKey({ record, pointer, readRevision }) {
   return JSON.stringify([
     record.datasetVersion.id,
@@ -1453,6 +1552,21 @@ function activeProjectionKey({ record, pointer, readRevision }) {
     pointer.revision,
     readRevision,
   ])
+}
+
+// The repository invokes this projector inside its write transaction. A map
+// request then reads only this view, while details and tracing retain theirs.
+export function createActiveMapProjection(siteBoundaries = {}) {
+  return {
+    version: `active-map/1:${ACTIVE_TOPOLOGY_PROJECTION_VERSION}:${fingerprint(siteBoundaries)}`,
+    project(record) {
+      const version = record.datasetVersion
+      const pointer = { datasetId: version.datasetId, branchId: version.branchId,
+        datasetVersionId: version.id, revision: version.activePointerRevision,
+        publicationProfile: version.publicationProfile }
+      return toActiveMapDataset({ record, pointer }, { siteBoundaries })
+    },
+  }
 }
 
 function buildActiveProjection({ record, pointer }) {
@@ -1559,6 +1673,7 @@ function toActiveMapDataset(resolved, {
       sourceIconHref: sourceIcon?.href ?? null,
       sourceIconResourceId: sourceIcon?.resource?.resourceId ?? null,
       sourceIconUrl,
+      ...projectAssetIcon(record, identity?.canonicalAssetId ?? asset.canonicalAssetId ?? asset.assetId),
       name: asset.name,
       category: asset.category,
       type: asset.type,
@@ -1624,7 +1739,7 @@ function toActiveMapDataset(resolved, {
     mountingExpectations: filterResolvedMountingExpectations(record, resolver),
     mountingReviewItems: filterResolvedMountingReviewItems(record, resolver),
     mountingSummary: structuredClone(record.mountingSummary ?? null),
-    topologyGraph: mapTopologyGraph,
+    topologyGraph: projectTopologyGraph(mapTopologyGraph),
     topologySummary: normalizeTopologySummary(
       record.topologySummary,
       mapTopologyGraph,
@@ -1632,7 +1747,7 @@ function toActiveMapDataset(resolved, {
     ),
     topologyReadiness: record.topologyReadiness ?? null,
     topologyIdentity: topology.identity,
-    assetIdentityMap,
+    assetIdentityMap: projectMapIdentityMap(assetIdentityMap),
     readiness: {
       ...(record.readiness ?? {}),
       mapReady: readinessContract.mapReady,
@@ -1803,173 +1918,6 @@ function projectAssetIdentity(asset, identityMap, resolver) {
     identityAliases: structuredClone(identity?.aliases ?? asset.identityAliases ?? {}),
     sourceFeatureId: asset.sourceFeatureId ?? asset.properties?.sourceFeatureId ?? null,
   }
-}
-
-function normalizeTopologyGraph(record, identityMap) {
-  const resolver = createAssetIdentityResolver(identityMap)
-  const sourceGraph = record.topologyGraph ?? {
-    datasetVersionId: record.datasetVersion?.id,
-    nodes: (record.assets ?? []).map((asset) => ({
-      id: asset.canonicalAssetId ?? asset.assetId ?? asset.id,
-      assetId: asset.canonicalAssetId ?? asset.assetId ?? asset.id,
-      sourceFeatureId: asset.sourceFeatureId ?? asset.properties?.sourceFeatureId,
-    })),
-    edges: (record.confirmedRelations ?? []).map((relation) => ({
-      ...relation,
-      sourceNodeId: relation.sourceAssetId,
-      targetNodeId: relation.targetAssetId,
-    })),
-    components: [],
-    degreeByNode: {},
-    isolatedNodeIds: [],
-  }
-  const unresolvedNodes = []
-  const nodes = []
-  const canonicalNodeIds = new Set()
-  const originalNodeToCanonical = new Map()
-  ;(sourceGraph.nodes ?? []).forEach((node) => {
-    const originalId = node.canonicalAssetId ?? node.assetId ?? node.id
-    const canonicalAssetId = resolver.resolve(originalId)
-    if (!canonicalAssetId) {
-      unresolvedNodes.push(originalId ?? null)
-      return
-    }
-    if (canonicalNodeIds.has(canonicalAssetId)) {
-      unresolvedNodes.push(originalId)
-      return
-    }
-    canonicalNodeIds.add(canonicalAssetId)
-    originalNodeToCanonical.set(originalId, canonicalAssetId)
-    nodes.push({
-      ...structuredClone(node),
-      id: canonicalAssetId,
-      canonicalAssetId,
-      assetId: canonicalAssetId,
-      sourceNodeId: originalId,
-    })
-  })
-
-  const unresolvedEdges = []
-  let edges = []
-  ;(sourceGraph.edges ?? []).forEach((edge) => {
-    if (edge?.relationType === MOUNTING_RELATION_TYPE) return
-    const originalSource = edge.sourceAssetId ?? edge.sourceNodeId
-    const originalTarget = edge.targetAssetId ?? edge.targetNodeId
-    const sourceAssetId = resolver.resolve(originalSource)
-      ?? originalNodeToCanonical.get(originalSource)
-    const targetAssetId = resolver.resolve(originalTarget)
-      ?? originalNodeToCanonical.get(originalTarget)
-    if (!sourceAssetId || !targetAssetId
-      || !canonicalNodeIds.has(sourceAssetId)
-      || !canonicalNodeIds.has(targetAssetId)
-      || sourceAssetId === targetAssetId) {
-      unresolvedEdges.push({
-        edgeId: edge.id ?? null,
-        sourceAssetId: originalSource ?? null,
-        targetAssetId: originalTarget ?? null,
-      })
-      return
-    }
-    edges.push({
-      ...structuredClone(edge),
-      sourceAssetId,
-      targetAssetId,
-      sourceNodeId: sourceAssetId,
-      targetNodeId: targetAssetId,
-      canonicalSourceAssetId: sourceAssetId,
-      canonicalTargetAssetId: targetAssetId,
-    })
-  })
-  edges = filterConflictingCameraEdges(edges, nodes).edges
-
-  const degreeByNode = Object.fromEntries(nodes.map(({ id }) => [id, 0]))
-  edges.forEach((edge) => {
-    degreeByNode[edge.sourceAssetId] += 1
-    degreeByNode[edge.targetAssetId] += 1
-  })
-  const components = normalizeComponents(
-    sourceGraph.components,
-    resolver,
-    canonicalNodeIds,
-    edges,
-  )
-  const graph = withTopologyGraphRevision({
-      ...structuredClone(sourceGraph),
-      datasetVersionId: record.datasetVersion?.id ?? sourceGraph.datasetVersionId,
-      nodes,
-      edges,
-      components,
-      degreeByNode,
-      isolatedNodeIds: nodes
-        .filter(({ id }) => degreeByNode[id] === 0)
-        .map(({ id }) => id)
-        .sort(),
-    })
-  return {
-    graph,
-    identity: {
-      version: identityMap.version,
-      migratedFromLegacyRecord: identityMap.migratedFromLegacyRecord === true,
-      sourceNodeCount: (sourceGraph.nodes ?? []).length,
-      resolvedNodeCount: nodes.length,
-      unresolvedNodeCount: unresolvedNodes.length,
-      sourceEdgeCount: (sourceGraph.edges ?? []).length,
-      resolvedEdgeCount: edges.length,
-      unresolvedEdgeCount: unresolvedEdges.length,
-      unresolvedNodes: unresolvedNodes.slice(0, 25),
-      unresolvedEdges: unresolvedEdges.slice(0, 25),
-    },
-  }
-}
-
-function normalizeComponents(sourceComponents, resolver, canonicalNodeIds, edges) {
-  const components = (sourceComponents ?? []).map((component, index) => ({
-    ...structuredClone(component),
-    componentId: component.componentId ?? component.id ?? `component:${index + 1}`,
-    nodeIds: [...new Set((component.nodeIds ?? [])
-      .map((id) => resolver.resolve(id))
-      .filter((id) => canonicalNodeIds.has(id)))].sort(),
-    edgeIds: (component.edgeIds ?? [])
-      .filter((edgeId) => edges.some((edge) => edge.id === edgeId))
-      .sort(),
-  })).filter(({ nodeIds }) => nodeIds.length)
-  if (components.length) return components
-  return connectedComponents(canonicalNodeIds, edges)
-}
-
-function connectedComponents(nodeIds, edges) {
-  const adjacency = new Map([...nodeIds].map((id) => [id, []]))
-  edges.forEach((edge) => {
-    adjacency.get(edge.sourceAssetId)?.push(edge.targetAssetId)
-    adjacency.get(edge.targetAssetId)?.push(edge.sourceAssetId)
-  })
-  const visited = new Set()
-  const components = []
-  ;[...nodeIds].sort().forEach((start) => {
-    if (visited.has(start)) return
-    const queue = [start]
-    const componentNodes = []
-    const componentNodeSet = new Set()
-    while (queue.length) {
-      const current = queue.shift()
-      if (visited.has(current)) continue
-      visited.add(current)
-      componentNodeSet.add(current)
-      componentNodes.push(current)
-      ;(adjacency.get(current) ?? []).forEach((next) => {
-        if (!visited.has(next)) queue.push(next)
-      })
-    }
-    components.push({
-      componentId: `component:${components.length + 1}`,
-      nodeIds: componentNodes.sort(),
-      edgeIds: edges.filter((edge) => (
-        componentNodeSet.has(edge.sourceAssetId)
-          && componentNodeSet.has(edge.targetAssetId)
-      )).map(({ id }) => id).filter(Boolean).sort(),
-    })
-  })
-  return components
 }
 
 function buildReadinessContract(record, topologyGraph) {

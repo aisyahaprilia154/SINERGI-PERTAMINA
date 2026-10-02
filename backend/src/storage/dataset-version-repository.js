@@ -10,6 +10,7 @@ import {
 } from 'node:fs/promises'
 import path from 'node:path'
 import { AppError } from '../errors.js'
+import { assertAdditionsBaseline } from '../import/additions-only-import.js'
 
 export class JsonDatasetVersionRepository {
   constructor(rootDirectory, {
@@ -219,6 +220,7 @@ export class JsonDatasetVersionRepository {
         allowLegacyDuringActivation: true,
       })
       const previous = resolved?.record ?? null
+      assertAdditionsBaseline(target, previous)
       const previousVersionId = previous?.datasetVersion.id ?? null
       const currentPointerRevision = resolved?.pointer.revision ?? null
       if (expectedActivePointerRevision !== undefined
@@ -269,6 +271,7 @@ export class JsonDatasetVersionRepository {
         ...recordsToArchive.map((record) => [record.datasetVersion.id, record]),
       ])
       let archivedRecords = []
+      const writtenIds = new Set()
 
       try {
         archivedRecords = await Promise.all(recordsToArchive.map((record) => (
@@ -282,8 +285,11 @@ export class JsonDatasetVersionRepository {
               archivedBy: actorId,
               archiveReason,
             },
-          })), { projectionMode: 'topology-review' }
+          }), { projectionMode: 'topology-review',
+            ...(target.datasetVersion.contentMode === 'additions_only'
+              ? { expectedRevision: Number(record.recordRevision ?? 0) } : {}) })
         )))
+        archivedRecords.forEach(record => writtenIds.add(record.datasetVersion.id))
         const activated = await this.update(datasetVersionId, (current) => ({
           ...current,
           datasetVersion: {
@@ -296,6 +302,7 @@ export class JsonDatasetVersionRepository {
             archiveReason: null,
           },
         }), { projectionMode: 'topology-review' })
+        writtenIds.add(datasetVersionId)
 
         await this.activationHooks.beforePointerCommit?.({
           datasetId,
@@ -303,6 +310,14 @@ export class JsonDatasetVersionRepository {
           previousVersionId,
           newVersionId: datasetVersionId,
         })
+        if (target.datasetVersion.contentMode === 'additions_only' && archivedRecords.length) {
+          const latest = await this.get(previousVersionId)
+          if (latest.recordRevision !== archivedRecords[0].recordRevision) {
+            throw new AppError('Baseline berubah saat aktivasi tambahan.', {
+              code: 'additions_baseline_changed', statusCode: 409,
+            })
+          }
+        }
         const pointer = {
           schemaVersion: '1.0.0',
           datasetId,
@@ -326,7 +341,8 @@ export class JsonDatasetVersionRepository {
       } catch (error) {
         try {
           for (const [id, snapshot] of snapshots) {
-            await this.update(id, () => snapshot)
+            if (!writtenIds.has(id)) continue
+            await this.update(id, current => ({ ...current, datasetVersion: snapshot.datasetVersion }))
           }
         } catch (rollbackError) {
           throw new AppError('Rollback transaksi aktivasi gagal.', {
