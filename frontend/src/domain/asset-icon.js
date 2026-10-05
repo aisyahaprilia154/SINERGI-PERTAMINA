@@ -7,7 +7,8 @@ export function assetIconUrl(asset) {
 }
 
 export function assetIconCanReset(asset) {
-  return Boolean(asset?.customIconUrl || (!asset?.iconReset && asset?.sourceIconUrl))
+  return Boolean(asset?.customIconUrl || (!asset?.iconReset
+    && !isJunctionBoxAsset(asset) && asset?.sourceIconUrl))
 }
 
 export function assetIconGlyph(asset) {

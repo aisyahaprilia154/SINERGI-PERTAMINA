@@ -9,6 +9,10 @@ export function getSessionUser() {
   try { return JSON.parse(window.sessionStorage.getItem(USER_KEY) || 'null') } catch { return null }
 }
 
+export function isAdministrator(user = getSessionUser()) {
+  return String(user?.role ?? '').trim().toLowerCase() === 'administrator'
+}
+
 export function saveSession({ token, user }) {
   window.sessionStorage.setItem(TOKEN_KEY, token)
   window.sessionStorage.setItem(USER_KEY, JSON.stringify(user))
@@ -38,7 +42,9 @@ export async function loadCurrentUser() {
     headers: { Authorization: `Bearer ${getSessionToken()}` },
   })
   if (!response.ok) throw new Error('Sesi sudah berakhir.')
-  return (await response.json()).user
+  const user = (await response.json()).user
+  window.sessionStorage.setItem(USER_KEY, JSON.stringify(user))
+  return user
 }
 
 export async function logout() {

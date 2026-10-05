@@ -84,6 +84,7 @@ button.asset-icon-preview:focus-visible { outline: 2px solid var(--app-accent); 
 }
 .asset-icon-actions .material-symbols-outlined { color: var(--app-muted); font-size: 19px; }
 .asset-icon-actions button:hover, .asset-icon-actions button:focus-visible { background: var(--app-control); outline: none; }
+.asset-icon-actions button:disabled { opacity: .55; cursor: default; background: transparent; }
 .asset-icon-actions [data-reset-asset-icon],
 .asset-icon-actions [data-reset-asset-icon] .material-symbols-outlined { color: var(--ui-danger); }
 .map-body .asset-drawer .asset-icon-feedback { font-size: 11px; font-weight: 400; color: var(--ui-success); }

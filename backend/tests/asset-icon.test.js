@@ -27,7 +27,7 @@ test('upload, authenticated resource, reload, and reset persist without changing
   const original = await repository.get('version-icons')
   const request = async (method, expectedRecordRevision, dataUrl) => fetch(
     `${origin}/api/datasets/dataset-icons/active/assets/CAM-01/icon`, {
-      method, headers: { authorization: 'Bearer viewer', 'content-type': 'application/json' },
+      method, headers: { authorization: 'Bearer admin', 'content-type': 'application/json' },
       body: JSON.stringify({ branchId: 'semarang', datasetVersionId: 'version-icons', expectedRecordRevision, dataUrl }),
     },
   )
@@ -60,6 +60,34 @@ test('upload, authenticated resource, reload, and reset persist without changing
   const stored = await repository.get('version-icons')
   for (const key of ['assets', 'geometries', 'relations', 'topologyGraph']) assert.deepEqual(stored[key], original[key])
   assert.deepEqual(fixture.auditEntries.map(e => e.event).filter(e => e.startsWith('asset.')), ['asset.icon_updated', 'asset.icon_reset'])
+})
+
+test('only administrators can replace or reset icons, while viewers can read them', async t => {
+  const fixture = await createFixture(t)
+  const url = `${fixture.origin}/api/datasets/dataset-icons/active/assets/CAM-01/icon`
+  const body = JSON.stringify({ branchId: 'semarang', datasetVersionId: 'version-icons',
+    expectedRecordRevision: 0, dataUrl: png })
+  for (const method of ['PUT', 'DELETE']) {
+    const denied = await fetch(url, { method,
+      headers: { authorization: 'Bearer viewer', 'content-type': 'application/json' }, body })
+    assert.equal(denied.status, 403)
+    assert.equal((await denied.json()).error.code, 'forbidden')
+  }
+  assert.equal((await fixture.repository.get('version-icons')).recordRevision, 0)
+  assert.equal((await fixture.repository.get('version-icons')).assetIconOverrides, undefined)
+  assert.equal(fixture.auditEntries.some(entry => entry.event.startsWith('asset.')), false)
+  const uploaded = await fetch(url, { method: 'PUT',
+    headers: { authorization: 'Bearer admin', 'content-type': 'application/json' }, body })
+  assert.equal(uploaded.status, 200)
+  const icon = await uploaded.json()
+  const deniedReset = await fetch(url, { method: 'DELETE',
+    headers: { authorization: 'Bearer viewer', 'content-type': 'application/json' },
+    body: JSON.stringify({ branchId: 'semarang', datasetVersionId: 'version-icons', expectedRecordRevision: 1 }) })
+  assert.equal(deniedReset.status, 403)
+  const stored = await fixture.repository.get('version-icons')
+  assert.equal(stored.recordRevision, 1)
+  assert.equal((await fetch(`${fixture.origin}${icon.customIconUrl}`,
+    { headers: { authorization: 'Bearer viewer' } })).status, 200)
 })
 
 test('icon edits reject a different active version and assets outside the dataset', async t => {
@@ -110,7 +138,9 @@ async function createFixture(t) {
   const auditLog = { record: async (event, entry) => { auditEntries.push({ event, ...entry }) } }
   const service = new DatasetVersionLifecycleService({ repository, auditLog })
   const app = createApp({ config: {}, repository, lifecycleService: service, auditLog,
-    authenticator: { authenticate: request => ({ id: 'viewer', role: 'Viewer', permissions: [], datasetIds: [],
+    authenticator: { authenticate: request => ({
+      id: request.headers.authorization === 'Bearer admin' ? 'admin' : 'viewer',
+      role: request.headers.authorization === 'Bearer admin' ? 'Administrator' : 'Viewer', permissions: [], datasetIds: [],
       branchIds: request.headers.authorization === 'Bearer other' ? ['other'] : ['semarang'] }) } })
   await new Promise(resolve => app.listen(0, '127.0.0.1', resolve))
   t.after(async () => { app.closeAllConnections(); await new Promise(resolve => app.close(resolve)); await rm(root, { recursive: true, force: true }) })

@@ -250,7 +250,7 @@ export function createApp({
         ? url.pathname.match(/^\/api\/datasets\/([a-zA-Z0-9_-]+)\/active\/assets\/([^/]+)\/icon$/)
         : null
       if (activeAssetIconMatch) {
-        const user = authenticator.authenticate(request)
+        const user = requireAdministrator(request, authenticator)
         const datasetId = activeAssetIconMatch[1]
         const body = await readJsonBody(request, 185 * 1024)
         const branchId = normalizeRequiredActiveBranch(body.branchId, config)

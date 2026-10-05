@@ -68,7 +68,7 @@ function bearerToken(request) {
 export function requireAdministrator(request, authenticator) {
   const user = authenticator.authenticate(request)
   if (user.role.toLowerCase() !== 'administrator') {
-    throw new AppError('Hanya Administrator yang dapat mengunggah dataset.', {
+    throw new AppError('Tindakan ini hanya tersedia untuk Administrator.', {
       code: 'forbidden',
       statusCode: 403,
     })

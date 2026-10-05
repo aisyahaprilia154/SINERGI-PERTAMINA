@@ -47,7 +47,7 @@ import { assetIconUrl } from '../../domain/asset-icon.js'
 import { bindAssetIconControl } from './asset-icon-editor.js'
 import { preloadBasemapResources } from './basemap-preload.js'
 import { bindThemeToggle } from '../../theme.js'
-import { getSessionUser, logout } from '../../services/account-session.js'
+import { getSessionUser, isAdministrator, logout } from '../../services/account-session.js'
 
 export async function renderMapPage(container) {
   document.title = 'Peta Jaringan — SINERGI'
@@ -135,7 +135,7 @@ export async function renderMapPage(container) {
     diagramAvailable: true,
     message: '',
   }
-  const canEditTopology = getSessionUser()?.role === 'Administrator'
+  const canEditTopology = isAdministrator()
   // The map is source-first. A not-ready legacy review contract must not
   // replace the confirmed graph with an empty graph or hide KML/KMZ evidence.
   const operationalTopologyGraph = fullTopologyGraph
@@ -668,7 +668,7 @@ export async function renderMapPage(container) {
       relationStatus: state.relationStatus,
       relationError: state.relationError,
       sourceIconDataByUrl: sourceIconLoader.dataByUrl,
-      iconControlsAvailable: Boolean(activeContext.datasetVersionId),
+      iconControlsAvailable: canEditTopology && Boolean(activeContext.datasetVersionId),
       iconFeedback: state.iconFeedback,
     })
     drawer.classList.add('open')
@@ -776,6 +776,7 @@ export async function renderMapPage(container) {
   }
 
   async function updateAssetIcon(assetId, dataUrl) {
+    if (!isAdministrator()) throw new Error('Hanya Administrator yang dapat mengubah ikon aset.')
     const result = await saveActiveAssetIcon({
       datasetId: activeContext.datasetId, branchId: activeContext.branchId,
       datasetVersionId: activeContext.datasetVersionId, assetId,
