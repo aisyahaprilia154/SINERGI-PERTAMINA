@@ -570,7 +570,7 @@ function renderAssetIconControl(asset, { iconControlsAvailable, sourceIconDataBy
     </button>
     <div class="asset-icon-actions" id="asset-icon-actions" hidden>
       <button type="button" data-change-asset-icon><span class="material-symbols-outlined" aria-hidden="true">image</span>Ganti ikon</button>
-      ${assetIconCanReset(asset) ? `<button type="button" data-reset-asset-icon><span class="material-symbols-outlined" aria-hidden="true">delete</span>Hapus ikon</button>` : ''}
+      <button type="button" data-reset-asset-icon ${assetIconCanReset(asset) ? '' : 'disabled title="Aset sudah menggunakan ikon bawaan"'}><span class="material-symbols-outlined" aria-hidden="true">restart_alt</span>Kembalikan ikon bawaan</button>
     </div>` : `<div class="asset-icon-preview">${preview}</div>`}
   </div>`
 }

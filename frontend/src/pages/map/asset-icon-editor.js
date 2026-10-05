@@ -91,7 +91,7 @@ export function openAssetIconEditor({ asset, mode = 'replace', currentIcon, onSa
   let closed = false
   let fileRequest = 0
   dialog.innerHTML = `<header class="asset-icon-dialog-header">
-    <div><h2 id="asset-icon-dialog-title">${reset ? 'Hapus ikon?' : 'Ganti ikon'}</h2><p>${escapeHtml(asset.name || asset.id)}</p></div>
+    <div><h2 id="asset-icon-dialog-title">${reset ? 'Kembalikan ikon bawaan?' : 'Ganti ikon'}</h2><p>${escapeHtml(asset.name || asset.id)}</p></div>
     <button class="icon-button" type="button" data-close-icon-editor aria-label="Tutup pengaturan ikon"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
   </header>
   <div class="asset-icon-dialog-content">
@@ -104,7 +104,7 @@ export function openAssetIconEditor({ asset, mode = 'replace', currentIcon, onSa
   </div>
   <footer class="asset-icon-dialog-footer">
     <button class="button secondary" type="button" data-close-icon-editor>Batal</button>
-    <button class="button primary${reset ? ' asset-icon-reset' : ''}" type="button" data-save-icon ${reset ? '' : 'disabled'}>${reset ? 'Hapus ikon' : 'Simpan'}</button>
+    <button class="button primary${reset ? ' asset-icon-reset' : ''}" type="button" data-save-icon ${reset ? '' : 'disabled'}>${reset ? 'Kembalikan ikon' : 'Simpan'}</button>
   </footer>`
   document.body.append(dialog)
   const save = dialog.querySelector('[data-save-icon]')
@@ -147,7 +147,7 @@ export function openAssetIconEditor({ asset, mode = 'replace', currentIcon, onSa
     errorLabel.hidden = true
     dialog.setAttribute('aria-busy', 'true')
     dialog.querySelectorAll('button').forEach(button => { button.disabled = true })
-    save.textContent = reset ? 'Menghapus…' : 'Menyimpan…'
+    save.textContent = reset ? 'Mengembalikan…' : 'Menyimpan…'
     try {
       await onSave(reset ? null : dataUrl)
       saving = false
@@ -156,7 +156,7 @@ export function openAssetIconEditor({ asset, mode = 'replace', currentIcon, onSa
       saving = false
       dialog.removeAttribute('aria-busy')
       dialog.querySelectorAll('button').forEach(button => { button.disabled = false })
-      save.textContent = reset ? 'Hapus ikon' : 'Simpan'
+      save.textContent = reset ? 'Kembalikan ikon' : 'Simpan'
       showError(error.message || 'Ikon belum dapat disimpan. Coba lagi.')
     }
   })
