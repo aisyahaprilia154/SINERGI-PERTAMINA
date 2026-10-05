@@ -2,13 +2,12 @@ import { isJunctionBoxAsset, JUNCTION_BOX_ICON_URL } from './junction-box-icon.j
 
 export function assetIconUrl(asset) {
   if (asset?.customIconUrl) return asset.customIconUrl
-  if (asset?.iconReset) return isJunctionBoxAsset(asset) ? JUNCTION_BOX_ICON_URL : null
+  if (asset?.iconReset) return null
   return isJunctionBoxAsset(asset) ? JUNCTION_BOX_ICON_URL : asset?.sourceIconUrl || null
 }
 
 export function assetIconCanReset(asset) {
-  return Boolean(asset?.customIconUrl || (!asset?.iconReset
-    && !isJunctionBoxAsset(asset) && asset?.sourceIconUrl))
+  return Boolean(assetIconUrl(asset))
 }
 
 export function assetIconGlyph(asset) {

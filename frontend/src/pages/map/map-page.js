@@ -679,7 +679,6 @@ export async function renderMapPage(container) {
 
     drawer.querySelector('.close-drawer')?.addEventListener('click', closeAssetDrawer)
     cleanupAssetIconControl = bindAssetIconControl(drawer, {
-      asset, sourceIconDataByUrl: sourceIconLoader.dataByUrl,
       onSave: dataUrl => updateAssetIcon(assetId, dataUrl),
     })
     bindDrawerMobileControls()
@@ -796,7 +795,7 @@ export async function renderMapPage(container) {
     if (url) await sourceIconLoader.load(url)
     canvasApi.refreshAssetIcons()
     if (selection.selectedAssetId === assetId) {
-      state.iconFeedback = { message: dataUrl ? 'Ikon diperbarui.' : 'Ikon bawaan digunakan.' }
+      state.iconFeedback = { message: dataUrl ? 'Ikon diperbarui.' : 'Ikon dihapus.' }
       renderDrawer()
     }
   }
