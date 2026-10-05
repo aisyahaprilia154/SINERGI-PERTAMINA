@@ -90,40 +90,6 @@ button.asset-icon-preview:focus-visible { outline: 2px solid var(--app-accent); 
 .map-body .asset-drawer .asset-icon-feedback { font-size: 11px; font-weight: 400; color: var(--ui-success); }
 .map-body .asset-drawer .asset-icon-feedback.error { color: var(--ui-danger); }
 
-.map-body .asset-icon-dialog {
-  width: min(380px, calc(100vw - 32px));
-  max-height: calc(100dvh - 40px);
-  padding: 0;
-  color: var(--app-ink);
-  background: var(--app-surface);
-  border: 1px solid var(--app-glass-border);
-  border-radius: 24px;
-  box-shadow: var(--ui-shadow-panel);
-  overflow-y: auto;
-}
-.asset-icon-dialog::backdrop { background: rgba(17, 36, 52, .24); backdrop-filter: blur(3px); }
-.asset-icon-dialog-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 22px 22px 0; }
-.asset-icon-dialog-header h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; font-weight: 650; }
-.asset-icon-dialog-header p { margin: 6px 0 0; color: var(--app-muted); font-size: 12px; overflow-wrap: anywhere; }
-.asset-icon-dialog-header .icon-button { flex: 0 0 auto; width: 30px; height: 30px; border-radius: 10px; }
-.asset-icon-dialog-content { padding: 26px 24px 24px; text-align: center; }
-.asset-icon-dialog-preview { width: 104px; height: 104px; display: grid; place-items: center; margin: 0 auto 18px; padding: 16px; color: var(--app-muted); background: var(--app-control); border: 1px solid var(--app-glass-border); border-radius: 26px; }
-.asset-icon-dialog-preview img { width: 100%; height: 100%; object-fit: contain; }
-.asset-icon-dialog-preview > .material-symbols-outlined { font-size: 38px; }
-.asset-icon-choose { padding: 5px 8px; color: var(--app-accent); border: 0; border-radius: 6px; background: transparent; cursor: pointer; font-weight: 600; font-size: 13px; }
-.asset-icon-choose:hover { background: var(--app-control); }
-.asset-icon-choose:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
-.asset-icon-format-hint { margin: 8px 0 0; color: var(--app-muted); font-size: 11px; }
-.asset-icon-file-name { max-width: 100%; margin: 8px 0 0; overflow-wrap: anywhere; color: var(--app-muted); font-size: 12px; }
-.asset-icon-reset-copy { margin: 0; font-size: 13px; line-height: 1.7; color: var(--app-muted); }
-.asset-icon-editor-error { margin: 16px 0 0; color: var(--ui-danger); line-height: 1.5; font-size: 12px; }
-.asset-icon-dialog-footer { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 22px 20px; border-top: 1px solid var(--app-glass-border); }
-.asset-icon-dialog-footer .button { min-height: 40px; padding-inline: 18px; border-radius: 12px; font-size: 13px; }
-.map-body .asset-icon-dialog-footer .primary { color: #fff; background: var(--app-accent-active, var(--app-accent)); border-color: var(--app-accent); }
-.map-body .asset-icon-dialog-footer .asset-icon-reset { color: var(--ui-danger); background: transparent; border-color: color-mix(in srgb, var(--ui-danger) 35%, var(--app-border)); }
-.map-body .asset-icon-dialog-footer .asset-icon-reset:hover { background: color-mix(in srgb, var(--ui-danger) 8%, transparent); }
-.asset-icon-dialog button:disabled { opacity: .55; cursor: default; }
-
 @media (max-width: 960px) {
   .map-body .asset-drawer .drawer-asset-identity { padding-top: 14px; }
   .asset-icon-control { width: 72px; margin-bottom: 14px; }

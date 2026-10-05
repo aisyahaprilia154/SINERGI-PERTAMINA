@@ -66,8 +66,8 @@ export function renderAssetDetailDrawer({
         </div>
         <p>${escapeHtml(assetTypeLabel)}</p>
         ${asset.location ? `<small class="drawer-asset-location">${escapeHtml(asset.location)}</small>` : ''}
-        ${iconFeedback ? `<p class="asset-icon-feedback${iconFeedback.error ? ' error' : ''}"
-          role="${iconFeedback.error ? 'alert' : 'status'}">${escapeHtml(iconFeedback.message)}</p>` : ''}
+        <p class="asset-icon-feedback${iconFeedback?.error ? ' error' : ''}"
+          data-asset-icon-feedback role="${iconFeedback?.error ? 'alert' : 'status'}" ${iconFeedback ? '' : 'hidden'}>${escapeHtml(iconFeedback?.message ?? '')}</p>
       </section>
 
       ${poleAsset || (!hasDirectRelations && !relationOptions.length && !['saved', 'removed', 'removing', 'error'].includes(relationStatus)) ? '' : `<section class="drawer-section drawer-topology-summary" aria-labelledby="asset-topology-title">
@@ -550,7 +550,7 @@ function renderRelationAssetIcon(asset, sourceIconDataByUrl = null) {
   const iconUrl = assetIconUrl(asset)
   const sourceIcon = sourceIconDataByUrl?.get?.(iconUrl)
   if (sourceIcon) return `<img class="relation-icon relation-icon-image" src="${escapeAttribute(sourceIcon)}" alt="" aria-hidden="true">`
-  if (isJunctionBoxAsset(asset)) {
+  if (isJunctionBoxAsset(asset) && !asset.iconReset) {
     return `<img class="relation-icon relation-icon-image" src="${JUNCTION_BOX_ICON_URL}" alt="" aria-hidden="true">`
   }
   return `<span class="relation-icon material-symbols-outlined" aria-hidden="true">${assetIcon(`${asset?.type || ''} ${asset?.category || ''}`)}</span>`
@@ -570,7 +570,7 @@ function renderAssetIconControl(asset, { iconControlsAvailable, sourceIconDataBy
     </button>
     <div class="asset-icon-actions" id="asset-icon-actions" hidden>
       <button type="button" data-change-asset-icon><span class="material-symbols-outlined" aria-hidden="true">image</span>Ganti ikon</button>
-      <button type="button" data-reset-asset-icon ${assetIconCanReset(asset) ? '' : 'disabled title="Aset sudah menggunakan ikon bawaan"'}><span class="material-symbols-outlined" aria-hidden="true">restart_alt</span>Kembalikan ikon bawaan</button>
+      <button type="button" data-reset-asset-icon ${assetIconCanReset(asset) ? '' : 'disabled title="Tidak ada gambar ikon untuk dihapus"'}><span class="material-symbols-outlined" aria-hidden="true">delete</span>Hapus ikon</button>
     </div>` : `<div class="asset-icon-preview">${preview}</div>`}
   </div>`
 }
