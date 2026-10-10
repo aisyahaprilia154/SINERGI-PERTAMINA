@@ -1,3 +1,5 @@
+import {renderTopNavigation,bindUserAccountMenu} from '../../components/app-header.js'
+export {renderTopNavigation,bindUserAccountMenu} from '../../components/app-header.js'
 import {
   adaptActiveAssetDetail,
   adaptActiveDatasetForMap,
@@ -18,7 +20,6 @@ import {
   renderAssetDetailDrawer,
   renderRelationSearchResults,
 } from './asset-detail-drawer.js'
-import { patraNiagaLogoMarkup } from '../brand-logo.js'
 import { renderNetworkMapCanvas } from './map-surface.js'
 import { renderNetworkList as renderNetworkSidebarList, renderNetworkSidebar } from './network-sidebar.js'
 import {
@@ -29,7 +30,6 @@ import {
 import {
   buildPoleGroups,
   createAssetReferenceIndex,
-  inferSpatialMountingRelations,
   mergeMountingRelations,
   mountingRelationsFromAssetProjection,
   mountedChildrenForPole,
@@ -46,8 +46,8 @@ import { createSourceIconLoader } from '../../domain/source-icon-loader.js'
 import { assetIconUrl } from '../../domain/asset-icon.js'
 import { bindAssetIconControl } from './asset-icon-editor.js'
 import { preloadBasemapResources } from './basemap-preload.js'
-import { bindThemeToggle } from '../../theme.js'
-import { getSessionUser, isAdministrator, logout } from '../../services/account-session.js'
+import { getSessionUser, isAdministrator } from '../../services/account-session.js'
+import {listenForDatasetRevision} from '../../services/operational-api.js'
 
 export async function renderMapPage(container) {
   document.title = 'Peta Jaringan — SINERGI'
@@ -70,14 +70,13 @@ export async function renderMapPage(container) {
     mapData = adaptActiveDatasetForMap(payload)
     mapData.recordRevision = payload.recordRevision
     window.sessionStorage.setItem('sinergiActiveDatasetId', mapData.activeContext.datasetId)
-    window.sessionStorage.setItem('sinergiActiveBranchId', mapData.activeContext.branchId)
   } catch (error) {
     renderDatasetState(container, {
       icon: 'error',
       title: 'Dataset aktif tidak dapat dimuat',
       message: error.message,
       retry: true,
-      allowImport: true,
+      allowImport: isAdministrator(),
     })
     container.querySelector('.retry-active-dataset')?.addEventListener('click', () => {
       renderMapPage(container)
@@ -86,7 +85,7 @@ export async function renderMapPage(container) {
       openMapDataTransferDialog({
         activeContext: {
           ...requestedContext,
-          branchName: formatContextName(requestedContext.branchId),
+          branchName: 'Seluruh fasilitas',
           datasetVersionId: null,
           version: 'Belum ada dataset aktif',
         },
@@ -104,9 +103,7 @@ export async function renderMapPage(container) {
     }]
     : await Promise.allSettled([
       loadActiveOverlays({
-        datasetId: mapData.activeContext.datasetId,
-        branchId: mapData.activeContext.branchId,
-        siteId: mapData.activeContext.siteId,
+        datasetId: mapData.activeContext.datasetId,        siteId: mapData.activeContext.siteId,
       }).catch(() => loadDatasetProjection({
         datasetVersionId: mapData.activeContext.datasetVersionId,
         projection: 'overlays',
@@ -240,6 +237,8 @@ export async function renderMapPage(container) {
     relationStatus: 'idle',
     relationError: null,
   }
+  listenForDatasetRevision({datasetId:activeContext.datasetId,revision:()=>mapData.recordRevision,isDirty:()=>state.relationEditorOpen||state.relationStatus==='saving',
+    onDirty:()=>{state.relationError='Data berubah di halaman lain. Muat ulang sebelum menyimpan.';renderDrawer()}})
   container.innerHTML = `
     <div class="map-app">
       ${renderTopNavigation('map', {
@@ -329,9 +328,7 @@ export async function renderMapPage(container) {
 
   function updateUrl(mode = 'push') {
     const query = new URLSearchParams(serializeMapUrlState(window.location.search, {
-      datasetId: activeContext.datasetId,
-      branchId: activeContext.branchId,
-      siteId: activeContext.siteId,
+      datasetId: activeContext.datasetId,      siteId: activeContext.siteId,
       selectedNetworkIds: selection.selectedNetworkIds,
       selectedAssetId: stableUrlAssetId(assetById[selection.selectedAssetId]),
       networkFamily: initialUrlState.networkFamily,
@@ -345,9 +342,7 @@ export async function renderMapPage(container) {
     const topologyLink = container.querySelector('a[href="/topology"], a[href^="/topology?"]')
     if (topologyLink) {
       const topologyQuery = new URLSearchParams({
-        datasetId: activeContext.datasetId,
-        branchId: activeContext.branchId,
-      })
+        datasetId: activeContext.datasetId,      })
       if (selectedArea?.key) topologyQuery.set('area', selectedArea.key)
       if (selection.selectedAssetId) topologyQuery.set('selectedAssetId', selection.selectedAssetId)
       topologyLink.href = `/topology?${topologyQuery}`
@@ -807,6 +802,8 @@ export async function renderMapPage(container) {
     renderDrawer()
     try {
       const response = await setMountingRelation({
+        datasetId: activeContext.datasetId,
+        expectedRecordRevision: mapData.recordRevision,
         datasetVersionId: activeContext.datasetVersionId,
         assetId,
         poleAssetId,
@@ -846,16 +843,7 @@ export async function renderMapPage(container) {
       ? response.mountingOptions
       : mountingOptions
     const confirmedRelations = mergeMountingRelations([nextRelations], assetReferenceIndex)
-    const inferredRelations = inferSpatialMountingRelations({
-      assets,
-      mountingRelations: confirmedRelations,
-      mountingOverrides: nextOverrides,
-      assetReferenceIndex,
-    })
-    mountingRelations = mergeMountingRelations([
-      confirmedRelations,
-      inferredRelations,
-    ], assetReferenceIndex)
+    mountingRelations = confirmedRelations
     mountingOverrides = nextOverrides.map((override) => ({ ...override }))
     mountingCandidates = nextCandidates.map((candidate) => ({ ...candidate }))
     mountingOptions = nextOptions.map((option) => ({
@@ -889,12 +877,13 @@ export async function renderMapPage(container) {
     renderDrawer()
     let rollbackGraph = topologyGraph
     try {
-      if (replaceEdgeId) {
+      if (replaceEdgeId || replaceRelationId) {
         const response = await saveTopologyDiagram({
+          datasetId: activeContext.datasetId,
           datasetVersionId: activeContext.datasetVersionId,
           expectedRecordRevision: mapData.recordRevision,
           changes: [
-            { type: 'remove-edge', edgeId: replaceEdgeId },
+            { type: 'remove-edge', edgeId: replaceEdgeId ?? replaceRelationId },
             { type: 'add-relation', sourceAssetId, targetAssetId },
           ],
         })
@@ -920,24 +909,6 @@ export async function renderMapPage(container) {
       }
 
       let expectedGraphRevision = topologyGraph.graphRevision ?? undefined
-      if (replaceRelationId) {
-        const revoked = await revokeTopologyRelation({
-          relationId: replaceRelationId,
-          reason: 'Hubungan diganti dari Detail aset.',
-          expectedGraphRevision,
-        })
-        if (revoked?.graph && Array.isArray(revoked.graph.edges)) {
-          topologyGraph = revoked.graph
-          mapData.recordRevision = revoked.recordRevision ?? mapData.recordRevision
-          expectedGraphRevision = topologyGraph.graphRevision ?? undefined
-          relationGraph = buildExplicitRelationGraph({
-            networks,
-            assetIds: validIds.assetIds,
-            topologyGraph,
-          })
-          canvasApi.setTopologyGraph(topologyGraph)
-        }
-      }
       rollbackGraph = topologyGraph
       const pendingRelationId = `pending-manual:${sourceAssetId}:${targetAssetId}`
       const pendingEdge = {
@@ -979,6 +950,8 @@ export async function renderMapPage(container) {
       renderDrawer()
       syncMap()
       const response = await createTopologyRelation({
+        datasetId: activeContext.datasetId,
+        expectedRecordRevision: mapData.recordRevision,
         datasetVersionId: activeContext.datasetVersionId,
         sourceAssetId,
         targetAssetId,
@@ -1033,11 +1006,14 @@ export async function renderMapPage(container) {
     try {
       const response = edgeId
         ? await saveTopologyDiagram({
+          datasetId: activeContext.datasetId,
           datasetVersionId: activeContext.datasetVersionId,
           expectedRecordRevision: mapData.recordRevision,
           changes: [{ type: 'remove-edge', edgeId }],
         })
         : await revokeTopologyRelation({
+          datasetId: activeContext.datasetId,
+          expectedRecordRevision: mapData.recordRevision,
           relationId,
           datasetVersionId: activeContext.datasetVersionId,
           reason: 'Hubungan dihapus dari Detail aset.',
@@ -1102,9 +1078,7 @@ export async function renderMapPage(container) {
   function fetchAssetDetail(assetId, { force = false } = {}) {
     if (!force && pendingAssetDetails.has(assetId)) return pendingAssetDetails.get(assetId)
     const request = loadActiveAssetDetail({
-      datasetId: activeContext.datasetId,
-      branchId: activeContext.branchId,
-      assetId,
+      datasetId: activeContext.datasetId,      assetId,
     }).then((detailPayload) => {
       const iconEdit = assetIconEdits.get(assetId)
       if (iconEdit && detailPayload.asset) Object.assign(detailPayload.asset, iconEdit)
@@ -1148,9 +1122,7 @@ export async function renderMapPage(container) {
       return
     }
     const query = new URLSearchParams({
-      datasetId: activeContext.datasetId,
-      branchId: activeContext.branchId,
-    })
+      datasetId: activeContext.datasetId,    })
     if (selectedArea?.key) query.set('area', selectedArea.key)
     if (selection.selectedAssetId) query.set('selectedAssetId', selection.selectedAssetId)
     window.location.href = `/topology?${query}`
@@ -1529,9 +1501,6 @@ function readRequestedDatasetContext() {
     datasetId: query.get('datasetId')
       || window.sessionStorage.getItem('sinergiActiveDatasetId')
       || 'dataset-semarang',
-    branchId: query.get('branchId')
-      || window.sessionStorage.getItem('sinergiActiveBranchId')
-      || 'semarang',
     siteId: query.get('siteId') || null,
   }
 }
@@ -1577,76 +1546,6 @@ function renderDatasetState(container, {
     </div>
   `
   bindUserAccountMenu()
-}
-
-let userAccountMenuInteractionsBound = false
-
-export function bindUserAccountMenu() {
-  if (typeof document === 'undefined') return
-  bindThemeToggle()
-  const account = getSessionUser()
-  document.querySelectorAll('[data-user-account-menu]').forEach((menu) => {
-    menu.querySelector('.user-menu-identity strong').textContent = account?.name || 'Pengguna'
-    menu.querySelector('.user-menu-identity small').textContent =
-      account?.role === 'Administrator' ? 'Administrator' : 'Pengguna'
-    menu.querySelector('.user-menu-avatar').textContent =
-      String(account?.name || 'SI').slice(0, 2).toUpperCase()
-    menu.querySelector('[data-user-account-trigger]').setAttribute('aria-label',
-      `Menu akun ${account?.name || 'Pengguna'}`)
-  })
-  if (userAccountMenuInteractionsBound) return
-  userAccountMenuInteractionsBound = true
-
-  document.addEventListener('click', (event) => {
-    const target = event.target
-    const trigger = target?.closest?.('[data-user-account-trigger]')
-    if (trigger) {
-      const menu = trigger.closest('[data-user-account-menu]')
-      if (!menu) return
-
-      const wasOpen = trigger.getAttribute('aria-expanded') === 'true'
-      closeUserAccountMenus()
-      if (!wasOpen) openUserAccountMenu(menu)
-      return
-    }
-
-    if (target?.closest?.('[data-user-account-logout]')) {
-      closeUserAccountMenus()
-      void logout().finally(() => window.location.assign('/'))
-      return
-    }
-
-    if (!target?.closest?.('[data-user-account-menu]')) closeUserAccountMenus()
-  })
-
-  document.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape') return
-    const openMenu = document.querySelector('[data-user-account-menu].is-open')
-    if (!openMenu) return
-
-    event.preventDefault()
-    closeUserAccountMenus()
-    openMenu.querySelector('[data-user-account-trigger]')?.focus()
-  })
-}
-
-function openUserAccountMenu(menu) {
-  const trigger = menu.querySelector('[data-user-account-trigger]')
-  const dropdown = menu.querySelector('[data-user-account-dropdown]')
-  if (!trigger || !dropdown) return
-
-  menu.classList.add('is-open')
-  trigger.setAttribute('aria-expanded', 'true')
-  dropdown.hidden = false
-}
-
-function closeUserAccountMenus() {
-  document.querySelectorAll('[data-user-account-menu].is-open').forEach((menu) => {
-    menu.classList.remove('is-open')
-    menu.querySelector('[data-user-account-trigger]')?.setAttribute('aria-expanded', 'false')
-    const dropdown = menu.querySelector('[data-user-account-dropdown]')
-    if (dropdown) dropdown.hidden = true
-  })
 }
 
 export function findAssetMatches(assets, query, limit = 8) {
@@ -1995,59 +1894,4 @@ function networkMatchesPreset(network, preset) {
     return /infrastructure|switch|server|router|rack|peripheral|printer|access point/.test(source)
   }
   return true
-}
-
-export function renderTopNavigation(activeView = 'map', context = null) {
-  const topologyNavigation = activeView === 'topology'
-  const contextParams = context?.datasetId
-    ? new URLSearchParams({
-      datasetId: context.datasetId,
-      branchId: context.branchId,
-    })
-    : null
-  if (contextParams && context.area) contextParams.set('area', context.area)
-  if (contextParams && context.draftVersionId) {
-    contextParams.set('draftVersionId', context.draftVersionId)
-  }
-  const contextQuery = contextParams ? `?${contextParams}` : ''
-  return `
-    <header class="top-navigation${topologyNavigation ? ' topology-top-navigation' : ''}">
-      <a class="brand-lockup nav-brand" href="/map${contextQuery}" aria-label="SINERGI — Peta Aset">
-        ${patraNiagaLogoMarkup()}
-      </a>
-      <nav aria-label="Navigasi utama">
-        <a href="/map${contextQuery}" class="${activeView === 'map' ? 'active' : ''}">
-          <span class="material-symbols-outlined" aria-hidden="true">map</span><span class="nav-label">Peta Aset</span>
-        </a>
-        <a href="/topology${contextQuery}" class="${activeView === 'topology' ? 'active' : ''}">
-          <span class="material-symbols-outlined" aria-hidden="true">account_tree</span><span class="nav-label">Diagram Topologi</span>
-        </a>
-      </nav>
-      <div class="nav-actions">
-        <button class="icon-button theme-toggle" type="button" data-theme-toggle
-          aria-label="Aktifkan mode gelap" aria-pressed="false" title="Mode gelap">
-          <span class="material-symbols-outlined" data-theme-icon aria-hidden="true">dark_mode</span>
-        </button>
-        <div class="user-account-menu" data-user-account-menu>
-          <button class="user-menu" data-user-account-trigger type="button"
-            aria-label="Menu akun" aria-haspopup="menu" aria-expanded="false"
-            aria-controls="user-account-dropdown">
-            <span class="user-menu-avatar" aria-hidden="true">SI</span>
-            <span class="user-menu-identity"><strong>Pengguna</strong><small>Pengguna</small></span>
-            <span class="material-symbols-outlined user-menu-chevron" aria-hidden="true">expand_more</span>
-          </button>
-          <div class="user-menu-dropdown" data-user-account-dropdown id="user-account-dropdown"
-            role="menu" aria-label="Menu akun" hidden>
-            <div class="user-menu-dropdown-items user-menu-dropdown-items-last">
-              <button class="user-menu-dropdown-item" data-user-account-logout
-                type="button" role="menuitem">
-                <span class="material-symbols-outlined" aria-hidden="true">logout</span>
-                <span>Keluar</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </header>
-  `
 }

@@ -18,12 +18,10 @@ const pool = await createPostgresPool({
   ssl: config.database.ssl,
 })
 try {
-  const account = await new PostgresAccountStore(pool).save({
+  const account = await new PostgresAccountStore(pool,{operational:true}).save({
     username: options.username,
     password,
     role: options.role,
-    branchIds: options.branches?.split(',').filter(Boolean) ?? [],
-    datasetIds: options.datasets?.split(',').filter(Boolean) ?? [],
   })
   process.stdout.write(`Akun ${account.username} (${account.role}) tersimpan.\n`)
 } finally {

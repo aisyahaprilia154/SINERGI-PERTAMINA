@@ -1,24 +1,5 @@
+@import './app-tokens.css';
 /* One visual language for the two operational workspaces. */
-.map-body,
-.topology-body {
-  --app-ink: #193248;
-  --app-muted: #617487;
-  --app-accent: #326b91;
-  --app-accent-soft: #eaf2f7;
-  --app-border: #dce5eb;
-  --app-canvas: #f4f7f9;
-  --app-surface: #fff;
-  --app-control: #f0f4f7;
-  --color-primary: var(--app-accent);
-  --color-primary-hover: #285a7b;
-  --color-primary-soft: var(--app-accent-soft);
-  --color-page: var(--app-canvas);
-  --color-text-primary: var(--app-ink);
-  --color-text-secondary: var(--app-muted);
-  --color-border: var(--app-border);
-  --color-surface-hover: var(--app-control);
-}
-
 .topology-body.topology-body {
   --workspace-accent: var(--app-accent);
   --workspace-canvas: var(--app-canvas);
@@ -243,18 +224,6 @@
   .topology-body #app .top-navigation nav a { font-size: 11px; }
   .map-body .nav-brand .brand-logo-wordmark strong,
   .topology-body .nav-brand .brand-logo-wordmark strong { font-size: 14px; }
-}
-
-:root[data-theme="dark"] .map-body,
-:root[data-theme="dark"] .topology-body {
-  --app-ink: #eef3f7;
-  --app-muted: #acbdca;
-  --app-accent: #8ebcde;
-  --app-accent-soft: #263f53;
-  --app-border: #394957;
-  --app-canvas: #18252f;
-  --app-surface: #22313d;
-  --app-control: #2d3d4a;
 }
 
 :root[data-theme="dark"] .map-body .top-navigation nav a.active,
@@ -518,37 +487,9 @@
 }
 
 /* Shared translucent material for both workspaces and their navigation. */
-.map-body,
-.topology-body {
-  --app-glass: rgba(248, 251, 253, .76);
-  --app-glass-raised: rgba(255, 255, 255, .68);
-  --app-glass-control: rgba(255, 255, 255, .52);
-  --app-glass-border: rgba(95, 125, 148, .2);
-  --app-glass-shadow: 0 18px 42px rgba(33, 57, 76, .11);
-  --ui-glass: var(--app-glass);
-  --ui-line: var(--app-glass-border);
-  --ui-radius-control: 12px;
-  --ui-radius-card: 18px;
-  --ui-radius-panel: 24px;
-  --ui-shadow-float: var(--app-glass-shadow);
-}
 
-:root[data-theme="dark"] .map-body,
-:root[data-theme="dark"] .topology-body {
-  --app-ink: #f5f5f7;
-  --app-muted: #a1a1a8;
-  --app-accent: #91c5e8;
-  --app-accent-soft: #353538;
-  --app-border: rgba(255, 255, 255, .12);
-  --app-canvas: #151517;
-  --app-surface: #1e1e20;
-  --app-control: #2a2a2d;
-  --app-glass: rgba(30, 30, 32, .82);
-  --app-glass-raised: rgba(48, 48, 51, .76);
-  --app-glass-control: rgba(255, 255, 255, .09);
-  --app-glass-border: rgba(255, 255, 255, .14);
-  --app-glass-shadow: 0 18px 42px rgba(0, 0, 0, .28);
-}
+
+
 
 .map-body .top-navigation,
 .topology-body #app .top-navigation,
@@ -1117,15 +1058,9 @@
 }
 
 /* Active controls need a strong, readable state in both themes. */
-.map-body,
-.topology-body {
-  --app-accent-active: #326b91;
-}
 
-:root[data-theme="dark"] .map-body,
-:root[data-theme="dark"] .topology-body {
-  --app-accent-active: #286f9c;
-}
+
+
 
 .map-body .map-category-presets button.active,
 .topology-body #app .topology-family-presets button.active,

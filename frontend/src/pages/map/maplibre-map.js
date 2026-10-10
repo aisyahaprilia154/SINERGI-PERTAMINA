@@ -1573,6 +1573,8 @@ function buildFeatureCollections({
   state,
   zoom,
 }) {
+  const removedPaths=new Set(topologyGraph.removedPathAssetIds ?? [])
+  geometries=geometries.filter(g=>!removedPaths.has(g.sourceNodeId ?? g.assetNodeId))
   const networkByGeometry = new Map()
   networks.forEach((network) => {
     network.geometryIds?.forEach((geometryId) => networkByGeometry.set(geometryId, network))

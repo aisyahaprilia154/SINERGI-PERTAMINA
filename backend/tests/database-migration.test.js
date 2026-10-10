@@ -163,10 +163,10 @@ class RecordingClient {
       const checksum = this.applied.get(id)
       return { rows: checksum ? [{ migration_id: id, checksum }] : [] }
     }
-    if (text.startsWith('INSERT INTO schema_migrations')) {
+    if (text.startsWith('INSERT INTO public.schema_migrations')) {
       this.applied.set(values[0], values[1])
     }
-    if (text.startsWith('DELETE FROM schema_migrations')) {
+    if (text.startsWith('DELETE FROM public.schema_migrations')) {
       this.applied.delete(values[0])
     }
     return { rows: [] }

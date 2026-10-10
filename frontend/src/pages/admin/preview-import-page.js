@@ -1,540 +1,79 @@
-import {
-  activateDatasetVersion,
-  downloadDatasetSource,
-  getDefaultAdminToken,
-  loadImportPreview,
-  reviewImportCategories,
-  rejectDatasetVersion,
-} from '../../services/import-dataset-service.js'
-import { patraNiagaLogoMarkup } from '../brand-logo.js'
-import { renderImportStatusBadge } from './import-status-badge.js'
-import { escapeAttribute, escapeHtml } from './import-view-utils.js'
-import { renderPreviewAssetDrawer } from './preview-asset-drawer.js'
-import { renderPreviewMapCanvas } from './preview-map-canvas.js'
-import {
-  buildImportPreviewModel,
-  calculateAssetBounds,
-  createImportPreviewState,
-  getVisiblePreviewData,
-} from './preview-import-state.js'
-import { renderPreviewSidebar } from './preview-sidebar.js'
-import { renderPreviewToolbar } from './preview-toolbar.js'
+import {mountAdminShell} from '../../components/admin-shell.js'
+import {loadImportPreview,loadImportStatus,decideImportItem,activateDatasetVersion,refreshImportPreview,downloadDatasetSource} from '../../services/import-dataset-service.js'
+import {loadActiveDataset} from '../../services/active-dataset-service.js'
+import {adaptActiveDatasetForMap} from '../../adapters/active-dataset-map-adapter.js'
+import {download} from './import-dataset-page.js'
+import {escapeHtml as e} from './import-view-utils.js'
 
-export function renderPreviewImportPage(container, datasetVersionId) {
-  document.title = 'Preview Import Dataset — SINERGI'
-  document.body.className = 'admin-preview-body'
-
-  const page = {
-    status: 'loading',
-    error: '',
-    model: null,
-    state: null,
-    controller: new AbortController(),
-    confirmAction: null,
+export async function renderPreviewImportPage(container,importId) {
+  document.title='Preview Tambahan — SINERGI'
+  const content=mountAdminShell(container,{active:'imports'})
+  let map=null,preview,baseline,showContext=true,busy=false,error=''
+  const load=async()=>{preview=await loadImportPreview({importId});baseline=await loadActiveDataset({datasetId:preview.import.dataset_id});render()}
+  const run=async action=>{if(busy)return;busy=true;render();try{await action();error='';await load()}catch(caught){error=caught.message;render()}finally{busy=false;render()}}
+  function render(){
+    map?.destroy?.();map=null
+    content.innerHTML=`<section class="operational-import"><a class="admin-back" href="/admin/datasets/import"><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>Kembali ke Impor</a><div class="au-heading"><div><h1 class="admin-page-title">Preview tambahan</h1><p class="admin-page-subtitle">Periksa lokasi dan konflik sebelum menerapkan tambahan.</p></div></div><section class="operational-card"><h2>${e(preview.import.name)}</h2>
+      <p>${preview.summary.addedAssets} aset baru · ${preview.summary.addedRelations} relasi baru · ${preview.summary.existingAssets} aset sudah tersimpan · ${preview.summary.conflicts} konflik</p>
+      <p>Aset lama yang cocok tetap memakai data database. Kategori baru ditempatkan sebagai perangkat akhir.</p>
+      ${error?`<p role="alert" class="operational-error">${e(error)}</p>`:''}
+      <div class="operational-actions"><button data-apply class="operational-primary" ${busy||preview.summary.conflicts||preview.import.status!=='ready'?'disabled':''}>Terapkan tambahan</button>
+      <button data-refresh ${busy?'disabled':''}>Hitung ulang preview</button><button data-source>Unduh sumber</button></div></section>
+      <section class="operational-card"><div class="operational-actions"><h2>Lokasi tambahan</h2><label><input data-context type="checkbox" ${showContext?'checked':''}> Tampilkan aset lama sebagai konteks</label></div><div class="operational-preview-map" data-preview-map></div></section>
+      <section class="operational-card"><h2>Tambahan aset dan kategori</h2>${renderAdditions(preview.items)}</section>
+      ${preview.conflicts.length?`<section class="operational-card"><h2>Konflik yang perlu diputuskan</h2>${preview.conflicts.map(item=>renderConflict(item,baseline,preview)).join('')}</section>`:''}</section>`
+    content.querySelector('[data-context]').addEventListener('change',event=>{showContext=event.target.checked;render()})
+    content.querySelector('[data-source]').addEventListener('click',()=>void run(async()=>download(await downloadDatasetSource({importId}))))
+    content.querySelector('[data-apply]').addEventListener('click',()=>void run(async()=>{await activateDatasetVersion({importId,expectedRevision:preview.baseRevision});window.location.assign(`/map?datasetId=${encodeURIComponent(preview.import.dataset_id)}`)}))
+    content.querySelector('[data-refresh]').addEventListener('click',()=>void run(async()=>{
+      await refreshImportPreview({importId})
+      while(container.isConnected){const status=await loadImportStatus({statusUrl:`/api/imports/${encodeURIComponent(importId)}`});if(status.import.status==='ready')break;if(status.import.status==='failed')throw new Error(status.import.error?.message || 'Preview gagal diperbarui.');await new Promise(resolve=>setTimeout(resolve,1200))}
+    }))
+    content.querySelectorAll('[data-item-action]').forEach(button=>button.addEventListener('click',()=>void run(async()=>{
+      const row=button.closest('[data-conflict-item]'),decision={decision:button.dataset.itemAction}
+      if(decision.decision==='match_existing')decision.assetId=row.querySelector('[data-existing-asset]').value
+      if(decision.decision==='connect'){decision.sourceAssetId=row.querySelector('[data-endpoint-start]').value;decision.targetAssetId=row.querySelector('[data-endpoint-end]').value}
+      await decideImportItem({importId,itemId:row.dataset.conflictItem,decision})
+    })))
+    const host=content.querySelector('[data-preview-map]'),payload=previewMapPayload(preview,baseline,showContext)
+    void import('../map/maplibre-map.js').then(({createMapLibreSurface})=>{
+      if(!host.isConnected)return
+      const model=adaptActiveDatasetForMap(payload);map=createMapLibreSurface(host,model)
+    }).catch(caught=>{if(host.isConnected)host.textContent=`Peta tidak dapat dimuat: ${caught.message}`})
   }
-
-  document.addEventListener('keydown', handleGlobalEscape)
-  load()
-
-  async function load() {
-    page.status = 'loading'
-    page.error = ''
-    render()
-    try {
-      const payload = await loadImportPreview({
-        token: getDefaultAdminToken(),
-        datasetVersionId,
-        signal: page.controller.signal,
-      })
-      page.model = buildImportPreviewModel(payload)
-      page.state = createImportPreviewState(page.model)
-      page.status = 'ready'
-    } catch (error) {
-      if (error.name === 'AbortError') return
-      page.status = 'error'
-      page.error = error.message
-    }
-    render()
+  content.innerHTML=`<section class="operational-import"><a class="admin-back" href="/admin/datasets/import"><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>Kembali ke Impor</a><div class="au-heading"><div><h1 class="admin-page-title">Preview tambahan</h1><p class="admin-page-subtitle">Periksa lokasi dan konflik sebelum menerapkan tambahan.</p></div></div><p role="status">Memuat tambahan…</p></section>`
+  try{await load()}catch(caught){content.querySelector('[role=status]').textContent=caught.message}
+}
+export function renderAdditions(items=[]) {
+  const assets=items.filter(i=>i.kind==='asset'&&i.status==='new')
+  return assets.length?`<div class="operational-table-wrap"><table><thead><tr><th>Aset</th><th>Fasilitas</th><th>Kategori</th><th>Peran</th></tr></thead><tbody>${assets.map(({proposal:p})=>`<tr><td>${e(p.name)}</td><td>${e(p.facility.name)}</td><td>${e(p.category)}</td><td>${e(p.diagramRole)}</td></tr>`).join('')}</tbody></table></div>`:'<p>Tidak ada tambahan aset.</p>'
+}
+function renderConflict(item,baseline,preview) {
+  const options=baseline.assets.filter(a=>!item.result?.candidates?.length||item.result.candidates.includes(a.id)).map(a=>`<option value="${e(a.id)}">${e(a.name)} · ${e(a.facilityName)} · ${e(a.id)}</option>`).join('')
+  const title=item.kind==='relation'?(item.proposal.kind==='mounting'?'Tiang pemasangan belum pasti':'Endpoint garis belum pasti'):item.proposal.name
+  if(item.kind==='relation') {
+    const available=[...baseline.assets.filter(a=>a.objectRole==='device_node'),...preview.additions.assets.filter(a=>a.kind==='device')]
+    item={...item,result:{...item.result,endpointCandidates:[0,1].map(i=>item.result?.endpointCandidates?.[i]?.length?item.result.endpointCandidates[i]:available.filter(a=>item.proposal.kind==='mounting'&&i===1?a.diagramRole==='physical-mount':a.diagramRole!=='physical-mount'))}}
   }
-
-  function render() {
-    container.innerHTML = renderShell(page, datasetVersionId)
-    if (page.status === 'ready') bindReadyEvents()
-    else container.querySelector('[data-retry-preview]')?.addEventListener('click', load)
+  return `<article class="operational-conflict" data-conflict-item="${e(item.id)}"><h3>${e(title)}</h3><p>${e(item.reason==='identity_conflict'?'Identitas aset memiliki beberapa kemungkinan.':item.reason==='invalid_geometry'?'Koordinat sumber tidak valid.':'Garis belum memiliki satu pasangan endpoint yang pasti.')}</p>
+    ${item.kind==='asset'&&item.status!=='invalid'?`<label>Aset lama<select data-existing-asset><option value="">Pilih aset…</option>${options}</select></label><button data-item-action="match_existing">Cocokkan ke aset lama</button><button data-item-action="create_new">Pastikan sebagai aset baru</button>`:''}
+    ${item.kind==='relation'?`<label>Endpoint awal<select data-endpoint-start><option value="">Pilih…</option>${endpointOptions(item.result?.endpointCandidates?.[0] ?? [])}</select></label><label>Endpoint akhir<select data-endpoint-end><option value="">Pilih…</option>${endpointOptions(item.result?.endpointCandidates?.[1] ?? [])}</select></label><button data-item-action="connect">Simpan pasangan</button>`:''}
+    <button data-item-action="skip">Lewati item</button></article>`
+}
+const endpointOptions=assets=>assets.map(a=>`<option value="${e(a.id)}">${e(a.name)} · ${e(a.id)}</option>`).join('')
+export function previewMapPayload(preview,baseline,context) {
+  const payload={...baseline,assets:context?[...baseline.assets]:[],geometries:context?[...baseline.geometries]:[],layers:[...baseline.layers],mountingRelations:context?[...baseline.mountingRelations]:[],topologyGraph:{nodes:[],edges:[]}}
+  const parts=geometry=>geometry?.type==='GeometryCollection'?geometry.geometries.flatMap(parts):geometry?[geometry]:[]
+  for(const p of preview.additions.assets) {
+    const layerId=`preview:${p.facility.key}:${p.category}`
+    payload.layers.push({id:layerId,name:p.category,sourceFolderPath:p.source.folderPath,defaultVisible:true})
+    payload.assets.push({id:p.id,assetId:p.id,canonicalAssetId:p.id,name:p.name,type:p.properties.assetType,category:p.category,dynamicCategory:p.properties.dynamicCategory,
+      diagramRole:p.diagramRole,diagramClass:p.diagramRole,facilityId:p.facility.key,sourceFolderPath:p.source.folderPath,layerId,objectRole:p.kind==='device'?'device_node':'cable_path',properties:{classification:{...p.properties,diagramClass:p.diagramRole}}})
+    parts(p.source.geometry).forEach((g,index)=>payload.geometries.push({id:`preview:${p.id}:${index}`,assetNodeId:p.id,geometryType:({Point:'point',LineString:'line_string',Polygon:'polygon'})[g.type],coordinates:g.coordinates}))
   }
-
-  function bindReadyEvents() {
-    const { model, state } = page
-    const rerender = () => render()
-    container.querySelectorAll('[data-view-mode]').forEach((button) => {
-      button.addEventListener('click', () => {
-        state.viewMode = button.dataset.viewMode
-        state.selectedAssetId = null
-        state.selectedIssueId = null
-        state.focusBounds = null
-        state.zoom = 1
-        rerender()
-      })
-    })
-    container.querySelector('[data-toggle-changes]')?.addEventListener('click', () => {
-      state.showChanges = !state.showChanges
-      rerender()
-    })
-    container.querySelector('[data-toggle-issues]')?.addEventListener('click', () => {
-      state.showIssues = !state.showIssues
-      rerender()
-    })
-    bindFilter('[data-filter-layer]', state.visibleLayerIds, 'filterLayer')
-    bindFilter('[data-filter-category]', state.visibleCategories, 'filterCategory')
-    bindFilter('[data-filter-geometry]', state.visibleGeometryTypes, 'filterGeometry')
-    bindFilter('[data-filter-issue]', state.visibleIssueSeverities, 'filterIssue')
-
-    container.querySelectorAll('[data-preview-asset]').forEach((element) => {
-      element.addEventListener('click', () => selectAsset(element.dataset.previewAsset))
-      element.addEventListener('keydown', (event) => {
-        if (!['Enter', ' '].includes(event.key)) return
-        event.preventDefault()
-        selectAsset(element.dataset.previewAsset)
-      })
-    })
-    container.querySelectorAll('[data-problem-asset], [data-navigate-issue]').forEach((button) => {
-      button.addEventListener('click', () => navigateIssue(
-        button.dataset.navigateIssue || button.dataset.issueId,
-        button.dataset.problemAsset,
-      ))
-    })
-    container.querySelector('.close-preview-drawer')?.addEventListener('click', closeDrawer)
-    container.querySelectorAll('[data-related-asset]').forEach((button) => {
-      button.addEventListener('click', () => selectAsset(button.dataset.relatedAsset))
-    })
-    container.querySelectorAll('[data-fit-all], [data-preview-fit], [data-reset-view]')
-      .forEach((button) => button.addEventListener('click', () => {
-        state.focusBounds = null
-        state.zoom = 1
-        rerender()
-      }))
-    container.querySelector('[data-preview-zoom-in]')?.addEventListener('click', () => {
-      state.zoom = Math.min(4, state.zoom + 0.5)
-      rerender()
-    })
-    container.querySelector('[data-preview-zoom-out]')?.addEventListener('click', () => {
-      state.zoom = Math.max(1, state.zoom - 0.5)
-      rerender()
-    })
-    container.querySelector('[data-open-preview-sidebar]')?.addEventListener('click', () => {
-      state.sidebarOpen = true
-      rerender()
-    })
-    container.querySelector('.close-preview-sidebar')?.addEventListener('click', () => {
-      state.sidebarOpen = false
-      rerender()
-    })
-    container.querySelector('.preview-mobile-backdrop')?.addEventListener('click', () => {
-      state.sidebarOpen = false
-      rerender()
-    })
-    container.querySelector('[data-download-report]')?.addEventListener('click', downloadReport)
-    container.querySelector('[data-download-source]')?.addEventListener('click', downloadSource)
-    const categoryReviewForm = container.querySelector('[data-category-review-form]')
-    categoryReviewForm?.addEventListener('submit', async (event) => {
-        event.preventDefault()
-        const decisions = [...categoryReviewForm.querySelectorAll('[data-category-key]')]
-          .map((input) => ({ key: input.dataset.categoryKey, label: input.value.trim() }))
-        if (decisions.some(({ label }) => !label)) return
-        categoryReviewForm.querySelector('button').disabled = true
-        try {
-          await reviewImportCategories({
-            token: getDefaultAdminToken(),
-            datasetVersionId,
-            expectedRecordRevision: page.model.payload.datasetVersion.recordRevision,
-            decisions,
-          })
-          await load()
-        } catch (error) {
-          page.state.actionStatus = 'error'
-          page.state.actionMessage = error.message
-          render()
-        }
-    })
-    container.querySelector('[data-request-activate]')?.addEventListener('click', () => {
-      page.confirmAction = 'activate'
-      rerender()
-      container.querySelector('#preview-confirm-dialog')?.showModal()
-    })
-    container.querySelector('[data-request-reject]')?.addEventListener('click', () => {
-      page.confirmAction = 'reject'
-      rerender()
-      container.querySelector('#preview-confirm-dialog')?.showModal()
-    })
-    container.querySelector('[data-cancel-confirmation]')?.addEventListener('click', () => {
-      container.querySelector('#preview-confirm-dialog')?.close()
-      page.confirmAction = null
-    })
-    container.querySelector('[data-confirm-breaking]')?.addEventListener('change', (event) => {
-      page.state.confirmBreakingChanges = event.currentTarget.checked
-    })
-    container.querySelector('[data-confirm-action]')?.addEventListener('click', performAction)
-    function bindFilter(selector, values, datasetKey) {
-      container.querySelectorAll(selector).forEach((input) => {
-        input.addEventListener('change', () => {
-          const value = input.dataset[datasetKey]
-          if (input.checked) values.add(value)
-          else values.delete(value)
-          state.focusBounds = null
-          rerender()
-        })
-      })
-    }
-  }
-
-  function selectAsset(assetId) {
-    page.state.selectedAssetId = assetId
-    page.state.selectedIssueId = null
-    page.state.focusBounds = calculateAssetBounds(page.model, assetId)
-      ?? page.state.focusBounds
-    page.state.zoom = 1
-    render()
-  }
-
-  function navigateIssue(issueId, hintedAssetId) {
-    const issue = page.model.payload.issues.find(({ id }) => id === issueId)
-    const assetId = hintedAssetId
-      || issue?.assetId
-      || findAssetForSourceReference(page.model, issue)?.assetId
-    page.state.selectedIssueId = issueId
-    if (assetId) {
-      page.state.selectedAssetId = assetId
-      page.state.focusBounds = calculateAssetBounds(page.model, assetId)
-      page.state.actionStatus = 'success'
-      page.state.actionMessage = `Issue ${issue?.issueCode ?? ''} difokuskan pada ${assetId}.`
-    } else {
-      page.state.actionStatus = 'error'
-      page.state.actionMessage = 'Issue ini tidak mempunyai referensi geometri yang dapat difokuskan.'
-    }
-    page.state.zoom = 1
-    render()
-  }
-
-  function closeDrawer() {
-    page.state.selectedAssetId = null
-    page.state.selectedIssueId = null
-    page.state.focusBounds = null
-    render()
-  }
-
-  function handleGlobalEscape(event) {
-    if (event.key !== 'Escape' || page.status !== 'ready') return
-    if (container.querySelector('#preview-confirm-dialog')?.open) return
-    if (page.state.selectedAssetId) closeDrawer()
-    else if (page.state.sidebarOpen) {
-      page.state.sidebarOpen = false
-      render()
-    }
-  }
-
-  async function performAction() {
-    const action = page.confirmAction
-    container.querySelector('#preview-confirm-dialog')?.close()
-    page.state.actionStatus = 'loading'
-    page.state.actionMessage = action === 'activate'
-      ? 'Mengaktifkan dataset version secara atomik…'
-      : 'Menolak dataset version…'
-    render()
-    try {
-      const result = action === 'activate'
-        ? await activateDatasetVersion({
-          token: getDefaultAdminToken(),
-          datasetVersionId,
-          expectedActiveVersionId:
-            page.model.payload.comparison?.activeDatasetVersionId ?? null,
-          expectedRecordRevision: page.model.payload.datasetVersion.recordRevision,
-          publicationProfile: 'map_only',
-          confirmBreakingChanges: page.state.confirmBreakingChanges === true,
-        })
-        : await rejectDatasetVersion({
-          token: getDefaultAdminToken(),
-          datasetVersionId,
-        })
-      page.model.payload.datasetVersion = result.datasetVersion
-      page.model.payload.canActivate = false
-      if (action === 'activate') {
-        page.model.payload.comparison.activeDatasetVersionId = result.datasetVersion.id
-        page.model.payload.activeDatasetVersion = {
-          datasetVersion: result.datasetVersion,
-          layers: page.model.payload.layers,
-          assets: page.model.payload.assets,
-          geometries: page.model.payload.geometries,
-          relations: page.model.payload.relations,
-        }
-        page.model.active = page.model.candidate
-        page.state.activeMapUrl = result.mapUrl || '/map'
-      }
-      page.state.actionStatus = 'success'
-      page.state.actionMessage = action === 'activate'
-        ? `Dataset ${result.datasetVersion.versionName} sekarang aktif. Dataset aktif sebelumnya telah diarsipkan.`
-        : `Dataset ${result.datasetVersion.versionName} telah ditolak dan diarsipkan.`
-    } catch (error) {
-      page.state.actionStatus = 'error'
-      page.state.actionMessage = error.message
-    }
-    page.confirmAction = null
-    render()
-  }
-
-  function downloadReport() {
-    const report = {
-      datasetVersion: page.model.payload.datasetVersion,
-      validation: page.model.payload.validation,
-      summary: page.model.payload.comparison?.summary,
-      issues: page.model.payload.issues,
-      exportedAt: new Date().toISOString(),
-    }
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `validation-${datasetVersionId}.json`
-    anchor.click()
-    URL.revokeObjectURL(url)
-  }
-
-  async function downloadSource() {
-    page.state.actionStatus = 'loading'
-    page.state.actionMessage = 'Memverifikasi dan menyiapkan file sumber asli…'
-    render()
-    try {
-      const source = await downloadDatasetSource({
-        token: getDefaultAdminToken(),
-        datasetVersionId,
-      })
-      const objectUrl = URL.createObjectURL(source.blob)
-      const anchor = document.createElement('a')
-      anchor.href = objectUrl
-      anchor.download = source.filename
-      anchor.hidden = true
-      document.body.append(anchor)
-      anchor.click()
-      anchor.remove()
-      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
-      page.state.actionStatus = 'success'
-      page.state.actionMessage = `File sumber ${source.filename} berhasil diverifikasi dan diunduh.`
-    } catch (error) {
-      page.state.actionStatus = 'error'
-      page.state.actionMessage = error.message
-    }
-    render()
-  }
-}
-
-function renderShell(page, datasetVersionId) {
-  return `
-    <div class="admin-preview-app">
-      ${renderAdminHeader()}
-      ${page.status === 'loading' ? renderLoading() : ''}
-      ${page.status === 'error' ? renderError(page.error) : ''}
-      ${page.status === 'ready' ? renderReady(page, datasetVersionId) : ''}
-    </div>
-  `
-}
-
-function renderReady(page, datasetVersionId) {
-  const { model, state } = page
-  const visible = getVisiblePreviewData(model, state)
-  return `
-    <main class="import-preview-workspace ${state.selectedAssetId ? 'drawer-open' : ''}">
-      ${renderPreviewSidebar({ model, state })}
-      <section class="import-preview-main" aria-label="Peta preview import">
-        ${renderCategoryReviews(model.payload.categoryReviews)}
-        ${renderPreviewToolbar({ model, state })}
-        <div class="import-preview-map">
-          ${renderPreviewMapCanvas({ visible, state })}
-        </div>
-      </section>
-      ${renderPreviewAssetDrawer({ model, state })}
-      <div class="preview-mobile-backdrop" ${state.sidebarOpen ? '' : 'hidden'}></div>
-    </main>
-    ${renderActivationBar(model, state)}
-    ${renderConfirmationDialog(page.confirmAction, model, state)}
-  `
-}
-
-export function renderCategoryReviews(groups = []) {
-  const pending = groups.filter(({ status }) => status === 'pending')
-  if (!pending.length) return ''
-  return `<section class="preview-category-reviews" aria-label="Tinjau kategori baru">
-    <h2>Tinjau kategori baru</h2>
-    <p>Terima nama usulan atau ubah sebelum mengaktifkan dataset.</p>
-    <form data-category-review-form>
-      <div class="preview-category-review-list">${pending.map((group) => `
-        <label>${escapeHtml(group.proposedLabel)} · ${group.count} aset · ${group.source === 'metadata' ? 'metadata KMZ' : group.source === 'folder' ? 'folder KMZ' : 'nama aset'}
-          <input data-category-key="${escapeAttribute(group.key)}" maxlength="80" required value="${escapeAttribute(group.proposedLabel)}">
-        </label>
-      `).join('')}</div>
-      <button type="submit">Simpan semua kategori</button>
-    </form>
-  </section>`
-}
-
-function renderAdminHeader() {
-  return `
-    <header class="admin-app-header">
-      <a class="brand-lockup" href="/map" aria-label="SINERGI — Pertamina Patra Niaga">
-        ${patraNiagaLogoMarkup()}
-      </a>
-      <span class="admin-area-label">Administrasi dataset</span>
-      <nav aria-label="Navigasi admin">
-        <a href="/map">Peta jaringan</a>
-        <button class="admin-user-menu" type="button" aria-label="Profil SSC ICT Administrator">
-          <span class="material-symbols-outlined" aria-hidden="true">account_circle</span>
-          <span><strong>SSC ICT</strong><small>Administrator</small></span>
-        </button>
-      </nav>
-    </header>
-  `
-}
-
-function renderLoading() {
-  return `
-    <main class="preview-page-state" aria-busy="true" aria-live="polite">
-      <span class="material-symbols-outlined preview-spinner" aria-hidden="true">progress_activity</span>
-      <strong>Menyiapkan preview import</strong>
-      <p>Membaca aset, geometri, relasi, dan perbandingan dataset aktif.</p>
-    </main>
-  `
-}
-
-function renderError(message) {
-  return `
-    <main class="preview-page-state preview-page-error" role="alert">
-      <span class="material-symbols-outlined" aria-hidden="true">error</span>
-      <strong>Preview tidak dapat dimuat</strong>
-      <p>${escapeHtml(message)}</p>
-      <div>
-        <a class="button secondary" href="/admin/datasets/import">Kembali</a>
-        <button class="button primary" type="button" data-retry-preview>Coba lagi</button>
-      </div>
-    </main>
-  `
-}
-
-export function renderActivationBar(model, state) {
-  const { datasetVersion, validation, canActivate } = model.payload
-  const publishableProfiles = model.payload.publishableProfiles
-  const mapOnlyPublishable = Array.isArray(publishableProfiles)
-    ? publishableProfiles.includes('map_only') && canActivate === true
-    : canActivate === true
-  const blocking = validation?.summary?.blockingErrors
-    ?? model.payload.issues.filter(({ canActivate: allowed }) => allowed === false).length
-  const warnings = validation?.summary?.warnings
-    ?? model.payload.issues.filter(({ severity }) => severity === 'warning').length
-  const terminal = ['active', 'archived'].includes(datasetVersion.status)
-  return `
-    <footer class="preview-activation-bar">
-      <div class="preview-version-details">
-        ${renderImportStatusBadge(datasetVersion.status)}
-        <span><small>Blocking errors</small><strong>${blocking}</strong></span>
-        <span><small>Warnings</small><strong>${warnings}</strong></span>
-        <span><small>Source filename</small><strong title="${escapeAttribute(datasetVersion.sourceFilename)}">${escapeHtml(datasetVersion.sourceFilename)}</strong></span>
-        <span><small>Ukuran</small><strong>${formatFileSize(datasetVersion.sourceSize)}</strong></span>
-        <span class="checksum-detail"><small>Checksum</small><strong
-          title="${escapeAttribute(datasetVersion.checksum || 'Tidak tersedia')}">${escapeHtml(shortChecksum(datasetVersion.checksum))}</strong></span>
-        <span><small>Uploader</small><strong>${escapeHtml(datasetVersion.importedBy || 'Tidak tersedia')}</strong></span>
-        <span><small>Upload time</small><strong>${formatDate(datasetVersion.importedAt)}</strong></span>
-      </div>
-      <div class="preview-activation-actions">
-        <a class="button secondary" href="/admin/datasets/import">
-          <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>Kembali
-        </a>
-        <button class="button secondary source-file-download" type="button" data-download-source
-          ${state.actionStatus === 'loading' ? 'disabled' : ''}
-          title="Unduh byte file KML/KMZ asli, bukan export dataset">
-          <span class="material-symbols-outlined" aria-hidden="true">file_download</span>
-          Unduh file sumber
-        </button>
-        <button class="button secondary" type="button" data-download-report>
-          <span class="material-symbols-outlined" aria-hidden="true">download</span>Unduh laporan
-        </button>
-        <button class="button danger-outline" type="button" data-request-reject
-          ${terminal || state.actionStatus === 'loading' ? 'disabled' : ''}>
-          Tolak versi
-        </button>
-        <button class="button primary" type="button" data-request-activate
-          ${mapOnlyPublishable && !terminal && state.actionStatus !== 'loading' ? '' : 'disabled'}
-          title="${mapOnlyPublishable ? 'Aktifkan dataset version ini' : 'Selesaikan blocking error sebelum aktivasi'}">
-          <span class="material-symbols-outlined" aria-hidden="true">publish</span>Aktifkan dataset
-        </button>
-      </div>
-    </footer>
-  `
-}
-
-function renderConfirmationDialog(action, model, state) {
-  const activate = action !== 'reject'
-  const highRisk = model.payload.comparison?.summary?.requiresBreakingChangeConfirmation === true
-  return `
-    <dialog id="preview-confirm-dialog" class="preview-confirm-dialog">
-      <form method="dialog">
-        <span class="confirmation-icon material-symbols-outlined" aria-hidden="true">
-          ${activate ? 'publish' : 'archive'}
-        </span>
-        <h2>${activate ? 'Aktifkan dataset version?' : 'Tolak dataset version?'}</h2>
-        <p>${activate
-          ? 'Dataset aktif saat ini akan diarsipkan dan versi ini dipublikasikan sebagai satu operasi penuh. Aktivasi sebagian tidak dilakukan.'
-          : 'Versi ini akan diarsipkan dan tidak dapat diaktifkan dari preview ini.'}</p>
-        <dl>
-          <div><dt>Versi</dt><dd>${escapeHtml(model.payload.datasetVersion.versionName)}</dd></div>
-          <div><dt>Cabang</dt><dd>${escapeHtml(model.payload.datasetVersion.branchId)}</dd></div>
-        </dl>
-        ${activate && highRisk ? `
-          <label class="preview-breaking-confirmation">
-            <input type="checkbox" data-confirm-breaking
-              ${state.confirmBreakingChanges === true ? 'checked' : ''}>
-            Saya sudah meninjau perubahan berisiko tinggi dan menyetujui publikasi.
-          </label>
-        ` : ''}
-        <div>
-          <button class="button secondary" type="button" data-cancel-confirmation>Batal</button>
-          <button class="button ${activate ? 'primary' : 'danger'}" type="button" data-confirm-action
-            ${activate && highRisk && state.confirmBreakingChanges !== true ? 'disabled' : ''}>
-            ${activate ? 'Ya, aktifkan dataset' : 'Ya, tolak versi'}
-          </button>
-        </div>
-      </form>
-    </dialog>
-  `
-}
-
-function findAssetForSourceReference(model, issue) {
-  if (!issue) return null
-  return model.candidate.assets.find((asset) => (
-    asset.sourcePlacemarkId === issue.geometryReference
-      || asset.name === issue.sourcePlacemarkName
-      || asset.properties?.sourceFolderPath === issue.sourceFolderPath
-  ))
-}
-
-function formatDate(value) {
-  if (!value) return 'Tidak tersedia'
-  try {
-    return new Intl.DateTimeFormat('id-ID', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    }).format(new Date(value))
-  } catch {
-    return value
-  }
-}
-
-function formatFileSize(value) {
-  if (!Number.isFinite(Number(value)) || Number(value) < 0) return 'Tidak tersedia'
-  const bytes = Number(value)
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 ** 2).toFixed(1)} MB`
-}
-
-function shortChecksum(value) {
-  if (!value) return 'Tidak tersedia'
-  const normalized = String(value).replace(/^sha256:/i, '')
-  return `sha256:${normalized.slice(0, 12)}${normalized.length > 12 ? '…' : ''}`
+  payload.topologyGraph.nodes=payload.assets.filter(a=>a.objectRole==='device_node').map(a=>({...a,assetId:a.id}))
+  const ids=new Set(payload.assets.map(a=>a.id))
+  payload.topologyGraph.edges=preview.additions.relations.filter(r=>r.kind!=='mounting'&&ids.has(r.sourceAssetId)&&ids.has(r.targetAssetId)).map(r=>({...r,sourceNodeId:r.sourceAssetId,targetNodeId:r.targetAssetId,relationType:'connected-to',verificationStatus:'confirmed'}))
+  payload.mountingRelations.push(...preview.additions.relations.filter(r=>r.kind==='mounting').map(r=>({...r,relationType:'mounted_on',verificationStatus:'confirmed'})))
+  return payload
 }

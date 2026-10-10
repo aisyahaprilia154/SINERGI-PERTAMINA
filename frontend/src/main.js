@@ -1,6 +1,8 @@
 import './style.css'
+import './styles/app-header.css'
 import { initializeTheme } from './theme.js'
 import { clearSession, getSessionToken, loadCurrentUser } from './services/account-session.js'
+import {startSessionPresence} from './services/session-presence.js'
 
 initializeTheme()
 
@@ -10,13 +12,13 @@ const normalizedPath = window.location.pathname.replace(/\/+$/, '') || '/'
 const previewMatch = normalizedPath.match(/^\/admin\/datasets\/import\/([^/]+)\/preview$/)
 
 const routeLoaders = {
-  '/admin/topology-review': {
-    loadStyle: () => import('./styles/topology-review-route.css'),
-    loadPage: () => import('./pages/admin/topology-review-page.js'),
-    render: 'renderTopologyReviewPage',
+  '/admin/users': {
+    loadStyle:()=>import('./styles/admin-users.css'),
+    loadPage:()=>import('./pages/admin/users-page.js'),
+    render:'renderUsersPage',
   },
   '/admin/datasets/import': {
-    loadStyle: () => import('./styles/admin-import.css'),
+    loadStyle: () => import('./styles/admin-route.css'),
     loadPage: () => import('./pages/admin/import-dataset-page.js'),
     render: 'renderImportDatasetPage',
   },
@@ -37,7 +39,7 @@ const fallbackRoute = {
   render: 'renderLoginPage',
 }
 const previewRoute = {
-  loadStyle: () => import('./styles/admin-preview-route.css'),
+  loadStyle: () => import('./styles/admin-route.css'),
   loadPage: () => import('./pages/admin/preview-import-page.js'),
   render: 'renderPreviewImportPage',
 }
@@ -62,6 +64,7 @@ const { loadStyle, loadPage, render } = previewMatch
   ? previewRoute
   : routeLoaders[routePath] ?? fallbackRoute
 if (!destination) {
+  if(getSessionToken())startSessionPresence()
   const [, page] = await Promise.all([loadStyle(), loadPage()])
   page[render](app, ...(previewMatch ? [decodeURIComponent(previewMatch[1])] : []))
 }

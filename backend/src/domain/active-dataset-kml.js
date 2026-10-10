@@ -5,6 +5,8 @@ export function serializeActiveDatasetKml({
   activePointer = {},
   items = [],
   filter = {},
+  operationalSchema = null,
+  relations = [],
   generatedAt = new Date().toISOString(),
 } = {}) {
   const placemarks = items.flatMap((item) => item.geometries
@@ -14,11 +16,11 @@ export function serializeActiveDatasetKml({
     ['dataset_version_id', datasetVersion.id],
     ['dataset_version_name', datasetVersion.versionName],
     ['dataset_id', datasetVersion.datasetId],
-    ['branch_id', datasetVersion.branchId],
-    ['publication_profile', datasetVersion.publicationProfile ?? 'map_only'],
+    ...(operationalSchema===2?[]:[['branch_id', datasetVersion.branchId],['publication_profile', datasetVersion.publicationProfile ?? 'map_only']]),
     ['active_pointer_revision', activePointer.revision],
     ['generated_at', generatedAt],
     ['filter', JSON.stringify(filter)],
+    ...(operationalSchema===2?[['relations',JSON.stringify(relations.map(r=>({id:r.id,kind:r.relationType,sourceAssetId:r.sourceAssetId,targetAssetId:r.targetAssetId,pathAssetIds:r.pathAssetIds ?? []})))]]:[]),
   ]
     .map(([name, value]) => `<Data name="${escapeXml(name)}"><value>${escapeXml(value)}</value></Data>`)
     .join('')
@@ -29,6 +31,11 @@ export function serializeActiveDatasetKml({
     `<name>${escapeXml(name)}</name>`,
     `<ExtendedData>${metadata}</ExtendedData>`,
     placemarks.join(''),
+    ...relations.filter(r=>r.relationType==='connected-to'&&!r.pathAssetIds?.length).map(r=>{
+      const ends=[r.sourceAssetId,r.targetAssetId].map(id=>items.find(i=>i.canonicalAssetId===id)?.positions?.[0])
+      if(ends.some(p=>!isPosition(p)))return ''
+      return `<Placemark><name>${escapeXml(r.id)}</name><ExtendedData><Data name="relation_id"><value>${escapeXml(r.id)}</value></Data><Data name="source_asset_id"><value>${escapeXml(r.sourceAssetId)}</value></Data><Data name="target_asset_id"><value>${escapeXml(r.targetAssetId)}</value></Data></ExtendedData><LineString><coordinates>${coordinates(ends)}</coordinates></LineString></Placemark>`
+    }),
     '</Document></kml>',
   ].join('')
 }

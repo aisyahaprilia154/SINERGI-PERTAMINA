@@ -1,23 +1,23 @@
-import { spawn } from 'node:child_process'
+import { spawn,execFileSync } from 'node:child_process'
 import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const projectRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+if(!process.env.SINERGI_DATABASE_URL) {
+  try {
+    const compose=JSON.parse(execFileSync('docker',['compose','--env-file','.env.docker','config','--format','json'],{cwd:projectRoot,encoding:'utf8',stdio:['ignore','pipe','pipe']}))
+    const database=compose.services.db,e=database.environment,port=database.ports.find(p=>Number(p.target)===5432)?.published ?? 5433
+    process.env.SINERGI_DATABASE_URL=`postgresql://${encodeURIComponent(e.POSTGRES_USER)}:${encodeURIComponent(e.POSTGRES_PASSWORD)}@127.0.0.1:${port}/${encodeURIComponent(e.POSTGRES_DB)}`
+  }catch{throw new Error('Set SINERGI_DATABASE_URL atau sediakan .env.docker untuk database PostgreSQL operasional.')}
+}
 const localAdminToken = process.env.SINERGI_LOCAL_ADMIN_TOKEN ?? 'local-admin'
 const backendPort = process.env.SINERGI_PORT ?? '5000'
 const frontendPort = process.env.SINERGI_DEV_FRONTEND_PORT ?? '5173'
-const branchIds = process.env.SINERGI_BRANCH_IDS ?? 'semarang'
-const branchDatasets = process.env.SINERGI_BRANCH_DATASETS ?? JSON.stringify({
-  semarang: 'dataset-semarang',
-})
 const authTokens = process.env.SINERGI_AUTH_TOKENS ?? JSON.stringify({
   [localAdminToken]: {
     id: 'local-admin',
-    role: 'Administrator',
-    branchIds: ['semarang'],
-    datasetIds: ['dataset-semarang'],
-  },
+    role: 'Administrator',  },
 })
 
 if (process.env.SINERGI_ALLOW_OCCUPIED_PORTS !== 'true') {
@@ -33,12 +33,6 @@ const services = [
     env: {
       ...process.env,
       SINERGI_AUTH_TOKENS: authTokens,
-      SINERGI_BRANCH_IDS: branchIds,
-      SINERGI_BRANCH_DATASETS: branchDatasets,
-      SINERGI_JOB_LOCK_STALE_MS: process.env.SINERGI_JOB_LOCK_STALE_MS ?? '5000',
-      // Local operational mode: strong, unique relation matches are confirmed
-      // immediately so the map does not depend on the retired review screen.
-      SINERGI_AUTOMATIC_RELATIONS: process.env.SINERGI_AUTOMATIC_RELATIONS ?? 'true',
     },
   },
   {
@@ -52,6 +46,7 @@ const services = [
     env: {
       ...process.env,
       VITE_SINERGI_ADMIN_TOKEN: localAdminToken,
+      SINERGI_API_TARGET: process.env.SINERGI_API_TARGET ?? `http://127.0.0.1:${backendPort}`,
     },
   },
 ]

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 export const SCHEMA_MIGRATIONS_BOOTSTRAP = `
-CREATE TABLE IF NOT EXISTS schema_migrations (
+CREATE TABLE IF NOT EXISTS public.schema_migrations (
   migration_id text PRIMARY KEY,
   checksum text NOT NULL,
   applied_at timestamptz NOT NULL
@@ -41,7 +41,7 @@ export async function runMigration(client, {
   try {
     await client.query(SCHEMA_MIGRATIONS_BOOTSTRAP)
     const current = await client.query(
-      'SELECT migration_id, checksum FROM schema_migrations WHERE migration_id = $1',
+      'SELECT migration_id, checksum FROM public.schema_migrations WHERE migration_id = $1',
       [id],
     )
     const existing = current.rows?.[0] ?? null
@@ -61,13 +61,13 @@ export async function runMigration(client, {
     await client.query(migrationSql)
     if (direction === 'up') {
       await client.query(
-        `INSERT INTO schema_migrations (migration_id, checksum, applied_at)
+        `INSERT INTO public.schema_migrations (migration_id, checksum, applied_at)
          VALUES ($1, $2, $3)`,
         [id, checksum, appliedAt],
       )
     } else {
       await client.query(
-        'DELETE FROM schema_migrations WHERE migration_id = $1',
+        'DELETE FROM public.schema_migrations WHERE migration_id = $1',
         [id],
       )
     }

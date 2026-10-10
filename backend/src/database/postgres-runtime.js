@@ -1,39 +1,4 @@
-const DEFAULT_OPERATIONAL_TABLES = Object.freeze([
-  'dataset_versions',
-  'dataset_version_active_reads',
-  'source_features',
-  'source_geometries',
-  'classified_objects',
-  'topology_jobs',
-  'topology_candidates',
-  'topology_components',
-  'topology_interfaces',
-  'confirmed_relations',
-  'graph_revisions',
-  'graph_nodes',
-  'graph_edges',
-  'accuracy_evaluations',
-  'audit_events',
-  'dataset_active_pointers',
-  'asset_identity_registry',
-  'dataset_version_diffs',
-])
-
-export const POSTGRES_RUNTIME_REQUIRED_COLUMNS = Object.freeze([
-  Object.freeze({
-    table: 'topology_jobs',
-    columns: Object.freeze([
-      'schema_version',
-      'queued_at',
-      'last_started_at',
-      'failed_at',
-      'progress',
-      'stage',
-      'cancel_requested',
-      'revision',
-    ]),
-  }),
-])
+const DEFAULT_OPERATIONAL_TABLES=Object.freeze(['dataset_state','facilities','asset_categories','assets','asset_aliases','source_objects','relations','imports','import_items','jobs','app_users','audit_events'])
 
 /**
  * Creates a node-postgres pool for an explicit database-backed task. Runtime
@@ -101,7 +66,7 @@ export async function verifyOperationalSchema(pool, {
 
   const identifiers = [...new Set(requiredTables.map((table) => String(table)))]
   const tableResult = await pool.query(
-    `SELECT table_name, to_regclass('public.' || table_name) AS relation_name
+    `SELECT table_name, to_regclass('sinergi.' || table_name) AS relation_name
      FROM unnest($1::text[]) AS required_table(table_name)`,
     [identifiers],
   )
@@ -124,7 +89,7 @@ export async function verifyOperationalSchema(pool, {
        FROM unnest($1::text[], $2::text[])
          AS required(table_name, column_name)
        LEFT JOIN information_schema.columns actual
-         ON actual.table_schema = 'public'
+         ON actual.table_schema = 'sinergi'
         AND actual.table_name = required.table_name
         AND actual.column_name = required.column_name
        WHERE actual.column_name IS NULL`,

@@ -22,10 +22,11 @@ import {
   loadTopologyRoots,
 } from '../../services/active-dataset-service.js'
 import { downloadSchematicPng, downloadSchematicSvg } from '../map/schematic-export.js'
-import { bindUserAccountMenu, renderTopNavigation } from '../map/map-page.js'
+import { bindUserAccountMenu, renderTopNavigation } from '../../components/app-header.js'
 import { bindThemeToggle } from '../../theme.js'
 import { getSessionUser } from '../../services/account-session.js'
-import { calculateTopologyDiagramLayout } from './topology-diagram-layout.js'
+import {listenForDatasetRevision} from '../../services/operational-api.js'
+import { calculateTopologyDiagramLayout, updateTopologyDiagramLayoutPositions } from './topology-diagram-layout.js'
 import { renderTopologyDiagramSvg } from './topology-diagram-svg.js'
 import { resolveTopologyDropTarget } from './topology-drop-target.js'
 import { frameMoveAssetIds } from './topology-frame-descendants.js'
@@ -49,7 +50,7 @@ const CANVAS_TOP_PADDING = 24
 const CANVAS_BOTTOM_PADDING = 30
 
 function topologyAreaStorageKey(activeContext) {
-  return `sinergi.topology.last-area:${activeContext.datasetId}:${activeContext.branchId}`
+  return `sinergi.topology.last-area:${activeContext.datasetId}`
 }
 
 function readStoredTopologyArea(key) {
@@ -84,6 +85,7 @@ export async function renderTopologyPage(container) {
     mapData.topologyFrameNames = payload.topologyFrameNames ?? {}
     mapData.topologyFrameAssignments = payload.topologyFrameAssignments ?? {}
     mapData.topologyFrames = payload.topologyFrames ?? {}
+    mapData.nodePositions = payload.nodePositions ?? {}
     persistActiveContext(mapData.activeContext)
 
     const datasetVersionId = mapData.activeContext.datasetVersionId
@@ -164,7 +166,7 @@ function mountTopologyWorkspace(container, {
     mutationBusy: false,
     frameComposerOpen: false,
     pendingFrameId: null,
-    frameNames: Object.fromEntries(Object.entries(mapData.topologyFrameNames ?? {}).map(([id, name]) => [`pole-group:${id}`, name])),
+    frameNames: Object.fromEntries(Object.entries(mapData.topologyFrameNames ?? {}).map(([id, name]) => [id.startsWith('pole-group:')||id.startsWith('excluded-mounting:')?id:`pole-group:${id}`, name])),
     changes: [],
     saveError: '',
     toastTimer: null,
@@ -182,16 +184,16 @@ function mountTopologyWorkspace(container, {
     mountingRelations: mapData.mountingRelations,
     topologyFrameAssignments: mapData.topologyFrameAssignments,
     topologyFrames: mapData.topologyFrames,
-    frameNames: state.frameNames })
+    frameNames: state.frameNames,nodePositions:mapData.nodePositions })
   savedSnapshot = captureSavedSnapshot()
+  listenForDatasetRevision({datasetId:activeContext.datasetId,revision:()=>mapData.recordRevision,isDirty:()=>state.changes.length>0,
+    onDirty:()=>showToast('Data berubah di halaman lain. Periksa perubahan sebelum menyimpan.')})
 
   const buildModel = () => buildTopologyDiagramModel({
     assets: mapData.assets,
     graph,
     locationGroups: mapData.locationGroups,
-    area: state.area,
-    branchId: activeContext.branchId,
-    datasetId: activeContext.datasetId,
+    area: state.area,    datasetId: activeContext.datasetId,
     datasetVersionId: activeContext.datasetVersionId,
     roots,
     mountingRelations: mapData.mountingRelations,
@@ -203,7 +205,7 @@ function mountTopologyWorkspace(container, {
     readiness: mapData.topologyReadiness,
   })
 
-  const buildLayout = (overrides = {}) => calculateTopologyDiagramLayout(model, {
+  const buildLayout = (overrides = {}) => updateTopologyDiagramLayoutPositions(calculateTopologyDiagramLayout(model, {
     minWidth: 1240,
     componentColumns: 3,
     componentMaxColumns: 4,
@@ -228,7 +230,7 @@ function mountTopologyWorkspace(container, {
         .map((change) => change.frame?.id),
     ].filter(Boolean),
     ...overrides,
-  })
+  }),mapData.nodePositions ?? {})
 
   const rebuild = ({ fit = false } = {}) => {
     model = buildModel()
@@ -962,9 +964,7 @@ function mountTopologyWorkspace(container, {
       model,
       layout,
       context: {
-        ...activeContext,
-        branchId: activeContext.branchId,
-        branchName: displayBranchName,
+        ...activeContext,        branchName: displayBranchName,
         datasetId: activeContext.datasetId,
         datasetVersionId: activeContext.datasetVersionId,
         areaKey: state.area,
@@ -1373,6 +1373,15 @@ function mountTopologyWorkspace(container, {
       showToast('Relasi ditambahkan. Pilih Simpan untuk menerapkan.')
       return
     }
+    const source=layout.nodes.find(n=>n.id===completed.assetId)
+    if(source&&drop.box?.id===source.mountingBoxId) {
+      const x=source.diagram.x+(event.clientX-completed.startX)/state.zoom
+      const y=source.diagram.y+(event.clientY-completed.startY)/state.zoom
+      mapData.nodePositions={...mapData.nodePositions,[source.id]:{x,y}}
+      stageChange({type:'move-node',assetId:source.id,x,y})
+      void completed.feedback?.finish();rebuild();showToast('Posisi tampilan diubah. Pilih Simpan untuk menerapkan.')
+      return
+    }
     void moveAssetToFrame(completed.assetId, drop.box, completed.feedback)
   }
 
@@ -1394,7 +1403,7 @@ function mountTopologyWorkspace(container, {
     if (box.kind !== 'excluded' && !box.hostId) { feedback?.cancel(); return }
     if (box.kind !== 'excluded' && !canMountAssetOnPole(node)) {
       feedback?.cancel()
-      showToast('Hanya CCTV atau Junction Box yang dapat dipasang pada tiang.')
+      showToast('Pilih perangkat akhir atau Junction Box untuk pemasangan pada tiang.')
       return
     }
     const source = layout?.nodes?.find(item => item.id === assetId)
@@ -1492,7 +1501,7 @@ function mountTopologyWorkspace(container, {
 
   function stageChange(change) {
     if (!canEditTopology) return
-    if (['mount', 'move-frame', 'rename-frame'].includes(change.type)) {
+    if (['mount', 'move-frame', 'rename-frame','move-node'].includes(change.type)) {
       state.changes = state.changes.filter(item => item.type !== change.type || item.assetId !== change.assetId)
     }
     if (change.type === 'create-frame') {
@@ -1512,6 +1521,7 @@ function mountTopologyWorkspace(container, {
     applyMutationResponse({ mountingRelations: snapshot.mountingRelations })
     mapData.topologyFrameAssignments = snapshot.topologyFrameAssignments ?? {}
     mapData.topologyFrames = snapshot.topologyFrames ?? {}
+    mapData.nodePositions = snapshot.nodePositions ?? {}
     state.frameNames = snapshot.frameNames
     state.changes = []
     state.saveError = ''
@@ -1523,14 +1533,15 @@ function mountTopologyWorkspace(container, {
     if (!canEditTopology) return
     if (!state.changes.length || state.mutationBusy) return
     await runMutation(async () => {
-      const response = await saveTopologyDiagram({ datasetVersionId: activeContext.datasetVersionId,
+      const response = await saveTopologyDiagram({ datasetId: activeContext.datasetId,
         expectedRecordRevision: mapData.recordRevision,
         changes: state.changes.map(({ draftEdgeId, ...change }) => change) })
       applyMutationResponse(response)
       mapData.recordRevision = response.recordRevision
       mapData.topologyFrameAssignments = response.topologyFrameAssignments ?? {}
       mapData.topologyFrames = response.topologyFrames ?? {}
-      state.frameNames = Object.fromEntries(Object.entries(response.topologyFrameNames ?? {}).map(([id, name]) => [`pole-group:${id}`, name]))
+      mapData.nodePositions = response.nodePositions ?? {}
+      state.frameNames = Object.fromEntries(Object.entries(response.topologyFrameNames ?? {}).map(([id, name]) => [id.startsWith('pole-group:')||id.startsWith('excluded-mounting:')?id:`pole-group:${id}`, name]))
       state.changes = []
       state.saveError = ''
       savedSnapshot = captureSavedSnapshot()
@@ -1559,7 +1570,7 @@ function mountTopologyWorkspace(container, {
             : null
         roots = refreshedRoots?.roots ?? refreshedRoots?.items ?? []
         state.frameNames = Object.fromEntries(Object.entries(persisted.topologyFrameNames ?? {})
-          .map(([id, name]) => [`pole-group:${id}`, name]))
+          .map(([id, name]) => [id.startsWith('pole-group:')||id.startsWith('excluded-mounting:')?id:`pole-group:${id}`, name]))
         savedSnapshot = captureSavedSnapshot()
         rebuild()
       } catch {
@@ -2097,9 +2108,7 @@ function mountTopologyWorkspace(container, {
   function openAssetMap(assetId) {
     if (!assetId) return
     const params = new URLSearchParams({
-      datasetId: activeContext.datasetId,
-      branchId: activeContext.branchId,
-      selectedAssetId: assetId,
+      datasetId: activeContext.datasetId,      selectedAssetId: assetId,
     })
     if (state.area) params.set('area', state.area)
     window.location.assign(`/map?${params.toString()}`)
@@ -2153,14 +2162,14 @@ function mountTopologyWorkspace(container, {
   function syncUrl() {
     const params = new URLSearchParams(window.location.search)
     params.set('datasetId', activeContext.datasetId)
-    params.set('branchId', activeContext.branchId)
+    params.delete('branchId')
     params.set('area', state.area ?? 'all')
     if (state.selectedAssetId) params.set('selectedAssetId', state.selectedAssetId)
     else params.delete('selectedAssetId')
     window.history.replaceState(null, '', `/topology?${params.toString()}`)
     const mapLink = container.querySelector('.top-navigation nav a[href^="/map"]')
     if (mapLink) {
-      const mapParams = new URLSearchParams({ datasetId: activeContext.datasetId, branchId: activeContext.branchId })
+      const mapParams = new URLSearchParams({ datasetId: activeContext.datasetId })
       mapParams.set('area', state.area ?? 'all')
       if (state.selectedAssetId) mapParams.set('selectedAssetId', state.selectedAssetId)
       mapLink.href = `/map?${mapParams.toString()}`
@@ -2240,6 +2249,7 @@ function cssEscape(value) {
 }
 
 function canMountAssetOnPole(node) {
+  if(['endpoint','junction-peer','junction-extended'].includes(node?.diagramClass))return true
   const identity = `${node?.type ?? ''} ${node?.assetType ?? ''} ${node?.name ?? ''}`
   return !/\btiang\b|\bpole\b|\bpylon\b/i.test(identity)
     && /junction\s*box|\bjb\b|cctv|camera|kamera/i.test(identity)
@@ -2348,24 +2358,19 @@ function renderErrorState(context, error) {
 function readRequestedDatasetContext() {
   const query = new URLSearchParams(window.location.search)
   let datasetId = query.get('datasetId')
-  let branchId = query.get('branchId')
   try {
     datasetId ||= window.sessionStorage.getItem('sinergiActiveDatasetId')
-    branchId ||= window.sessionStorage.getItem('sinergiActiveBranchId')
   } catch {
     // Storage may be unavailable in a restricted browser context.
   }
   return {
-    datasetId: datasetId || DEFAULT_DATASET_ID,
-    branchId: branchId || DEFAULT_BRANCH_ID,
-    siteId: query.get('siteId') || null,
+    datasetId: datasetId || DEFAULT_DATASET_ID,    siteId: query.get('siteId') || null,
   }
 }
 
 function persistActiveContext(context) {
   try {
     if (context?.datasetId) window.sessionStorage.setItem('sinergiActiveDatasetId', context.datasetId)
-    if (context?.branchId) window.sessionStorage.setItem('sinergiActiveBranchId', context.branchId)
   } catch {
     // Storage is a convenience only.
   }

@@ -1,6 +1,8 @@
 services:
   db:
     image: postgis/postgis:16-3.4
+    ports:
+      - "127.0.0.1:5433:5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-sinergi}
       POSTGRES_USER: ${POSTGRES_USER:-sinergi}
@@ -39,8 +41,6 @@ services:
       SINERGI_STORAGE_MODE: postgres
       SINERGI_DATABASE_URL: "postgresql://${POSTGRES_USER:-sinergi}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}@db:5432/${POSTGRES_DB:-sinergi}"
       SINERGI_AUTH_TOKENS: '${SINERGI_AUTH_TOKENS:-{}}'
-      SINERGI_BRANCH_IDS: "${SINERGI_BRANCH_IDS:-semarang}"
-      SINERGI_BRANCH_DATASETS: '${SINERGI_BRANCH_DATASETS:-{"semarang":"dataset-semarang"}}'
     volumes:
       - sinergi-app-data:/app/.data
     ports:
@@ -65,7 +65,7 @@ services:
         VITE_SINERGI_VECTOR_TILES_URL: ${VITE_SINERGI_VECTOR_TILES_URL:-/api/basemap/openfreemap/planet}
         VITE_SINERGI_BASEMAP_ATTRIBUTION: ${VITE_SINERGI_BASEMAP_ATTRIBUTION:-}
     ports:
-      - "127.0.0.1:${SINERGI_HTTP_PORT:-8080}:8080"
+      - "${SINERGI_HTTP_BIND_ADDRESS:-127.0.0.1}:${SINERGI_HTTP_PORT:-8080}:8080"
     depends_on:
       backend:
         condition: service_healthy

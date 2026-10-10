@@ -1,202 +1,31 @@
-import assert from 'node:assert/strict'
 import test from 'node:test'
-import { renderPreviewMapCanvas, previewMapInternals } from '../src/pages/admin/preview-map-canvas.js'
-import { renderActivationBar, renderCategoryReviews } from '../src/pages/admin/preview-import-page.js'
-import { renderPreviewToolbar } from '../src/pages/admin/preview-toolbar.js'
-import { parseAttachmentFilename } from '../src/services/import-dataset-service.js'
-import {
-  buildImportPreviewModel,
-  calculateAssetBounds,
-  createImportPreviewState,
-  getVisiblePreviewData,
-} from '../src/pages/admin/preview-import-state.js'
+import assert from 'node:assert/strict'
+import {previewMapPayload,renderAdditions} from '../src/pages/admin/preview-import-page.js'
+import {adaptActiveDatasetForMap,adaptActiveDatasetForTopology} from '../src/adapters/active-dataset-map-adapter.js'
 
-const payload = {
-  datasetVersion: {
-    id: 'version-2',
-    branchId: 'semarang',
-    versionName: 'Import Juli 2026',
-    sourceFilename: 'network.kml',
-    sourceSize: 1536,
-    checksum: `sha256:${'a'.repeat(64)}`,
-    importedBy: 'admin-1',
-    importedAt: '2026-07-28T09:00:00.000Z',
-  },
-  layers: [{ id: 'layer-1', name: 'Network', datasetVersionId: 'version-2' }],
-  assets: [
-    asset('node-a', 'A', 'Switch', 'Infrastructure'),
-    asset('node-b', 'B', 'CCTV', 'CCTV'),
-  ],
-  geometries: [
-    point('geometry-a', 'node-a', 110, -7),
-    point('geometry-b', 'node-b', 110.01, -7.01),
-    {
-      id: 'line-b',
-      assetNodeId: 'node-b',
-      geometryType: 'line_string',
-      coordinates: [[110, -7], [110.01, -7.01]],
-    },
-  ],
-  relations: [{
-    id: 'relation-a-b',
-    sourceAssetId: 'A',
-    targetAssetId: 'B',
-    relationType: 'connected_to',
-  }],
-  issues: [{
-    id: 'issue-b',
-    severity: 'warning',
-    issueCode: 'CATEGORY_UNMAPPED',
-    message: 'Category needs review.',
-    assetId: 'B',
-    canActivate: true,
-  }],
-  comparison: {
-    assetChanges: [
-      { assetId: 'A', status: 'updated' },
-      { assetId: 'B', status: 'new' },
-    ],
-    removedAssets: [{
-      asset: asset('node-c-old', 'C', 'Printer', 'Peripheral'),
-      geometries: [point('geometry-c-old', 'node-c-old', 110.02, -7.02)],
-      status: 'removed',
-    }],
-    summary: {
-      newAssets: 1,
-      updatedAssets: 1,
-      unchangedAssets: 0,
-      removedAssets: 1,
-    },
-  },
-  activeDatasetVersion: null,
-}
-
-test('preview model binds changes, issues, layers, and removed geometry without mutation', () => {
-  const model = buildImportPreviewModel(payload)
-
-  assert.equal(model.candidate.assetsByAssetId.get('A').changeStatus, 'updated')
-  assert.equal(model.candidate.assetsByAssetId.get('B').issues[0].id, 'issue-b')
-  assert.equal(model.removed.assets[0].changeStatus, 'removed')
-  assert.deepEqual(payload.assets[0].properties, {})
+const baseline={operationalSchema:2,datasetVersion:{id:'old-import',datasetId:'shared'},assets:[{id:'jb',name:'JB',type:'JB',category:'Infrastructure',objectRole:'device_node',diagramClass:'junction-peer',sourceFolderPath:'/RJBT/Site A/JB'}],
+ geometries:[{id:'old-point',assetNodeId:'jb',geometryType:'point',coordinates:[110,-7]}],layers:[],mountingRelations:[],topologyGraph:{nodes:[],edges:[]}}
+const fridge={id:'fridge',name:'Kulkas',category:'Kulkas',kind:'device',diagramRole:'endpoint',facility:{key:'site a',name:'Site A'},properties:{assetType:'Kulkas',dynamicCategory:true},source:{folderPath:'/RJBT/Site A/Kulkas',geometry:{type:'Point',coordinates:[110.0002,-7]}}}
+const preview={additions:{assets:[fridge],relations:[{id:'edge',sourceAssetId:'jb',targetAssetId:'fridge'}]},items:[{kind:'asset',status:'new',proposal:fridge}]}
+test('preview shows additions and optionally baseline connection context',()=>{
+ const additions=previewMapPayload(preview,baseline,false)
+ assert.deepEqual(additions.assets.map(a=>a.id),['fridge']);assert.equal(additions.topologyGraph.edges.length,0)
+ const context=previewMapPayload(preview,baseline,true)
+ assert.deepEqual(context.assets.map(a=>a.id),['jb','fridge']);assert.equal(context.topologyGraph.edges.length,1)
+ assert.equal(baseline.assets.length,1)
 })
-
-test('filters keep candidate data inside selected layer, category, and geometry type', () => {
-  const model = buildImportPreviewModel(payload)
-  const state = createImportPreviewState(model)
-  state.visibleCategories.delete('CCTV')
-  state.visibleGeometryTypes.delete('line_string')
-  state.showChanges = false
-  const visible = getVisiblePreviewData(model, state)
-
-  assert.deepEqual(visible.assets.map(({ assetId }) => assetId), ['A'])
-  assert.deepEqual(visible.geometries.map(({ geometryType }) => geometryType), ['point'])
+test('rerendering preview never appends proposed mounting to the baseline',()=>{
+ const mounting={...preview,additions:{assets:[fridge],relations:[{id:'mount',kind:'mounting',sourceAssetId:'fridge',targetAssetId:'jb'}]}}
+ const first=previewMapPayload(mounting,baseline,true),second=previewMapPayload(mounting,baseline,true)
+ assert.equal(first.mountingRelations.length,1);assert.equal(second.mountingRelations.length,1);assert.equal(baseline.mountingRelations.length,0)
 })
-
-test('issue focus bounds preserve longitude-latitude orientation', () => {
-  const model = buildImportPreviewModel(payload)
-  const bounds = calculateAssetBounds(model, 'B')
-
-  assert.ok(bounds.west < 110)
-  assert.ok(bounds.east > 110.01)
-  assert.ok(bounds.south < -7.01)
-  assert.ok(bounds.north > -7)
+test('new category remains an endpoint and shares the same relation in map and diagram',()=>{
+ const payload=previewMapPayload(preview,baseline,true),map=adaptActiveDatasetForMap(payload),diagram=adaptActiveDatasetForTopology(payload)
+ assert.equal(diagram.assets.find(a=>a.id==='fridge').diagramClass,'endpoint')
+ assert.deepEqual(map.topologyGraph.edges,diagram.topologyGraph.edges)
+ assert.equal(map.assets.find(a=>a.id==='fridge').category,'Kulkas')
 })
-
-test('SVG renderer exposes keyboard targets and non-color change cues', () => {
-  const model = buildImportPreviewModel(payload)
-  const state = createImportPreviewState(model)
-  const html = renderPreviewMapCanvas({
-    visible: getVisiblePreviewData(model, state),
-    state,
-  })
-
-  assert.match(html, /role="button"/)
-  assert.match(html, /change-updated/)
-  assert.match(html, /change-new/)
-  assert.match(html, /change-removed/)
-  assert.match(html, /node-change-glyph/)
-  assert.match(html, /Peta preview/)
+test('asset source text is escaped in the additions preview',()=>{
+ const html=renderAdditions([{kind:'asset',status:'new',proposal:{...fridge,name:'<script>alert(1)</script>'}}])
+ assert.ok(!html.includes('<script>'));assert.match(html,/&lt;script&gt;/)
 })
-
-test('far-zoom simplification retains the first and last coordinate', () => {
-  const positions = Array.from({ length: 201 }, (_, index) => [index, index])
-  const simplified = previewMapInternals.simplifyPositions(positions, 1)
-
-  assert.deepEqual(simplified[0], positions[0])
-  assert.deepEqual(simplified.at(-1), positions.at(-1))
-  assert.ok(simplified.length < positions.length)
-})
-
-test('active map link only appears after server-confirmed activation state', () => {
-  const model = buildImportPreviewModel(payload)
-  const state = createImportPreviewState(model)
-  assert.doesNotMatch(renderPreviewToolbar({ model, state }), /Buka map dataset aktif/)
-
-  state.activeMapUrl = '/map'
-  assert.match(renderPreviewToolbar({ model, state }), /Buka map dataset aktif/)
-})
-
-test('version detail distinguishes original source download from validation export', () => {
-  const model = buildImportPreviewModel(payload)
-  const state = createImportPreviewState(model)
-  const html = renderActivationBar(model, state)
-
-  assert.match(html, /Source filename/)
-  assert.match(html, /network\.kml/)
-  assert.match(html, /1\.5 KB/)
-  assert.match(html, /sha256:aaaaaaaaaaaa/)
-  assert.match(html, /admin-1/)
-  assert.match(html, /Unduh file sumber/)
-  assert.match(html, /bukan export dataset/)
-  assert.match(html, /Unduh laporan/)
-})
-
-test('pending categories are reviewable and prevent activation in preview', () => {
-  const model = buildImportPreviewModel({
-    ...payload,
-    canActivate: false,
-    categoryReviews: [{
-      key: 'pc', proposedLabel: 'PC', source: 'folder', count: 3, status: 'pending',
-    }],
-  })
-  const state = createImportPreviewState(model)
-  assert.match(renderCategoryReviews(model.payload.categoryReviews), /PC · 3 aset · folder KMZ/)
-  assert.match(renderCategoryReviews(model.payload.categoryReviews), /data-category-key="pc"/)
-  assert.match(renderActivationBar(model, state), /data-request-activate\s+disabled/)
-})
-
-test('attachment filename prefers UTF-8 Content-Disposition safely', () => {
-  assert.equal(
-    parseAttachmentFilename(
-      'attachment; filename="network.kml"; filename*=UTF-8\'\'jaringan%20resmi.kml',
-      'fallback.kml',
-    ),
-    'jaringan resmi.kml',
-  )
-  assert.equal(
-    parseAttachmentFilename('attachment; filename="network.kmz"', 'fallback.kmz'),
-    'network.kmz',
-  )
-})
-
-function asset(id, assetId, type, category) {
-  return {
-    id,
-    assetId,
-    name: `${type} ${assetId}`,
-    type,
-    category,
-    layerId: 'layer-1',
-    branchId: 'semarang',
-    properties: {},
-  }
-}
-
-function point(id, assetNodeId, longitude, latitude) {
-  return {
-    id,
-    assetNodeId,
-    geometryType: 'point',
-    coordinates: [longitude, latitude],
-  }
-}
