@@ -54,17 +54,18 @@ ulang, pengguna perlu masuk kembali. Token lama dari `SINERGI_AUTH_TOKENS` tidak
 dipakai oleh backend Docker pada mode produksi.
 
 Setelah akun administrator pertama tersedia, buka **Admin → Pengguna** di
-`/admin/users` untuk menambah akun, mengganti peran, mengaktifkan/nonaktifkan akun,
-dan mereset password. Perubahan peran, status akun, atau password mengakhiri seluruh
-sesi akun tersebut. Administrator aktif terakhir tidak dapat dinonaktifkan atau
-diturunkan perannya. Perubahan akun tercatat di `audit_events` tanpa menyimpan password.
+`/admin/users` untuk menambah akun, mengganti peran, dan mereset password.
+Semua akun dapat masuk sesuai perannya; fitur nonaktif akun dihapus melalui
+migrasi `0012_remove_account_status`. Perubahan peran atau password mengakhiri
+seluruh sesi akun tersebut. Administrator terakhir tidak dapat diturunkan
+menjadi Viewer. Kehadiran Online berasal dari heartbeat, sedangkan waktu
+terakhir online tetap tersimpan setelah sesi berakhir.
 
-**Online** dan **Aktif** mempunyai arti berbeda. Akun aktif boleh masuk; Online
-berarti ada sesi yang mengirim heartbeat atau request dalam 90 detik terakhir.
+**Online** berarti ada sesi yang mengirim heartbeat atau request dalam 90 detik terakhir.
 Web mengirim heartbeat setiap 30 detik; daftar Pengguna diperbarui tiap 15 detik
 saat halaman terlihat. Logout langsung mengakhiri sesi itu; sesi lain milik akun
 yang sama tetap dihitung. Tab tertutup atau koneksi terputus baru menjadi Offline
-setelah batas 90 detik. Waktu terakhir aktif disimpan di `app_users.last_seen_at`.
+setelah batas 90 detik. Waktu terakhir online disimpan di `app_users.last_seen_at`.
 Saat daftar gagal dimuat, UI menampilkan **Belum diperbarui**, bukan status Online
 yang dianggap masih benar. Indikator memakai satu backend Docker; menjalankan
 beberapa replika backend membutuhkan penyimpanan sesi bersama terlebih dahulu.

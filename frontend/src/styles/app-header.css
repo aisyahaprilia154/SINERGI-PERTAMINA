@@ -24,6 +24,8 @@
 [data-app-header] .user-menu-dropdown-items{padding:5px 8px 2px}
 :is(.map-body,.topology-body,.admin-body) #app .app-header.top-navigation[data-app-header] .user-menu-dropdown-item{width:100%;min-height:44px;padding:0 10px;display:flex;align-items:center;gap:12px;text-align:left;color:var(--app-ink);background:transparent;border:0;border-radius:9px;font:inherit;font-weight:550;cursor:pointer}
 [data-app-header] .user-menu-dropdown-item:hover{background:var(--app-control)}
+[data-app-header] .user-menu-dropdown-item[aria-current="page"]{background:var(--app-control);font-weight:650}
+[data-app-header] .user-menu-dropdown-divider{height:1px;margin:5px 12px;background:var(--app-border)}
 [data-app-header] .user-menu-dropdown-item .material-symbols-outlined{color:var(--app-muted)}
 :root[data-theme="dark"] [data-app-header] .brand-logo-wordmark strong{color:var(--app-ink)}
 :root[data-theme="dark"] [data-app-header] .brand-logo-wordmark small{color:#ff7b80}

@@ -60,7 +60,7 @@ export class OperationalRepository {
       throw new AppError('Data berubah. Muat ulang sebelum menyimpan.',{code:'revision_conflict',statusCode:409})
     }
   }
-  async bump(client,datasetId){await client.query('UPDATE sinergi.dataset_state SET revision=revision+1,updated_at=now() WHERE id=$1',[datasetId])}
+  async bump(client,datasetId){await client.query('UPDATE sinergi.dataset_state SET revision=revision+1,current_checkpoint_id=null,updated_at=now() WHERE id=$1',[datasetId])}
   async snapshot(datasetId,{client=null,includeDeleted=false}={}) {
     if(!client) return this.transaction(c=>this.snapshot(datasetId,{client:c,includeDeleted}),{readOnly:true})
     const state=await this.state(client,datasetId)
@@ -73,7 +73,10 @@ export class OperationalRepository {
     const facilities=(await client.query('SELECT * FROM sinergi.facilities WHERE dataset_id=$1 ORDER BY name',[datasetId])).rows
     const aliases=(await client.query('SELECT x.* FROM sinergi.asset_aliases x JOIN sinergi.assets a ON a.id=x.asset_id WHERE a.dataset_id=$1 AND x.active',[datasetId])).rows
     const latest=state.latest_import_id?(await client.query('SELECT * FROM sinergi.imports WHERE id=$1',[state.latest_import_id])).rows[0]:null
-    const sourceImports=(await client.query("SELECT id,source_manifest FROM sinergi.imports WHERE id=ANY($1::text[]) OR (dataset_id=$2 AND status='applied') ORDER BY created_at",[[...new Set(assets.map(a=>a.source_import_id).filter(Boolean))],datasetId])).rows
+    const sourceIds=[...new Set([...(state.active_import_ids??[]),...assets.map(a=>a.source_import_id).filter(Boolean)])]
+    const sourceImports=(await client.query(state.active_import_ids===undefined
+      ? "SELECT id,source_manifest FROM sinergi.imports WHERE id=ANY($1::text[]) OR (dataset_id=$2 AND status='applied') ORDER BY created_at"
+      : 'SELECT id,source_manifest FROM sinergi.imports WHERE id=ANY($1::text[]) ORDER BY created_at',state.active_import_ids===undefined?[sourceIds,datasetId]:[sourceIds])).rows
     return {state,assets,relations,deletedRelations:allRelations.filter(r=>r.deleted),facilities,aliases,latest,sourceImports}
   }
   async saveIcon({datasetId,assetId,expectedRevision,dataUrl,actorId}) {

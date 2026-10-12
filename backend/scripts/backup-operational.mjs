@@ -34,6 +34,7 @@ try {
   try {
     const legacy=(await client.query("SELECT to_regclass('public.dataset_versions') name")).rows[0].name;
     const operationalTables=['dataset_state','facilities','asset_categories','assets','asset_aliases','source_objects','relations','imports','import_items','jobs','app_users','audit_events'];
+    if((await client.query("SELECT to_regclass('sinergi.dataset_checkpoints') name")).rows[0].name)operationalTables.push('dataset_checkpoints');
     const proof=async connection=>{
       if(legacy)return (await connection.query('SELECT id,md5(payload::text) digest FROM public.dataset_versions ORDER BY id')).rows;
       const hashes=[];

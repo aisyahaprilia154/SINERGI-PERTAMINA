@@ -6,6 +6,7 @@ Aplikasi peta aset jaringan, impor KML/KMZ, dan diagram topologi. Frontend memak
 
 - Peta jaringan aset dengan pilihan area, pencarian, filter jaringan, dan diagram topologi.
 - Satu dataset kumulatif untuk seluruh fasilitas. Impor KML/KMZ menampilkan preview tambahan dan konflik sebelum Administrator menerapkan.
+- Halaman Impor menyimpan maksimal 10 versi data lengkap; Administrator dapat menyimpan hasil koreksi dan memulihkan peta/diagram tanpa mengimpor ulang file sumber.
 - Penggantian ikon aset melalui panel detail; ikon berlaku pada peta dan diagram.
 - Peta dan diagram memakai aset serta relasi yang sama, dengan revision untuk mencegah perubahan usang.
 - Kategori baru, termasuk Kulkas dan Printer, menjadi perangkat akhir; Viewer membaca seluruh fasilitas.

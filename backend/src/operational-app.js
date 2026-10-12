@@ -11,8 +11,10 @@ import { snapshotToView,insertRows } from './storage/operational-repository.js'
 import { buildActiveAssetCatalog,queryActiveAssets } from './domain/active-dataset-query.js'
 import { serializeActiveDatasetKml } from './domain/active-dataset-kml.js'
 import { requireAdministrator,HEARTBEAT_INTERVAL_MS,ONLINE_TIMEOUT_MS } from './security/authorization.js'
+import {DatasetCheckpoints} from './storage/dataset-checkpoints.js'
 
 export function createOperationalApp({repository,importService,fileStore,config,authenticator,accountStore}) {
+  const versions=repository.checkpoints??new DatasetCheckpoints({repository,fileStore})
   const basemap=createOpenFreeMapProxy({directory:path.join(config.dataRoot,'basemap-cache')})
   return http.createServer(async(request,response)=>{
     response.setHeader('x-content-type-options','nosniff');response.setHeader('x-frame-options','DENY')
@@ -47,7 +49,7 @@ export function createOperationalApp({repository,importService,fileStore,config,
       const admin=()=>requireAdministrator(request,authenticator)
       if(parts[0]==='api'&&parts[1]==='admin'&&parts[2]==='users'){
         admin()
-        if(request.method==='GET'&&!parts[3])return send(200,{users:(await accountStore.list()).map(a=>({...a,online:a.active&&authenticator.isOnline(a.id)})),serverTime:new Date().toISOString(),onlineTimeoutSeconds:ONLINE_TIMEOUT_MS/1000})
+        if(request.method==='GET'&&!parts[3])return send(200,{users:(await accountStore.list()).map(a=>({...a,online:authenticator.isOnline(a.id)})),serverTime:new Date().toISOString(),onlineTimeoutSeconds:ONLINE_TIMEOUT_MS/1000})
         if((request.method==='POST'&&!parts[3])||(request.method==='PATCH'&&parts[3]&&!parts[4])||(request.method==='POST'&&parts[4]==='password')){
           const result=await accountStore.manage({actorId:user.id,userId:parts[3],body:await readJson(request,8192),resetPassword:parts[4]==='password'})
           if(result.sessionsRevoked)authenticator.revokeUser(result.user.id)
@@ -61,7 +63,7 @@ export function createOperationalApp({repository,importService,fileStore,config,
       if(parts[0]==='api'&&parts[1]==='imports') {
         if(!(request.method==='GET'&&['source-resources','overlay-resources','source-file'].includes(parts[3]))) admin()
         const id=parts[2]
-        if(!id&&request.method==='GET') return send(200,{imports:(await repository.pool.query('SELECT id,dataset_id,name,source_filename,status,summary,error,base_revision,created_at,applied_at FROM sinergi.imports ORDER BY created_at DESC LIMIT 100')).rows})
+        if(!id&&request.method==='GET') return send(200,{imports:(await repository.pool.query('SELECT i.id,i.dataset_id,name,source_filename,status,summary,error,base_revision,created_at,applied_at,i.id=ANY(d.active_import_ids) AS included_in_active FROM sinergi.imports i JOIN sinergi.dataset_state d ON d.id=i.dataset_id ORDER BY created_at DESC LIMIT 100')).rows})
         if(!id&&request.method==='POST') {
           const upload=await receiveImportUpload(request,{fileStore,maxFileSize:config.upload.maxFileSize})
           try {
@@ -93,6 +95,7 @@ export function createOperationalApp({repository,importService,fileStore,config,
           const record=await importService.get(id)
           if(record.status!=='ready') throw new AppError('Preview tidak dapat diperbarui.',{code:'import_not_ready',statusCode:409})
           await repository.transaction(async client=>{
+            await repository.state(client,record.dataset_id,{lock:true})
             const changed=await client.query("UPDATE sinergi.imports SET status='processing' WHERE id=$1 AND status='ready' RETURNING id",[id])
             if(!changed.rowCount) throw new AppError('Preview telah berubah.',{code:'import_not_ready',statusCode:409})
             await client.query("UPDATE sinergi.jobs SET status='queued',attempts=0,progress=0,available_at=now(),error=null WHERE import_id=$1",[id])
@@ -106,6 +109,13 @@ export function createOperationalApp({repository,importService,fileStore,config,
       }
       if(parts[0]==='api'&&parts[1]==='datasets'&&parts[2]) {
         const datasetId=parts[2]
+        if(parts[3]==='versions') {
+          admin()
+          if(request.method==='GET'&&parts.length===4)return send(200,await versions.list(datasetId))
+          if(request.method==='POST'&&parts.length===4){const body=await readJson(request,8192);return send(201,await versions.manual({datasetId,name:body.name,expectedRevision:body.expectedRevision,actorId:user.id}))}
+          if(request.method==='POST'&&parts[5]==='restore'&&parts.length===6){const body=await readJson(request,4096);return send(200,await versions.restore({datasetId,versionId:parts[4],expectedRevision:body.expectedRevision,actorId:user.id}))}
+          throw new AppError('Endpoint versi tidak ditemukan.',{code:'not_found',statusCode:404})
+        }
         if(request.method==='POST'&&parts[3]==='diagram') {
           admin();const body=await readJson(request)
           return send(200,await repository.saveDiagram({datasetId,expectedRevision:body.expectedRevision,changes:body.changes,actorId:user.id}))

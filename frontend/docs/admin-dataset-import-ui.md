@@ -1,42 +1,40 @@
-# SINERGI Admin Dataset Import UI
+# UI admin SINERGI
 
-Halaman import tersedia pada:
+Admin memakai header dan token tema yang sama dengan Peta/Diagram. Dropdown akun
+Administrator memuat Kelola pengguna, Riwayat import, dan Versi database di atas
+Keluar. Navigasi utama hanya Peta/Diagram, tanpa tab admin. CSS dibatasi pada `.admin-body`.
 
-```text
-/admin/datasets/import
-```
+## Pengguna
 
-Halaman ini tidak mengubah navbar atau halaman network map. Style dibatasi oleh
-class `admin-import-body`.
+Tabel memuat pengguna/email, peran, terakhir online, dan tindakan Kelola.
+Online menggunakan heartbeat nyata; koneksi gagal ditandai Belum diperbarui.
+Tidak ada status Aktif/Nonaktif akun. Administrator/Viewer, reset password,
+pencabutan sesi, perlindungan administrator terakhir, dan konflik edit tetap ada.
 
-## Integrasi API
+## Impor dan versi
 
-UI memakai endpoint relative berikut:
+`/admin/datasets/import` menampilkan halaman Riwayat import dengan konteks dataset.
+`/admin/datasets/versions` menampilkan halaman Versi database untuk simpan/pulihkan.
+Impor KML/KMZ membuka drawer kanan sekitar 400 px; pada mobile layar penuh.
+Drawer mempertahankan draft saat koneksi gagal dan meminta konfirmasi sebelum
+membuangnya. Selama unggah/pemrosesan, drawer tidak dapat ditutup; tindakan ini
+tidak mengklaim membatalkan job server. Status unggah berasal dari XMLHttpRequest.
 
-- `GET /api/admin/import-config`;
-- `POST /api/admin/imports`;
-- `GET /api/admin/imports/:datasetVersionId`.
+Endpoint yang digunakan: `/api/import-config`, `/api/imports`, serta
+`/api/datasets/:id/versions`. Token berasal dari sesi akun aplikasi.
+Alur tetap unggah → pencocokan → preview → terapkan tambahan. Simpan versi
+menyimpan checkpoint; Pulihkan mengembalikan data sesuai versi terpilih setelah
+menyimpan keadaan sekarang. Maksimal sepuluh versi unik per dataset.
 
-Vite meneruskan `/api` ke `SINERGI_API_TARGET`, dengan default
-`http://127.0.0.1:5000`. Pada production, frontend dan API diharapkan tersedia
-pada origin yang sama atau diatur oleh reverse proxy.
+## Preview
 
-Token Administrator dibaca dari `sessionStorage` atau `localStorage` key
-`sinergiAdminToken`. Untuk localhost saja, fallback token adalah `local-admin`.
+Header memuat nama impor, jumlah tambahan/konflik, dan satu tindakan utama
+Terapkan tambahan. Peta, tambahan aset, dan konflik memakai bagian halaman biasa.
+Keputusan konflik memperbarui isi yang diperlukan, mempertahankan fokus dan
+posisi peta. Data lama sebagai konteks, hitung ulang, dan sumber unduhan tetap ada.
 
-## Progress dan cancellation
+## Verifikasi
 
-- progress upload berasal dari `XMLHttpRequest.upload`;
-- progress processing berasal langsung dari `processing.progress` backend;
-- nama tahap berasal dari `processing.stage`;
-- jika persen belum tersedia, UI memakai progress indeterminate;
-- tombol Batal dapat menghentikan upload yang belum selesai;
-- setelah backend menerima file, tombol Batal hanya menghentikan polling karena
-  backend belum menyediakan cancellation endpoint;
-- UI menyatakan keterbatasan tersebut dan tidak mengklaim job server dibatalkan.
-
-## Aktivasi
-
-Import valid maupun invalid tidak diaktifkan otomatis. Dataset invalid tidak
-mempunyai tindakan aktivasi. Halaman hanya menyediakan laporan validasi,
-preview read-only, dan upload ulang.
+Tes DOM/CSS mencakup 1440/1024/768/390 px dalam kedua tema, keyboard/fokus,
+draft, kegagalan koneksi, konflik usang, dan fungsi versi. Pemeriksaan ini
+bukan verifikasi visual melalui browser; tidak menggunakan computer use.

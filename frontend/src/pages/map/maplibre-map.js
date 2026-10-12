@@ -81,6 +81,7 @@ export function createMapLibreSurface(element, {
   onBasemapStatus = () => {},
   onLayoutStatus = () => {},
   iconLoader = createSourceIconLoader(),
+  initialCamera = null,
 } = {}) {
   let currentCandidates = candidates
   let currentTopologyGraph = topologyGraph
@@ -158,7 +159,7 @@ export function createMapLibreSurface(element, {
       attribution: basemapAttribution,
       darkMode,
     }),
-    ...(initialBounds ? {
+    ...(initialCamera ? initialCamera : initialBounds ? {
       bounds: [[initialBounds[0], initialBounds[1]], [initialBounds[2], initialBounds[3]]],
       fitBoundsOptions: mapFitOptions(),
     } : { center: [117, -2], zoom: 3 }),
@@ -911,6 +912,9 @@ export function createMapLibreSurface(element, {
   }
 
   return {
+    getCamera() {
+      return {center: map.getCenter().toArray(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch()}
+    },
     refreshAssetIcons() {
       syncAdaptiveMarkers()
     },

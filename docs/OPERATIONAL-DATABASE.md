@@ -4,7 +4,7 @@ SINERGI memakai satu dataset kumulatif untuk seluruh fasilitas. Administrator me
 
 ## Skema untuk DBeaver
 
-Buka **Databases → sinergi → Schemas → sinergi → Tables**. Skema aplikasi memiliki 12 tabel:
+Buka **Databases → sinergi → Schemas → sinergi → Tables**. Skema aplikasi memiliki 13 tabel:
 
 | Tabel | Fungsi |
 | --- | --- |
@@ -20,8 +20,9 @@ Buka **Databases → sinergi → Schemas → sinergi → Tables**. Skema aplikas
 | `jobs` | Progres, pemilik pemrosesan, batas retry, pemulihan job |
 | `app_users` | Akun Administrator/Viewer dengan hash kata sandi |
 | `audit_events` | Riwayat tindakan penting; tidak dapat ditulis ulang |
+| `dataset_checkpoints` | Maksimal 10 versi operasional terkompresi per dataset untuk pemulihan |
 
-`public.schema_migrations` dan tabel bawaan PostGIS berada di luar 12 tabel aplikasi. Tabel versi/graph/interface/component/approval lama telah dihentikan. Migrasi SQL lama tetap menjadi riwayat perubahan skema.
+`public.schema_migrations` dan tabel bawaan PostGIS berada di luar 13 tabel aplikasi. Tabel versi/graph/interface/component/approval lama telah dihentikan. Checkpoint hanya dibaca saat menyimpan/memulihkan versi; bukan arsip graph untuk pembacaan peta. Migrasi SQL lama tetap menjadi riwayat perubahan skema.
 
 Untuk demonstrasi, tunjukkan fasilitas dan kategori, lalu hubungan `assets → source_objects` dan `relations`. Setelah impor diterapkan di web, tunjukkan tambahan baris serta perubahan revision/audit. Gunakan DBeaver untuk memeriksa data; edit melalui web agar revision, validasi, dan audit berjalan bersama.
 
@@ -97,7 +98,21 @@ Pemeriksaan baseline pada migrasi ini: 1.376 aset, sembilan fasilitas, 594 pasan
 
 ## Backup operasional dan rollback
 
-Sesudah migrasi, skrip backup yang sama memverifikasi hash seluruh 12 tabel pada database restore. Gunakan nama restore baru, misalnya `--restore-db=sinergi_after_migration_check`. Hentikan backend selama backup konsisten, kemudian jalankan kembali dengan `up -d --no-deps backend frontend`. Backup tidak menghapus volume.
+Sesudah migrasi, skrip backup yang sama memverifikasi hash seluruh tabel operasional, termasuk checkpoint jika sudah tersedia, pada database restore. Gunakan nama restore baru, misalnya `--restore-db=sinergi_after_migration_check`. Hentikan backend selama backup konsisten, kemudian jalankan kembali dengan `up -d --no-deps backend frontend`. Backup tidak menghapus volume.
+
+### Versi data di halaman Impor
+
+Administrator dapat **Simpan versi** untuk menyimpan keadaan yang sudah dikoreksi, dan **Pulihkan** untuk kembali ke versi tersebut. Impor otomatis menyimpan keadaan sebelum dan sesudah penerapan dalam transaksi yang sama. Sebelum pemulihan, keadaan sekarang ikut disimpan. Kegagalan penyimpanan, validasi sumber, atau audit membatalkan seluruh perubahan.
+
+Snapshot memuat ID aset, EWKB geometri dan koreksi, ikon, fasilitas/kategori, alias aktif/nonaktif, koneksi/tombstone, mounting, layout/frame/root, serta referensi impor dan manifest sumber. File asli tetap satu salinan. Akun/password/sesi, job, audit, dan skema tidak dikembalikan. Revision selalu naik ketika keadaan dipulihkan; preview dan draft lama tidak dapat ditulis ke revision baru.
+
+Maksimal 10 keadaan unik per dataset. Keadaan identik memakai versi yang sudah ada dan memperbarui urutan retensinya. Pemangkasan melindungi versi aktif dan cadangan sebelum operasi terakhir pada saat operasi tersebut berjalan. Nama yang dimasukkan untuk keadaan identik tidak mengganti nama versi sebelumnya. Edit biasa tidak otomatis membuat checkpoint.
+
+Riwayat impor tetap tersedia, tetapi impor yang dibatalkan oleh pemulihan ditandai **Pernah diterapkan · di luar data aktif**. Untuk menerapkannya kembali, unggah sumbernya melalui preview biasa. Download sumber atau ekspor KML bukan pemulihan keadaan database lengkap. Versi sebelum fitur diaktifkan tidak direkonstruksi; bootstrap membuat satu **Baseline saat fitur versi diaktifkan**.
+
+API Administrator: `GET /api/datasets/:id/versions`, `POST /api/datasets/:id/versions` dengan `{name, expectedRevision}`, dan `POST /api/datasets/:id/versions/:versionId/restore` dengan `{expectedRevision}`. Daftar hanya mengembalikan metadata, tanpa payload snapshot. Pembacaan aktif/graph tetap memakai tabel operasional.
+
+Untuk peralihan dari 12 tabel: backup dan uji restore, hentikan backend, jalankan `npm run db:migrate` memakai image baru, kemudian jalankan backend/frontend baru. Migrasi `0011_dataset_checkpoints` menambahkan tabel dan daftar impor aktif tanpa mengganti baseline. Pemulihan bencana tetap membutuhkan dump dan penyimpanan sumber yang cocok dengan versi kode.
 
 Backup sebelum peralihan lokal tersimpan di `.local-runtime/operational-backup/2026-10-09T15-02-25-385Z/`, berisi `database.dump`, `source-storage`, dan manifest checksum. Laporan verifikasi berada di `.local-runtime/operational-migration/`. Direktori ini diabaikan Git; salin ke penyimpanan backup deployment.
 
@@ -107,6 +122,8 @@ Untuk rollback, hentikan backend/frontend dan restore dump ke **database baru ya
 
 ## Pengujian
 
-Jalankan `npm test`, `npm run lint`, dan `npm run build` dari `backend` dan `frontend`. `node backend/scripts/test-operational.mjs` menjalankan integrasi PostgreSQL pada `sinergi_migration_check`, bukan database aktif. Pengujian tersebut membuat dataset fixture tersendiri untuk impor, akun, revision, rollback transaksi, penghapusan relasi, kategori baru, dan pemulihan worker.
+Jalankan `npm test`, `npm run lint`, dan `npm run build` dari `backend` dan `frontend`. `npm run test:operational` dari backend menjalankan integrasi PostgreSQL pada `sinergi_migration_check`, bukan database aktif. Pengujian mencakup impor, akun, revision, rollback transaksi, penghapusan relasi, kategori baru, pemulihan worker, serta A → B → C, batas checkpoint, sumber hilang, kegagalan snapshot/audit, dan perubahan bersamaan.
+
+`node backend/scripts/verify-dataset-checkpoints.mjs --database=sinergi_migration_check --source-root=<backup>/source-storage` mengukur simpan/pulihkan dan memeriksa kesamaan seluruh baseline 1.376 aset. Skrip menolak database aktif, mengubah data pada salinan untuk pengujian, lalu memulihkan keadaan awal dengan revision baru.
 
 Audit visual browser tidak dijalankan pada pengerjaan ini sesuai permintaan untuk tidak memakai computer use. Validasi UI memakai pengujian adapter, layout, render, dan build.

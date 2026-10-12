@@ -43,14 +43,16 @@ try {
   assert.deepEqual(pairs(oldMap),pairs(newMap))
   const coordinates=m=>m.geometries.map(g=>g.coordinates).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))
   assert.deepEqual(coordinates(oldMap),coordinates(newMap))
-  const missingUsers=(await client.query('SELECT count(*)::int n FROM (SELECT id,username,password_hash,role,active FROM public.app_users EXCEPT SELECT id,username,password_hash,role,active FROM sinergi.app_users) missing')).rows[0].n
+  const missingUsers=(await client.query('SELECT count(*)::int n FROM (SELECT id,username,password_hash,role FROM public.app_users EXCEPT SELECT id,username,password_hash,role FROM sinergi.app_users) missing')).rows[0].n
   assert.equal(missingUsers,0)
   const missingHistory=(await client.query('SELECT count(*)::int n FROM public.dataset_versions v LEFT JOIN sinergi.imports i ON i.id=v.id WHERE i.id IS NULL OR i.source_checksum IS DISTINCT FROM v.source_checksum')).rows[0].n
   assert.equal(missingHistory,0)
   await client.query(`DROP TABLE ${tables.map(t=>`public.${t}`).join(',')}`)
   await repository.audit(client,'migration.legacy_retired',{actorId:'system:migration',datasetId:state.id,details:{tables,visibleGeometry:newMap.geometries.length}})
-  await repository.bump(client,state.id)
-  return {database,retiredTables:tables.length,applicationTables:12,assets:snapshot.assets.length,facilities:snapshot.facilities.length,
+  if('current_checkpoint_id' in state)await repository.bump(client,state.id)
+  else await client.query('UPDATE sinergi.dataset_state SET revision=revision+1,updated_at=now() WHERE id=$1',[state.id])
+  const applicationTables=(await client.query("SELECT count(*)::int n FROM information_schema.tables WHERE table_schema='sinergi' AND table_type='BASE TABLE'")).rows[0].n
+  return {database,retiredTables:tables.length,applicationTables,assets:snapshot.assets.length,facilities:snapshot.facilities.length,
    connections:pairs(newMap).length,mounting:newMap.mountingRelations.length,visibleGeometry:newMap.geometries.length,accountsPreserved:true,historyArchived:true}
  })
  await writeFile(path.join(root,'.local-runtime/operational-migration',live?'retirement-live.json':'retirement-restore.json'),JSON.stringify(report,null,2))

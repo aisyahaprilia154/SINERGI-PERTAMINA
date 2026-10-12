@@ -45,6 +45,7 @@ export class OperationalImportService {
       const proposals=proposalsFromCanonical(canonical,projection,record.dataset_id)
       if(!proposals.length) throw new AppError('KMZ tidak berisi aset yang dapat diimpor.',{code:'empty_import',statusCode:422})
       await this.repository.transaction(async client=>{
+        await this.repository.state(client,record.dataset_id,{lock:true})
         if(lease) {
           const owner=(await client.query("SELECT locked_by FROM sinergi.jobs WHERE import_id=$1 AND status='running' AND lock_expires_at>now() FOR UPDATE",[id])).rows[0]?.locked_by
           if(owner!==lease)throw new AppError('Job telah diambil worker lain.',{code:'job_lease_lost',statusCode:409})
@@ -88,8 +89,11 @@ export class OperationalImportService {
   }
   async decide(id,itemId,decision,actorId) {
     return this.repository.transaction(async client=>{
+      const initial=await this.get(id,client)
+      const state=await this.repository.state(client,initial.dataset_id,{lock:true})
       const record=await this.get(id,client,{lock:true})
       if(record.status!=='ready') throw new AppError('Impor tidak dapat diedit.',{code:'import_not_ready',statusCode:409})
+      if(Number(record.base_revision)!==Number(state.revision))throw new AppError('Baseline berubah; hitung ulang preview.',{code:'preview_stale',statusCode:409})
       const item=(await client.query('SELECT * FROM sinergi.import_items WHERE id=$1 AND import_id=$2',[itemId,id])).rows[0]
       if(!item) throw new AppError('Item tidak ditemukan.',{code:'item_not_found',statusCode:404})
       let status,matched=null,proposal=item.proposal
@@ -124,14 +128,20 @@ export class OperationalImportService {
   }
   async apply(id,expectedRevision,actorId) {
     return this.repository.transaction(async client=>{
+      const initial=await this.get(id,client)
+      const state=await this.repository.state(client,initial.dataset_id,{lock:true})
       const record=await this.get(id,client,{lock:true})
-      const state=await this.repository.state(client,record.dataset_id,{lock:true})
       this.repository.assertRevision(state,expectedRevision)
-      if(record.status==='applied') return {revision:Number(state.revision),alreadyApplied:true}
+      if(record.status==='applied') {
+        if(!state.active_import_ids.includes(id))throw new AppError('Impor ini tidak termasuk data aktif. Unggah ulang file sumber untuk menerapkannya kembali.',{code:'import_not_active',statusCode:409})
+        return {revision:Number(state.revision),alreadyApplied:true}
+      }
       if(record.status!=='ready') throw new AppError('Impor belum siap.',{code:'import_not_ready',statusCode:409})
       if(Number(record.base_revision)!==Number(state.revision)) throw new AppError('Baseline berubah; hitung ulang preview.',{code:'preview_stale',statusCode:409})
       const items=(await client.query('SELECT * FROM sinergi.import_items WHERE import_id=$1 ORDER BY id',[id])).rows
       if(items.some(i=>['conflict','invalid'].includes(i.status))) throw new AppError('Selesaikan atau lewati konflik sebelum menerapkan.',{code:'import_conflicts',statusCode:409})
+      if(!this.repository.checkpoints)throw new Error('Dataset checkpoints must be configured before applying imports.')
+      const before=await this.repository.checkpoints.save(client,{datasetId:record.dataset_id,name:`Sebelum impor — ${record.name}`.slice(0,180),actorId,reason:'before_import',markCurrent:false})
       for(const item of items.filter(i=>i.kind==='asset'&&i.status==='new')) {
         const p=item.proposal,facilityId=p.facility.id ?? `facility-${stableKey(record.dataset_id,p.facility.key)}`,categoryId=`category-${stableKey(key(p.category))}`,sourceId=`source-${stableKey(id,p.source.featureId)}`
         await insertRows(client,'facilities',[{id:facilityId,dataset_id:record.dataset_id,name:p.facility.name,aliases:[p.facility.key]}])
@@ -166,9 +176,11 @@ export class OperationalImportService {
       const summary=summarize(items)
       await client.query("UPDATE sinergi.import_items SET result=result||jsonb_build_object('assetId',COALESCE(matched_asset_id,proposal->>'id')),status=CASE WHEN status='new' THEN 'applied' ELSE status END,proposal='{}' WHERE import_id=$1",[id])
       await client.query("UPDATE sinergi.imports SET status='applied',summary=$2,applied_at=now() WHERE id=$1",[id,JSON.stringify(summary)])
-      await client.query('UPDATE sinergi.dataset_state SET latest_import_id=$2 WHERE id=$1',[record.dataset_id,id])
+      await client.query('UPDATE sinergi.dataset_state SET latest_import_id=$2,active_import_ids=array_append(active_import_ids,$2) WHERE id=$1',[record.dataset_id,id])
       await this.repository.audit(client,'import.applied',{actorId,datasetId:record.dataset_id,importId:id,details:summary})
       await this.repository.bump(client,record.dataset_id)
+      const after=await this.repository.checkpoints.save(client,{datasetId:record.dataset_id,name:`Setelah impor — ${record.name}`.slice(0,180),actorId,reason:'after_import'})
+      await this.repository.checkpoints.prune(client,record.dataset_id,[before.version.id,after.version.id])
       return {datasetId:record.dataset_id,revision:Number(state.revision)+1,recordRevision:Number(state.revision)+1,summary}
     })
   }

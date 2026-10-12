@@ -32,10 +32,11 @@ test('presence resumes after reconnection and bfcache, revokes expired sessions 
  }finally{globalThis.window=previousWindow;globalThis.document=previousDocument}
 })
 
-test('user list renders server presence separately from account access and escapes user fields',()=>{
- const user={id:'safe-id',username:'<img onerror=alert(1)>',email:'a@example.test',role:'Viewer',active:true,online:false,lastSeenAt:null}
- const html=renderUserRows([user]);assert.match(html,/Aktif/);assert.match(html,/Offline/);assert.match(html,/Belum pernah masuk/);assert.equal(html.includes('<img'),false)
+test('user list renders last online without account status and escapes user fields',()=>{
+ const user={id:'safe-id',username:'<img onerror=alert(1)>',email:'a@example.test',role:'Viewer',online:false,lastSeenAt:null}
+ const html=renderUserRows([user]);assert.doesNotMatch(html,/Aktif|Nonaktif|Offline/);assert.match(html,/Belum pernah masuk/);assert.equal(html.includes('<img'),false)
  assert.match(renderUserRows([{...user,online:true}]),/is-online/)
+ assert.match(renderUserRows([{...user,lastSeenAt:'2026-10-10T09:00:00Z'}],{serverTime:'2026-10-10T09:02:00Z'}),/2 menit lalu/)
  const stale=renderUserRows([{...user,online:true}],{unconfirmed:true});assert.match(stale,/Belum diperbarui/);assert.equal(stale.includes('is-online'),false)
  assert.equal(lastSeenLabel('2026-10-10T09:00:00Z','2026-10-10T09:02:00Z'),'2 menit lalu')
 })

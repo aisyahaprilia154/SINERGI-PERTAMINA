@@ -12,6 +12,11 @@ const normalizedPath = window.location.pathname.replace(/\/+$/, '') || '/'
 const previewMatch = normalizedPath.match(/^\/admin\/datasets\/import\/([^/]+)\/preview$/)
 
 const routeLoaders = {
+  '/admin/datasets/versions': {
+    loadStyle: () => import('./styles/admin-route.css'),
+    loadPage: () => import('./pages/admin/dataset-versions-page.js'),
+    render: 'renderDatasetVersionsPage',
+  },
   '/admin/users': {
     loadStyle:()=>import('./styles/admin-users.css'),
     loadPage:()=>import('./pages/admin/users-page.js'),

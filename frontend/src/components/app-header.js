@@ -89,14 +89,13 @@ export function renderTopNavigation(activeView = 'map', context = null) {
       <a class="brand-lockup nav-brand" href="/map${contextQuery}" aria-label="SINERGI — Peta Aset">
         ${patraNiagaLogoMarkup()}
       </a>
-      <nav aria-label="Navigasi utama" style="--app-nav-count:${isAdministrator()?3:2}">
+      <nav aria-label="Navigasi utama" style="--app-nav-count:2">
         <a href="/map${contextQuery}" aria-label="Peta Aset" ${activeView==='map'?'aria-current="page"':''} class="${activeView === 'map' ? 'active' : ''}">
           <span class="material-symbols-outlined" aria-hidden="true">map</span><span class="nav-label">Peta Aset</span><span class="nav-label-short">Peta</span>
         </a>
         <a href="/topology${contextQuery}" aria-label="Diagram Topologi" ${activeView==='topology'?'aria-current="page"':''} class="${activeView === 'topology' ? 'active' : ''}">
           <span class="material-symbols-outlined" aria-hidden="true">account_tree</span><span class="nav-label">Diagram Topologi</span><span class="nav-label-short">Diagram</span>
         </a>
-        ${isAdministrator()?`<a href="/admin/users" ${activeView==='admin'?'class="active" aria-current="page"':''}><span class="material-symbols-outlined" aria-hidden="true">manage_accounts</span><span class="nav-label">Admin</span><span class="nav-label-short">Admin</span></a>`:''}
       </nav>
       <div class="nav-actions">
         <button class="icon-button theme-toggle" type="button" data-theme-toggle
@@ -113,6 +112,9 @@ export function renderTopNavigation(activeView = 'map', context = null) {
           </button>
           <div class="user-menu-dropdown" data-user-account-dropdown id="user-account-dropdown"
             role="menu" aria-label="Menu akun" hidden>
+            ${isAdministrator()?`<div class="user-menu-dropdown-items">
+              ${[['users','/admin/users','manage_accounts','Kelola pengguna'],['imports','/admin/datasets/import','history','Riwayat import'],['versions','/admin/datasets/versions','restore','Versi database']].map(([view,path,icon,label])=>`<a class="user-menu-dropdown-item" href="${path}${contextQuery}" role="menuitem" ${activeView===view?'aria-current="page"':''}><span class="material-symbols-outlined" aria-hidden="true">${icon}</span><span>${label}</span></a>`).join('')}
+            </div><div class="user-menu-dropdown-divider" role="separator"></div>`:''}
             <div class="user-menu-dropdown-items user-menu-dropdown-items-last">
               <button class="user-menu-dropdown-item" data-user-account-logout
                 type="button" role="menuitem">

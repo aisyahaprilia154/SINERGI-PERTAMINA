@@ -5,44 +5,77 @@ import {adaptActiveDatasetForMap} from '../../adapters/active-dataset-map-adapte
 import {download} from './import-dataset-page.js'
 import {escapeHtml as e} from './import-view-utils.js'
 
-export async function renderPreviewImportPage(container,importId) {
-  document.title='Preview Tambahan — SINERGI'
+export async function renderPreviewImportPage(container,importId,{createSurface=null}={}) {
+  document.title='Preview — SINERGI'
   const content=mountAdminShell(container,{active:'imports'})
-  let map=null,preview,baseline,showContext=true,busy=false,error=''
-  const load=async()=>{preview=await loadImportPreview({importId});baseline=await loadActiveDataset({datasetId:preview.import.dataset_id});render()}
-  const run=async action=>{if(busy)return;busy=true;render();try{await action();error='';await load()}catch(caught){error=caught.message;render()}finally{busy=false;render()}}
-  function render(){
-    map?.destroy?.();map=null
-    content.innerHTML=`<section class="operational-import"><a class="admin-back" href="/admin/datasets/import"><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>Kembali ke Impor</a><div class="au-heading"><div><h1 class="admin-page-title">Preview tambahan</h1><p class="admin-page-subtitle">Periksa lokasi dan konflik sebelum menerapkan tambahan.</p></div></div><section class="operational-card"><h2>${e(preview.import.name)}</h2>
-      <p>${preview.summary.addedAssets} aset baru · ${preview.summary.addedRelations} relasi baru · ${preview.summary.existingAssets} aset sudah tersimpan · ${preview.summary.conflicts} konflik</p>
-      <p>Aset lama yang cocok tetap memakai data database. Kategori baru ditempatkan sebagai perangkat akhir.</p>
-      ${error?`<p role="alert" class="operational-error">${e(error)}</p>`:''}
-      <div class="operational-actions"><button data-apply class="operational-primary" ${busy||preview.summary.conflicts||preview.import.status!=='ready'?'disabled':''}>Terapkan tambahan</button>
-      <button data-refresh ${busy?'disabled':''}>Hitung ulang preview</button><button data-source>Unduh sumber</button></div></section>
-      <section class="operational-card"><div class="operational-actions"><h2>Lokasi tambahan</h2><label><input data-context type="checkbox" ${showContext?'checked':''}> Tampilkan aset lama sebagai konteks</label></div><div class="operational-preview-map" data-preview-map></div></section>
-      <section class="operational-card"><h2>Tambahan aset dan kategori</h2>${renderAdditions(preview.items)}</section>
-      ${preview.conflicts.length?`<section class="operational-card"><h2>Konflik yang perlu diputuskan</h2>${preview.conflicts.map(item=>renderConflict(item,baseline,preview)).join('')}</section>`:''}</section>`
-    content.querySelector('[data-context]').addEventListener('change',event=>{showContext=event.target.checked;render()})
-    content.querySelector('[data-source]').addEventListener('click',()=>void run(async()=>download(await downloadDatasetSource({importId}))))
-    content.querySelector('[data-apply]').addEventListener('click',()=>void run(async()=>{await activateDatasetVersion({importId,expectedRevision:preview.baseRevision});window.location.assign(`/map?datasetId=${encodeURIComponent(preview.import.dataset_id)}`)}))
-    content.querySelector('[data-refresh]').addEventListener('click',()=>void run(async()=>{
-      await refreshImportPreview({importId})
-      while(container.isConnected){const status=await loadImportStatus({statusUrl:`/api/imports/${encodeURIComponent(importId)}`});if(status.import.status==='ready')break;if(status.import.status==='failed')throw new Error(status.import.error?.message || 'Preview gagal diperbarui.');await new Promise(resolve=>setTimeout(resolve,1200))}
-    }))
-    content.querySelectorAll('[data-item-action]').forEach(button=>button.addEventListener('click',()=>void run(async()=>{
+  let map=null,preview,baseline,showContext=true,busy=false,mapGeneration=0,mapSignature='',camera=null,disposed=false,conflictsMarkup='',focusAfter=null
+  content.innerHTML=`<section class="operational-import operational-preview"><a class="admin-back" href="/admin/datasets/import"><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>Riwayat import</a><div class="au-heading preview-heading"><div><h1 data-preview-name>Preview</h1><p class="admin-caption" data-preview-summary>Memuat tambahan…</p></div><div class="operational-actions"><button data-apply class="au-button au-primary" disabled>Terapkan tambahan</button><button class="au-icon" data-refresh disabled aria-label="Hitung ulang preview" title="Hitung ulang preview"><span class="material-symbols-outlined" aria-hidden="true">refresh</span></button><button class="au-icon" data-source disabled aria-label="Unduh sumber" title="Unduh sumber"><span class="material-symbols-outlined" aria-hidden="true">download</span></button></div></div><p class="operational-error" role="alert" data-preview-error hidden></p><p class="operational-status" role="status" data-preview-status></p><section class="admin-section preview-map-section"><div class="admin-section-heading"><h2>Lokasi tambahan</h2><label class="admin-check"><input data-context type="checkbox" checked>Tampilkan aset lama</label></div><div class="operational-preview-map" data-preview-map></div></section><section class="admin-section"><div class="admin-section-heading"><h2>Tambahan aset</h2></div><div data-additions></div></section><section class="admin-section" data-conflicts-section hidden><div class="admin-section-heading"><h2>Konflik</h2></div><div data-conflicts></div></section></section>`
+  const host=content.querySelector('[data-preview-map]'),error=content.querySelector('[data-preview-error]'),status=content.querySelector('[data-preview-status]'),conflicts=content.querySelector('[data-conflicts]')
+  const showError=caught=>{error.textContent=caught?.message||'';error.hidden=!caught}
+  const syncControls=()=>{
+    content.querySelector('[data-apply]').disabled=busy||!preview||!!preview.summary.conflicts||preview.import.status!=='ready'
+    content.querySelectorAll('[data-refresh],[data-source],[data-item-action],[data-conflict-item] select').forEach(el=>{el.disabled=busy||!preview})
+    status.textContent=busy?'Memproses…':''
+    content.querySelector('.operational-preview').setAttribute('aria-busy',String(busy))
+  }
+  async function updateMap() {
+    const payload=previewMapPayload(preview,baseline,showContext),signature=JSON.stringify(payload)
+    if(signature===mapSignature)return
+    mapSignature=signature;camera=map?.getCamera?.()||camera;map?.destroy?.();map=null
+    const generation=++mapGeneration
+    try {
+      const factory=createSurface||(await import('../map/maplibre-map.js')).createMapLibreSurface
+      if(disposed||generation!==mapGeneration||!host.isConnected)return
+      host.replaceChildren()
+      map=factory(host,{...adaptActiveDatasetForMap(payload),initialCamera:camera})
+    }catch(caught){if(!disposed&&generation===mapGeneration){mapSignature='';host.textContent=`Peta tidak dapat dimuat: ${caught.message}`}}
+  }
+  function render() {
+    content.querySelector('[data-preview-name]').textContent=preview.import.name
+    content.querySelector('[data-preview-summary]').textContent=`${preview.summary.addedAssets} aset baru · ${preview.summary.addedRelations} relasi baru · ${preview.summary.conflicts} konflik`
+    const additions=content.querySelector('[data-additions]'),additionHtml=renderAdditions(preview.items)
+    if(additions.innerHTML!==additionHtml)additions.innerHTML=additionHtml
+    const html=preview.conflicts.map(item=>renderConflict(item,baseline,preview)).join('')
+    if(conflictsMarkup!==html){
+      conflictsMarkup=html
+      const focused=document.activeElement,row=focused?.closest('[data-conflict-item]'),key=row?.dataset.conflictItem
+      const attr=focused?.matches('select')?[...focused.attributes].find(a=>a.name.startsWith('data-'))?.name:null,action=focused?.dataset.itemAction
+      const selections=[...conflicts.querySelectorAll('select')].map(el=>({id:el.closest('[data-conflict-item]').dataset.conflictItem,attr:[...el.attributes].find(a=>a.name.startsWith('data-'))?.name,value:el.value}))
+      conflicts.innerHTML=html
+      for(const selection of selections){const target=[...conflicts.querySelectorAll('[data-conflict-item]')].find(el=>el.dataset.conflictItem===selection.id)?.querySelector(`[${selection.attr}]`);if(target&&[...target.options].some(o=>o.value===selection.value))target.value=selection.value}
+      if(key){const target=[...conflicts.querySelectorAll('[data-conflict-item]')].find(el=>el.dataset.conflictItem===key);focusAfter=(target?.querySelector(attr?`[${attr}]`:`[data-item-action="${action}"]`)||conflicts.querySelector('button')||content.querySelector('[data-refresh]'))}
+    }
+    content.querySelector('[data-conflicts-section]').hidden=!preview.conflicts.length
+    syncControls();void updateMap()
+  }
+  const load=async()=>{
+    const next=await loadImportPreview({importId}),active=await loadActiveDataset({datasetId:next.import.dataset_id})
+    if(disposed)return
+    preview=next;baseline=active;render()
+  }
+  const run=async(action,{reload=true}={})=>{
+    if(busy)return
+    focusAfter=document.activeElement;busy=true;showError(null);syncControls()
+    try{await action();if(reload)await load()}catch(caught){showError(caught)}finally{busy=false;syncControls();if(focusAfter?.isConnected&&!focusAfter.disabled)focusAfter.focus();focusAfter=null}
+  }
+  content.querySelector('[data-context]').addEventListener('change',event=>{showContext=event.target.checked;if(preview)void updateMap()})
+  content.querySelector('[data-source]').addEventListener('click',()=>void run(async()=>download(await downloadDatasetSource({importId})),{reload:false}))
+  content.querySelector('[data-apply]').addEventListener('click',()=>void run(async()=>{await activateDatasetVersion({importId,expectedRevision:preview.baseRevision});window.location.assign(`/map?datasetId=${encodeURIComponent(preview.import.dataset_id)}`)},{reload:false}))
+  content.querySelector('[data-refresh]').addEventListener('click',()=>void run(async()=>{
+    await refreshImportPreview({importId})
+    while(container.isConnected&&!disposed){const result=await loadImportStatus({statusUrl:`/api/imports/${encodeURIComponent(importId)}`});if(result.import.status==='ready')break;if(result.import.status==='failed')throw new Error(result.import.error?.message||'Preview gagal diperbarui.');await new Promise(resolve=>setTimeout(resolve,1200))}
+  }))
+  conflicts.addEventListener('click',event=>{
+    const button=event.target.closest('[data-item-action]');if(!button)return
+    void run(async()=>{
       const row=button.closest('[data-conflict-item]'),decision={decision:button.dataset.itemAction}
       if(decision.decision==='match_existing')decision.assetId=row.querySelector('[data-existing-asset]').value
       if(decision.decision==='connect'){decision.sourceAssetId=row.querySelector('[data-endpoint-start]').value;decision.targetAssetId=row.querySelector('[data-endpoint-end]').value}
       await decideImportItem({importId,itemId:row.dataset.conflictItem,decision})
-    })))
-    const host=content.querySelector('[data-preview-map]'),payload=previewMapPayload(preview,baseline,showContext)
-    void import('../map/maplibre-map.js').then(({createMapLibreSurface})=>{
-      if(!host.isConnected)return
-      const model=adaptActiveDatasetForMap(payload);map=createMapLibreSurface(host,model)
-    }).catch(caught=>{if(host.isConnected)host.textContent=`Peta tidak dapat dimuat: ${caught.message}`})
-  }
-  content.innerHTML=`<section class="operational-import"><a class="admin-back" href="/admin/datasets/import"><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>Kembali ke Impor</a><div class="au-heading"><div><h1 class="admin-page-title">Preview tambahan</h1><p class="admin-page-subtitle">Periksa lokasi dan konflik sebelum menerapkan tambahan.</p></div></div><p role="status">Memuat tambahan…</p></section>`
-  try{await load()}catch(caught){content.querySelector('[role=status]').textContent=caught.message}
+    })
+  })
+  window.addEventListener('pagehide',()=>{disposed=true;mapGeneration++;map?.destroy?.()},{once:true})
+  try{await load()}catch(caught){showError(caught);content.querySelector('[data-preview-summary]').textContent='Preview belum dapat dimuat.'}
 }
 export function renderAdditions(items=[]) {
   const assets=items.filter(i=>i.kind==='asset'&&i.status==='new')

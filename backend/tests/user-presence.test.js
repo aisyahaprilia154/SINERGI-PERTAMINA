@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {TokenAuthenticator,ONLINE_TIMEOUT_MS} from '../src/security/authorization.js'
-import {protectLastAdministrator} from '../src/security/account-store.js'
+import {protectLastAdministrator,PostgresAccountStore} from '../src/security/account-store.js'
 const request=token=>({headers:{authorization:`Bearer ${token}`}})
 
 test('online expires without a heartbeat and returns on authenticated activity',()=>{
@@ -20,9 +20,14 @@ test('a backend restart shows no online user until a new valid session exists',(
   const first=new TokenAuthenticator(),session=first.issueSession({id:'user'}),restarted=new TokenAuthenticator()
   assert.equal(restarted.isOnline('user'),false);assert.throws(()=>restarted.authenticate(request(session.token)),{code:'invalid_token'})
 })
-test('the last active administrator cannot be disabled or downgraded',()=>{
-  const admin={active:true,role:'Administrator'}
-  assert.throws(()=>protectLastAdministrator(admin,{active:false,role:'Administrator'},1),{code:'last_administrator'})
-  assert.throws(()=>protectLastAdministrator(admin,{active:true,role:'Viewer'},1),{code:'last_administrator'})
-  assert.doesNotThrow(()=>protectLastAdministrator(admin,{active:false,role:'Viewer'},2))
+test('the last administrator cannot be downgraded',()=>{
+  const admin={role:'Administrator'}
+  assert.throws(()=>protectLastAdministrator(admin,{role:'Viewer'},1),{code:'last_administrator'})
+  assert.doesNotThrow(()=>protectLastAdministrator(admin,{role:'Viewer'},2))
+  assert.doesNotThrow(()=>protectLastAdministrator(admin,{role:'Administrator'},1))
+})
+
+test('removed account status is rejected before writing or opening a transaction',async()=>{
+  const store=new PostgresAccountStore({query(){throw new Error('Should not query')}})
+  for(const active of [true,false,null])await assert.rejects(store.manage({actorId:'admin',userId:'user',body:{active}}),{code:'unsupported_account_status',statusCode:400})
 })
