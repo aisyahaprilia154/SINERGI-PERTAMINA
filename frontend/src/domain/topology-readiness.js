@@ -17,6 +17,12 @@ export function resolveTopologyReadiness({
   topologyGraph = null,
   validation = null,
 } = {}) {
+  if(topologyReadiness?.operational === true) {
+    const graphEdgeCount=topologyGraph?.edges?.length ?? 0
+    return {status:'ready',ready:true,diagramAvailable:true,graphAvailable:true,graphValid:true,graphEdgeCount,
+      validationErrorCount:0,graphRevision:topologyGraph?.revision ?? null,message:null,
+      capabilities:{viewTopology:true,diagram:true,editAssetMounting:true}}
+  }
   const status = readinessContract?.topologyReady
     ?? topologyReadiness?.topologyReadiness
     ?? readiness?.topologyReadiness

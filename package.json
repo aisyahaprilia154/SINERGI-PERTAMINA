@@ -3,10 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "lint": "node shared/lint.mjs",
     "dev": "node scripts/dev.mjs",
-    "docker:up": "docker compose up --build -d",
-    "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f",
-    "docker:ps": "docker compose ps"
+    "docker:up": "docker compose --env-file .env.docker up --build -d",
+    "docker:down": "docker compose --env-file .env.docker down",
+    "docker:logs": "docker compose --env-file .env.docker logs -f",
+    "docker:ps": "docker compose --env-file .env.docker ps"
   }
 }

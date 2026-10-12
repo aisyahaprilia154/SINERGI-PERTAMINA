@@ -69,6 +69,7 @@ export function adaptActiveDatasetForMap(payload) {
     .filter(isRenderableGeometry)
     .map((geometry) => {
       const owner = ownerByNodeId.get(geometry.assetNodeId)
+      if(payload.operationalSchema===2&&owner?.mapVisible===false)return null
       const layer = layerById.get(owner?.layerId)
       return {
         ...geometry,
@@ -76,13 +77,13 @@ export function adaptActiveDatasetForMap(payload) {
         layer,
         sourceStatus: sourceStatusFor(owner, layer),
       }
-    })
+    }).filter(Boolean)
   const visibleGeometryParts = geometryParts.filter(({ sourceStatus }) => (
     sourceStatus === 'visible'
   ))
   const bounds = positionBounds(visibleGeometryParts.flatMap(extractPositions))
   const allMapGeometries = geometryParts.map((geometry) => toMapGeometry(geometry, bounds))
-  const hiddenOperationalCableNodeIds = tegalC17RedundantCableNodeIds(payload.assets, layerById)
+  const hiddenOperationalCableNodeIds = payload.operationalSchema === 2 ? new Set() : tegalC17RedundantCableNodeIds(payload.assets, layerById)
   const geometries = allMapGeometries.filter(({ sourceStatus, sourceNodeId }) => (
     sourceStatus === 'visible' && !hiddenOperationalCableNodeIds.has(sourceNodeId)
   ))
@@ -220,7 +221,7 @@ export function adaptActiveDatasetForMap(payload) {
     asset.poleGroupId = poleGroup?.id ?? null
     asset.mountedOnAssetId = mountingTargetByAssetId.get(asset.id) ?? null
     asset.mountedAssetIds = mountedAssetIdsByHostId.get(asset.id) ?? []
-    asset.mountingExpectation = manuallyMountedAssetIds.has(asset.id) ? 'pole' : correctedMountingExpectation(asset)
+    asset.mountingExpectation = manuallyMountedAssetIds.has(asset.id) ? 'pole' : (payload.operationalSchema === 2 ? null : correctedMountingExpectation(asset))
       ?? expectationByAssetId.get(asset.id)?.expectation ?? 'unknown'
     asset.mountingReview = mountingReviewByAssetId.get(asset.id) ?? null
   })
@@ -231,15 +232,14 @@ export function adaptActiveDatasetForMap(payload) {
   const capabilities = structuredClone(payload.capabilities ?? null)
   const activeContextSource = payload.context ?? {}
   const activeContext = {
-    branchId: activeContextSource.branchId ?? payload.datasetVersion.branchId,
-    branchName: formatName(activeContextSource.branchId ?? payload.datasetVersion.branchId),
+    ...(payload.operationalSchema===2?{branchName:'Seluruh fasilitas'}:{branchId:activeContextSource.branchId ?? payload.datasetVersion.branchId,branchName:formatName(activeContextSource.branchId ?? payload.datasetVersion.branchId)}),
     datasetId: activeContextSource.datasetId ?? payload.datasetVersion.datasetId,
     datasetVersionId: activeContextSource.datasetVersionId ?? payload.datasetVersion.id,
     siteId: activeContextSource.siteId ?? null,
-    publicationProfile: activeContextSource.publicationProfile
+    ...(payload.operationalSchema===2?{}:{publicationProfile: activeContextSource.publicationProfile
       ?? payload.publicationProfile
       ?? payload.datasetVersion.publicationProfile
-      ?? 'map_only',
+      ?? 'map_only'}),
     datasetName: payload.datasetVersion.versionName,
     version: payload.datasetVersion.versionName,
     sourceFilename: payload.datasetVersion.sourceFilename,
@@ -380,7 +380,7 @@ export function adaptActiveDatasetForTopology(payload) {
     item,
   ]))
   assets.forEach((asset) => {
-    asset.mountingExpectation = mountingRelations.some(relation => relation.sourceAssetId === asset.id && relation.provenance === 'manual_admin') ? 'pole' : correctedMountingExpectation(asset)
+    asset.mountingExpectation = mountingRelations.some(relation => relation.sourceAssetId === asset.id && relation.provenance === 'manual_admin') ? 'pole' : (payload.operationalSchema === 2 ? null : correctedMountingExpectation(asset))
       ?? expectationByAssetId.get(asset.id)?.expectation ?? 'unknown'
     asset.mountingReview = mountingReviewByAssetId.get(asset.id) ?? null
   })
@@ -402,15 +402,14 @@ export function adaptActiveDatasetForTopology(payload) {
   const datasetVersion = payload.datasetVersion
   const topologyReadiness = structuredClone(payload.topologyReadiness ?? null)
   const activeContext = {
-    branchId: context.branchId ?? datasetVersion.branchId,
-    branchName: context.branchName ?? formatName(context.branchId ?? datasetVersion.branchId),
+    ...(payload.operationalSchema===2?{branchName:'Seluruh fasilitas'}:{branchId:context.branchId ?? datasetVersion.branchId,branchName:context.branchName ?? formatName(context.branchId ?? datasetVersion.branchId)}),
     datasetId: context.datasetId ?? datasetVersion.datasetId,
     datasetVersionId: context.datasetVersionId ?? datasetVersion.id,
     siteId: context.siteId ?? null,
-    publicationProfile: context.publicationProfile
+    ...(payload.operationalSchema===2?{}:{publicationProfile: context.publicationProfile
       ?? payload.publicationProfile
       ?? datasetVersion.publicationProfile
-      ?? 'map_only',
+      ?? 'map_only'}),
     datasetName: datasetVersion.versionName,
     version: datasetVersion.versionName,
     publishedAt: datasetVersion.publishedAt ?? datasetVersion.activatedAt ?? null,
@@ -466,6 +465,9 @@ export function adaptActiveDatasetForTopology(payload) {
 }
 
 function confirmedTopologyProjection(payload) {
+  if (payload.operationalSchema === 2) {
+    return structuredClone(payload.topologyGraph ?? { nodes: [], edges: [] })
+  }
   // A map publication can expose confirmed relation evidence even when the
   // legacy topology-review readiness contract is not ready. Readiness only
   // controls the retired review workflow; it must not erase graph evidence
@@ -787,7 +789,7 @@ export function adaptActiveAssetDetail(payload, mapAsset) {
   const mountingRelations = normalizeMountingRelations(
     payload.mountingRelations ?? mapAsset.mountingRelations ?? [],
     detailReferenceResolver,
-  ).filter(relation => relation.sourceAssetId !== expectedId || !correctedMountingExpectation(mapAsset))
+  ).filter(relation => payload.operationalSchema === 2 || relation.sourceAssetId !== expectedId || !correctedMountingExpectation(mapAsset))
   const mountingExpectations = normalizeMountingExpectations(
     payload.mountingExpectations ?? mapAsset.mountingExpectations ?? [],
     detailReferenceResolver,
@@ -830,7 +832,7 @@ export function adaptActiveAssetDetail(payload, mapAsset) {
       detailReferenceResolver,
     ),
     mountingOptions,
-    mountingExpectation: correctedMountingExpectation(mapAsset) ?? mountingExpectations.find(({ assetId }) => (
+    mountingExpectation: (payload.operationalSchema === 2 ? null : correctedMountingExpectation(mapAsset)) ?? mountingExpectations.find(({ assetId }) => (
       assetId === expectedId
     ))?.expectation ?? mapAsset.mountingExpectation ?? 'unknown',
     mountingReview: mountingReviewItems.find(({ assetId }) => (

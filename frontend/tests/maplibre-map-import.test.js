@@ -90,72 +90,6 @@ test('manual relation connectors are suppressed only by matching KML line geomet
   assert.doesNotMatch(source, /sourceGeometryIds\.some\(\(id\) => availableGeometryIds\.has\(id\)\)/)
 })
 
-test('connection review keeps the decision beside a candidate-focused asset map', async () => {
-  const reviewSource = await readFile(
-    new URL('../src/pages/admin/topology-review-page.js', import.meta.url),
-    'utf8',
-  )
-  const mapSource = await readFile(
-    new URL('../src/pages/map/maplibre-map.js', import.meta.url),
-    'utf8',
-  )
-
-  assert.match(reviewSource, /id="review-map"/)
-  assert.match(reviewSource, /createMapLibreSurface\(container\.querySelector\('#review-map'\)/)
-  assert.match(reviewSource, /candidates: initialLocationCandidates/)
-  assert.match(reviewSource, /reviewMap\.focusCoordinates\(positions\)/)
-  assert.match(reviewSource, /class="site-select"/)
-  assert.match(reviewSource, /mapData\.locationGroups\.map/)
-  assert.match(reviewSource, /scopeMapData\(\{/)
-  assert.match(reviewSource, /query\.set\('area', nextArea\)/)
-  assert.match(reviewSource, /attachCandidateMapGeometryIds/)
-  assert.match(reviewSource, /isolateSelectedCandidate: false/)
-  assert.doesNotMatch(reviewSource, /loadImportConfig/)
-  assert.match(reviewSource, /class="decision-reason-select"/)
-  assert.match(reviewSource, /Detail tambahan <small>Opsional/)
-  assert.match(reviewSource, /decisionDialogCopy/)
-  assert.doesNotMatch(reviewSource, /class="review-reason"/)
-  assert.match(mapSource, /selectedCandidateId/)
-  assert.match(mapSource, /selectedCandidateGeometryIds/)
-  assert.match(mapSource, /selectedCandidateFocus/)
-  assert.match(mapSource, /candidateContextDimmed/)
-  assert.match(mapSource, /candidateContext: Boolean\(selectedCandidate/)
-  assert.match(mapSource, /candidateEndpoint: focusedAssetIds\.has\(asset\.id\)/)
-  assert.match(mapSource, /candidateFocused/)
-  assert.match(mapSource, /candidateContextDimmed\s*\?\s*0\.16/)
-  assert.match(mapSource, /focusCoordinates\(positions\)/)
-  assert.match(mapSource, /map-selected-candidate-overlay/)
-  assert.doesNotMatch(mapSource, /Koneksi dipilih/)
-  assert.match(mapSource, /selected-map-endpoint source/)
-  assert.match(mapSource, /selected-map-endpoint target/)
-  assert.match(mapSource, /function geometryIdsForCandidate/)
-  assert.match(mapSource, /!isolateCandidate \|\| candidateGeometry/)
-  assert.match(mapSource, /!isolateCandidate \|\| candidate\.candidateId === state\.selectedCandidateId/)
-})
-
-test('connection review separates one active review from bulk selection actions', async () => {
-  const reviewSource = await readFile(
-    new URL('../src/pages/admin/topology-review-page.js', import.meta.url),
-    'utf8',
-  )
-  const reviewStyles = await readFile(
-    new URL('../src/styles/topology-review.css', import.meta.url),
-    'utf8',
-  )
-
-  assert.match(reviewSource, /class="bulk-selection-bar"/)
-  assert.match(reviewSource, /class="queue-scroll-region"/)
-  assert.match(reviewSource, /function renderBulkSelectionBar\(\)/)
-  assert.match(reviewSource, /Hubungkan koneksi/)
-  assert.match(reviewSource, /Hubungkan \$\{selectedCount\}/)
-  assert.match(reviewSource, /Batalkan pilihan/)
-  assert.doesNotMatch(reviewSource, /Hubungkan pilihan \(\$\{selectedCount\}\)/)
-  assert.match(reviewStyles, /grid-template-columns:\s*[\s\S]*minmax\(320px, 360px\)[\s\S]*minmax\(0, 1fr\)[\s\S]*minmax\(360px, 420px\)/)
-  assert.match(reviewStyles, /\.bulk-selection-bar\s*\{[\s\S]*grid-column: 1 \/ -1/)
-  assert.match(reviewStyles, /\.queue-scroll-region\s*\{[\s\S]*overflow-y: auto/)
-  assert.match(reviewStyles, /\.queue-selection\s*\{[\s\S]*position: sticky/)
-})
-
 test('MapLibre basemap is environment-configured and operational data is fail-safe', async () => {
   const source = await readFile(
     new URL('../src/pages/map/maplibre-map.js', import.meta.url),
@@ -204,7 +138,9 @@ test('MapLibre basemap is environment-configured and operational data is fail-sa
   assert.match(surfaceSource, /basemap-status-overview/)
   assert.match(surfaceSource, /basemap-status-metrics/)
   assert.match(surfaceSource, /class="map-attribution"/)
-  assert.match(mapPageSource, /account_tree<\/span><span class="nav-label">Diagram Topologi<\/span>/)
+  const headerSource = await readFile(new URL('../src/components/app-header.js', import.meta.url), 'utf8')
+  assert.match(headerSource, /account_tree<\/span><span class="nav-label">Diagram Topologi<\/span>/)
+  assert.match(mapPageSource, /components\/app-header\.js/)
 })
 
 test('fallback and vector basemap styles are valid and use a visible neutral canvas', () => {

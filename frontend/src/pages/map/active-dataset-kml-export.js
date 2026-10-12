@@ -38,7 +38,7 @@ export function collectSelectedNetworkAssetIds(networks, selectedNetworkIds) {
   const selected = new Set(selectedNetworkIds ?? [])
   return [...new Set((networks ?? [])
     .filter((network) => selected.has(network.id))
-    .flatMap((network) => network.assetIds ?? network.nodeIds ?? []))]
+    .flatMap((network) => [...(network.assetIds ?? []), ...(network.nodeIds ?? [])]))]
 }
 
 function serializePlacemark(asset, geometries) {

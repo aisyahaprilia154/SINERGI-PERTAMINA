@@ -1,636 +1,89 @@
-import {
-  getDefaultAdminToken,
-  loadImportConfig,
-  loadImportStatus,
-  uploadDataset,
-} from '../../services/import-dataset-service.js'
-import { patraNiagaLogoMarkup } from '../brand-logo.js'
-import { renderImportDatasetForm } from './import-dataset-form.js'
-import { validateImportFile } from './import-dataset-state.js'
-import { renderImportProgress } from './import-progress.js'
-import { renderImportStatusBadge } from './import-status-badge.js'
-import { renderImportSummary } from './import-summary.js'
-import { escapeAttribute, escapeHtml } from './import-view-utils.js'
+import {loadImportConfig,loadImportHistory,loadImportStatus,uploadDataset,downloadDatasetSource} from '../../services/import-dataset-service.js'
+import {escapeHtml as e} from './import-view-utils.js'
+import {mountAdminShell} from '../../components/admin-shell.js'
+import {adminDrawerMarkup,adminDrawerHeading,bindAdminOverlay} from '../../components/admin-overlay.js'
+import {currentDatasetId} from '../../services/operational-api.js'
 
-export function renderImportDatasetPage(container) {
-  document.title = 'Import Dataset KML/KMZ — SINERGI'
-  document.body.className = 'admin-import-body'
-
-  const state = {
-    configStatus: 'loading',
-    config: null,
-    configError: null,
-    phase: 'idle',
-    values: {
-      branchId: '',
-      importMode: 'stage_only',
-      versionName: createDefaultVersionName(),
-      versionNote: '',
-      officialSourceConfirmed: false,
-    },
-    selectedFile: null,
-    fileValidation: null,
-    fieldErrors: {},
-    uploadPercent: null,
-    backendStatus: null,
-    uploadResponse: null,
-    statusUrl: null,
-    startedAt: null,
-    errorMessage: null,
-    processMessage: null,
-    reportOpen: false,
-    previewOpen: false,
-    issueFilter: 'all',
-    controller: null,
-    elapsedTimer: null,
-  }
-
-  loadConfig()
-
-  async function loadConfig() {
-    state.configStatus = 'loading'
-    state.configError = null
-    render()
-    try {
-      state.config = await loadImportConfig({ token: getDefaultAdminToken() })
-      state.configStatus = 'ready'
-      state.values.branchId = state.config.branches[0]?.id ?? ''
-      if (!state.config.workflow?.importModes?.includes(state.values.importMode)) {
-        state.values.importMode = 'stage_only'
-      }
-    } catch (error) {
-      state.configStatus = 'error'
-      state.configError = error.message
+export async function renderImportDatasetPage(container) {
+  document.title='Riwayat import — SINERGI'
+  const content=mountAdminShell(container,{active:'imports'})
+  content.innerHTML=`<section class="operational-import" data-import-workspace><div class="au-heading"><h1>Riwayat import</h1><button type="button" class="au-button au-primary" data-open-import disabled><span class="material-symbols-outlined" aria-hidden="true">upload</span>Impor KML/KMZ</button></div><div data-import-content></div><p class="operational-status" data-page-status role="status">Memuat data…</p></section>${adminDrawerMarkup('import-editor')}`
+  const workspace=content.querySelector('[data-import-workspace]'),pageStatus=content.querySelector('[data-page-status]'),openButton=content.querySelector('[data-open-import]')
+  try {
+    const [config,initialHistory]=await Promise.all([loadImportConfig(),loadImportHistory()])
+    if(!container.isConnected)return
+    if(!config.datasets.length)throw new Error('Belum ada dataset yang tersedia.')
+    const requested=new URLSearchParams(window.location.search).get('datasetId')||currentDatasetId()
+    let datasetId=config.datasets.some(d=>d.id===requested)?requested:config.datasets[0].id
+    let history=initialHistory.imports,uploading=false,dirty=false,discarding=false,disposed=false
+    const datasetName=d=>d.name||(d.id==='dataset-semarang'?'SINERGI':d.id)
+    content.querySelector('[data-import-content]').innerHTML=`<div class="au-toolbar admin-dataset-context">${config.datasets.length===1?`<span>Dataset <strong>${e(datasetName(config.datasets[0]))}</strong></span>`:`<label>Dataset <select data-dataset-context aria-label="Dataset aktif">${config.datasets.map(d=>`<option value="${e(d.id)}" ${d.id===datasetId?'selected':''}>${e(datasetName(d))}</option>`).join('')}</select></label>`}</div><section class="admin-section"><div data-import-history></div></section>`
+    const historyHost=content.querySelector('[data-import-history]'),selector=content.querySelector('[data-dataset-context]'),layer=content.querySelector('[data-drawer="import-editor"]'),editor=layer.querySelector('.au-editor')
+    editor.innerHTML=`${adminDrawerHeading('Impor KML/KMZ','import-editor')}<form data-import-form><input name="datasetId" type="hidden" value="${e(datasetId)}"><label>Nama impor<input name="versionName" maxlength="180" placeholder="Tambahan aset Oktober" required></label><label>File KML/KMZ<input name="file" type="file" accept=".kml,.kmz" required></label><small>Maksimum ${Math.round(config.maxFileSize/1024/1024)} MB. Tambahan diperiksa sebelum diterapkan.</small><p class="operational-status" role="status" data-upload-status></p><div class="au-editor-footer"><button type="button" class="au-button" data-close-editor>Batal</button><button class="au-button au-primary" type="submit">Unggah dan lihat preview</button></div></form><section data-discard-confirm hidden><h2>Buang draft impor?</h2><p>Nama dan file yang dipilih belum diunggah.</p><div class="au-editor-footer"><button type="button" class="au-button" data-keep-draft>Lanjutkan mengisi</button><button type="button" class="au-button au-danger" data-discard-draft>Buang draft</button></div></section>`
+    const form=editor.querySelector('form'),uploadStatus=editor.querySelector('[data-upload-status]'),confirmation=editor.querySelector('[data-discard-confirm]')
+    const renderRows=()=>{historyHost.innerHTML=renderHistory(history.filter(i=>!i.dataset_id||i.dataset_id===datasetId))}
+    renderRows();pageStatus.textContent=''
+    const syncControls=()=>{
+      openButton.disabled=uploading
+      if(selector)selector.disabled=uploading||!layer.hidden
+      form.querySelectorAll('input,button').forEach(el=>{el.disabled=uploading})
+      editor.querySelectorAll('[data-close-editor]').forEach(el=>{el.disabled=uploading})
+      form.setAttribute('aria-busy',String(uploading))
     }
-    render()
-  }
-
-  function render() {
-    container.innerHTML = renderShell(state)
-    bindEvents()
-  }
-
-  function bindEvents() {
-    container.querySelector('.retry-import-config')?.addEventListener('click', loadConfig)
-    if (state.configStatus !== 'ready') return
-
-    const form = container.querySelector('#import-dataset-form')
-    form?.addEventListener('submit', handleSubmit)
-    form?.querySelector('[name="branchId"]')?.addEventListener('change', (event) => {
-      state.values.branchId = event.target.value
-      render()
-    })
-    form?.querySelector('[name="importMode"]')?.addEventListener('change', (event) => {
-      state.values.importMode = event.target.value
-      render()
-    })
-    form?.querySelector('[name="versionName"]')?.addEventListener('input', (event) => {
-      state.values.versionName = event.target.value
-    })
-    form?.querySelector('[name="versionNote"]')?.addEventListener('input', (event) => {
-      state.values.versionNote = event.target.value
-    })
-    form?.querySelector('[name="officialSourceConfirmed"]')
-      ?.addEventListener('change', (event) => {
-        state.values.officialSourceConfirmed = event.target.checked
-      })
-
-    const fileInput = container.querySelector('#dataset-file')
-    fileInput?.addEventListener('change', () => selectFiles(fileInput.files))
-    container.querySelector('[data-dropzone-trigger]')
-      ?.addEventListener('click', () => fileInput?.click())
-    container.querySelector('.replace-import-file')
-      ?.addEventListener('click', () => fileInput?.click())
-    container.querySelector('.remove-import-file')?.addEventListener('click', () => {
-      state.selectedFile = null
-      state.fileValidation = null
-      render()
-    })
-
-    const dropTarget = container.querySelector('[data-dropzone-trigger]')
-      ?? container.querySelector('.selected-import-file')
-    if (dropTarget) {
-      for (const eventName of ['dragenter', 'dragover']) {
-        dropTarget.addEventListener(eventName, (event) => {
-          event.preventDefault()
-          dropTarget.classList.add('is-dragging')
-        })
-      }
-      for (const eventName of ['dragleave', 'drop']) {
-        dropTarget.addEventListener(eventName, (event) => {
-          event.preventDefault()
-          dropTarget.classList.remove('is-dragging')
-        })
-      }
-      dropTarget.addEventListener('drop', (event) => selectFiles(event.dataTransfer.files))
+    function close({discard=false}={}) {
+      if(uploading)return
+      if(discard){form.reset();form.elements.datasetId.value=datasetId;dirty=false;uploadStatus.textContent=''}
+      layer.hidden=true;editor.hidden=true;workspace.inert=false;discarding=false;confirmation.hidden=true;form.hidden=false
+      document.body.classList.remove('admin-editor-open');syncControls();openButton.focus()
     }
-
-    container.querySelector('.cancel-import')?.addEventListener('click', cancelImport)
-    container.querySelector('.cancel-import-draft')?.addEventListener('click', resetImport)
-    container.querySelector('.retry-import')?.addEventListener('click', retryImport)
-    container.querySelector('.upload-again')?.addEventListener('click', resetImport)
-    container.querySelector('.open-validation-report')?.addEventListener('click', () => {
-      state.reportOpen = !state.reportOpen
-      state.previewOpen = false
-      render()
-    })
-    container.querySelector('.open-import-preview')?.addEventListener('click', () => {
-      const datasetVersionId = state.backendStatus?.datasetVersion?.id
-      if (datasetVersionId) {
-        window.location.assign(
-          `/admin/datasets/import/${encodeURIComponent(datasetVersionId)}/preview`,
-        )
-      }
-    })
-    container.querySelector('.open-topology-result')?.addEventListener('click', () => {
-      const version = state.backendStatus?.datasetVersion
-      if (!version?.datasetId) return
-      const query = new URLSearchParams({ datasetId: version.datasetId })
-      if (version.branchId) query.set('branchId', version.branchId)
-      window.location.assign(`/topology?${query}`)
-    })
-    container.querySelector('.issue-filter')?.addEventListener('change', (event) => {
-      state.issueFilter = event.target.value
-      render()
-    })
-  }
-
-  function selectFiles(fileList) {
-    if (!fileList?.length) return
-    if (fileList.length > 1) {
-      state.selectedFile = null
-      state.fileValidation = {
-        valid: false,
-        error: 'Pilih hanya satu file KML atau KMZ.',
-      }
-      render()
-      return
+    function requestClose(){
+      if(uploading)return
+      if(!dirty){close();return}
+      discarding=true;form.hidden=true;confirmation.hidden=false;editor.querySelector('[data-keep-draft]').focus()
     }
-    state.selectedFile = fileList[0]
-    state.fileValidation = validateImportFile(
-      state.selectedFile,
-      state.config.limits.maxFileSize,
-    )
-    state.fieldErrors = {}
-    render()
-  }
-
-  async function handleSubmit(event) {
-    event.preventDefault()
-    readFormValues(event.currentTarget)
-    state.fileValidation = validateImportFile(
-      state.selectedFile,
-      state.config.limits.maxFileSize,
-    )
-    state.fieldErrors = validateFields(state)
-    if (Object.keys(state.fieldErrors).length || !state.fileValidation.valid) {
-      render()
-      return
-    }
-
-    const branch = state.config.branches.find(({ id }) => id === state.values.branchId)
-    state.phase = 'uploading'
-    state.startedAt = Date.now()
-    state.uploadPercent = null
-    state.errorMessage = null
-    state.processMessage = null
-    state.controller = new AbortController()
-    startElapsedTimer()
-    render()
-
-    try {
-      const response = await uploadDataset({
-        token: getDefaultAdminToken(),
-        fields: {
-          branchId: state.values.branchId,
-          datasetId: branch?.datasetId,
-          importMode: state.values.importMode,
-          contentMode: 'additions_only',
-          versionName: state.values.versionName,
-          versionNote: state.values.versionNote,
-          officialSourceConfirmed: state.values.officialSourceConfirmed,
-        },
-        file: state.selectedFile,
-        signal: state.controller.signal,
-        onProgress: (percent) => {
-          state.uploadPercent = percent
-          render()
-        },
-      })
-      state.uploadResponse = response
-      state.statusUrl = response.statusUrl
-      state.phase = 'processing'
-      state.backendStatus = {
-        datasetVersion: response.datasetVersion,
-        processing: response.processing,
-      }
-      render()
-      await pollStatus()
-    } catch (error) {
-      if (error.name === 'AbortError') return
-      state.phase = 'error'
-      state.errorMessage = error.message
-      stopElapsedTimer()
-      render()
-    }
-  }
-
-  async function pollStatus() {
-    while (state.phase === 'processing' && !state.controller.signal.aborted) {
+    const keepDraft=()=>{discarding=false;confirmation.hidden=true;form.hidden=false;form.elements.versionName.focus()}
+    openButton.addEventListener('click',()=>{
+      if(uploading)return
+      layer.hidden=false;editor.hidden=false;workspace.inert=true;document.body.classList.add('admin-editor-open');syncControls();form.elements.versionName.focus()
+    })
+    layer.addEventListener('click',event=>{
+      if(event.target.closest('[data-close-editor]'))requestClose()
+      if(event.target.closest('[data-keep-draft]'))keepDraft()
+      if(event.target.closest('[data-discard-draft]'))close({discard:true})
+    })
+    const disposeKeys=bindAdminOverlay(editor,{isOpen:()=>!editor.hidden,isBusy:()=>uploading,onEscape:()=>discarding?keepDraft():requestClose()})
+    const beforeUnload=event=>{if(dirty||uploading){event.preventDefault();event.returnValue=''}}
+    window.addEventListener('beforeunload',beforeUnload)
+    window.addEventListener('pagehide',()=>{disposed=true;disposeKeys();window.removeEventListener('beforeunload',beforeUnload);document.body.classList.remove('admin-editor-open')},{once:true})
+    form.addEventListener('input',()=>{dirty=true});form.addEventListener('change',()=>{dirty=true})
+    selector?.addEventListener('change',()=>{datasetId=selector.value;form.elements.datasetId.value=datasetId;renderRows()})
+    form.addEventListener('submit',async event=>{
+      event.preventDefault();if(uploading)return
+      const values=new FormData(form),file=values.get('file')
+      if(!file?.size||file.size>config.maxFileSize||!/(\.kml|\.kmz)$/i.test(file.name)){uploadStatus.textContent='Pilih file KML/KMZ dengan ukuran yang diperbolehkan.';return}
+      uploading=true;syncControls()
       try {
-        const status = await loadImportStatus({
-          token: getDefaultAdminToken(),
-          statusUrl: state.statusUrl,
-          signal: state.controller.signal,
-        })
-        state.backendStatus = status
-        if (status.datasetVersion.status === 'active') {
-          state.phase = 'success'
-          stopElapsedTimer()
-          render()
-          return
+        const response=await uploadDataset({fields:{datasetId,versionName:values.get('versionName')},file,onProgress:p=>{uploadStatus.textContent=`Mengunggah${p===null?'':` ${p}%`}…`}})
+        uploadStatus.textContent='Membaca aset dan mencari tambahan…'
+        while(container.isConnected&&!disposed) {
+          const result=await loadImportStatus({statusUrl:response.statusUrl})
+          if(result.import.status==='ready'){dirty=false;window.location.assign(`/admin/datasets/import/${encodeURIComponent(response.importId)}/preview`);return}
+          if(result.import.status==='failed')throw new Error(result.import.error?.message||'File gagal diproses.')
+          await new Promise(resolve=>setTimeout(resolve,1200))
         }
-        if (status.datasetVersion.status === 'invalid') {
-          state.phase = 'invalid'
-          stopElapsedTimer()
-          render()
-          return
-        }
-        if (status.datasetVersion.status === 'valid') {
-          const waitingForAutomaticActivation = status.datasetVersion.importMode === 'replace_active'
-            && status.autoActivation?.status !== 'failed'
-          if (!waitingForAutomaticActivation) {
-            state.phase = 'success'
-            stopElapsedTimer()
-            render()
-            return
-          }
-        }
-        render()
-        await delay(500, state.controller.signal)
-      } catch (error) {
-        if (error.name === 'AbortError') return
-        state.phase = 'error'
-        state.errorMessage = error.message
-        stopElapsedTimer()
-        render()
-        return
-      }
-    }
-  }
-
-  function cancelImport() {
-    const wasAccepted = Boolean(state.statusUrl)
-    state.controller?.abort()
-    stopElapsedTimer()
-    state.phase = 'cancelled'
-    state.processMessage = wasAccepted
-      ? 'Pemantauan dihentikan. Backend tidak mendukung pembatalan job setelah file diterima; proses server dapat tetap berjalan.'
-      : 'Upload dibatalkan sebelum request selesai.'
-    render()
-  }
-
-  function retryImport() {
-    if (state.statusUrl) {
-      state.phase = 'processing'
-      state.errorMessage = null
-      state.controller = new AbortController()
-      startElapsedTimer()
-      render()
-      pollStatus()
-      return
-    }
-    state.phase = 'idle'
-    state.errorMessage = null
-    render()
-  }
-
-  function resetImport() {
-    state.controller?.abort()
-    stopElapsedTimer()
-    state.phase = 'idle'
-    state.selectedFile = null
-    state.fileValidation = null
-    state.fieldErrors = {}
-    state.uploadPercent = null
-    state.backendStatus = null
-    state.uploadResponse = null
-    state.statusUrl = null
-    state.startedAt = null
-    state.errorMessage = null
-    state.processMessage = null
-    state.reportOpen = false
-    state.previewOpen = false
-    state.issueFilter = 'all'
-    state.values.versionName = createDefaultVersionName()
-    state.values.versionNote = ''
-    state.values.importMode = 'stage_only'
-    state.values.officialSourceConfirmed = false
-    render()
-  }
-
-  function readFormValues(form) {
-    const data = new FormData(form)
-    state.values.branchId = String(data.get('branchId') ?? state.values.branchId)
-    state.values.importMode = String(data.get('importMode') ?? 'stage_only')
-    state.values.versionName = String(data.get('versionName') ?? '').trim()
-    state.values.versionNote = String(data.get('versionNote') ?? '').trim()
-    state.values.officialSourceConfirmed = data.get('officialSourceConfirmed') === 'on'
-  }
-
-  function startElapsedTimer() {
-    stopElapsedTimer()
-    state.elapsedTimer = window.setInterval(() => {
-      if (['uploading', 'processing'].includes(state.phase)) render()
-    }, 1000)
-  }
-
-  function stopElapsedTimer() {
-    if (state.elapsedTimer) window.clearInterval(state.elapsedTimer)
-    state.elapsedTimer = null
-  }
+      }catch(error){uploadStatus.textContent=error.message;uploading=false;syncControls()}
+    })
+    historyHost.addEventListener('click',async event=>{
+      const button=event.target.closest('[data-download-source]');if(!button)return
+      try{download(await downloadDatasetSource({importId:button.dataset.downloadSource}))}catch(error){pageStatus.textContent=error.message}
+    })
+    syncControls()
+  }catch(error){pageStatus.textContent=error.message}
 }
-
-function renderShell(state) {
-  return `
-    <div class="admin-import-app">
-      ${renderAdminHeader()}
-      <main class="admin-import-main">
-        <header class="admin-page-heading">
-          <div>
-            <nav aria-label="Breadcrumb">
-              <a href="/admin/datasets">Dataset</a>
-              <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
-              <span>Import dataset</span>
-            </nav>
-            <h1>Import Dataset KML/KMZ</h1>
-            <p>Import data dan bentuk diagram topologi secara otomatis.</p>
-          </div>
-          ${renderImportStatusBadge(
-            state.configStatus === 'loading' ? 'loading' : state.phase,
-          )}
-        </header>
-
-        ${renderContent(state)}
-      </main>
-    </div>
-  `
+export function renderHistory(imports=[]) {
+  if(!imports.length)return '<p>Belum ada impor.</p>'
+  return `<div class="operational-table-wrap"><table><thead><tr><th>Impor</th><th>Waktu</th><th>Hasil</th><th>Status</th><th></th></tr></thead><tbody>${imports.map(i=>`<tr><td><strong>${e(i.name)}</strong><small>${e(i.source_filename)}</small></td><td>${e(new Date(i.created_at).toLocaleString('id-ID'))}</td>
+    <td>${i.summary?.legacy?'Baseline / arsip lama':`${Number(i.summary?.addedAssets ?? 0)} aset · ${Number(i.summary?.addedRelations ?? 0)} koneksi`}</td><td>${e(i.status==='applied'?(i.included_in_active===false?'Pernah diterapkan · di luar data aktif':'Diterapkan'):({processing:'Diproses',ready:'Siap diperiksa',failed:'Gagal',archived:'Arsip'})[i.status])}</td>
+    <td>${i.status==='ready'?`<a class="au-row-action" href="/admin/datasets/import/${encodeURIComponent(i.id)}/preview">Preview</a>`:''} ${i.source_filename?`<button type="button" class="au-row-action" data-download-source="${e(i.id)}">File sumber</button>`:''}</td></tr>`).join('')}</tbody></table></div>`
 }
-
-function renderAdminHeader() {
-  return `
-    <header class="admin-app-header">
-      <a class="brand-lockup" href="/map" aria-label="SINERGI — Pertamina Patra Niaga">
-        ${patraNiagaLogoMarkup()}
-      </a>
-      <span class="admin-area-label">Administrasi dataset</span>
-      <nav aria-label="Navigasi admin">
-        <a href="/map">Peta jaringan</a>
-        <button class="admin-user-menu" type="button" aria-label="Profil SSC ICT Administrator">
-          <span class="material-symbols-outlined" aria-hidden="true">account_circle</span>
-          <span><strong>SSC ICT</strong><small>Administrator</small></span>
-        </button>
-      </nav>
-    </header>
-  `
-}
-
-function renderContent(state) {
-  if (state.configStatus === 'loading') {
-    return `
-      <section class="admin-loading-state" aria-live="polite" aria-busy="true">
-        <span class="material-symbols-outlined" aria-hidden="true">progress_activity</span>
-        <strong>Memuat konfigurasi import</strong>
-        <p>Membaca daftar cabang dan batas file dari server.</p>
-      </section>
-    `
-  }
-  if (state.configStatus === 'error') {
-    return `
-      <section class="admin-error-state" role="alert">
-        <span class="material-symbols-outlined" aria-hidden="true">error</span>
-        <div>
-          <strong>Konfigurasi import tidak dapat dimuat</strong>
-          <p>${escapeHtml(state.configError)}</p>
-          <button class="button secondary retry-import-config" type="button">
-            <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
-            Coba lagi
-          </button>
-        </div>
-      </section>
-    `
-  }
-
-  const busy = ['uploading', 'processing'].includes(state.phase)
-  const completed = ['success', 'invalid'].includes(state.phase)
-  return `
-    <div class="admin-import-layout">
-      ${!completed ? renderImportDatasetForm({
-        config: state.config,
-        values: state.values,
-        file: state.selectedFile,
-        fileValidation: state.fileValidation,
-        fieldErrors: state.fieldErrors,
-        disabled: busy,
-      }) : ''}
-
-      ${['uploading', 'processing', 'success', 'invalid', 'cancelled'].includes(state.phase)
-        ? renderImportProgress({
-          phase: state.phase,
-          backendStage: state.backendStatus?.processing?.stage,
-          backendProgress: state.backendStatus?.processing?.progress,
-          uploadPercent: state.uploadPercent,
-          fileExtension: extensionOf(state.selectedFile?.name),
-          startedAt: state.startedAt,
-          now: Date.now(),
-          message: state.processMessage,
-        })
-        : ''}
-
-      ${state.phase === 'error' ? renderErrorState(state) : ''}
-      ${completed ? renderCompletedState(state) : ''}
-      ${state.phase === 'cancelled' ? renderCancelledActions(state) : ''}
-      ${busy ? `
-        <div class="processing-actions">
-          <button class="button secondary cancel-import" type="button">Batal</button>
-        </div>
-      ` : ''}
-    </div>
-  `
-}
-
-function renderCompletedState(state) {
-  const status = state.backendStatus
-  const active = status.datasetVersion?.status === 'active'
-  const autoActivationFailed = status.autoActivation?.status === 'failed'
-  const topology = status.topology ?? {}
-  return `
-    ${autoActivationFailed ? `
-      <section class="admin-error-state" role="alert">
-        <span class="material-symbols-outlined" aria-hidden="true">warning</span>
-        <div>
-          <strong>Data berhasil diproses, tetapi belum mengganti data aktif</strong>
-          <p>${escapeHtml(status.autoActivation.message || 'Aktivasi otomatis gagal. Buka preview untuk meninjau dan mengaktifkan versi ini.')}</p>
-        </div>
-      </section>
-    ` : ''}
-    ${topology.generated ? `
-      <p class="activation-ready-note" role="status">
-        <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
-        <span><strong>Diagram topologi otomatis sudah dibuat.</strong><br>
-          ${Number(topology.nodeCount || 0).toLocaleString('id-ID')} aset dan
-          ${Number(topology.edgeCount || 0).toLocaleString('id-ID')} relasi terkonfirmasi.
-          ${active
-            ? 'Diagram ini sekarang menggunakan data hasil import.'
-            : 'Data aktif belum berubah; aktifkan versi ini dari preview bila sudah siap.'}
-        </span>
-      </p>
-    ` : ''}
-    ${renderImportSummary({
-      datasetVersion: status.datasetVersion,
-      validation: status.validation,
-      issues: status.issues,
-    })}
-    <div class="import-result-actions">
-      <button class="button secondary upload-again" type="button">
-        <span class="material-symbols-outlined" aria-hidden="true">restart_alt</span>
-        Upload ulang
-      </button>
-      <span></span>
-      <button class="button secondary open-validation-report" type="button"
-        aria-expanded="${state.reportOpen}">
-        <span class="material-symbols-outlined" aria-hidden="true">fact_check</span>
-        Lihat laporan validasi
-      </button>
-      <button class="button primary open-import-preview" type="button"
-        aria-label="Buka preview peta hasil import">
-        <span class="material-symbols-outlined" aria-hidden="true">preview</span>
-        Lihat preview
-      </button>
-      ${active ? `
-        <button class="button primary open-topology-result" type="button">
-          <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
-          Buka diagram topologi
-        </button>
-      ` : ''}
-    </div>
-    ${state.reportOpen ? renderValidationReport(state) : ''}
-  `
-}
-
-function renderValidationReport(state) {
-  const issues = state.backendStatus?.issues ?? []
-  const filtered = state.issueFilter === 'all'
-    ? issues
-    : issues.filter((issue) => issue.severity === state.issueFilter)
-  return `
-    <section class="validation-report-panel" aria-labelledby="validation-report-title">
-      <header class="import-section-header">
-        <div>
-          <span class="section-kicker">IMPORT ISSUES</span>
-          <h2 id="validation-report-title">Laporan validasi</h2>
-        </div>
-        <label>
-          <span class="visually-hidden">Filter issue</span>
-          <select class="issue-filter">
-            ${['all', 'error', 'warning', 'information'].map((filter) => `
-              <option value="${filter}" ${state.issueFilter === filter ? 'selected' : ''}>
-                ${filter === 'all' ? 'Semua issue' : capitalize(filter)}
-              </option>
-            `).join('')}
-          </select>
-        </label>
-      </header>
-      ${filtered.length ? `
-        <ul class="validation-issue-list">
-          ${filtered.map((issue) => `
-            <li class="issue-${escapeAttribute(issue.severity)}">
-              <span class="material-symbols-outlined" aria-hidden="true">
-                ${issue.severity === 'error'
-                  ? 'error'
-                  : issue.severity === 'warning' ? 'warning' : 'info'}
-              </span>
-              <span>
-                <strong>${escapeHtml(issue.issueCode)}</strong>
-                <p>${escapeHtml(issue.message)}</p>
-                <small>
-                  ${escapeHtml(issue.scope ?? 'processing')}
-                  ${issue.assetId ? ` · ${escapeHtml(issue.assetId)}` : ''}
-                </small>
-              </span>
-            </li>
-          `).join('')}
-        </ul>
-      ` : '<p class="panel-empty-state">Tidak ada issue untuk filter ini.</p>'}
-    </section>
-  `
-}
-
-function renderErrorState(state) {
-  return `
-    <section class="admin-error-state" role="alert">
-      <span class="material-symbols-outlined" aria-hidden="true">error</span>
-      <div>
-        <strong>Import tidak dapat dilanjutkan</strong>
-        <p>${escapeHtml(state.errorMessage)}</p>
-        <button class="button secondary retry-import" type="button">
-          <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
-          Coba lagi
-        </button>
-      </div>
-    </section>
-  `
-}
-
-function renderCancelledActions(state) {
-  return `
-    <div class="import-result-actions">
-      <button class="button secondary upload-again" type="button">Upload ulang</button>
-      ${state.statusUrl ? `
-        <button class="button primary retry-import" type="button">
-          Lanjutkan pemantauan
-        </button>
-      ` : ''}
-    </div>
-  `
-}
-
-function validateFields(state) {
-  const errors = {}
-  if (!state.values.branchId) errors.branchId = 'Kantor cabang wajib dipilih.'
-  if (!state.values.versionName) errors.versionName = 'Identitas versi wajib diisi.'
-  if (!state.values.officialSourceConfirmed) {
-    errors.confirmed = 'Konfirmasi sumber resmi wajib diberikan sebelum import.'
-  }
-  return errors
-}
-
-function delay(milliseconds, signal) {
-  return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(resolve, milliseconds)
-    signal?.addEventListener('abort', () => {
-      window.clearTimeout(timeout)
-      const error = new Error('Dibatalkan')
-      error.name = 'AbortError'
-      reject(error)
-    }, { once: true })
-  })
-}
-
-function extensionOf(filename) {
-  const normalized = String(filename ?? '').toLowerCase()
-  const index = normalized.lastIndexOf('.')
-  return index >= 0 ? normalized.slice(index) : null
-}
-
-function createDefaultVersionName() {
-  return `Import ${new Intl.DateTimeFormat('id-ID', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(new Date())}`
-}
-
-function capitalize(value) {
-  return value.charAt(0).toUpperCase() + value.slice(1)
-}
+export function download({blob,filename}){const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=filename;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}

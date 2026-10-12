@@ -1,257 +1,36 @@
-import { getSessionToken } from './account-session.js'
-
-export function getDefaultAdminToken() {
-  return typeof window === 'undefined' ? '' : getSessionToken()
-}
-
-export async function loadImportConfig({
-  token,
-  signal,
-  apiBase = '',
-} = {}) {
-  return requestJson(`${apiBase}/api/admin/import-config`, {
-    token,
-    signal,
+import {getSessionToken} from './account-session.js'
+import {requestJson} from './operational-api.js'
+export const getDefaultAdminToken=()=>typeof window==='undefined'?'':getSessionToken()
+export const loadImportConfig=options=>requestJson(`${options?.apiBase ?? ''}/api/import-config`,options)
+export const loadImportHistory=options=>requestJson(`${options?.apiBase ?? ''}/api/imports`,options)
+export const loadImportStatus=options=>requestJson(`${options.apiBase ?? ''}${options.statusUrl}`,options)
+export const loadImportPreview=options=>requestJson(`${options.apiBase ?? ''}/api/imports/${encodeURIComponent(options.importId ?? options.datasetVersionId)}/preview`,options)
+export const decideImportItem=options=>requestJson(`${options.apiBase ?? ''}/api/imports/${encodeURIComponent(options.importId)}/items/${encodeURIComponent(options.itemId)}`,{...options,method:'PATCH',body:options.decision})
+export const refreshImportPreview=options=>requestJson(`${options.apiBase ?? ''}/api/imports/${encodeURIComponent(options.importId)}/refresh`,{...options,method:'POST'})
+export const activateDatasetVersion=options=>requestJson(`${options.apiBase ?? ''}/api/imports/${encodeURIComponent(options.importId ?? options.datasetVersionId)}/apply`,{...options,method:'POST',body:{expectedRevision:options.expectedRevision ?? options.expectedRecordRevision}})
+export function uploadDataset({token=getDefaultAdminToken(),fields={},file,signal,onProgress,apiBase=''}) {
+  return new Promise((resolve,reject)=>{
+    const request=new XMLHttpRequest(),form=new FormData()
+    for(const name of ['datasetId','versionName']) if(fields[name])form.append(name,fields[name])
+    form.append('file',file);request.open('POST',`${apiBase}/api/imports`);request.setRequestHeader('Authorization',`Bearer ${token}`);request.responseType='json'
+    request.upload.addEventListener('progress',event=>onProgress?.(event.lengthComputable?Math.round(event.loaded/event.total*100):null))
+    request.addEventListener('load',()=>{
+      const body=request.response ?? {};if(request.status>=200&&request.status<300)resolve(body)
+      else {const error=new Error(body.error?.message || 'Upload gagal.');error.status=request.status;reject(error)}
+    })
+    request.addEventListener('error',()=>reject(new Error('Koneksi terputus. Periksa riwayat impor sebelum mencoba lagi.')))
+    request.addEventListener('abort',()=>reject(Object.assign(new Error('Upload dibatalkan.'),{name:'AbortError'})))
+    signal?.addEventListener('abort',()=>request.abort(),{once:true});request.send(form)
   })
 }
-
-export function uploadDataset({
-  token,
-  fields,
-  file,
-  signal,
-  onProgress,
-  apiBase = '',
-}) {
-  if (typeof XMLHttpRequest === 'undefined') {
-    return Promise.reject(new Error('Browser tidak mendukung upload file.'))
-  }
-
-  return new Promise((resolve, reject) => {
-    const request = new XMLHttpRequest()
-    const formData = new FormData()
-    Object.entries(fields).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== '') {
-        formData.append(key, String(value))
-      }
-    })
-    formData.append('file', file)
-
-    request.open('POST', `${apiBase}/api/admin/imports`)
-    request.setRequestHeader('Authorization', `Bearer ${token}`)
-    request.responseType = 'json'
-
-    request.upload.addEventListener('progress', (event) => {
-      if (!event.lengthComputable) {
-        onProgress?.(null)
-        return
-      }
-      onProgress?.(Math.round((event.loaded / event.total) * 100))
-    })
-    request.addEventListener('load', () => {
-      const body = request.response ?? parseJson(request.responseText)
-      if (request.status >= 200 && request.status < 300) {
-        resolve(body)
-      } else {
-        reject(createApiError(body, request.status))
-      }
-    })
-    request.addEventListener('error', () => reject(new Error(
-      request.status === 0
-        ? 'Koneksi terputus saat upload. File mungkin sudah diterima server; periksa daftar versi sebelum mengupload ulang.'
-        : 'Tidak dapat terhubung ke service import.',
-    )))
-    request.addEventListener('abort', () => {
-      const error = new Error('Upload dibatalkan.')
-      error.name = 'AbortError'
-      reject(error)
-    })
-    signal?.addEventListener('abort', () => request.abort(), { once: true })
-    request.send(formData)
-  })
+export async function downloadDatasetSource(options={}) {
+  const id=options.importId ?? options.datasetVersionId
+  const response=await fetch(`${options.apiBase ?? ''}/api/imports/${encodeURIComponent(id)}/source-file`,{headers:{Authorization:`Bearer ${options.token ?? getDefaultAdminToken()}`},signal:options.signal})
+  if(!response.ok)throw new Error((await response.json()).error?.message || 'Unduhan gagal.')
+  return {blob:await response.blob(),filename:parseAttachmentFilename(response.headers.get('content-disposition'),`source-${id}`)}
 }
-
-export async function loadImportStatus({
-  token,
-  statusUrl,
-  signal,
-  apiBase = '',
-}) {
-  return requestJson(`${apiBase}${statusUrl}`, {
-    token,
-    signal,
-  })
-}
-
-export async function loadImportPreview({
-  token,
-  datasetVersionId,
-  signal,
-  apiBase = '',
-}) {
-  return requestJson(
-    `${apiBase}/api/admin/imports/${encodeURIComponent(datasetVersionId)}/preview`,
-    { token, signal },
-  )
-}
-
-export async function reviewImportCategories({
-  token,
-  datasetVersionId,
-  expectedRecordRevision,
-  decisions,
-  signal,
-  apiBase = '',
-}) {
-  return requestJson(
-    `${apiBase}/api/admin/imports/${encodeURIComponent(datasetVersionId)}/category-reviews`,
-    { token, signal, method: 'POST', body: { expectedRecordRevision, decisions } },
-  )
-}
-
-export async function autoAssignUniqueIdentityAssignments({
-  token = getDefaultAdminToken(),
-  datasetVersionId,
-  expectedRecordRevision,
-  signal,
-  apiBase = '',
-} = {}) {
-  if (!datasetVersionId) throw new TypeError('Dataset version ID wajib tersedia.')
-  return requestJson(
-    `${apiBase}/api/admin/imports/${encodeURIComponent(datasetVersionId)}/identity-assignments/auto`,
-    {
-      token,
-      signal,
-      method: 'POST',
-      body: {
-        ...(expectedRecordRevision !== undefined ? { expectedRecordRevision } : {}),
-      },
-    },
-  )
-}
-
-export async function activateDatasetVersion({
-  token,
-  datasetVersionId,
-  expectedActiveVersionId,
-  expectedRecordRevision,
-  expectedActivePointerRevision,
-  publicationProfile = 'map_only',
-  confirmBreakingChanges = false,
-  signal,
-  apiBase = '',
-}) {
-  return requestJson(
-    `${apiBase}/api/admin/imports/${encodeURIComponent(datasetVersionId)}/activate`,
-    {
-      token,
-      signal,
-      method: 'POST',
-      body: {
-        confirmArchiveCurrent: true,
-        expectedActiveVersionId: expectedActiveVersionId ?? null,
-        expectedRecordRevision,
-        expectedActivePointerRevision,
-        publicationProfile,
-        confirmBreakingChanges,
-      },
-    },
-  )
-}
-
-export async function rejectDatasetVersion({
-  token,
-  datasetVersionId,
-  signal,
-  apiBase = '',
-}) {
-  return requestJson(
-    `${apiBase}/api/admin/imports/${encodeURIComponent(datasetVersionId)}/reject`,
-    {
-      token,
-      signal,
-      method: 'POST',
-    },
-  )
-}
-
-export async function downloadDatasetSource({
-  token,
-  datasetVersionId,
-  signal,
-  apiBase = '',
-}) {
-  const response = await fetch(
-    `${apiBase}/api/dataset-versions/${encodeURIComponent(datasetVersionId)}/source-file`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-      signal,
-    },
-  )
-  if (!response.ok) {
-    const responseBody = await response.json().catch(() => ({}))
-    throw createApiError(responseBody, response.status)
-  }
-  return {
-    blob: await response.blob(),
-    filename: parseAttachmentFilename(
-      response.headers.get('content-disposition'),
-      `source-${datasetVersionId}`,
-    ),
-    contentType: response.headers.get('content-type') || 'application/octet-stream',
-  }
-}
-
-export function parseAttachmentFilename(contentDisposition, fallback) {
-  const extended = String(contentDisposition ?? '')
-    .match(/filename\*=UTF-8''([^;]+)/i)?.[1]
-  if (extended) {
-    try {
-      return decodeURIComponent(extended)
-    } catch {
-      // Continue with the safe ASCII filename.
-    }
-  }
-  const ascii = String(contentDisposition ?? '').match(/filename="([^"]+)"/i)?.[1]
-  return ascii || fallback
-}
-
-async function requestJson(url, {
-  token,
-  signal,
-  method = 'GET',
-  body,
-}) {
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-    },
-    method,
-    ...(body ? { body: JSON.stringify(body) } : {}),
-    signal,
-  })
-  const responseBody = await response.json().catch(() => ({}))
-  if (!response.ok) throw createApiError(responseBody, response.status)
-  return responseBody
-}
-
-function createApiError(body, status) {
-  const error = new Error(
-    body?.error?.message
-      || `Request import gagal dengan status ${status}.`,
-  )
-  error.name = 'ImportApiError'
-  error.status = status
-  error.code = body?.error?.code
-  error.details = body?.error?.details
-  return error
-}
-
-function parseJson(value) {
-  try {
-    return JSON.parse(value)
-  } catch {
-    return {}
-  }
+export function parseAttachmentFilename(header,fallback) {
+  const encoded=String(header ?? '').match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+  if(encoded)try{return decodeURIComponent(encoded)}catch{ /* use fallback */ }
+  return String(header ?? '').match(/filename="([^"]+)"/i)?.[1] || fallback
 }
