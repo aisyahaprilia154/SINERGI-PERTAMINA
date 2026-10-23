@@ -3,13 +3,15 @@ import { startFrontend, usesReactRoute } from '../src/frontend-bootstrap.js'
 import { reactRoutes } from '../src/react/routes.js'
 
 describe('transition entrypoint', () => {
-  it('activates React login and users while preserving other legacy pages and aliases', async () => {
-    expect(reactRoutes).toHaveLength(3)
+  it('activates React login, users and versions while preserving other legacy pages and aliases', async () => {
+    expect(reactRoutes).toHaveLength(4)
     expect(await usesReactRoute('/')).toBe(true)
     expect(await usesReactRoute('/unknown')).toBe(true)
     expect(await usesReactRoute('/admin/users')).toBe(true)
     expect(await usesReactRoute('/admin/users/')).toBe(true)
-    for (const pathname of ['/map', '/peta', '/topology', '/topologi', '/admin/datasets/versions', '/admin/datasets/import', '/admin/datasets/import/id/preview']) {
+    expect(await usesReactRoute('/admin/datasets/versions')).toBe(true)
+    expect(await usesReactRoute('/admin/datasets/versions/')).toBe(true)
+    for (const pathname of ['/map', '/peta', '/topology', '/topologi', '/admin/datasets/import', '/admin/datasets/import/id/preview']) {
       expect(await usesReactRoute(pathname)).toBe(false)
     }
   })

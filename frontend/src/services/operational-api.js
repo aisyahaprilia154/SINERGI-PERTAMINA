@@ -3,6 +3,7 @@ export const currentDatasetId = value => value || (typeof window!=='undefined'?w
 export async function requestJson(url,{token=typeof window==='undefined'?'':getSessionToken(),signal,method='GET',body}={}) {
   const response=await fetch(url,{method,signal,headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})})
   const payload=await response.json().catch(()=>({}))
+  signal?.throwIfAborted()
   if(!response.ok) {const error=new Error(payload.error?.message || `Request gagal (${response.status}).`);Object.assign(error,{status:response.status,code:payload.error?.code,details:payload.error?.details});throw error}
   if(method!=='GET'&&Number.isSafeInteger(payload.revision)&&typeof window!=='undefined') {
     const datasetId=payload.datasetId ?? url.match(/\/api\/datasets\/([^/]+)/)?.[1]

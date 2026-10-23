@@ -1,0 +1,185 @@
+{
+  "threshold": 12,
+  "results": [
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "list",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "list",
+      "reference": "baseline",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "save",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "restore",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "empty",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "list",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "list",
+      "reference": "baseline",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "save",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "restore",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "empty",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "list",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "list",
+      "reference": "baseline",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "save",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "restore",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "empty",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "list",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "list",
+      "reference": "baseline",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "save",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "restore",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "empty",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    }
+  ]
+}

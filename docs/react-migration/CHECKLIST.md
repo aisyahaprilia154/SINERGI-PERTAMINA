@@ -1,6 +1,6 @@
 # Migrasi React SINERGI — baseline dan checklist
 
-Tanggal: 23 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **5 — Kelola pengguna**.
+Tanggal: 23 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **6 — Versi database**.
 Commit asal: `5375bd3` pada `main`. Branch kerja lokal: `react-migration-baseline`.
 Rencana asli pengguna disimpan tanpa perubahan di [PLAN.md](PLAN.md).
 
@@ -92,8 +92,8 @@ Screenshot memakai fixture kecil, tanggal data tetap, locale id-ID, timezone Asi
 - [x] 3. Login, sesi, dan penjagaan akses — lihat [laporan tahap 3](STAGE-3.md).
 - [x] 4. Komponen bersama — lihat [laporan tahap 4](STAGE-4.md).
 - [x] 5. Kelola pengguna — lihat [laporan tahap 5](STAGE-5.md).
-- [ ] 6. Versi database — **tahap berikutnya**.
-- [ ] 7. Riwayat dan unggah impor.
+- [x] 6. Versi database — lihat [laporan tahap 6](STAGE-6.md).
+- [ ] 7. Riwayat dan unggah impor — **tahap berikutnya**.
 - [ ] 8. Preview impor.
 - [ ] 9. Pisahkan logika peta.
 - [ ] 10. Peta React untuk membaca data.
@@ -124,3 +124,17 @@ Tahap 4 menyiapkan komponen bersama dan memakainya untuk logo/tombol tema login.
 - [x] Checkpoint lokal tahap 5 setelah pemeriksaan; folder pengguna `docs/figures/` tidak disertakan. Tidak ada push/merge/deployment.
 
 Login dan Kelola pengguna kini aktif memakai React. Lima halaman lain masih legacy. Seluruh API browser memakai mock; database Docker asli dan akun dari komputer lama belum dipulihkan. Hasil dan batas verifikasi terbaru ada di [STAGE-5.md](STAGE-5.md).
+
+## Hasil tahap 6
+
+- [x] Aktifkan `/admin/datasets/versions` dengan JSX dan komponen bersama React; tanpa renderer/binder versi lama.
+- [x] Pertahankan prioritas pemilihan dataset, daftar versi, indikator aktif, label batas 10, checkpoint, konfirmasi restore, dan status proses.
+- [x] Pertahankan endpoint/payload/token, expectedRevision saat dialog dibuka, revision storage dan context URL. Service menerima AbortSignal opsional.
+- [x] Verifikasi submit tunggal, validasi nama, busy, konfirmasi, fokus/Escape, konflik 409, retry, status existing dan nama draft pada kegagalan biasa.
+- [x] Verifikasi pergantian dataset, scope listener focus/storage, cleanup ketika dilepas, abort read/write/config dan respons terlambat termasuk penulisan revision storage.
+- [x] Bandingkan daftar/dialog simpan/dialog restore/empty dalam desktop/mobile dan terang/gelap: 32 screenshot, 20 pasangan identik termasuk 4 perbandingan terhadap baseline awal.
+- [x] Frontend: 336 tes Node lama + 73 tes React; Playwright: 34 tes; smoke baseline: 10 kelompok, semuanya lulus.
+- [x] Backend: 75 lulus, 1 integrasi PostgreSQL dilewati; build frontend/backend dan lint root/frontend/backend berhasil.
+- [x] Checkpoint Git lokal setelah pemeriksaan; tidak ada push/merge/deployment. `docs/figures/` tidak diubah atau dimasukkan checkpoint.
+
+Login, Kelola pengguna, dan Versi database aktif memakai React. Riwayat/unggah, preview impor, peta dan topologi masih legacy. Semua operasi tulis UI memakai API mock; login/database Docker asli belum diverifikasi. Hasil terbaru: [STAGE-6.md](STAGE-6.md).
