@@ -106,6 +106,45 @@ test('migration loader reads both directions from the repository', async () => {
   assert.equal(migration.downSql, down)
 })
 
+test('legacy LF/CRLF checksums accept identical SQL without replaying or rewriting migration history', async () => {
+  const up = 'CREATE TABLE demo (id text);\nCREATE INDEX demo_idx ON demo(id);\n'
+  const down = 'DROP INDEX demo_idx;\nDROP TABLE demo;\n'
+  const endings = value => [value, value.replace(/\n/g, '\r\n')]
+  for (const recordedUp of endings(up)) {
+    for (const recordedDown of endings(down)) {
+      const recorded = createMigrationChecksum(recordedUp, recordedDown)
+      for (const checkoutUp of endings(up)) {
+        for (const checkoutDown of endings(down)) {
+          const client = new RecordingClient()
+          client.applied.set(migrationId, recorded)
+          const result = await runMigration(client, { id: migrationId, upSql: checkoutUp, downSql: checkoutDown })
+          assert.equal(result.status, 'already_applied')
+          assert.equal(client.applied.get(migrationId), recorded)
+          assert.equal(client.commands.includes(checkoutUp), false)
+          assert.equal(client.commands.some(command => command.startsWith('INSERT INTO')), false)
+          assert.equal(client.commands.at(-1), 'COMMIT')
+        }
+      }
+    }
+  }
+})
+
+test('line-ending compatibility still rejects changes to SQL content or an explicit checksum', async () => {
+  const upSql = 'CREATE TABLE demo (id text);\n', downSql = 'DROP TABLE demo;\n'
+  const recorded = createMigrationChecksum(upSql, downSql)
+  for (const changed of [
+    { upSql: 'CREATE TABLE demo (id bigint);\r\n', downSql },
+    { upSql, downSql: 'DROP TABLE other;\r\n' },
+    { upSql, downSql, checksum: 'explicit-different-checksum' },
+  ]) {
+    const client = new RecordingClient()
+    client.applied.set(migrationId, recorded)
+    await assert.rejects(runMigration(client, { id: migrationId, ...changed }), /Checksum migration/)
+    assert.equal(client.commands.at(-1), 'ROLLBACK')
+    assert.equal(client.applied.get(migrationId), recorded)
+  }
+})
+
 test('active pointer migration adds one publication boundary per dataset branch', async () => {
   const migration = await loadMigration(
     migrationDirectory,

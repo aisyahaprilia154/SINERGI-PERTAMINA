@@ -11,6 +11,13 @@ docs
 **/dist
 **/.data
 backend/artifacts/database-backup
+# Local database transfer files must not enter application images.
+backend/2026-10-23T16-29-38-418Z
+backend/2026-10-23T16-29-38-418Z.zip
+backend/database.dump
+backend/manifest.json
+backend/source-storage
+backend/source-storage.zip
 *.log
 .env
 .env.*

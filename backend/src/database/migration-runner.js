@@ -47,7 +47,7 @@ export async function runMigration(client, {
     const existing = current.rows?.[0] ?? null
 
     if (direction === 'up' && existing) {
-      if (existing.checksum !== checksum) {
+      if (!matchesMigrationChecksum(existing.checksum, checksum, upSql, downSql)) {
         throw new Error(`Checksum migration ${id} berubah setelah diterapkan.`)
       }
       await client.query('COMMIT')
@@ -98,6 +98,23 @@ export function createMigrationChecksum(upSql, downSql) {
     .update('\n-- DOWN --\n')
     .update(downSql)
     .digest('hex')
+}
+
+function matchesMigrationChecksum(recorded, expected, upSql, downSql) {
+  if (recorded === expected) return true
+  // Keep explicit checksum overrides authoritative. Legacy checksums hash raw
+  // files, so a Windows checkout can otherwise reject identical SQL from Linux.
+  if (expected !== createMigrationChecksum(upSql, downSql)) return false
+  const lineEndings = sql => {
+    const lf = sql.replace(/\r\n/g, '\n')
+    return [lf, lf.replace(/\n/g, '\r\n')]
+  }
+  for (const up of lineEndings(upSql)) {
+    for (const down of lineEndings(downSql)) {
+      if (recorded === createMigrationChecksum(up, down)) return true
+    }
+  }
+  return false
 }
 
 function assertMigrationId(id) {
