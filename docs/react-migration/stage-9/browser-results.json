@@ -1,0 +1,23 @@
+{
+  "runtime": "Chromium Headless Shell 156.0.8078.4",
+  "firstFullRun": {
+    "passed": 42,
+    "failed": 1,
+    "failure": "auth login navigation context destroyed"
+  },
+  "secondFullRun": {
+    "passed": 42,
+    "failed": 1,
+    "failure": "source download event timeout"
+  },
+  "recheck": {
+    "passed": 2,
+    "failed": 0,
+    "cases": [
+      "auth login",
+      "source download"
+    ]
+  },
+  "uniqueVerifiedCases": 43,
+  "singleCleanFullRun": false
+}

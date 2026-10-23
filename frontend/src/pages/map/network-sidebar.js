@@ -1,4 +1,4 @@
-import { formatAssetTypeLabel } from '../../domain/asset-type-label.js'
+import {getNetworkSubcategories,formatDatasetCounts} from '../../domain/map-read-model.js'
 
 export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, {
   locationGroups = [],
@@ -189,34 +189,6 @@ function renderNetworkItem({
       </div>
     </article>
   `
-}
-
-function getNetworkSubcategories(network, assetById) {
-  const counts = new Map()
-  network.nodeIds.forEach((assetId) => {
-    const asset = assetById[assetId]
-    if (!asset) return
-    const label = normalizeSubcategory(formatAssetTypeLabel(asset), network.type)
-    counts.set(label, (counts.get(label) || 0) + 1)
-  })
-  return [...counts].map(([label, count]) => ({ label, count }))
-}
-
-function normalizeSubcategory(type, networkType) {
-  const normalizedType = String(type ?? '').toLowerCase()
-  const normalizedNetwork = String(networkType ?? '').toLowerCase()
-  if (normalizedType === 'junction box' && normalizedNetwork === 'cctv') return 'Junction Box CCTV'
-  if (normalizedType.includes('switch')) return 'Switch'
-  if (normalizedType === 'access point') return 'Access Point'
-  return type
-}
-
-function formatDatasetCounts(counts) {
-  return `${Number(counts.networkCount) || 0} jaringan, `
-    + `${Number(counts.layerCount) || 0} layer, `
-    + `${Number(counts.assetNodeCount) || 0} node, `
-    + `${Number(counts.lineCount) || 0} line, `
-    + `${Number(counts.polygonCount) || 0} polygon`
 }
 
 function renderLoadingSkeleton() {

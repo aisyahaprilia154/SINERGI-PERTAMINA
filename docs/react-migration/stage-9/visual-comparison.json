@@ -1,0 +1,29 @@
+{
+  "threshold": 12,
+  "results": [
+    {
+      "size": "desktop",
+      "theme": "light",
+      "changedPixels": 0,
+      "totalPixels": 1296000
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "changedPixels": 0,
+      "totalPixels": 1296000
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "changedPixels": 0,
+      "totalPixels": 329160
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "changedPixels": 0,
+      "totalPixels": 329160
+    }
+  ]
+}

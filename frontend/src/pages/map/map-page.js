@@ -1,9 +1,10 @@
+import {isPoleLikeAsset,readRequestedDatasetContext,stableUrlAssetId,findAssetMatches,searchResultTypeLabel,formatContextName,selectLocationGroup,displayAssetName,buildRelationOptions,isRelationDevice,isCameraAsset,isJunctionBoxAsset,validCoordinate,distanceBetweenCoordinates,summarizeMapTopology,scopeMapData,overlayMatchesArea,networkMatchesPreset,mapSelectionOptions,mapSelectionQuery} from '../../domain/map-read-model.js'
+export {findAssetMatches,selectLocationGroup,displayAssetName,buildRelationOptions,summarizeMapTopology,scopeMapData} from '../../domain/map-read-model.js'
 import {renderTopNavigation,bindUserAccountMenu} from '../../components/app-header.js'
 export {renderTopNavigation,bindUserAccountMenu} from '../../components/app-header.js'
 import {
   adaptActiveAssetDetail,
   adaptActiveDatasetForMap,
-  locationGroupFor,
 } from '../../adapters/active-dataset-map-adapter.js'
 import {
   createTopologyRelation,
@@ -25,7 +26,6 @@ import { renderNetworkList as renderNetworkSidebarList, renderNetworkSidebar } f
 import {
   createNetworkSelectionState,
   parseMapUrlState,
-  serializeMapUrlState,
 } from './network-sidebar-state.js'
 import {
   buildPoleGroups,
@@ -39,9 +39,7 @@ import {
   getConnectedAssets,
 } from './network-tracing.js'
 import { openMapDataTransferDialog } from './map-data-transfer-dialog.js'
-import { searchMatchScore } from '../../domain/search-normalization.js'
 import { branchNameForFacility } from '../../domain/facility-branch.js'
-import { formatAssetTypeLabel } from '../../domain/asset-type-label.js'
 import { createSourceIconLoader } from '../../domain/source-icon-loader.js'
 import { assetIconUrl } from '../../domain/asset-icon.js'
 import { bindAssetIconControl } from './asset-icon-editor.js'
@@ -56,7 +54,7 @@ export async function renderMapPage(container) {
   void preloadBasemapResources(String(import.meta.env.VITE_SINERGI_VECTOR_TILES_URL ?? '').trim()
     || '/api/basemap/openfreemap/planet')
 
-  const requestedContext = readRequestedDatasetContext()
+  const requestedContext = readRequestedDatasetContext(window.location.search, window.sessionStorage.getItem('sinergiActiveDatasetId'))
   renderDatasetState(container, {
     icon: 'progress_activity',
     title: 'Memuat dataset aktif',
@@ -103,7 +101,8 @@ export async function renderMapPage(container) {
     }]
     : await Promise.allSettled([
       loadActiveOverlays({
-        datasetId: mapData.activeContext.datasetId,        siteId: mapData.activeContext.siteId,
+        datasetId: mapData.activeContext.datasetId,
+        siteId: mapData.activeContext.siteId,
       }).catch(() => loadDatasetProjection({
         datasetVersionId: mapData.activeContext.datasetVersionId,
         projection: 'overlays',
@@ -184,20 +183,7 @@ export async function renderMapPage(container) {
       && overlay.resourceUrl
       && overlayMatchesArea(overlay, selectedArea)
     ))
-  const defaultNetworkIds = networks
-    .filter((network) => network.isDefaultVisible)
-    .map((network) => network.id)
-  if (!defaultNetworkIds.length && networks[0]) defaultNetworkIds.push(networks[0].id)
-
-  const validIds = {
-    networkIds: networks.map((network) => network.id),
-    assetIds: assets.map((asset) => asset.id),
-    assetAliases: Object.fromEntries(assets.map((asset) => [
-      stableUrlAssetId(asset),
-      asset.id,
-    ])),
-    defaultNetworkIds,
-  }
+  const validIds = mapSelectionOptions({networks, assets})
   const initialUrlState = parseMapUrlState(window.location.search, validIds)
   const selection = createNetworkSelectionState({
     networkIds: validIds.networkIds,
@@ -327,22 +313,14 @@ export async function renderMapPage(container) {
   }
 
   function updateUrl(mode = 'push') {
-    const query = new URLSearchParams(serializeMapUrlState(window.location.search, {
-      datasetId: activeContext.datasetId,      siteId: activeContext.siteId,
-      selectedNetworkIds: selection.selectedNetworkIds,
-      selectedAssetId: stableUrlAssetId(assetById[selection.selectedAssetId]),
-      networkFamily: initialUrlState.networkFamily,
-      category: initialUrlState.category,
-      assetType: initialUrlState.assetType,
-      topologyStatus: initialUrlState.topologyStatus,
-    }))
-    if (selectedArea?.key) query.set('area', selectedArea.key)
+    const query = mapSelectionQuery(window.location.search, {activeContext, selectedArea, assetById, selection, urlState:initialUrlState})
     const nextUrl = `${window.location.pathname}?${query}${window.location.hash}`
     window.history[`${mode}State`](null, '', nextUrl)
     const topologyLink = container.querySelector('a[href="/topology"], a[href^="/topology?"]')
     if (topologyLink) {
       const topologyQuery = new URLSearchParams({
-        datasetId: activeContext.datasetId,      })
+        datasetId: activeContext.datasetId,
+      })
       if (selectedArea?.key) topologyQuery.set('area', selectedArea.key)
       if (selection.selectedAssetId) topologyQuery.set('selectedAssetId', selection.selectedAssetId)
       topologyLink.href = `/topology?${topologyQuery}`
@@ -1078,7 +1056,8 @@ export async function renderMapPage(container) {
   function fetchAssetDetail(assetId, { force = false } = {}) {
     if (!force && pendingAssetDetails.has(assetId)) return pendingAssetDetails.get(assetId)
     const request = loadActiveAssetDetail({
-      datasetId: activeContext.datasetId,      assetId,
+      datasetId: activeContext.datasetId,
+      assetId,
     }).then((detailPayload) => {
       const iconEdit = assetIconEdits.get(assetId)
       if (iconEdit && detailPayload.asset) Object.assign(detailPayload.asset, iconEdit)
@@ -1122,7 +1101,8 @@ export async function renderMapPage(container) {
       return
     }
     const query = new URLSearchParams({
-      datasetId: activeContext.datasetId,    })
+      datasetId: activeContext.datasetId,
+    })
     if (selectedArea?.key) query.set('area', selectedArea.key)
     if (selection.selectedAssetId) query.set('selectedAssetId', selection.selectedAssetId)
     window.location.href = `/topology?${query}`
@@ -1489,30 +1469,6 @@ export async function renderMapPage(container) {
   syncMap()
 }
 
-function isPoleLikeAsset(asset) {
-  return /\b(tiang|pole|pylon)\b/i.test(
-    `${asset?.type ?? ''} ${asset?.category ?? ''} ${asset?.name ?? ''}`,
-  )
-}
-
-function readRequestedDatasetContext() {
-  const query = new URLSearchParams(window.location.search)
-  return {
-    datasetId: query.get('datasetId')
-      || window.sessionStorage.getItem('sinergiActiveDatasetId')
-      || 'dataset-semarang',
-    siteId: query.get('siteId') || null,
-  }
-}
-
-function stableUrlAssetId(asset) {
-  return asset?.stableAssetId
-    ?? asset?.assetId
-    ?? asset?.canonicalAssetId
-    ?? asset?.id
-    ?? null
-}
-
 function renderDatasetState(container, {
   icon,
   title,
@@ -1548,54 +1504,6 @@ function renderDatasetState(container, {
   bindUserAccountMenu()
 }
 
-export function findAssetMatches(assets, query, limit = 8) {
-  const normalizedQuery = String(query ?? '').trim()
-  if (!normalizedQuery.replace(/[^\p{L}\p{N}]/gu, '').length) return []
-
-  return assets
-    .map((asset, index) => {
-      const fields = [
-        asset.id,
-        asset.assetId,
-        asset.canonicalAssetId,
-        asset.name,
-        asset.sourceName,
-        asset.location,
-        asset.locationGroupName,
-        asset.locationGroupKey,
-        asset.hostname,
-        asset.type,
-        asset.category,
-        asset.sourceFolderPath,
-      ]
-      const score = searchMatchScore(fields, normalizedQuery)
-      if (!score) return null
-      return {
-        asset,
-        index,
-        score,
-      }
-    })
-    .filter(Boolean)
-    .sort((left, right) => (
-      right.score - left.score
-      || String(left.asset.name || left.asset.id).localeCompare(
-        String(right.asset.name || right.asset.id),
-        'id',
-      )
-      || left.index - right.index
-    ))
-    .slice(0, limit)
-    .map(({ asset }) => asset)
-}
-
-function searchResultTypeLabel(asset) {
-  if (isJunctionBoxAsset(asset)) return 'Junction Box'
-  const source = `${asset?.type || ''} ${asset?.assetType || ''} ${asset?.name || ''}`.toLocaleLowerCase('id')
-  if (/\btiang\b|\bpole\b|\bpylon\b/.test(source)) return 'Jaringan Infrastruktur'
-  return formatAssetTypeLabel(asset)
-}
-
 function escapePageHtml(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -1603,295 +1511,4 @@ function escapePageHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;')
-}
-
-function formatContextName(value) {
-  return String(value ?? '')
-    .replace(/[-_]+/g, ' ')
-    .replace(/\b\w/g, (character) => character.toUpperCase())
-}
-
-export function selectLocationGroup(search, locationGroups = []) {
-  const requested = new URLSearchParams(search).get('area')
-  return locationGroups.find(({ key }) => key === requested) ?? locationGroups[0] ?? null
-}
-
-export function displayAssetName(asset) {
-  return String(asset?.name || '').trim() || 'Aset tanpa nama'
-}
-
-/**
- * Returns a small, explainable set of device targets for a manual relation.
- * The list is intentionally local to the selected area and prefers a nearby
- * junction box for cameras, without changing any KML geometry or graph data.
- */
-export function buildRelationOptions({
-  sourceAsset,
-  assets = [],
-  connectedAssets = [],
-  locationKey = null,
-  limit = 8,
-} = {}) {
-  if (!sourceAsset?.id) return []
-  const connectedIds = new Set(connectedAssets.map(({ asset }) => asset?.id).filter(Boolean))
-  const sourceLocation = sourceAsset.locationGroupKey || locationKey
-  return assets
-    .filter((candidate) => candidate?.id && candidate.id !== sourceAsset.id)
-    .filter((candidate) => !connectedIds.has(candidate.id))
-    .filter((candidate) => isRelationDevice(candidate))
-    .filter((candidate) => (
-      !sourceLocation
-      || !candidate.locationGroupKey
-      || candidate.locationGroupKey === sourceLocation
-    ))
-    .filter((candidate) => validCoordinate(candidate.coordinate))
-    .map((candidate) => {
-      const distanceMeters = distanceBetweenCoordinates(
-        sourceAsset.coordinate,
-        candidate.coordinate,
-      )
-      const preferredJunction = isCameraAsset(sourceAsset) && isJunctionBoxAsset(candidate)
-      return {
-        asset: candidate,
-        distanceMeters,
-        preferredJunction,
-        reason: preferredJunction
-          ? 'Junction box terdekat'
-          : `${Math.round(distanceMeters).toLocaleString('id-ID')} m dari aset ini`,
-      }
-    })
-    .sort((left, right) => (
-      Number(right.preferredJunction) - Number(left.preferredJunction)
-      || left.distanceMeters - right.distanceMeters
-      || displayAssetName(left.asset).localeCompare(displayAssetName(right.asset), 'id')
-    ))
-    .slice(0, Math.max(1, limit))
-}
-
-function isRelationDevice(asset) {
-  const source = `${asset?.type || ''} ${asset?.category || ''} ${asset?.objectRole || ''}`.toLocaleLowerCase('id')
-  return !/cable|line|string|path|polygon|area|jalur/.test(source)
-}
-
-function isCameraAsset(asset) {
-  return /cctv|camera|kamera/.test(
-    `${asset?.type || ''} ${asset?.category || ''}`.toLocaleLowerCase('id'),
-  )
-}
-
-function isJunctionBoxAsset(asset) {
-  return /junction\s*box|\bjb\b|junction/.test(
-    `${asset?.type || ''} ${asset?.category || ''} ${asset?.name || ''}`.toLocaleLowerCase('id'),
-  )
-}
-
-function validCoordinate(coordinate) {
-  return Array.isArray(coordinate)
-    && coordinate.length >= 2
-    && Number.isFinite(Number(coordinate[0]))
-    && Number.isFinite(Number(coordinate[1]))
-}
-
-function distanceBetweenCoordinates(left, right) {
-  if (!validCoordinate(left) || !validCoordinate(right)) return Number.POSITIVE_INFINITY
-  const earthRadiusMeters = 6371008.8
-  const toRadians = (value) => Number(value) * Math.PI / 180
-  const latitudeDelta = toRadians(Number(right[1]) - Number(left[1]))
-  const longitudeDelta = toRadians(Number(right[0]) - Number(left[0]))
-  const leftLatitude = toRadians(left[1])
-  const rightLatitude = toRadians(right[1])
-  const haversine = Math.sin(latitudeDelta / 2) ** 2
-    + Math.cos(leftLatitude) * Math.cos(rightLatitude) * Math.sin(longitudeDelta / 2) ** 2
-  return 2 * earthRadiusMeters * Math.asin(Math.sqrt(Math.min(1, haversine)))
-}
-
-export function summarizeMapTopology({
-  assets = [],
-  topologyGraph = {},
-  datasetTopologySummary = {},
-} = {}) {
-  const connectedAssetIds = new Set((topologyGraph.edges ?? []).flatMap((edge) => [
-    edge.sourceAssetId ?? edge.sourceNodeId,
-    edge.targetAssetId ?? edge.targetNodeId,
-  ].filter(Boolean)))
-  return {
-    confirmedConnectionCount: (topologyGraph.edges ?? []).length,
-    pendingConnectionCount: Number(datasetTopologySummary.candidateCount || 0)
-      + Number(datasetTopologySummary.ambiguousCount || 0),
-    isolatedAssetCount: assets.filter(({ id }) => !connectedAssetIds.has(id)).length,
-    pendingScope: 'dataset',
-  }
-}
-
-export function scopeMapData({
-  selectedArea,
-  assets,
-  diagramAssets,
-  geometries,
-  exportAssets,
-  networks,
-  topologyGraph,
-  mountingRelations = [],
-  mountingCandidates = [],
-  mountingOptions = [],
-  poleGroups = [],
-}) {
-  const areaKey = selectedArea?.key
-  const scopedAssets = areaKey
-    ? assets.filter(({ locationGroupKey }) => locationGroupKey === areaKey)
-    : [...assets]
-  const scopedGeometries = areaKey
-    ? geometries.filter(({ locationGroupKey }) => locationGroupKey === areaKey)
-    : [...geometries]
-  const scopedAssetIds = new Set(scopedAssets.map(({ id }) => id))
-  const scopedGeometryIds = new Set(scopedGeometries.map(({ id }) => id))
-  const scopedMountingRelations = mountingRelations.filter((relation) => (
-    scopedAssetIds.has(relation.sourceAssetId)
-      && scopedAssetIds.has(relation.targetAssetId)
-  ))
-  const scopedMountingCandidates = mountingCandidates.filter((candidate) => (
-    scopedAssetIds.has(candidate.assetId)
-      && scopedAssetIds.has(candidate.targetAssetId)
-  ))
-  const scopedMountingOptions = mountingOptions.filter((option) => (
-    scopedAssetIds.has(option.assetId)
-      && scopedAssetIds.has(option.targetAssetId)
-  ))
-  const mountingRelationsByHostId = new Map()
-  scopedMountingRelations.forEach((relation) => {
-    if (!mountingRelationsByHostId.has(relation.targetAssetId)) {
-      mountingRelationsByHostId.set(relation.targetAssetId, [])
-    }
-    mountingRelationsByHostId.get(relation.targetAssetId).push(relation)
-  })
-  const scopedPoleGroups = poleGroups
-    .map((group) => {
-      const assetIds = group.assetIds.filter((assetId) => scopedAssetIds.has(assetId))
-      return {
-        ...group,
-        assetIds,
-        assets: group.assets.filter((asset) => scopedAssetIds.has(asset.id)),
-        relations: mountingRelationsByHostId.get(group.poleAssetId) ?? [],
-        count: assetIds.length,
-        childCount: assetIds.filter((assetId) => assetId !== group.poleAssetId).length,
-      }
-    })
-    .filter((group) => (
-      group.assetIds.includes(group.poleAssetId) && group.assetIds.length > 1
-    ))
-  const edges = (topologyGraph.edges ?? []).filter((edge) => {
-    const sourceId = edge.sourceAssetId ?? edge.sourceNodeId
-    const targetId = edge.targetAssetId ?? edge.targetNodeId
-    return scopedAssetIds.has(sourceId) && scopedAssetIds.has(targetId)
-  })
-  const degreeByNode = Object.fromEntries([...scopedAssetIds].map((assetId) => [assetId, 0]))
-  edges.forEach((edge) => {
-    const sourceId = edge.sourceAssetId ?? edge.sourceNodeId
-    const targetId = edge.targetAssetId ?? edge.targetNodeId
-    degreeByNode[sourceId] = (degreeByNode[sourceId] ?? 0) + 1
-    degreeByNode[targetId] = (degreeByNode[targetId] ?? 0) + 1
-  })
-  const isolatedNodeIds = [...scopedAssetIds].filter((assetId) => !degreeByNode[assetId])
-  const scopedNetworks = networks.map((network) => {
-    const nodeIds = network.nodeIds.filter((id) => scopedAssetIds.has(id))
-    const geometryIds = network.geometryIds.filter((id) => scopedGeometryIds.has(id))
-    const relations = (network.relations ?? []).filter((relation) => (
-      scopedAssetIds.has(relation.sourceAssetId)
-      && scopedAssetIds.has(relation.targetAssetId)
-    ))
-    const geometryIdSet = new Set(geometryIds)
-    const networkGeometries = scopedGeometries.filter(({ id }) => geometryIdSet.has(id))
-    const geometryAssetIds = networkGeometries
-      .map(({ assetId }) => assetId)
-      .filter(Boolean)
-    const assetIds = [...new Set([...nodeIds, ...geometryAssetIds])]
-    const relationAssetIds = new Set(relations.flatMap(({ sourceAssetId, targetAssetId }) => (
-      [sourceAssetId, targetAssetId]
-    )))
-    return {
-      ...network,
-      nodeIds,
-      geometryIds,
-      geometryAssetIds,
-      assetIds,
-      relations,
-      relationIds: relations.map(({ id }) => id),
-      edges: relations.map(({ sourceAssetId, targetAssetId }) => [sourceAssetId, targetAssetId]),
-      confirmedConnectionCount: relations.length,
-      isolatedAssetCount: nodeIds.filter((assetId) => !relationAssetIds.has(assetId)).length,
-      assetCount: assetIds.length,
-      nodeCount: nodeIds.length,
-      lineCount: networkGeometries.filter(
-        ({ geometryType }) => geometryType === 'line_string',
-      ).length,
-      polygonCount: networkGeometries.filter(
-        ({ geometryType }) => geometryType === 'polygon',
-      ).length,
-      ...(selectedArea?.bounds ? { bounds: selectedArea.bounds } : {}),
-    }
-  }).filter((network) => network.nodeIds.length || network.geometryIds.length)
-  const nodes = (topologyGraph.nodes ?? []).filter((node) => (
-    scopedAssetIds.has(node.id) || scopedAssetIds.has(node.assetId)
-  ))
-  const scopedExportAssetIds = new Set([
-    ...scopedAssetIds,
-    ...scopedGeometries.map(({ assetId }) => assetId).filter(Boolean),
-  ])
-  return {
-    assets: scopedAssets,
-    assetById: Object.fromEntries(scopedAssets.map((asset) => [asset.id, asset])),
-    diagramAssets: diagramAssets.filter((asset) => (
-      asset.locationGroupKey === areaKey || !areaKey
-    )),
-    geometries: scopedGeometries,
-    exportAssets: exportAssets.filter(({ id }) => scopedExportAssetIds.has(id)),
-    mountingRelations: scopedMountingRelations,
-    mountingCandidates: scopedMountingCandidates,
-    mountingOptions: scopedMountingOptions,
-    poleGroups: scopedPoleGroups,
-    networks: scopedNetworks,
-    topologyGraph: {
-      ...topologyGraph,
-      nodes,
-      edges,
-      degreeByNode,
-      isolatedNodeIds,
-    },
-    counts: {
-      networkCount: scopedNetworks.length,
-      layerCount: new Set([
-        ...scopedAssets.map(({ layerId }) => layerId),
-        ...scopedGeometries.map(({ layerId }) => layerId),
-      ].filter(Boolean)).size,
-      assetCount: scopedExportAssetIds.size,
-      assetNodeCount: scopedAssets.length,
-      pointCount: scopedGeometries.filter(({ geometryType }) => geometryType === 'point').length,
-      lineCount: scopedGeometries.filter(
-        ({ geometryType }) => geometryType === 'line_string',
-      ).length,
-      polygonCount: scopedGeometries.filter(
-        ({ geometryType }) => geometryType === 'polygon',
-      ).length,
-      geometryCount: scopedGeometries.length,
-      poleGroupCount: scopedPoleGroups.length,
-    },
-  }
-}
-
-function overlayMatchesArea(overlay, selectedArea) {
-  if (!selectedArea) return true
-  return locationGroupFor(overlay.sourceFolderPath).locationGroupKey === selectedArea.key
-}
-
-function networkMatchesPreset(network, preset) {
-  if (preset.startsWith('custom:')) return network.categoryKey === preset
-  const source = `${network.category ?? ''} ${network.type ?? ''} ${network.name ?? ''}`.toLowerCase()
-  if (preset === 'cctv') return /cctv|camera|kamera|nvr|junction/.test(source)
-  if (preset === 'fiber') return /fiber|fibre|\bfo\b|otb/.test(source)
-  if (preset === 'power') return /power|pln|listrik/.test(source)
-  if (preset === 'lan') return /\blan\b|utp/.test(source)
-  if (preset === 'infrastructure') {
-    return /infrastructure|switch|server|router|rack|peripheral|printer|access point/.test(source)
-  }
-  return true
 }

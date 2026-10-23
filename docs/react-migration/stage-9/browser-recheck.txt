@@ -1,0 +1,9 @@
+
+Running 2 tests using 1 worker
+
+(node:22108) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 1 [desktop-edge] › frontend\e2e\auth.spec.js:46:1 › login success preserves session keys and enters the legacy map through a new document (4.9s)
+  ok 2 [desktop-edge] › frontend\e2e\imports.spec.js:71:1 › downloads authenticated source preserving encoded filename (1.4s)
+
+  2 passed (10.7s)

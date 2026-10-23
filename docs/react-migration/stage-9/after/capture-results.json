@@ -1,0 +1,29 @@
+{
+  "settledMapFrames": true,
+  "results": [
+    {
+      "size": "desktop",
+      "theme": "light",
+      "errors": [],
+      "unexpected": []
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "errors": [],
+      "unexpected": []
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "errors": [],
+      "unexpected": []
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "errors": [],
+      "unexpected": []
+    }
+  ]
+}

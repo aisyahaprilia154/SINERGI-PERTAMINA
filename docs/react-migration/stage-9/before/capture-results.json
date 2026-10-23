@@ -1,0 +1,41 @@
+{
+  "fixture": "mock only; blank vector basemap, no external tile dependency",
+  "results": [
+    {
+      "name": "map",
+      "size": "desktop",
+      "theme": "light",
+      "title": "Peta Jaringan — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "map-desktop-light.png"
+    },
+    {
+      "name": "map",
+      "size": "desktop",
+      "theme": "dark",
+      "title": "Peta Jaringan — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "map-desktop-dark.png"
+    },
+    {
+      "name": "map",
+      "size": "mobile",
+      "theme": "light",
+      "title": "Peta Jaringan — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "map-mobile-light.png"
+    },
+    {
+      "name": "map",
+      "size": "mobile",
+      "theme": "dark",
+      "title": "Peta Jaringan — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "map-mobile-dark.png"
+    }
+  ]
+}

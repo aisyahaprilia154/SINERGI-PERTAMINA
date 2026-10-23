@@ -95,8 +95,8 @@ Screenshot memakai fixture kecil, tanggal data tetap, locale id-ID, timezone Asi
 - [x] 6. Versi database — lihat [laporan tahap 6](STAGE-6.md).
 - [x] 7. Riwayat dan unggah impor — lihat [laporan tahap 7](STAGE-7.md).
 - [x] 8. Preview impor — lihat [laporan tahap 8](STAGE-8.md).
-- [ ] 9. Pisahkan logika peta — **tahap berikutnya**.
-- [ ] 10. Peta React untuk membaca data.
+- [x] 9. Pisahkan logika peta — lihat [laporan tahap 9](STAGE-9.md).
+- [ ] 10. Peta React untuk membaca data — **tahap berikutnya**.
 - [ ] 11. Detail dan edit aset di peta.
 - [ ] 12. Dialog peta dan ekspor.
 - [ ] 13. Pisahkan logika topologi.
@@ -156,3 +156,8 @@ Login, Kelola pengguna, Versi database, dan riwayat/unggah kini memakai React. P
 ## Hasil tahap 8
 
 Preview impor kini aktif memakai React dengan tabel/konflik/endpoint/konteks aset lama, hitung ulang, sumber, apply dan adapter MapLibre terisolasi. Revision 409 memuat data terbaru; request/polling/map/object URL dibersihkan. Frontend 336 + 97 tes, backend 77 lulus/1 skip, browser 43/43, smoke 10/10, lint dan build lulus. Visual 32 halaman + 24 potongan, 12 pasangan header/tabel/konflik identik dalam desktop/mobile dan terang/gelap. Peta/topologi tetap legacy. Lanjut tahap 9 lalu 10 sesuai izin pengguna, tanpa push/deploy. [Laporan tahap 8](STAGE-8.md).
+
+
+## Hasil tahap 9
+
+Pencarian, area/scope/hitungan, target relasi, label/preset, konteks dan ID URL kini modul murni. State seleksi/URL dan traversal graph dipindah dengan facade kompatibilitas. Model komposisi siap dipakai React; halaman peta masih legacy. Bukti 21 fungsi + 2 modul identik dengan checkpoint tahap 8 (normalisasi export/input konteks), 341 tes Node + 97 React, backend 77 lulus/1 skip, lint/build lulus. Empat pasangan visual final identik dan smoke 10/10 lulus. Browser mencakup 43 kasus melalui 42/43 pada run utama dan 2/2 uji ulang kasus login/unduhan yang sempat terganggu; bukan satu run bersih. [Rincian tahap 9](STAGE-9.md). Lanjut tahap 10 sesuai izin pengguna lalu berhenti.

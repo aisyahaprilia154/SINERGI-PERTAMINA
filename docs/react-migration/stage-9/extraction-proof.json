@@ -1,0 +1,124 @@
+{
+  "sourceCheckpoint": "46ec023",
+  "note": "Only readRequestedDatasetContext receives globals as explicit arguments; normalized before comparison.",
+  "results": [
+    {
+      "function": "isPoleLikeAsset",
+      "identical": true,
+      "sha256": "7d7c6465c3f9a4f3d60bf878806dbd987427e264b83db0464af7bae645fb8a05"
+    },
+    {
+      "function": "readRequestedDatasetContext",
+      "identical": true,
+      "sha256": "ef30f678fdc718683d115705768662de1fb7ed430a9aa6080fd5babcedf0ecbe"
+    },
+    {
+      "function": "stableUrlAssetId",
+      "identical": true,
+      "sha256": "c7fcaeea84772db6336ead434fb6d19cf05b65ce9ef1b6519b9b887b64a1ab78"
+    },
+    {
+      "function": "findAssetMatches",
+      "identical": true,
+      "sha256": "9f1c0130e740bedb2db19f9f2f67f1c806c25a20650a9428cec9231ba43b92b8"
+    },
+    {
+      "function": "searchResultTypeLabel",
+      "identical": true,
+      "sha256": "76df55bed71faeff975bf047a9b8eea333995770dce0575ec7ca033da299292e"
+    },
+    {
+      "function": "formatContextName",
+      "identical": true,
+      "sha256": "61c7345969ce1ef145b0968a260ae4194441bf97ff47ea59ae78bb45e66854e9"
+    },
+    {
+      "function": "selectLocationGroup",
+      "identical": true,
+      "sha256": "60129f98eb1bd179d7c50c8b1c9d51b71163ec3ebafa46b8ae80f15e1456387a"
+    },
+    {
+      "function": "displayAssetName",
+      "identical": true,
+      "sha256": "b46601f3c95c39fd61f344a41d8e10b72a8dc71e940e336b4191b5e3302615e6"
+    },
+    {
+      "function": "buildRelationOptions",
+      "identical": true,
+      "sha256": "d6c2b0c6eb76d10f43eb59421f2c95a454d0e97d97e52bbe8960886d766c4387"
+    },
+    {
+      "function": "isRelationDevice",
+      "identical": true,
+      "sha256": "a7037ef78a192170906de90eaa428d370d8f40953eaf7dbc0a4bc241accc873d"
+    },
+    {
+      "function": "isCameraAsset",
+      "identical": true,
+      "sha256": "53d1f7510d4d58ed6630e5601342aa6f35e2c6c073a788aaadb0f0cccec28aa2"
+    },
+    {
+      "function": "isJunctionBoxAsset",
+      "identical": true,
+      "sha256": "732b7a3b6c1a832eca936342a2738c3d2251ef675e67640c7ee860632ffc908b"
+    },
+    {
+      "function": "validCoordinate",
+      "identical": true,
+      "sha256": "84a32def3ccefad51eeda46a6303222cabfdc7dcb0dec0fba50c6fd34c9c86b6"
+    },
+    {
+      "function": "distanceBetweenCoordinates",
+      "identical": true,
+      "sha256": "47326145f8aaaff80c63cd35e89e78aa825601922891b3de22051ce53845bef5"
+    },
+    {
+      "function": "summarizeMapTopology",
+      "identical": true,
+      "sha256": "8f647bffc5223accada3b19eaa440910a29ad1b3a88ae25630a0c9d749f72c2f"
+    },
+    {
+      "function": "scopeMapData",
+      "identical": true,
+      "sha256": "b248c8b13846cdc74568a4365f9feb9a1497c596cc74886a91d77721f139fcb6"
+    },
+    {
+      "function": "overlayMatchesArea",
+      "identical": true,
+      "sha256": "28a607d8e3d9ed8f7bb0d6654b18afa092867ce3021539deb9629a46b96e4ffa"
+    },
+    {
+      "function": "networkMatchesPreset",
+      "identical": true,
+      "sha256": "750deb211f05a64216b0d9e4709e31aaccbb2709fa2c2393262a49d34897f1f4"
+    },
+    {
+      "module": "map-selection.js",
+      "identical": true,
+      "sha256": "9f02303d564a09a64d904b367e19889ae540aa4eac1afbb8b6dfd34f065479b6"
+    },
+    {
+      "module": "map-network-tracing.js",
+      "identical": true,
+      "sha256": "d464788896222946cd0c58380d3c35bd4372c837780fc0dae144ee79c23afc3f"
+    },
+    {
+      "function": "getNetworkSubcategories",
+      "source": "network-sidebar.js",
+      "identical": true,
+      "sha256": "4ef198f76244db129b9b9af5155f276e7fd937be322206c743b2d2531169a459"
+    },
+    {
+      "function": "normalizeSubcategory",
+      "source": "network-sidebar.js",
+      "identical": true,
+      "sha256": "f9eb4025dda2e44282d5f63b34397e3446d2a73d3d48a3c46ff3dc8a25a55f78"
+    },
+    {
+      "function": "formatDatasetCounts",
+      "source": "network-sidebar.js",
+      "identical": true,
+      "sha256": "a8c4115789754521b8dfd5c52630a4e143515288258eccf9efe2a3932db30922"
+    }
+  ]
+}
