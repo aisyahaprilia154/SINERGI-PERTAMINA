@@ -4,7 +4,7 @@ import { reactRoutes } from '../src/react/routes.js'
 
 describe('transition entrypoint', () => {
   it('activates React login, users and versions while preserving other legacy pages and aliases', async () => {
-    expect(reactRoutes).toHaveLength(5)
+    expect(reactRoutes).toHaveLength(6)
     expect(await usesReactRoute('/')).toBe(true)
     expect(await usesReactRoute('/unknown')).toBe(true)
     expect(await usesReactRoute('/admin/users')).toBe(true)
@@ -13,7 +13,8 @@ describe('transition entrypoint', () => {
     expect(await usesReactRoute('/admin/datasets/versions/')).toBe(true)
     expect(await usesReactRoute('/admin/datasets/import')).toBe(true)
     expect(await usesReactRoute('/admin/datasets/import/')).toBe(true)
-    for (const pathname of ['/map', '/peta', '/topology', '/topologi', '/admin/datasets/import/id/preview']) {
+    expect(await usesReactRoute('/admin/datasets/import/id/preview')).toBe(true)
+    for (const pathname of ['/map', '/peta', '/topology', '/topologi']) {
       expect(await usesReactRoute(pathname)).toBe(false)
     }
   })

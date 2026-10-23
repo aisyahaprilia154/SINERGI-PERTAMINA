@@ -94,8 +94,8 @@ Screenshot memakai fixture kecil, tanggal data tetap, locale id-ID, timezone Asi
 - [x] 5. Kelola pengguna — lihat [laporan tahap 5](STAGE-5.md).
 - [x] 6. Versi database — lihat [laporan tahap 6](STAGE-6.md).
 - [x] 7. Riwayat dan unggah impor — lihat [laporan tahap 7](STAGE-7.md).
-- [ ] 8. Preview impor — **tahap berikutnya**.
-- [ ] 9. Pisahkan logika peta.
+- [x] 8. Preview impor — lihat [laporan tahap 8](STAGE-8.md).
+- [ ] 9. Pisahkan logika peta — **tahap berikutnya**.
 - [ ] 10. Peta React untuk membaca data.
 - [ ] 11. Detail dan edit aset di peta.
 - [ ] 12. Dialog peta dan ekspor.
@@ -151,3 +151,8 @@ Login, Kelola pengguna, dan Versi database aktif memakai React. Riwayat/unggah, 
 - [x] Checkpoint Git lokal setelah verifikasi; tidak ada push/merge/deployment. Folder docs/figures/, penghapusan .env.docker.example, rahasia dan backup database tidak disertakan.
 
 Login, Kelola pengguna, Versi database, dan riwayat/unggah kini memakai React. Preview impor, peta, dan topologi masih legacy. Docker sehat di port 5174 dengan image sebelum tahap 7; kode terbaru Vite di port 5173 memakai backend Docker port 5001. Seluruh operasi tulis pengujian memakai API mock. Hasil: [STAGE-7.md](STAGE-7.md). Tahap berikutnya **8 — Preview impor**, hanya setelah diminta.
+
+
+## Hasil tahap 8
+
+Preview impor kini aktif memakai React dengan tabel/konflik/endpoint/konteks aset lama, hitung ulang, sumber, apply dan adapter MapLibre terisolasi. Revision 409 memuat data terbaru; request/polling/map/object URL dibersihkan. Frontend 336 + 97 tes, backend 77 lulus/1 skip, browser 43/43, smoke 10/10, lint dan build lulus. Visual 32 halaman + 24 potongan, 12 pasangan header/tabel/konflik identik dalam desktop/mobile dan terang/gelap. Peta/topologi tetap legacy. Lanjut tahap 9 lalu 10 sesuai izin pengguna, tanpa push/deploy. [Laporan tahap 8](STAGE-8.md).
