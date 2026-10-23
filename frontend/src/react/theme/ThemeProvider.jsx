@@ -1,5 +1,6 @@
-import { useLayoutEffect, useSyncExternalStore } from 'react'
+import { useLayoutEffect, useMemo, useSyncExternalStore } from 'react'
 import { initializeTheme, toggleTheme } from '../../theme.js'
+import { ThemeContext } from './theme-context.js'
 
 const snapshot = () => document.documentElement.dataset.theme || 'light'
 const subscribe = listener => {
@@ -7,8 +8,9 @@ const subscribe = listener => {
   return () => window.removeEventListener('sinergi:theme-change', listener)
 }
 
-export function useLoginTheme() {
+export function ThemeProvider({ children }) {
   useLayoutEffect(() => initializeTheme(), [])
   const theme = useSyncExternalStore(subscribe, snapshot)
-  return { theme, toggleTheme }
+  const value = useMemo(() => ({ theme, toggleTheme }), [theme])
+  return <ThemeContext value={value}>{children}</ThemeContext>
 }

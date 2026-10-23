@@ -36,13 +36,16 @@ const routes = [
 
 async function main() {
   const { chromium } = require('playwright')
+  const requestedPages = process.env.BASELINE_PAGES?.split(',').map(value => value.trim())
+  const selectedRoutes = requestedPages ? routes.filter(([name]) => requestedPages.includes(name)) : routes
+  assert.ok(selectedRoutes.length, 'No baseline pages selected')
   await fs.mkdir(output, { recursive: true })
   const browser = await chromium.launch({ headless: true, channel: process.env.BASELINE_BROWSER_CHANNEL || 'msedge' })
   const results = []
   try {
     for (const [size, viewport] of [['desktop', { width: 1440, height: 900 }], ['mobile', { width: 390, height: 844 }]]) {
       for (const theme of ['light', 'dark']) {
-        for (const [name, url, ready] of routes) {
+        for (const [name, url, ready] of selectedRoutes) {
           const context = await browser.newContext({ viewport, colorScheme: theme, locale: 'id-ID', timezoneId: 'Asia/Jakarta' })
           const page = await context.newPage()
           const errors = [], unexpected = []
@@ -83,7 +86,7 @@ async function main() {
       }
     }
     await fs.writeFile(path.join(output, 'capture-results.json'), JSON.stringify({ fixture: 'mock only; blank vector basemap, no external tile dependency', results }, null, 2))
-    assert.equal(results.length, 28)
+    assert.equal(results.length, selectedRoutes.length * 4)
     assert.deepEqual(results.flatMap(r => r.errors), [], 'Browser runtime errors')
     assert.deepEqual(results.flatMap(r => r.unexpected), [], 'Unmocked API requests')
   } finally { await browser.close() }

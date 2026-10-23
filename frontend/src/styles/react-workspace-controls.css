@@ -1,0 +1,9 @@
+/* Same dock geometry as the topology workspace, reusable in a positioned host. */
+[data-react-workspace-controls] { position:absolute; bottom:16px; left:50%; z-index:32; display:flex; justify-content:center; padding:4px; background:var(--workspace-raised,var(--app-glass-raised)); color:var(--workspace-text,var(--app-ink)); border:1px solid var(--workspace-line,var(--app-glass-border)); border-radius:12px; box-shadow:0 4px 16px rgba(0,0,0,.09),0 1px 2px rgba(0,0,0,.04); backdrop-filter:blur(18px) saturate(130%); transform:translateX(-50%); }
+[data-react-workspace-controls] :is(.topology-toolbar-navigation,.topology-stitch-zoom-control) { display:flex; align-items:center; height:30px; gap:4px; }
+[data-react-workspace-controls] button { display:inline-flex; align-items:center; justify-content:center; width:30px; min-width:30px; height:30px; min-height:30px; border:0; border-radius:6px; padding:0; background:transparent; color:inherit; cursor:pointer; }
+[data-react-workspace-controls] button:hover:not(:disabled) { background:var(--app-control); }
+[data-react-workspace-controls] button:disabled { opacity:.55; cursor:default; }
+[data-react-workspace-controls] .material-symbols-outlined { width:20px; overflow:hidden; pointer-events:none; flex:0 0 20px; }
+[data-react-workspace-controls] .topology-zoom-reset { min-width:44px; font-size:12px; font-weight:560; font-variant-numeric:tabular-nums; }
+[data-react-workspace-controls] .topology-toolbar-navigation-button > span:last-child:not(.material-symbols-outlined) { display:none; }

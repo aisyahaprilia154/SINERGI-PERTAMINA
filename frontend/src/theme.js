@@ -2,7 +2,15 @@ const THEME_STORAGE_KEY = 'sinergi.theme'
 const THEME_VALUES = new Set(['light', 'dark', 'system'])
 
 let themeInteractionsBound = false
-let systemThemeListenerBound = false
+let themeOwners = 0
+let detachSystemTheme = null
+let transitionFrame = null
+
+function stopThemeTransition() {
+  if (transitionFrame !== null) cancelAnimationFrame(transitionFrame)
+  transitionFrame = null
+  document.documentElement.classList.remove('theme-switching')
+}
 
 function readThemePreference() {
   if (typeof window === 'undefined') return 'system'
@@ -39,7 +47,7 @@ function updateThemeToggleButtons(theme) {
   if (typeof document === 'undefined') return
 
   const dark = theme === 'dark'
-  document.querySelectorAll('[data-theme-toggle]').forEach((button) => {
+  document.querySelectorAll('[data-theme-toggle]:not([data-react-theme-control])').forEach((button) => {
     button.setAttribute('aria-pressed', String(dark))
     button.setAttribute('aria-label', dark ? 'Aktifkan mode terang' : 'Aktifkan mode gelap')
     button.setAttribute('title', dark ? 'Mode terang' : 'Mode gelap')
@@ -57,10 +65,12 @@ export function applyTheme(preference = readThemePreference(), { persist = false
 
   if (typeof document !== 'undefined') {
     if (previousTheme && previousTheme !== theme) {
+      stopThemeTransition()
       document.documentElement.classList.add('theme-switching')
-      requestAnimationFrame(() => requestAnimationFrame(() => {
+      transitionFrame = requestAnimationFrame(() => { transitionFrame = requestAnimationFrame(() => {
+        transitionFrame = null
         document.documentElement.classList.remove('theme-switching')
-      }))
+      }) })
     }
     document.documentElement.dataset.theme = theme
     document.documentElement.style.colorScheme = theme
@@ -78,19 +88,23 @@ export function initializeTheme() {
   const preference = readThemePreference()
   applyTheme(preference)
 
-  if (systemThemeListenerBound || typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {}
-
-  const media = window.matchMedia('(prefers-color-scheme: dark)')
-  const handleSystemThemeChange = () => {
-    if (readThemePreference() === 'system') applyTheme('system')
+  if (typeof window === 'undefined') return () => {}
+  themeOwners++
+  if (themeOwners === 1 && typeof window.matchMedia === 'function') {
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const change = () => { if (readThemePreference() === 'system') applyTheme('system') }
+    if (typeof media.addEventListener === 'function') media.addEventListener('change', change)
+    else media.addListener(change)
+    detachSystemTheme = () => {
+      if (typeof media.removeEventListener === 'function') media.removeEventListener('change', change)
+      else media.removeListener(change)
+    }
   }
-  if (typeof media.addEventListener === 'function') media.addEventListener('change', handleSystemThemeChange)
-  else media.addListener(handleSystemThemeChange)
-  systemThemeListenerBound = true
+  let released = false
   return () => {
-    if (typeof media.removeEventListener === 'function') media.removeEventListener('change', handleSystemThemeChange)
-    else media.removeListener(handleSystemThemeChange)
-    systemThemeListenerBound = false
+    if (released) return
+    released = true
+    if (--themeOwners === 0) { detachSystemTheme?.(); detachSystemTheme = null; stopThemeTransition() }
   }
 }
 
@@ -104,7 +118,7 @@ export function bindThemeToggle() {
 
   if (!themeInteractionsBound) {
     document.addEventListener('click', (event) => {
-      const trigger = event.target?.closest?.('[data-theme-toggle]')
+      const trigger = event.target?.closest?.('[data-theme-toggle]:not([data-react-theme-control])')
       if (!trigger) return
       event.preventDefault()
       toggleTheme()

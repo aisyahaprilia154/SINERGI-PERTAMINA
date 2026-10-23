@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './test.js'
 import { readFile, writeFile } from 'node:fs/promises'
 
 test('active login loads React and preserves password visibility controls', async ({ page }) => {

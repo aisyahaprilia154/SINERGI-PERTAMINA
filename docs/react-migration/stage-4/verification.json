@@ -1,0 +1,26 @@
+{
+  "stage": 4,
+  "date": "2026-10-23",
+  "timezone": "Asia/Jakarta",
+  "branch": "react-migration-baseline",
+  "previousCheckpoint": "422e055",
+  "node": "24.19.0",
+  "checks": {
+    "frontendLegacy": { "passed": 336, "failed": 0 },
+    "reactVitest": { "passed": 41, "failed": 0, "sharedComponentTests": 13 },
+    "playwright": { "regressionPassed": 15, "sharedPassed": 4, "uniqueValidatedTests": 19, "execution": "15 regression cases passed in the main run; all 4 shared cases passed in a targeted rerun after the workspace icon fix", "api": "mocked" },
+    "baselineSmoke": { "passedGroups": 10, "api": "mocked" },
+    "backend": { "passed": 75, "failed": 0, "skipped": 1 },
+    "build": { "frontend": "passed", "backend": "passed", "clientOutput": true, "serverWorkerOutput": true, "e2eFixtureInProduction": false },
+    "lint": { "root": "passed", "frontend": "passed", "backend": "passed" },
+    "visual": { "loginModes": 4, "headerModes": 4, "sharedDrawerDialogModes": 4, "headerComparison": "header-comparison.json", "loginComparison": "login-comparison.json", "wholeApplicationRecapture": "not completed: legacy map canvas timeout; final visual scope is changed components" }
+  },
+  "activeReactPages": ["login", "public-login-fallback"],
+  "remainingLegacyPages": ["users", "versions", "imports", "import-preview", "map", "topology"],
+  "unrelatedFilesExcluded": ["docs/figures/"],
+  "frontendUrl": "http://localhost:5173/",
+  "backendRunning": false,
+  "nextStage": 5,
+  "pushed": false,
+  "deployed": false
+}

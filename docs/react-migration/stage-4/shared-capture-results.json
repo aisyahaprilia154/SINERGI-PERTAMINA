@@ -1,0 +1,48 @@
+{
+  "results": [
+    {
+      "size": "desktop",
+      "theme": "light",
+      "headerBox": {
+        "x": 0,
+        "y": 0,
+        "width": 1440,
+        "height": 64
+      },
+      "errors": []
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "headerBox": {
+        "x": 0,
+        "y": 0,
+        "width": 1440,
+        "height": 64
+      },
+      "errors": []
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "headerBox": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 108
+      },
+      "errors": []
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "headerBox": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 108
+      },
+      "errors": []
+    }
+  ]
+}

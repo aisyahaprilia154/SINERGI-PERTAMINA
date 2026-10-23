@@ -1,0 +1,29 @@
+{
+  "threshold": "channel difference >12; no masked pixels",
+  "results": [
+    {
+      "size": "desktop",
+      "theme": "light",
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    }
+  ]
+}

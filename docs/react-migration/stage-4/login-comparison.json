@@ -1,0 +1,21 @@
+{
+  "threshold": "channel difference >12; no masked pixels",
+  "results": [
+    {
+      "screenshot": "login-desktop-light.png",
+      "changed_pixels_over_12": 0
+    },
+    {
+      "screenshot": "login-desktop-dark.png",
+      "changed_pixels_over_12": 0
+    },
+    {
+      "screenshot": "login-mobile-light.png",
+      "changed_pixels_over_12": 0
+    },
+    {
+      "screenshot": "login-mobile-dark.png",
+      "changed_pixels_over_12": 0
+    }
+  ]
+}

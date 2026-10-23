@@ -1,6 +1,6 @@
 # Migrasi React SINERGI — baseline dan checklist
 
-Tanggal: 23 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **3 — login, sesi, dan penjagaan akses**.
+Tanggal: 23 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **4 — komponen bersama**.
 Commit asal: `5375bd3` pada `main`. Branch kerja lokal: `react-migration-baseline`.
 Rencana asli pengguna disimpan tanpa perubahan di [PLAN.md](PLAN.md).
 
@@ -90,8 +90,8 @@ Screenshot memakai fixture kecil, tanggal data tetap, locale id-ID, timezone Asi
 - [x] 1. Baseline dan checklist.
 - [x] 2. Fondasi React dan pengujian — lihat [laporan tahap 2](STAGE-2.md).
 - [x] 3. Login, sesi, dan penjagaan akses — lihat [laporan tahap 3](STAGE-3.md).
-- [ ] 4. Komponen bersama — **tahap berikutnya**.
-- [ ] 5. Kelola pengguna.
+- [x] 4. Komponen bersama — lihat [laporan tahap 4](STAGE-4.md).
+- [ ] 5. Kelola pengguna — **tahap berikutnya**.
 - [ ] 6. Versi database.
 - [ ] 7. Riwayat dan unggah impor.
 - [ ] 8. Preview impor.
@@ -109,3 +109,5 @@ Catatan integrasi untuk dievaluasi ketika mencapai tahap terkait: jangan mengakt
 Tidak ada halaman React aktif pada tahap 1 maupun tahap 2. Ketujuh halaman tetap memakai implementasi vanilla yang sama. Checkpoint tahap 1 berisi dokumentasi, artefak baseline, skrip verifikasi, dan tiga file handover lokal sebelumnya. Checkpoint tahap 2 menambahkan fondasi dan pengujian terisolasi; belum mengaktifkan UI React pada rute aplikasi.
 
 Mulai tahap 3, login `/` dan fallback URL publik memakai React. Enam halaman lain masih legacy. Kebijakan akses dan service akun dipakai bersama; lihat STAGE-3.md untuk hasil pemeriksaan terbaru.
+
+Tahap 4 menyiapkan komponen bersama dan memakainya untuk logo/tombol tema login. Header/admin, tabel, overlay, dan kontrol workspace React diuji terisolasi; belum mengambil alih enam halaman legacy. Hasil terbaru ada di STAGE-4.md.

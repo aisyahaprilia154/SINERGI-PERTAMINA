@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   test: {
+    maxWorkers: 1,
     environment: 'jsdom',
     include: ['react-tests/**/*.test.{js,jsx}'],
     setupFiles: ['./react-tests/setup.js'],

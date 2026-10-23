@@ -1,0 +1,41 @@
+{
+  "fixture": "mock only; blank vector basemap, no external tile dependency",
+  "results": [
+    {
+      "name": "login",
+      "size": "desktop",
+      "theme": "light",
+      "title": "SINERGI — Masuk",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "login-desktop-light.png"
+    },
+    {
+      "name": "login",
+      "size": "desktop",
+      "theme": "dark",
+      "title": "SINERGI — Masuk",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "login-desktop-dark.png"
+    },
+    {
+      "name": "login",
+      "size": "mobile",
+      "theme": "light",
+      "title": "SINERGI — Masuk",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "login-mobile-light.png"
+    },
+    {
+      "name": "login",
+      "size": "mobile",
+      "theme": "dark",
+      "title": "SINERGI — Masuk",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "login-mobile-dark.png"
+    }
+  ]
+}
