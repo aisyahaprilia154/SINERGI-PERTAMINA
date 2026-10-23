@@ -1,0 +1,236 @@
+{
+  "threshold": 12,
+  "results": [
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "list",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "list",
+      "reference": "baseline",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "create",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": [
+        161,
+        150,
+        844,
+        152
+      ]
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "edit",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "password",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "discard",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": [
+        161,
+        150,
+        844,
+        152
+      ]
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "list",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "list",
+      "reference": "baseline",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "create",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "edit",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "password",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "discard",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 1296000,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "list",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": [
+        15,
+        192,
+        375,
+        194
+      ]
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "list",
+      "reference": "baseline",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "create",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "edit",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "password",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "discard",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "list",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "list",
+      "reference": "baseline",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "create",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "edit",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "password",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "discard",
+      "reference": "legacy",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": null
+    }
+  ]
+}

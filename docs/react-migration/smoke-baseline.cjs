@@ -65,10 +65,10 @@ async function main() {
 
     ;({ page } = await open('/admin/users'))
     await page.locator('[data-search]').fill('no-matching-user')
-    await expect(page.locator('[data-rows]')).toContainText('Tidak ada pengguna')
+    await expect(page.locator('.au-table-wrap tbody')).toContainText('Tidak ada pengguna')
     await page.locator('[data-search]').fill('')
     await page.locator('[data-role]').selectOption('Viewer')
-    await expect(page.locator('[data-rows] tr')).toHaveCount(1)
+    await expect(page.locator('.au-table-wrap tbody tr')).toHaveCount(1)
     await page.locator('[data-new-user]').click()
     await page.locator('input[name=username]').fill('unsaved-draft')
     await page.keyboard.press('Escape')
@@ -135,7 +135,9 @@ async function main() {
 
     expect(errors).toEqual([])
     expect(unexpected).toEqual([])
-    await fs.writeFile(path.join(__dirname, 'baseline', 'smoke-results.json'), JSON.stringify({ checks, errors, unexpected, database: 'not connected; all API responses mocked' }, null, 2))
+    const output = process.env.BASELINE_OUTPUT_DIR ? path.resolve(process.env.BASELINE_OUTPUT_DIR) : path.join(__dirname, 'baseline')
+    await fs.mkdir(output, { recursive: true })
+    await fs.writeFile(path.join(output, 'smoke-results.json'), JSON.stringify({ checks, errors, unexpected, database: 'not connected; all API responses mocked' }, null, 2))
   } finally { if (context) await context.close(); await browser.close() }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

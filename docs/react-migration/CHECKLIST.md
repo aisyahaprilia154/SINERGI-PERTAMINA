@@ -1,6 +1,6 @@
 # Migrasi React SINERGI — baseline dan checklist
 
-Tanggal: 23 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **4 — komponen bersama**.
+Tanggal: 23 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **5 — Kelola pengguna**.
 Commit asal: `5375bd3` pada `main`. Branch kerja lokal: `react-migration-baseline`.
 Rencana asli pengguna disimpan tanpa perubahan di [PLAN.md](PLAN.md).
 
@@ -91,8 +91,8 @@ Screenshot memakai fixture kecil, tanggal data tetap, locale id-ID, timezone Asi
 - [x] 2. Fondasi React dan pengujian — lihat [laporan tahap 2](STAGE-2.md).
 - [x] 3. Login, sesi, dan penjagaan akses — lihat [laporan tahap 3](STAGE-3.md).
 - [x] 4. Komponen bersama — lihat [laporan tahap 4](STAGE-4.md).
-- [ ] 5. Kelola pengguna — **tahap berikutnya**.
-- [ ] 6. Versi database.
+- [x] 5. Kelola pengguna — lihat [laporan tahap 5](STAGE-5.md).
+- [ ] 6. Versi database — **tahap berikutnya**.
 - [ ] 7. Riwayat dan unggah impor.
 - [ ] 8. Preview impor.
 - [ ] 9. Pisahkan logika peta.
@@ -111,3 +111,16 @@ Tidak ada halaman React aktif pada tahap 1 maupun tahap 2. Ketujuh halaman tetap
 Mulai tahap 3, login `/` dan fallback URL publik memakai React. Enam halaman lain masih legacy. Kebijakan akses dan service akun dipakai bersama; lihat STAGE-3.md untuk hasil pemeriksaan terbaru.
 
 Tahap 4 menyiapkan komponen bersama dan memakainya untuk logo/tombol tema login. Header/admin, tabel, overlay, dan kontrol workspace React diuji terisolasi; belum mengambil alih enam halaman legacy. Hasil terbaru ada di STAGE-4.md.
+
+## Hasil tahap 5
+
+- [x] Aktifkan `/admin/users` dengan JSX, AdminLayout, tabel, dan drawer React; tanpa renderer/binder halaman lama.
+- [x] Pertahankan pencarian, filter, tambah/edit, reset password, status online, refresh 15 detik, dan kontrak API/token/expectedUpdatedAt.
+- [x] Verifikasi administrator terakhir, snapshot revision/draft saat refresh dan konflik, pencabutan sesi, dan penolakan Viewer.
+- [x] Verifikasi validasi native, submit berulang, Escape/fokus, konfirmasi buang draft, beforeunload, empty/error/retry, polling visible/hidden, abort dan respons terlambat.
+- [x] Bandingkan daftar dengan baseline awal serta lima keadaan halaman/drawer dengan implementasi lama pada desktop/mobile, terang/gelap: 40 screenshot, 24 perbandingan, 0 pixel berbeda pada ambang RGB > 12 per kanal.
+- [x] Frontend: 336 tes lama + 55 tes React lulus; browser: 26 tes lulus dalam satu run; smoke baseline: 10 kelompok lulus.
+- [x] Backend: 75 lulus, 1 integrasi PostgreSQL dilewati; build frontend/backend dan lint root/frontend/backend berhasil.
+- [x] Checkpoint lokal tahap 5 setelah pemeriksaan; folder pengguna `docs/figures/` tidak disertakan. Tidak ada push/merge/deployment.
+
+Login dan Kelola pengguna kini aktif memakai React. Lima halaman lain masih legacy. Seluruh API browser memakai mock; database Docker asli dan akun dari komputer lama belum dipulihkan. Hasil dan batas verifikasi terbaru ada di [STAGE-5.md](STAGE-5.md).

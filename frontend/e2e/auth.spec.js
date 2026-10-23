@@ -132,7 +132,7 @@ test('Viewer cannot enter any administrator route', async ({ page }) => {
   }
 })
 
-test('Administrator still enters the legacy user management page', async ({ page }) => {
+test('Administrator enters the React user management page', async ({ page }) => {
   await installApi(page, { authenticated: true })
   await page.goto('/')
   await seedSession(page)

@@ -1,0 +1,284 @@
+{
+  "results": [
+    {
+      "implementation": "legacy",
+      "state": "list",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-list-desktop-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "create",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-create-desktop-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "discard",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-discard-desktop-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "edit",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-edit-desktop-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "password",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-password-desktop-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "list",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-list-desktop-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "create",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-create-desktop-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "discard",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-discard-desktop-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "edit",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-edit-desktop-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "password",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-password-desktop-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "list",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-list-desktop-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "create",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-create-desktop-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "discard",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-discard-desktop-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "edit",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-edit-desktop-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "password",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-password-desktop-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "list",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-list-desktop-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "create",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-create-desktop-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "discard",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-discard-desktop-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "edit",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-edit-desktop-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "password",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-password-desktop-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "list",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-list-mobile-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "create",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-create-mobile-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "discard",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-discard-mobile-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "edit",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-edit-mobile-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "password",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-password-mobile-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "list",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-list-mobile-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "create",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-create-mobile-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "discard",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-discard-mobile-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "edit",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-edit-mobile-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "password",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-password-mobile-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "list",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-list-mobile-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "create",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-create-mobile-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "discard",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-discard-mobile-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "edit",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-edit-mobile-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "password",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-password-mobile-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "list",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-list-mobile-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "create",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-create-mobile-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "discard",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-discard-mobile-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "edit",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-edit-mobile-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "password",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-password-mobile-dark.png"
+    }
+  ]
+}
