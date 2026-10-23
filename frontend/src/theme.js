@@ -78,7 +78,7 @@ export function initializeTheme() {
   const preference = readThemePreference()
   applyTheme(preference)
 
-  if (systemThemeListenerBound || typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+  if (systemThemeListenerBound || typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {}
 
   const media = window.matchMedia('(prefers-color-scheme: dark)')
   const handleSystemThemeChange = () => {
@@ -87,6 +87,11 @@ export function initializeTheme() {
   if (typeof media.addEventListener === 'function') media.addEventListener('change', handleSystemThemeChange)
   else media.addListener(handleSystemThemeChange)
   systemThemeListenerBound = true
+  return () => {
+    if (typeof media.removeEventListener === 'function') media.removeEventListener('change', handleSystemThemeChange)
+    else media.removeListener(handleSystemThemeChange)
+    systemThemeListenerBound = false
+  }
 }
 
 export function toggleTheme() {

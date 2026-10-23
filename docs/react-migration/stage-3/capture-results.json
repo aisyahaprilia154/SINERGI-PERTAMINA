@@ -1,0 +1,257 @@
+{
+  "fixture": "mock only; blank vector basemap, no external tile dependency",
+  "results": [
+    {
+      "name": "login",
+      "size": "desktop",
+      "theme": "light",
+      "title": "SINERGI — Masuk",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "login-desktop-light.png"
+    },
+    {
+      "name": "users",
+      "size": "desktop",
+      "theme": "light",
+      "title": "Kelola pengguna — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "users-desktop-light.png"
+    },
+    {
+      "name": "versions",
+      "size": "desktop",
+      "theme": "light",
+      "title": "Versi database — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "versions-desktop-light.png"
+    },
+    {
+      "name": "imports",
+      "size": "desktop",
+      "theme": "light",
+      "title": "Riwayat import — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "imports-desktop-light.png"
+    },
+    {
+      "name": "preview",
+      "size": "desktop",
+      "theme": "light",
+      "title": "Preview — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "preview-desktop-light.png"
+    },
+    {
+      "name": "map",
+      "size": "desktop",
+      "theme": "light",
+      "title": "Peta Jaringan — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "map-desktop-light.png"
+    },
+    {
+      "name": "topology",
+      "size": "desktop",
+      "theme": "light",
+      "title": "Diagram Topologi — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "topology-desktop-light.png"
+    },
+    {
+      "name": "login",
+      "size": "desktop",
+      "theme": "dark",
+      "title": "SINERGI — Masuk",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "login-desktop-dark.png"
+    },
+    {
+      "name": "users",
+      "size": "desktop",
+      "theme": "dark",
+      "title": "Kelola pengguna — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "users-desktop-dark.png"
+    },
+    {
+      "name": "versions",
+      "size": "desktop",
+      "theme": "dark",
+      "title": "Versi database — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "versions-desktop-dark.png"
+    },
+    {
+      "name": "imports",
+      "size": "desktop",
+      "theme": "dark",
+      "title": "Riwayat import — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "imports-desktop-dark.png"
+    },
+    {
+      "name": "preview",
+      "size": "desktop",
+      "theme": "dark",
+      "title": "Preview — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "preview-desktop-dark.png"
+    },
+    {
+      "name": "map",
+      "size": "desktop",
+      "theme": "dark",
+      "title": "Peta Jaringan — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "map-desktop-dark.png"
+    },
+    {
+      "name": "topology",
+      "size": "desktop",
+      "theme": "dark",
+      "title": "Diagram Topologi — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "topology-desktop-dark.png"
+    },
+    {
+      "name": "login",
+      "size": "mobile",
+      "theme": "light",
+      "title": "SINERGI — Masuk",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "login-mobile-light.png"
+    },
+    {
+      "name": "users",
+      "size": "mobile",
+      "theme": "light",
+      "title": "Kelola pengguna — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "users-mobile-light.png"
+    },
+    {
+      "name": "versions",
+      "size": "mobile",
+      "theme": "light",
+      "title": "Versi database — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "versions-mobile-light.png"
+    },
+    {
+      "name": "imports",
+      "size": "mobile",
+      "theme": "light",
+      "title": "Riwayat import — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "imports-mobile-light.png"
+    },
+    {
+      "name": "preview",
+      "size": "mobile",
+      "theme": "light",
+      "title": "Preview — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "preview-mobile-light.png"
+    },
+    {
+      "name": "map",
+      "size": "mobile",
+      "theme": "light",
+      "title": "Peta Jaringan — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "map-mobile-light.png"
+    },
+    {
+      "name": "topology",
+      "size": "mobile",
+      "theme": "light",
+      "title": "Diagram Topologi — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "topology-mobile-light.png"
+    },
+    {
+      "name": "login",
+      "size": "mobile",
+      "theme": "dark",
+      "title": "SINERGI — Masuk",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "login-mobile-dark.png"
+    },
+    {
+      "name": "users",
+      "size": "mobile",
+      "theme": "dark",
+      "title": "Kelola pengguna — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "users-mobile-dark.png"
+    },
+    {
+      "name": "versions",
+      "size": "mobile",
+      "theme": "dark",
+      "title": "Versi database — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "versions-mobile-dark.png"
+    },
+    {
+      "name": "imports",
+      "size": "mobile",
+      "theme": "dark",
+      "title": "Riwayat import — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "imports-mobile-dark.png"
+    },
+    {
+      "name": "preview",
+      "size": "mobile",
+      "theme": "dark",
+      "title": "Preview — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "preview-mobile-dark.png"
+    },
+    {
+      "name": "map",
+      "size": "mobile",
+      "theme": "dark",
+      "title": "Peta Jaringan — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "map-mobile-dark.png"
+    },
+    {
+      "name": "topology",
+      "size": "mobile",
+      "theme": "dark",
+      "title": "Diagram Topologi — SINERGI",
+      "errors": [],
+      "unexpected": [],
+      "screenshot": "topology-mobile-dark.png"
+    }
+  ]
+}

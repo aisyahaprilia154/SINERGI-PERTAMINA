@@ -1,8 +1,9 @@
 import './style.css'
 import './styles/app-header.css'
 import { initializeTheme } from './theme.js'
-import { clearSession, getSessionToken, loadCurrentUser } from './services/account-session.js'
+import { getSessionToken, restoreSession } from './services/account-session.js'
 import {startSessionPresence} from './services/session-presence.js'
+import { pageRedirect } from './domain/page-access.js'
 
 initializeTheme()
 
@@ -49,20 +50,7 @@ const previewRoute = {
   render: 'renderPreviewImportPage',
 }
 const routePath = { '/peta': '/map', '/topologi': '/topology' }[normalizedPath] ?? normalizedPath
-const isLoginRoute = !previewMatch && !routeLoaders[routePath]
-let destination = null
-if (getSessionToken()) {
-  try {
-    const user = await loadCurrentUser()
-    if (isLoginRoute) destination = '/map'
-    else if (routePath.startsWith('/admin/') && user.role !== 'Administrator') destination = '/map'
-  } catch {
-    clearSession()
-    if (!isLoginRoute) destination = '/'
-  }
-} else if (!isLoginRoute) {
-  destination = '/'
-}
+const destination = pageRedirect(routePath, await restoreSession())
 if (destination) window.location.replace(destination)
 
 const { loadStyle, loadPage, render } = previewMatch

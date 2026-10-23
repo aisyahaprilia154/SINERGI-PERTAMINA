@@ -1,0 +1,25 @@
+{
+  "stage": 3,
+  "date": "2026-10-23",
+  "timezone": "Asia/Jakarta",
+  "branch": "react-migration-baseline",
+  "previousCheckpoint": "fd1b2ed",
+  "node": "24.19.0",
+  "checks": {
+    "frontendLegacy": { "passed": 336, "failed": 0 },
+    "reactVitest": { "passed": 28, "failed": 0 },
+    "playwright": { "passed": 15, "failed": 0, "browser": "Microsoft Edge", "api": "mocked" },
+    "baselineSmoke": { "passedGroups": 10, "api": "mocked" },
+    "backend": { "passed": 75, "failed": 0, "skipped": 1, "skipReason": "SINERGI_TEST_DATABASE_URL not configured" },
+    "lint": { "root": "passed", "frontend": "passed", "backend": "passed" },
+    "build": { "frontend": "passed", "backend": "passed", "clientOutput": true, "serverWorkerOutput": true },
+    "visual": { "captures": 28, "comparison": "visual-comparison.json" },
+    "session": { "abortedRequestsIgnoreLateResponses": true, "duplicateSubmitBlocked": true, "sharedHeartbeat": true, "strictModeCleanup": true, "bfcacheLifecycleSimulated": true }
+  },
+  "activeReactPages": ["login", "public-login-fallback"],
+  "remainingLegacyPages": ["users", "versions", "imports", "import-preview", "map", "topology"],
+  "limitations": ["No live server authentication or PostgreSQL integration", "No Docker build", "Small mocked dataset and basemap", "Existing MapLibre chunk-size warning", "Real bfcache traversal not specifically verified"],
+  "nextStage": 4,
+  "pushed": false,
+  "deployed": false
+}

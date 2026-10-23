@@ -1,3 +1,12 @@
-// Register only completed pages. An empty registry leaves every live page legacy.
-// During migration use document navigation between pages (plain anchors), not Link.
-export const reactRoutes = []
+import { pageAccess } from '../domain/page-access.js'
+
+const loginRoute = async () => {
+  const { LoginRoute } = await import('./login/LoginRoute.jsx')
+  return { Component: LoginRoute }
+}
+
+// Preserve the old unknown-URL login fallback, without claiming protected pages.
+export const reactRoutes = [
+  { path: '/', lazy: loginRoute },
+  { path: '*', lazy: loginRoute, handle: { acceptsPath: pathname => pageAccess(pathname) === 'login' } },
+]

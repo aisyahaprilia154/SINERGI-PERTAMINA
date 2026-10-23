@@ -1,6 +1,5 @@
 // Run with Node and Playwright available through NODE_PATH. Start Vite on 5173 first.
 // All /api requests are intercepted; this script never uses an operational database.
-const { chromium } = require('playwright')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const assert = require('node:assert/strict')
@@ -36,6 +35,7 @@ const routes = [
 ]
 
 async function main() {
+  const { chromium } = require('playwright')
   await fs.mkdir(output, { recursive: true })
   const browser = await chromium.launch({ headless: true, channel: process.env.BASELINE_BROWSER_CHANNEL || 'msedge' })
   const results = []

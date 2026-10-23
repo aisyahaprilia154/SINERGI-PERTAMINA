@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
 
-test('active login remains legacy and does not load the React root', async ({ page }) => {
+test('active login loads React and preserves password visibility controls', async ({ page }) => {
   const requests = []
   page.on('request', request => requests.push(request.url()))
   await page.goto('/')
@@ -9,7 +9,7 @@ test('active login remains legacy and does not load the React root', async ({ pa
   await page.locator('#password').fill('fixture-password')
   await page.locator('.password-toggle').click()
   await expect(page.locator('#password')).toHaveAttribute('type', 'text')
-  expect(requests.some(url => url.includes('/src/react/bootstrap.jsx'))).toBe(false)
+  expect(requests.some(url => url.includes('/src/react/bootstrap.jsx'))).toBe(true)
 })
 
 test('isolated JSX route works and leaves through document navigation', async ({ page }) => {

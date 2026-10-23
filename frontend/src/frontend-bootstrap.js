@@ -3,7 +3,8 @@ import { reactRoutes } from './react/routes.js'
 export async function usesReactRoute(pathname, routes = reactRoutes) {
   if (routes.length === 0) return false
   const { matchRoutes } = await import('react-router')
-  return matchRoutes(routes, pathname) !== null
+  const matches = matchRoutes(routes, pathname)
+  return matches !== null && matches.every(({ route }) => !route.handle?.acceptsPath || route.handle.acceptsPath(pathname))
 }
 
 export async function startFrontend({

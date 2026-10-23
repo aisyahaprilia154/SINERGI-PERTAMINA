@@ -1,0 +1,257 @@
+{
+  "threshold": "Report pixels with a channel difference >12; no pixels masked",
+  "results": [
+    {
+      "screenshot": "imports-desktop-dark.png",
+      "size": [
+        1440,
+        900
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "imports-desktop-light.png",
+      "size": [
+        1440,
+        900
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "imports-mobile-dark.png",
+      "size": [
+        390,
+        844
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "imports-mobile-light.png",
+      "size": [
+        390,
+        844
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "login-desktop-dark.png",
+      "size": [
+        1440,
+        900
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "login-desktop-light.png",
+      "size": [
+        1440,
+        900
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "login-mobile-dark.png",
+      "size": [
+        390,
+        844
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "login-mobile-light.png",
+      "size": [
+        390,
+        844
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "map-desktop-dark.png",
+      "size": [
+        1440,
+        900
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "map-desktop-light.png",
+      "size": [
+        1440,
+        900
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "map-mobile-dark.png",
+      "size": [
+        390,
+        844
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "map-mobile-light.png",
+      "size": [
+        390,
+        844
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "preview-desktop-dark.png",
+      "size": [
+        1440,
+        900
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "preview-desktop-light.png",
+      "size": [
+        1440,
+        900
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "preview-mobile-dark.png",
+      "size": [
+        390,
+        844
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "preview-mobile-light.png",
+      "size": [
+        390,
+        844
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "topology-desktop-dark.png",
+      "size": [
+        1440,
+        900
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "topology-desktop-light.png",
+      "size": [
+        1440,
+        900
+      ],
+      "changed_pixels_over_12": 198,
+      "changed_percent": 0.01528
+    },
+    {
+      "screenshot": "topology-mobile-dark.png",
+      "size": [
+        390,
+        844
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "topology-mobile-light.png",
+      "size": [
+        390,
+        844
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "users-desktop-dark.png",
+      "size": [
+        1440,
+        900
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "users-desktop-light.png",
+      "size": [
+        1440,
+        900
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "users-mobile-dark.png",
+      "size": [
+        390,
+        844
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "users-mobile-light.png",
+      "size": [
+        390,
+        844
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "versions-desktop-dark.png",
+      "size": [
+        1440,
+        900
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "versions-desktop-light.png",
+      "size": [
+        1440,
+        900
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "versions-mobile-dark.png",
+      "size": [
+        390,
+        844
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    },
+    {
+      "screenshot": "versions-mobile-light.png",
+      "size": [
+        390,
+        844
+      ],
+      "changed_pixels_over_12": 0,
+      "changed_percent": 0.0
+    }
+  ]
+}

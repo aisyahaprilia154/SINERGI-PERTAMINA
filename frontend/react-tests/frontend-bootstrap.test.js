@@ -3,9 +3,11 @@ import { startFrontend, usesReactRoute } from '../src/frontend-bootstrap.js'
 import { reactRoutes } from '../src/react/routes.js'
 
 describe('transition entrypoint', () => {
-  it('keeps every existing page and alias on the legacy implementation', async () => {
-    expect(reactRoutes).toEqual([])
-    for (const pathname of ['/', '/map', '/peta', '/topology', '/topologi', '/admin/users', '/admin/datasets/versions', '/admin/datasets/import', '/admin/datasets/import/id/preview', '/unknown']) {
+  it('activates React login and preserves the legacy protected pages and aliases', async () => {
+    expect(reactRoutes).toHaveLength(2)
+    expect(await usesReactRoute('/')).toBe(true)
+    expect(await usesReactRoute('/unknown')).toBe(true)
+    for (const pathname of ['/map', '/peta', '/topology', '/topologi', '/admin/users', '/admin/datasets/versions', '/admin/datasets/import', '/admin/datasets/import/id/preview']) {
       expect(await usesReactRoute(pathname)).toBe(false)
     }
   })
