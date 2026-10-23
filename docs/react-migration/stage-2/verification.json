@@ -1,0 +1,28 @@
+{
+  "stage": 2,
+  "date": "2026-10-23",
+  "timezone": "Asia/Jakarta",
+  "branch": "react-migration-baseline",
+  "node": "24.19.0",
+  "vite": "8.1.6",
+  "react": "19.3.1",
+  "reactRouter": "8.5.0",
+  "checks": {
+    "frontendLegacy": { "passed": 336, "failed": 0 },
+    "reactVitest": { "passed": 11, "failed": 0 },
+    "playwright": { "passed": 6, "failed": 0, "browser": "Microsoft Edge", "fastRefreshStatePreserved": true },
+    "baselineSmoke": { "passedGroups": 10, "api": "mocked" },
+    "backend": { "passed": 75, "failed": 0, "skipped": 1, "skipReason": "SINERGI_TEST_DATABASE_URL not configured" },
+    "lint": { "root": "passed", "frontend": "passed", "backend": "passed", "jsxAndHooks": "passed" },
+    "build": { "frontend": "passed", "backend": "passed", "clientOutput": true, "serverWorkerOutput": true, "e2eFixtureInProduction": false },
+    "npmAuditFrontend": { "vulnerabilities": 0 },
+    "visual": { "captures": 28, "api": "mocked", "comparison": "visual-comparison.json" },
+    "legacyEntrypoint": { "unchanged": true, "gitBlob": "dfd885e491fed794e9ef6c47a8e14e972af8026f" }
+  },
+  "activeReactPages": [],
+  "remainingLegacyPages": ["login", "users", "versions", "imports", "import-preview", "map", "topology"],
+  "limitations": ["No live PostgreSQL integration test", "No Docker build", "Small mocked dataset and basemap", "Existing MapLibre chunk-size warning"],
+  "nextStage": 3,
+  "pushed": false,
+  "deployed": false
+}

@@ -5,7 +5,7 @@ const fs = require('node:fs/promises')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 
-const output = path.join(__dirname, 'baseline')
+const output = process.env.BASELINE_OUTPUT_DIR ? path.resolve(process.env.BASELINE_OUTPUT_DIR) : path.join(__dirname, 'baseline')
 const user = { id: 'baseline-admin', username: 'baseline', name: 'Baseline Administrator', role: 'Administrator', online: true, updatedAt: '2026-10-23T00:00:00Z' }
 const viewer = { ...user, id: 'baseline-viewer', username: 'viewer', name: 'Baseline Viewer', role: 'Viewer', online: false }
 const assets = [

@@ -1,7 +1,7 @@
 # Migrasi React SINERGI — baseline dan checklist
 
-Tanggal: 23 Oktober 2026 (Asia/Jakarta). Tahap aktif: **1 — baseline**.
-Commit asal: `5375bd3` pada `main`. Branch kerja lokal: `codex/react-migration-baseline`.
+Tanggal: 23 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **2 — fondasi React dan pengujian**.
+Commit asal: `5375bd3` pada `main`. Branch kerja lokal: `react-migration-baseline`.
 Rencana asli pengguna disimpan tanpa perubahan di [PLAN.md](PLAN.md).
 
 ## Hasil tahap 1
@@ -88,8 +88,8 @@ Screenshot memakai fixture kecil, tanggal data tetap, locale id-ID, timezone Asi
 ## Status urutan migrasi
 
 - [x] 1. Baseline dan checklist.
-- [ ] 2. Fondasi React dan pengujian — **tahap berikutnya**.
-- [ ] 3. Login, sesi, dan penjagaan akses.
+- [x] 2. Fondasi React dan pengujian — lihat [laporan tahap 2](STAGE-2.md).
+- [ ] 3. Login, sesi, dan penjagaan akses — **tahap berikutnya**.
 - [ ] 4. Komponen bersama.
 - [ ] 5. Kelola pengguna.
 - [ ] 6. Versi database.
@@ -106,4 +106,4 @@ Screenshot memakai fixture kecil, tanggal data tetap, locale id-ID, timezone Asi
 
 Catatan integrasi untuk dievaluasi ketika mencapai tahap terkait: jangan mengaktifkan peta React tanpa seluruh dialog/ekspor yang sudah tersedia; perlindungan draft pada reload/perpindahan dokumen harus hadir ketika fitur edit diaktifkan, sebelum penjagaan navigasi SPA tahap 16. Rencana asli tetap disimpan utuh di PLAN.md.
 
-Tidak ada halaman React pada tahap 1. Ketujuh halaman tetap memakai implementasi vanilla yang sama. Checkpoint hanya berisi dokumentasi, artefak baseline, skrip verifikasi, dan tiga file handover lokal sebelumnya.
+Tidak ada halaman React aktif pada tahap 1 maupun tahap 2. Ketujuh halaman tetap memakai implementasi vanilla yang sama. Checkpoint tahap 1 berisi dokumentasi, artefak baseline, skrip verifikasi, dan tiga file handover lokal sebelumnya. Checkpoint tahap 2 menambahkan fondasi dan pengujian terisolasi; belum mengaktifkan UI React pada rute aplikasi.
