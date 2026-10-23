@@ -1,0 +1,17 @@
+{
+  "checks": [
+    "Login toggle password, rejected login and retry control",
+    "User search, role filter and protected drawer draft",
+    "Empty versions, save dialog Escape and focus restoration",
+    "Import file validation blocks invalid upload before API write",
+    "Empty import history",
+    "Map API error, retry and asset search",
+    "Topology zoom and reset",
+    "Viewer admin-route redirect and hidden administrator menu",
+    "Anonymous protected-route redirect",
+    "Expired session redirects to login"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "database": "not connected; all API responses mocked"
+}

@@ -1,0 +1,228 @@
+{
+  "results": [
+    {
+      "implementation": "legacy",
+      "state": "list",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-list-desktop-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "drawer",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-drawer-desktop-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "discard",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-discard-desktop-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "empty",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-empty-desktop-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "list",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-list-desktop-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "drawer",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-drawer-desktop-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "discard",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-discard-desktop-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "empty",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-empty-desktop-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "list",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-list-desktop-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "drawer",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-drawer-desktop-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "discard",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-discard-desktop-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "empty",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-empty-desktop-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "list",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-list-desktop-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "drawer",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-drawer-desktop-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "discard",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-discard-desktop-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "empty",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-empty-desktop-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "list",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-list-mobile-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "drawer",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-drawer-mobile-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "discard",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-discard-mobile-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "empty",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-empty-mobile-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "list",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-list-mobile-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "drawer",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-drawer-mobile-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "discard",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-discard-mobile-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "empty",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-empty-mobile-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "list",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-list-mobile-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "drawer",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-drawer-mobile-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "discard",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-discard-mobile-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "empty",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-empty-mobile-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "list",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-list-mobile-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "drawer",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-drawer-mobile-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "discard",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-discard-mobile-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "empty",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-empty-mobile-dark.png"
+    }
+  ]
+}

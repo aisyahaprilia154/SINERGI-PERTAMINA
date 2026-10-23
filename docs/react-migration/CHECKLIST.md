@@ -93,8 +93,8 @@ Screenshot memakai fixture kecil, tanggal data tetap, locale id-ID, timezone Asi
 - [x] 4. Komponen bersama — lihat [laporan tahap 4](STAGE-4.md).
 - [x] 5. Kelola pengguna — lihat [laporan tahap 5](STAGE-5.md).
 - [x] 6. Versi database — lihat [laporan tahap 6](STAGE-6.md).
-- [ ] 7. Riwayat dan unggah impor — **tahap berikutnya**.
-- [ ] 8. Preview impor.
+- [x] 7. Riwayat dan unggah impor — lihat [laporan tahap 7](STAGE-7.md).
+- [ ] 8. Preview impor — **tahap berikutnya**.
 - [ ] 9. Pisahkan logika peta.
 - [ ] 10. Peta React untuk membaca data.
 - [ ] 11. Detail dan edit aset di peta.
@@ -138,3 +138,16 @@ Login dan Kelola pengguna kini aktif memakai React. Lima halaman lain masih lega
 - [x] Checkpoint Git lokal setelah pemeriksaan; tidak ada push/merge/deployment. `docs/figures/` tidak diubah atau dimasukkan checkpoint.
 
 Login, Kelola pengguna, dan Versi database aktif memakai React. Riwayat/unggah, preview impor, peta dan topologi masih legacy. Semua operasi tulis UI memakai API mock; login/database Docker asli belum diverifikasi. Hasil terbaru: [STAGE-6.md](STAGE-6.md).
+
+## Hasil tahap 7
+
+- [x] Aktifkan `/admin/datasets/import` dan trailing slash dengan JSX, AdminLayout, DataTable, dan Drawer React; tanpa renderer/binder riwayat lama pada rute aktif.
+- [x] Pertahankan dataset, daftar/status/sumber, draft, validasi file, multipart/Bearer, progress, polling 1200 ms, serta navigasi dokumen penuh ke preview memakai importId dari respons.
+- [x] Tambahkan pencarian nama/file dan filter status lokal sesuai rencana; tambahan toolbar dicatat sebagai perubahan dari baseline.
+- [x] Verifikasi error/retry, submit berulang, busy, Escape/fokus, konfirmasi buang draft, beforeunload, sesi/role, abort pada unmount/pagehide, respons terlambat dan cleanup object URL/timer.
+- [x] Visual desktop/mobile terang/gelap: 32 screenshot halaman + 32 potongan, 16 pasangan pembanding. Tabel/header identik, panel konfirmasi identik pada ambang RGB >12, panel form berbeda 39–53 pixel (<0,02%); tambahan toolbar disengaja.
+- [x] Frontend: 336 tes Node lama + 87 tes React lulus; backend: 77 lulus, 1 integrasi PostgreSQL dilewati. Lint dan build root/frontend/backend yang relevan berhasil.
+- [x] Playwright: 39/39 lulus dalam satu run pada Chromium Headless Shell 156; smoke baseline: 10/10 kelompok lulus, semua API dimock. Edge timeout dan Chromium standar gagal start side-by-side; rincian/reproduksi ada di laporan.
+- [x] Checkpoint Git lokal setelah verifikasi; tidak ada push/merge/deployment. Folder docs/figures/, penghapusan .env.docker.example, rahasia dan backup database tidak disertakan.
+
+Login, Kelola pengguna, Versi database, dan riwayat/unggah kini memakai React. Preview impor, peta, dan topologi masih legacy. Docker sehat di port 5174 dengan image sebelum tahap 7; kode terbaru Vite di port 5173 memakai backend Docker port 5001. Seluruh operasi tulis pengujian memakai API mock. Hasil: [STAGE-7.md](STAGE-7.md). Tahap berikutnya **8 — Preview impor**, hanya setelah diminta.

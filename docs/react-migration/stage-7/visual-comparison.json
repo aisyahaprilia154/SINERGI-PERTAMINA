@@ -1,0 +1,174 @@
+{
+  "threshold": 12,
+  "note": "Full pages intentionally add search/status toolbar. Compare unchanged parts without hiding new UI.",
+  "results": [
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "table",
+      "changedPixels": 0,
+      "totalPixels": 118720,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "header",
+      "changedPixels": 0,
+      "totalPixels": 92160,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "drawer-panel",
+      "changedPixels": 41,
+      "totalPixels": 350400,
+      "bbox": [
+        0,
+        107,
+        300,
+        350
+      ]
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "discard-panel",
+      "changedPixels": 0,
+      "totalPixels": 350400,
+      "bbox": [
+        0,
+        105,
+        271,
+        350
+      ]
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "table",
+      "changedPixels": 0,
+      "totalPixels": 118720,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "header",
+      "changedPixels": 0,
+      "totalPixels": 92160,
+      "bbox": null
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "drawer-panel",
+      "changedPixels": 53,
+      "totalPixels": 350400,
+      "bbox": [
+        0,
+        92,
+        300,
+        374
+      ]
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "discard-panel",
+      "changedPixels": 0,
+      "totalPixels": 350400,
+      "bbox": [
+        0,
+        95,
+        296,
+        374
+      ]
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "table",
+      "changedPixels": 0,
+      "totalPixels": 47060,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "header",
+      "changedPixels": 0,
+      "totalPixels": 42120,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "drawer-panel",
+      "changedPixels": 39,
+      "totalPixels": 329160,
+      "bbox": [
+        0,
+        159,
+        390,
+        432
+      ]
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "discard-panel",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": [
+        0,
+        159,
+        390,
+        432
+      ]
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "table",
+      "changedPixels": 0,
+      "totalPixels": 47060,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "header",
+      "changedPixels": 0,
+      "totalPixels": 42120,
+      "bbox": null
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "drawer-panel",
+      "changedPixels": 53,
+      "totalPixels": 329160,
+      "bbox": [
+        0,
+        143,
+        390,
+        454
+      ]
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "discard-panel",
+      "changedPixels": 0,
+      "totalPixels": 329160,
+      "bbox": [
+        0,
+        135,
+        390,
+        454
+      ]
+    }
+  ]
+}
