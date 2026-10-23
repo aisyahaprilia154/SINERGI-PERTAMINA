@@ -1,6 +1,6 @@
 # Migrasi React SINERGI — baseline dan checklist
 
-Tanggal: 23 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **6 — Versi database**.
+Terakhir diperbarui: 24 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **10 — Peta React untuk membaca data**.
 Commit asal: `5375bd3` pada `main`. Branch kerja lokal: `react-migration-baseline`.
 Rencana asli pengguna disimpan tanpa perubahan di [PLAN.md](PLAN.md).
 
@@ -96,8 +96,8 @@ Screenshot memakai fixture kecil, tanggal data tetap, locale id-ID, timezone Asi
 - [x] 7. Riwayat dan unggah impor — lihat [laporan tahap 7](STAGE-7.md).
 - [x] 8. Preview impor — lihat [laporan tahap 8](STAGE-8.md).
 - [x] 9. Pisahkan logika peta — lihat [laporan tahap 9](STAGE-9.md).
-- [ ] 10. Peta React untuk membaca data — **tahap berikutnya**.
-- [ ] 11. Detail dan edit aset di peta.
+- [x] 10. Peta React untuk membaca data — disiapkan dan diuji; rute aktif masih legacy.
+- [ ] 11. Detail dan edit aset di peta — **tahap berikutnya, menunggu permintaan baru**.
 - [ ] 12. Dialog peta dan ekspor.
 - [ ] 13. Pisahkan logika topologi.
 - [ ] 14. Topologi React untuk membaca data.
@@ -161,3 +161,7 @@ Preview impor kini aktif memakai React dengan tabel/konflik/endpoint/konteks ase
 ## Hasil tahap 9
 
 Pencarian, area/scope/hitungan, target relasi, label/preset, konteks dan ID URL kini modul murni. State seleksi/URL dan traversal graph dipindah dengan facade kompatibilitas. Model komposisi siap dipakai React; halaman peta masih legacy. Bukti 21 fungsi + 2 modul identik dengan checkpoint tahap 8 (normalisasi export/input konteks), 341 tes Node + 97 React, backend 77 lulus/1 skip, lint/build lulus. Empat pasangan visual final identik dan smoke 10/10 lulus. Browser mencakup 43 kasus melalui 42/43 pada run utama dan 2/2 uji ulang kasus login/unduhan yang sempat terganggu; bukan satu run bersih. [Rincian tahap 9](STAGE-9.md). Lanjut tahap 10 sesuai izin pengguna lalu berhenti.
+
+## Hasil tahap 10
+
+UI baca peta memakai JSX untuk sidebar, area/jaringan/preset, pencarian, CCTV, basemap, zoom, legenda dan mobile; MapLibre terisolasi melalui adapter persisten. State URL/back/forward, fokus, role, loading/error/retry/empty serta cleanup request/listener/renderer/ikon diverifikasi. Rute produksi peta tetap legacy, UI React baru tersedia di fixture development sampai tahap aktivasi. Detail/edit dan dialog/ekspor belum dimigrasikan. Frontend 341 Node + 114 React, backend 77 lulus/1 skip, browser penuh 49/49 plus 10/10 ulang terdampak perubahan akhir, smoke 10/10, lint/build lulus. Visual 56 halaman + 40 potongan; 20 pasangan komponen, 16 identik dan empat berbeda 5–17 pixel (<0,01%). Lima halaman aktif React; peta dan topologi aktif tetap legacy. [Laporan tahap 10](STAGE-10.md). Tahap 8–10 selesai berurutan sesuai izin pengguna; berhenti di sini tanpa memulai tahap 11. Tidak ada push/deployment.

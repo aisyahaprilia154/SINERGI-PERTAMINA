@@ -1,0 +1,7 @@
+/* Decorative glyphs must not intercept neighboring controls if the font fails. */
+.react-map-read .material-symbols-outlined { pointer-events: none; }
+
+/* The existing desktop CSS hides this lone button; do not leave an empty shell. */
+@media (min-width: 961px) {
+  .react-map-read .map-floating-top:has(.map-action-group > .diagram-toggle:only-child) { display: none; }
+}

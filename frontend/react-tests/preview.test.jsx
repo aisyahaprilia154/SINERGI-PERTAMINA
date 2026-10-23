@@ -114,6 +114,15 @@ describe('isolated MapLibre preview adapter', () => {
     expect(create.mock.calls[1][1].initialCamera).toEqual({ center: [110, -7], zoom: 18 }); expect(surfaces[0].destroy).toHaveBeenCalledOnce()
     adapter.dispose(); expect(surfaces[1].destroy).toHaveBeenCalledOnce(); host.remove()
   })
+  it('aborts source-icon requests owned by the preview surface and ignores late data', async () => {
+    const host = document.createElement('div'); document.body.append(host); state.pending = deferred()
+    let request, loader
+    const adapter = createPreviewMapAdapter(host, { loadFactory: async () => (_host, options) => { loader = options.iconLoader; request = loader.load('/api/icons/preview'); return { destroy() {} } } })
+    await adapter.update(fixtures.active)
+    const signal = state.calls.at(-1).signal; expect(signal.aborted).toBe(false)
+    adapter.dispose(); expect(signal.aborted).toBe(true)
+    state.pending.resolve(new Response('source-image')); expect(await request).toBeNull(); expect(loader.dataByUrl.size).toBe(0); host.remove()
+  })
   it('ignores delayed factory resolution after disposal and allows retry after load failure', async () => {
     const host = document.createElement('div'); document.body.append(host); const pending = deferred(), create = vi.fn()
     const adapter = createPreviewMapAdapter(host, { loadFactory: () => pending.promise })

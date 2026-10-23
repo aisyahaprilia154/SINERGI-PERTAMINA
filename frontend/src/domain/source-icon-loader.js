@@ -1,11 +1,11 @@
 import { getDefaultMapToken } from '../services/active-dataset-service.js'
 
-export function createSourceIconLoader() {
+export function createSourceIconLoader({signal} = {}) {
   const dataByUrl = new Map()
   const pendingByUrl = new Map()
 
   const load = (url) => {
-    if (!url) return Promise.resolve(null)
+    if (!url || signal?.aborted) return Promise.resolve(null)
     if (dataByUrl.has(url)) return Promise.resolve(dataByUrl.get(url))
     if (pendingByUrl.has(url)) return pendingByUrl.get(url)
 
@@ -14,15 +14,17 @@ export function createSourceIconLoader() {
         const token = getDefaultMapToken()
         const response = await fetch(url, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
+          ...(signal ? {signal} : {}),
         })
         if (!response.ok) throw new Error(`Ikon aset gagal dimuat (${response.status}).`)
-        const dataUrl = await blobToDataUrl(await response.blob())
+        const dataUrl = await blobToDataUrl(await response.blob(), signal)
+        signal?.throwIfAborted()
         dataByUrl.set(url, dataUrl)
         return dataUrl
       } catch {
         // Cache failures as null so a broken KMZ resource cannot trigger a
         // fetch loop every time the map is repositioned or the diagram redraws.
-        dataByUrl.set(url, null)
+        if (!signal?.aborted) dataByUrl.set(url, null)
         return null
       } finally {
         pendingByUrl.delete(url)
@@ -43,11 +45,18 @@ export function createSourceIconLoader() {
   return { dataByUrl, load, preload }
 }
 
-function blobToDataUrl(blob) {
+function blobToDataUrl(blob, signal) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(signal.reason); return }
     const reader = new FileReader()
-    reader.addEventListener('load', () => resolve(reader.result))
-    reader.addEventListener('error', () => reject(reader.error || new Error('Ikon aset gagal dibaca.')))
+    const abort = () => { reader.abort(); reject(signal.reason) }
+    const finish = (callback, value) => { signal?.removeEventListener('abort', abort); callback(value) }
+    reader.addEventListener('load', () => finish(resolve, reader.result))
+    reader.addEventListener('error', () => finish(reject, reader.error || new Error('Ikon aset gagal dibaca.')))
+    if (signal) {
+      reader.addEventListener('abort', () => finish(reject, signal.reason))
+      signal.addEventListener('abort', abort, {once: true})
+    }
     reader.readAsDataURL(blob)
   })
 }

@@ -1,0 +1,146 @@
+{
+  "threshold": 12,
+  "note": "Prepared React read UI is inactive. Import/export and diagram dialogs remain later stages; full-page equality is not asserted.",
+  "results": [
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "default",
+      "changedPixels": 0,
+      "totalPixels": 92160
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "networks",
+      "changedPixels": 17,
+      "totalPixels": 259840
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "legend",
+      "changedPixels": 0,
+      "totalPixels": 94668
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "basemap",
+      "changedPixels": 0,
+      "totalPixels": 70700
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "search",
+      "changedPixels": 0,
+      "totalPixels": 21164
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "default",
+      "changedPixels": 0,
+      "totalPixels": 92160
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "networks",
+      "changedPixels": 13,
+      "totalPixels": 259840
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "legend",
+      "changedPixels": 0,
+      "totalPixels": 94668
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "basemap",
+      "changedPixels": 0,
+      "totalPixels": 70700
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "search",
+      "changedPixels": 0,
+      "totalPixels": 21164
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "default",
+      "changedPixels": 0,
+      "totalPixels": 42120
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "networks",
+      "changedPixels": 17,
+      "totalPixels": 237120
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "legend",
+      "changedPixels": 0,
+      "totalPixels": 94668
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "basemap",
+      "changedPixels": 0,
+      "totalPixels": 70700
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "search",
+      "changedPixels": 0,
+      "totalPixels": 26700
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "default",
+      "changedPixels": 0,
+      "totalPixels": 42120
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "networks",
+      "changedPixels": 5,
+      "totalPixels": 237120
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "legend",
+      "changedPixels": 0,
+      "totalPixels": 94668
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "basemap",
+      "changedPixels": 0,
+      "totalPixels": 70700
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "search",
+      "changedPixels": 0,
+      "totalPixels": 26700
+    }
+  ]
+}

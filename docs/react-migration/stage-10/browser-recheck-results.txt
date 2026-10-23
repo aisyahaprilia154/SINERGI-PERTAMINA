@@ -1,0 +1,17 @@
+
+Running 10 tests using 1 worker
+
+(node:25108) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [desktop-edge] › frontend\e2e\map-read.spec.js:26:1 › prepared React map keeps one canvas through network, selection, URL history, theme and coverage changes (4.5s)
+  ok  2 [desktop-edge] › frontend\e2e\map-read.spec.js:45:1 › search keyboard, Ctrl K, presets, focus, basemap and legend controls stay usable (3.4s)
+  ok  3 [desktop-edge] › frontend\e2e\map-read.spec.js:60:1 › mobile map opens asset panel, supports selection and returns focus after Escape (2.3s)
+  ok  4 [desktop-edge] › frontend\e2e\map-read.spec.js:71:1 › Viewer read map handles error, retry and an empty dataset without admin actions (1.2s)
+  ok  5 [desktop-edge] › frontend\e2e\map-read.spec.js:82:1 › leaving the experimental page aborts its pending dataset request (629ms)
+  ok  6 [desktop-edge] › frontend\e2e\map-read.spec.js:100:1 › production map route still loads the legacy implementation in stage 10 (1.6s)
+  ok  7 [desktop-edge] › frontend\e2e\preview.spec.js:27:1 › preview uses React and MapLibre, context toggle preserves a usable map, source download works (1.9s)
+  ok  8 [desktop-edge] › frontend\e2e\preview.spec.js:38:1 › conflict draft survives failure and busy rejects duplicate decisions (1.7s)
+  ok  9 [desktop-edge] › frontend\e2e\preview.spec.js:51:1 › recalculation polls, apply sends base revision and leaves through a new document (1.8s)
+  ok 10 [desktop-edge] › frontend\e2e\preview.spec.js:61:1 › Viewer is redirected before preview is loaded (1.9s)
+
+  10 passed (22.2s)
