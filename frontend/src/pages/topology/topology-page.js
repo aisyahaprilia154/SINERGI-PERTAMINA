@@ -1,32 +1,21 @@
 import '../../styles/topology-workspace.css'
 import '../../styles/topology-refinement.css'
 import '../../styles/app-harmony.css'
-import { adaptActiveDatasetForTopology } from '../../adapters/active-dataset-map-adapter.js'
 import { branchNameForFacility } from '../../domain/facility-branch.js'
 import { renderLocationContextPanel } from '../../components/location-context-panel.js'
-import { stageCameraRelationReplacement } from '../../domain/camera-relation-draft.js'
 import { createSourceIconLoader } from '../../domain/source-icon-loader.js'
 import { JUNCTION_BOX_ICON_URL } from '../../domain/junction-box-icon.js'
 import { assetIconUrl } from '../../domain/asset-icon.js'
 import { CONNECTION_STYLES } from './topology-connection-style.js'
 import {
-  buildTopologyDiagramModel,
-  getTopologyDiagramSearchResults,
   networkFamilyLabel,
 } from '../../domain/topology-diagram-model.js'
-import { buildPoleGroups, poleGroupForAsset } from '../../domain/pole-groups.js'
-import {
-  saveTopologyDiagram,
-  loadActiveDataset,
-  loadTopologyProjection,
-  loadTopologyRoots,
-} from '../../services/active-dataset-service.js'
+import { poleGroupForAsset } from '../../domain/pole-groups.js'
 import { downloadSchematicPng, downloadSchematicSvg } from '../map/schematic-export.js'
 import { bindUserAccountMenu, renderTopNavigation } from '../../components/app-header.js'
 import { bindThemeToggle } from '../../theme.js'
 import { getSessionUser } from '../../services/account-session.js'
 import {listenForDatasetRevision} from '../../services/operational-api.js'
-import { calculateTopologyDiagramLayout, updateTopologyDiagramLayoutPositions } from './topology-diagram-layout.js'
 import { renderTopologyDiagramSvg } from './topology-diagram-svg.js'
 import { resolveTopologyDropTarget } from './topology-drop-target.js'
 import { frameMoveAssetIds } from './topology-frame-descendants.js'
@@ -39,6 +28,18 @@ import {
   effectiveViewportFor,
   zoomSurfaceMetrics,
 } from './topology-viewport.js'
+
+import {createTopologyDocument} from '../../domain/topology-document.js'
+import {createTopologyWorkspaceState} from '../../domain/topology-workspace-state.js'
+import {createTopologySelection} from '../../domain/topology-selection.js'
+import {getDeviceSearchResults,relationTargetsFor as findRelationTargets,networkPathFor as findNetworkPath,directRelationsFor as findDirectRelations} from '../../domain/topology-search.js'
+import {buildTopologyWorkspaceModel,buildTopologyWorkspaceLayout} from '../../domain/topology-workspace-model.js'
+import {loadTopologyDocument} from '../../services/topology-document-service.js'
+import {createTopologyWorkspaceScope} from '../../adapters/topology-workspace-scope.js'
+import {createTopologyGraphRenderer} from '../../adapters/topology-graph-renderer.js'
+import {createDownloadScope} from '../../services/download-scope.js'
+
+const mountedWorkspaces=new WeakMap()
 
 const DEFAULT_DATASET_ID = 'dataset-semarang'
 const DEFAULT_BRANCH_ID = 'semarang'
@@ -70,6 +71,9 @@ function persistTopologyArea(key, area) {
 }
 
 export async function renderTopologyPage(container) {
+  mountedWorkspaces.get(container)?.dispose()
+  const scope=createTopologyWorkspaceScope()
+  mountedWorkspaces.set(container,scope)
   document.title = 'Diagram Topologi — SINERGI'
   document.body.className = 'map-body topology-body'
   const requested = readRequestedDatasetContext()
@@ -79,48 +83,20 @@ export async function renderTopologyPage(container) {
   bindThemeToggle()
 
   try {
-    const payload = await loadActiveDataset({ ...requested, view: 'topology' })
-    const mapData = adaptActiveDatasetForTopology(payload)
-    mapData.recordRevision = payload.recordRevision
-    mapData.topologyFrameNames = payload.topologyFrameNames ?? {}
-    mapData.topologyFrameAssignments = payload.topologyFrameAssignments ?? {}
-    mapData.topologyFrames = payload.topologyFrames ?? {}
-    mapData.nodePositions = payload.nodePositions ?? {}
-    persistActiveContext(mapData.activeContext)
-
-    const datasetVersionId = mapData.activeContext.datasetVersionId
-    let graph = mapData.topologyGraph ?? { nodes: [], edges: [] }
-    if (!hasGraph(graph)) {
-      const graphPayload = await loadTopologyProjection({
-        datasetVersionId,
-        projection: 'graph',
-      }).catch(() => null)
-      graph = graphFromPayload(graphPayload, graph)
-    }
-
-    const rootsPayload = Array.isArray(payload.topologyRoots)
-      ? { roots: payload.topologyRoots }
-      : graph.graphRevision
-      ? await loadTopologyRoots({
-        datasetVersionId,
-        graphRevision: graph.graphRevision,
-      }).catch(() => null)
-      : null
-
-    mountTopologyWorkspace(container, {
-      mapData,
-      graph,
-      roots: rootsPayload?.roots ?? rootsPayload?.items ?? [],
-      context: requested,
-    })
+    const documentData=await loadTopologyDocument(requested,{signal:scope.signal})
+    if(scope.disposed)return ()=>scope.dispose()
+    persistActiveContext(documentData.mapData.activeContext)
+    mountTopologyWorkspace(container,{...documentData,context:requested,scope})
   } catch (error) {
+    if(scope.disposed)return ()=>scope.dispose()
     container.innerHTML = renderErrorState(requested, error)
     bindUserAccountMenu()
     bindThemeToggle()
-    container.querySelector('[data-retry-topology]')?.addEventListener('click', () => {
+    scope.listen(container.querySelector('[data-retry-topology]'),'click', () => {
       void renderTopologyPage(container)
     })
   }
+  return ()=>scope.dispose()
 }
 
 function mountTopologyWorkspace(container, {
@@ -128,49 +104,12 @@ function mountTopologyWorkspace(container, {
   graph,
   roots,
   context,
+  scope,
 }) {
   const canEditTopology = getSessionUser()?.role === 'Administrator'
   const activeContext = mapData.activeContext
-  const query = new URLSearchParams(window.location.search)
-  const validAreaKeys = new Set(mapData.locationGroups.map(({ key }) => key))
-  const requestedArea = query.get('area')
-  const areaStorageKey = topologyAreaStorageKey(activeContext)
-  const storedArea = readStoredTopologyArea(areaStorageKey)
-  const preferredArea = requestedArea === 'all' || validAreaKeys.has(requestedArea)
-    ? requestedArea
-    : storedArea === 'all' || validAreaKeys.has(storedArea)
-      ? storedArea
-      : 'all'
-  const selectedArea = preferredArea === 'all' || validAreaKeys.has(preferredArea)
-    ? preferredArea === 'all' ? null : preferredArea
-    : null
-  const selectedAssetFromUrl = query.get('selectedAssetId') || query.get('assetId')
-
-  const state = {
-    area: selectedArea,
-    selectedAssetId: selectedAssetFromUrl || null,
-    selectedEdgeId: null,
-    selectedMountingGroupId: null,
-    selectedFamilies: new Set(),
-    search: '',
-    labelMode: 'auto',
-    showMountingPhysical: true,
-    zoom: DEFAULT_ZOOM,
-    sidebarCollapsed: window.matchMedia?.('(max-width: 960px)').matches ?? false,
-    exportOpen: false,
-    actionsOpen: false,
-    legendOpen: false,
-    inspectorOpen: Boolean(selectedAssetFromUrl),
-    searchResults: [],
-    relationSearch: '',
-    mutationBusy: false,
-    frameComposerOpen: false,
-    pendingFrameId: null,
-    frameNames: Object.fromEntries(Object.entries(mapData.topologyFrameNames ?? {}).map(([id, name]) => [id.startsWith('pole-group:')||id.startsWith('excluded-mounting:')?id:`pole-group:${id}`, name])),
-    changes: [],
-    saveError: '',
-    toastTimer: null,
-  }
+  const areaStorageKey=topologyAreaStorageKey(activeContext)
+  const state=createTopologyWorkspaceState({mapData,search:window.location.search,storedArea:readStoredTopologyArea(areaStorageKey),compact:window.matchMedia?.('(max-width: 960px)').matches ?? false})
 
   let model = null
   let layout = null
@@ -178,59 +117,25 @@ function mountTopologyWorkspace(container, {
   let panState = null
   let dragState = null
   let suppressViewportClick = false
-  let savedSnapshot = null
-  const sourceIconLoader = createSourceIconLoader()
-  const captureSavedSnapshot = () => structuredClone({ graph, assets: mapData.assets,
-    mountingRelations: mapData.mountingRelations,
-    topologyFrameAssignments: mapData.topologyFrameAssignments,
-    topologyFrames: mapData.topologyFrames,
-    frameNames: state.frameNames,nodePositions:mapData.nodePositions })
-  savedSnapshot = captureSavedSnapshot()
-  listenForDatasetRevision({datasetId:activeContext.datasetId,revision:()=>mapData.recordRevision,isDirty:()=>state.changes.length>0,
-    onDirty:()=>showToast('Data berubah di halaman lain. Periksa perubahan sebelum menyimpan.')})
-
-  const buildModel = () => buildTopologyDiagramModel({
-    assets: mapData.assets,
-    graph,
-    locationGroups: mapData.locationGroups,
-    area: state.area,    datasetId: activeContext.datasetId,
-    datasetVersionId: activeContext.datasetVersionId,
-    roots,
-    mountingRelations: mapData.mountingRelations,
-    poleGroups: mapData.poleGroups,
-    selectedFamilies: state.selectedFamilies,
-    search: state.search,
-    showMountingPhysical: state.showMountingPhysical,
-    publicationProfile: activeContext.publicationProfile,
-    readiness: mapData.topologyReadiness,
+  const sourceIconLoader=createSourceIconLoader({signal:scope.signal})
+  const downloads=createDownloadScope(scope.signal)
+  scope.own(downloads.dispose)
+  const documentController=createTopologyDocument({mapData,graph,roots,state,canEditTopology,getModel:()=>model,signal:scope.signal,
+    rebuild:(...args)=>rebuild(...args),updatePanelState,showToast,closeFrameNameEditor})
+  const {stageChange,cancelDraft,saveDraft,applyMutationResponse,addRelation,removeRelation}=documentController
+  const {selectSearchResult,selectAsset,selectEdge,selectMountingGroup,clearSelection}=createTopologySelection({state,mapData,getModel:()=>model,getLayout:()=>layout,
+    persistArea:area=>persistTopologyArea(areaStorageKey,area),rebuild:(...args)=>rebuild(...args),renderGraph,renderInspector,renderTopologySidebar,updatePanelState,syncUrl,focusAssetCard,focusMountingGroup})
+  scope.own(listenForDatasetRevision({datasetId:activeContext.datasetId,revision:()=>mapData.recordRevision,isDirty:()=>state.changes.length>0||state.mutationBusy,
+    onDirty:()=>showToast('Data berubah di halaman lain. Periksa perubahan sebelum menyimpan.')}))
+  scope.own(()=>{
+    cancelAssetDrag()
+    const viewport=container.querySelector('[data-topology-viewport]')
+    if(panState&&viewport?.hasPointerCapture?.(panState.pointerId))viewport.releasePointerCapture(panState.pointerId)
+    panState=null;viewport?.classList.remove('is-panning')
   })
-
-  const buildLayout = (overrides = {}) => updateTopologyDiagramLayoutPositions(calculateTopologyDiagramLayout(model, {
-    minWidth: 1240,
-    componentColumns: 3,
-    componentMaxColumns: 4,
-    componentPackingAspectRatio: 2.25,
-    layoutStyle: 'central-backbone',
-    mountingBoxMinWidth: 248,
-    mountingBoxPadding: 24,
-    mountingBoxHeaderHeight: 52,
-    mountingBoxNodeGapX: 36,
-    mountingBoxLevelGapY: 82,
-    mountingBoxGapY: 54,
-    mountingBoxGapX: 36,
-    mountingRootColumns: window.matchMedia('(max-width: 620px)').matches ? 3
-      : window.matchMedia('(max-width: 960px)').matches ? 5 : null,
-    mountingRootFrameGap: state.area === 'ft-tegal-baru' ? 64 : null,
-    overview: state.area === null,
-    frameAssignments: mapData.topologyFrameAssignments,
-    customFrames: mapData.topologyFrames,
-    retainEmptyFrameIds: [
-      state.pendingFrameId,
-      ...state.changes.filter((change) => change.type === 'create-frame')
-        .map((change) => change.frame?.id),
-    ].filter(Boolean),
-    ...overrides,
-  }),mapData.nodePositions ?? {})
+  const buildModel=()=>buildTopologyWorkspaceModel({mapData,graph:documentController.graph,roots:documentController.roots,state})
+  const buildLayout=(overrides={})=>buildTopologyWorkspaceLayout(model,{mapData,state,narrow:window.matchMedia('(max-width: 620px)').matches,compact:window.matchMedia('(max-width: 960px)').matches,overrides})
+  let graphRenderer=null
 
   const rebuild = ({ fit = false } = {}) => {
     model = buildModel()
@@ -242,7 +147,7 @@ function mountTopologyWorkspace(container, {
     renderTopologySidebar()
     updateToolbar()
     updatePanelState()
-    if (fit) requestAnimationFrame(() => {
+    if (fit) scope.frame(() => {
       if (window.matchMedia('(max-width: 960px)').matches) fitGraph()
       else resetGraphViewport()
     })
@@ -264,6 +169,7 @@ function mountTopologyWorkspace(container, {
     canEditTopology,
   })
   bindThemeToggle()
+  graphRenderer=createTopologyGraphRenderer({frame:container.querySelector('[data-topology-frame]'),getSnapshot:()=>({model,layout,state,mapData,activeContext}),sourceIconLoader,scope,syncGraphSurface,renderOverviewLabels,onIconsReady:()=>{renderInspector();renderTray()},isDragging:()=>!!dragState?.active})
   bindWorkspaceEvents()
   renderGraph()
   renderInspector()
@@ -271,26 +177,26 @@ function mountTopologyWorkspace(container, {
   renderTopologySidebar()
   updateToolbar()
   updatePanelState()
-  requestAnimationFrame(() => {
+  scope.frame(() => {
     if (state.selectedAssetId) focusRelations()
     else if (window.matchMedia('(max-width: 960px)').matches) fitGraph()
     else resetGraphViewport()
   })
 
   function bindWorkspaceEvents() {
-    container.addEventListener('click', handleClick)
-    container.addEventListener('change', handleChange)
-    container.addEventListener('input', handleInput)
-    container.addEventListener('keydown', handleKeydown)
-    container.addEventListener('dblclick', handleDoubleClick)
-    container.addEventListener('submit', handleSubmit)
+    scope.listen(container,'click', handleClick)
+    scope.listen(container,'change', handleChange)
+    scope.listen(container,'input', handleInput)
+    scope.listen(container,'keydown', handleKeydown)
+    scope.listen(container,'dblclick', handleDoubleClick)
+    scope.listen(container,'submit', handleSubmit)
     const viewport = container.querySelector('[data-topology-viewport]')
     const warnUnsaved = event => {
       if (!viewport?.isConnected) { window.removeEventListener('beforeunload', warnUnsaved); return }
       if (state.changes.length) { event.preventDefault(); event.returnValue = '' }
     }
-    window.addEventListener('beforeunload', warnUnsaved)
-    viewport?.addEventListener('wheel', (event) => {
+    scope.listen(window,'beforeunload',warnUnsaved)
+    scope.listen(viewport,'wheel', (event) => {
       if (!event.ctrlKey && !event.metaKey) return
       event.preventDefault()
       const direction = event.deltaY > 0 ? -1 : 1
@@ -300,23 +206,24 @@ function mountTopologyWorkspace(container, {
       })
     }, { passive: false })
 
-    viewport?.addEventListener('pointerdown', beginPan)
-    viewport?.addEventListener('pointermove', movePan)
-    viewport?.addEventListener('pointerup', endPan)
-    viewport?.addEventListener('pointercancel', endPan)
-    viewport?.addEventListener('lostpointercapture', endPan)
-    viewport?.addEventListener('scroll', renderOverviewLabels, { passive: true })
+    scope.listen(viewport,'pointerdown', beginPan)
+    scope.listen(viewport,'pointermove', movePan)
+    scope.listen(viewport,'pointerup', endPan)
+    scope.listen(viewport,'pointercancel', endPan)
+    scope.listen(viewport,'lostpointercapture', endPan)
+    scope.listen(viewport,'scroll', renderOverviewLabels, { passive: true })
     const tray = container.querySelector('[data-topology-tray]')
-    tray?.addEventListener('pointerdown', beginTrayAssetDrag)
-    tray?.addEventListener('pointermove', movePan)
-    tray?.addEventListener('pointerup', endPan)
-    tray?.addEventListener('pointercancel', endPan)
-    tray?.addEventListener('lostpointercapture', endPan)
+    scope.listen(tray,'pointerdown', beginTrayAssetDrag)
+    scope.listen(tray,'pointermove', movePan)
+    scope.listen(tray,'pointerup', endPan)
+    scope.listen(tray,'pointercancel', endPan)
+    scope.listen(tray,'lostpointercapture', endPan)
 
     if (viewport && typeof ResizeObserver === 'function') {
       let wasCompact = window.matchMedia('(max-width: 960px)').matches
       let rootColumns = wasCompact ? window.matchMedia('(max-width: 620px)').matches ? 3 : 5 : null
       const resizeObserver = new ResizeObserver(() => {
+        if (scope.disposed) return
         const compact = window.matchMedia('(max-width: 960px)').matches
         const nextRootColumns = compact ? window.matchMedia('(max-width: 620px)').matches ? 3 : 5 : null
         if (nextRootColumns !== rootColumns) {
@@ -331,7 +238,7 @@ function mountTopologyWorkspace(container, {
         if (shouldFit) fitGraph()
         else syncGraphSurface({ preserveCenter: true })
       })
-      resizeObserver.observe(viewport)
+      scope.observe(resizeObserver,viewport)
     }
   }
 
@@ -438,7 +345,7 @@ function mountTopologyWorkspace(container, {
     if (action === 'toggle-sidebar') {
       state.sidebarCollapsed = !state.sidebarCollapsed
       updatePanelState()
-      requestAnimationFrame(() => syncGraphSurface({ preserveCenter: true }))
+      scope.frame(() => syncGraphSurface({ preserveCenter: true }))
       return
     }
     if (action === 'close-export') {
@@ -552,8 +459,8 @@ function mountTopologyWorkspace(container, {
     const target = event.target
     if (target.matches('[data-topology-search]')) {
       state.search = target.value
-      window.clearTimeout(searchTimer)
-      searchTimer = window.setTimeout(() => {
+      scope.clearTimeout(searchTimer)
+      searchTimer = scope.timeout(() => {
         state.searchResults = getDeviceSearchResults(model, state.search)
         rebuild()
       }, 120)
@@ -650,98 +557,6 @@ function mountTopologyWorkspace(container, {
     renderGraph()
   }
 
-  function selectSearchResult(result) {
-    if (!result) return
-    const targetAssetId = result.assetId ?? result.id
-    const targetAsset = model.nodeById.get(targetAssetId)
-      ?? mapData.assets.find((asset) => asset.id === targetAssetId)
-    const targetArea = targetAsset?.areaKey ?? targetAsset?.locationGroupKey
-    const shouldDrillIntoArea = layout?.mode === 'area-overview'
-      && targetArea
-      && targetArea !== state.area
-
-    state.search = ''
-    state.searchResults = []
-    if (shouldDrillIntoArea) {
-      state.area = targetArea
-      persistTopologyArea(areaStorageKey, state.area)
-      if (result.kind === 'mounting') {
-        state.selectedMountingGroupId = result.id
-        state.selectedAssetId = null
-        state.selectedEdgeId = null
-      } else if (result.kind === 'edge') {
-        state.selectedEdgeId = result.id
-        state.selectedAssetId = null
-        state.selectedMountingGroupId = null
-      } else {
-        state.selectedAssetId = result.id
-        state.selectedEdgeId = null
-        state.selectedMountingGroupId = null
-      }
-      rebuild()
-    }
-
-    if (result.kind === 'edge') {
-      selectEdge(result.id)
-      if (result.assetId) focusAssetCard(result.assetId)
-    } else if (result.kind === 'mounting') {
-      selectMountingGroup(result.id)
-      focusMountingGroup(result.id)
-    } else {
-      selectAsset(result.id, { focus: true })
-    }
-    renderTopologySidebar()
-    updatePanelState()
-  }
-
-  function selectAsset(assetId, { focus = false } = {}) {
-    if (!assetId || !model.nodeById.has(assetId)) return
-    if (state.selectedAssetId !== assetId) state.relationSearch = ''
-    state.selectedAssetId = assetId
-    state.selectedEdgeId = null
-    state.selectedMountingGroupId = null
-    state.inspectorOpen = true
-    renderGraph()
-    renderInspector()
-    updatePanelState()
-    syncUrl()
-    if (focus) focusAssetCard(assetId)
-  }
-
-  function selectEdge(edgeId) {
-    if (!edgeId || !model.edgeById.has(edgeId)) return
-    state.selectedEdgeId = edgeId
-    state.selectedAssetId = null
-    state.selectedMountingGroupId = null
-    state.inspectorOpen = true
-    renderGraph()
-    renderInspector()
-    updatePanelState()
-  }
-
-  function selectMountingGroup(groupId) {
-    const box = layout?.mountingBoxes?.find(({ id }) => id === groupId)
-    if (!box || !['confirmed', 'empty', 'excluded'].includes(box.kind)) return
-    state.selectedMountingGroupId = box.id
-    state.selectedAssetId = null
-    state.selectedEdgeId = null
-    state.inspectorOpen = false
-    renderGraph()
-    updatePanelState()
-  }
-
-  function clearSelection() {
-    if (!state.selectedAssetId && !state.selectedEdgeId && !state.selectedMountingGroupId) return
-    state.selectedAssetId = null
-    state.selectedEdgeId = null
-    state.selectedMountingGroupId = null
-    state.inspectorOpen = false
-    renderGraph()
-    renderInspector()
-    updatePanelState()
-    syncUrl()
-  }
-
   function toggleFamily(family) {
     if (state.selectedFamilies.has(family)) state.selectedFamilies.delete(family)
     else state.selectedFamilies.add(family)
@@ -801,7 +616,7 @@ function mountTopologyWorkspace(container, {
     }))
     renderGraph()
     updateToolbar()
-    requestAnimationFrame(() => centerGraph({ smooth: true, wholeContent: true }))
+    scope.frame(() => centerGraph({ smooth: true, wholeContent: true }))
   }
 
   function focusAssetCard(assetId) {
@@ -832,7 +647,7 @@ function mountTopologyWorkspace(container, {
       renderGraph()
       updateToolbar()
     }
-    requestAnimationFrame(() => {
+    scope.frame(() => {
       const frame = container.querySelector('[data-topology-frame]')
       if (!frame) return
       restoreViewportCenter(viewport, frame, {
@@ -861,7 +676,7 @@ function mountTopologyWorkspace(container, {
       renderGraph()
       updateToolbar()
     }
-    requestAnimationFrame(() => {
+    scope.frame(() => {
       const frame = container.querySelector('[data-topology-frame]')
       if (!frame) return
       restoreViewportCenter(viewport, frame, center, { respectOverlays: true })
@@ -892,7 +707,7 @@ function mountTopologyWorkspace(container, {
     renderGraph()
     updateToolbar()
     const selectedDiagram = nodes.find((node) => node.id === selected.id)?.diagram
-    requestAnimationFrame(() => restoreViewportCenter(viewport, frame, {
+    scope.frame(() => restoreViewportCenter(viewport, frame, {
       x: fittedZoom < 0.5 && selectedDiagram ? selectedDiagram.centerX : (left + right) / 2,
       y: fittedZoom < 0.5 && selectedDiagram ? selectedDiagram.centerY : (top + bottom) / 2,
     }, { respectOverlays: true }))
@@ -908,7 +723,7 @@ function mountTopologyWorkspace(container, {
         safe.width / layout.width)))
       renderGraph()
       updateToolbar()
-      requestAnimationFrame(() => centerGraph())
+      scope.frame(() => centerGraph())
       return
     }
     const readableFloor = viewport.clientWidth < 620 ? 0.85 : DEFAULT_ZOOM
@@ -924,68 +739,10 @@ function mountTopologyWorkspace(container, {
     }))
     renderGraph()
     updateToolbar()
-    requestAnimationFrame(() => centerGraph())
+    scope.frame(() => centerGraph())
   }
 
-  function renderGraph() {
-    const frame = container.querySelector('[data-topology-frame]')
-    if (!frame) return
-    if (!model || model.status !== 'ready' || !layout || layout.status !== 'ready') {
-      frame.innerHTML = `<div class="topology-stitch-empty">
-        <span class="material-symbols-outlined" aria-hidden="true">account_tree</span>
-        <strong>${escapeHtml(model?.message ?? 'Belum ada data topology untuk area ini.')}</strong>
-        <span>Pilih area lain atau periksa dataset aktif.</span>
-      </div>`
-      frame.style.width = '100%'
-      frame.style.height = '100%'
-      frame.style.transform = 'none'
-      syncGraphSurface()
-      return
-    }
-    const sourceIconPreload = sourceIconLoader.preload(
-      layout.nodes.map((node) => (
-        assetIconUrl(node)
-      )),
-    )
-    if (sourceIconPreload) {
-      void sourceIconPreload.then(() => {
-        if (frame.isConnected && !dragState?.active) {
-          renderGraph()
-          renderInspector()
-          renderTray()
-        }
-      })
-    }
-    const displayBranchName = branchNameForFacility(
-      mapData.locationGroups.find(({ key }) => key === state.area),
-      activeContext.branchName,
-    )
-    const svg = renderTopologyDiagramSvg({
-      model,
-      layout,
-      context: {
-        ...activeContext,        branchName: displayBranchName,
-        datasetId: activeContext.datasetId,
-        datasetVersionId: activeContext.datasetVersionId,
-        areaKey: state.area,
-      },
-      selectedAssetId: state.selectedAssetId,
-      selectedEdgeId: state.selectedEdgeId,
-      selectedMountingGroupId: state.selectedMountingGroupId,
-      labelMode: state.labelMode,
-      showMountingPhysical: state.showMountingPhysical,
-      zoom: state.zoom,
-      renderMode: 'interactive',
-      sourceIconDataByUrl: sourceIconLoader.dataByUrl,
-      mountingLabelById: state.frameNames,
-    })
-    frame.innerHTML = svg
-    frame.style.width = `${layout.width}px`
-    frame.style.height = `${layout.height}px`
-    frame.style.transform = `scale(${state.zoom})`
-    syncGraphSurface()
-    renderOverviewLabels()
-  }
+  function renderGraph() {graphRenderer?.render()}
 
   function renderOverviewLabels() {
     const layer = container.querySelector('[data-topology-overview-labels]')
@@ -1275,7 +1032,7 @@ function mountTopologyWorkspace(container, {
     suppressViewportClick = panState.distance >= 4
     panState = null
     event.currentTarget.classList.remove('is-panning')
-    window.setTimeout(() => { suppressViewportClick = false }, 0)
+    scope.timeout(() => { suppressViewportClick = false }, 0)
   }
 
   function moveAssetDrag(event) {
@@ -1295,6 +1052,8 @@ function mountTopologyWorkspace(container, {
       dragState.autoPan = createDragAutoPan(dragState.viewport, pointer => {
         if (dragState?.active) scheduleAssetDropTarget(pointer)
       })
+      scope.own(dragState.feedback.cancel)
+      scope.own(()=>dragState?.autoPan?.stop())
       source.classList.add('is-dragging')
     }
     dragState.feedback.move(event)
@@ -1306,7 +1065,7 @@ function mountTopologyWorkspace(container, {
     if (!dragState?.active) return
     dragState.latestPointer = { clientX, clientY }
     if (dragState.targetFrame) return
-    dragState.targetFrame = window.requestAnimationFrame(() => {
+    dragState.targetFrame = scope.frame(() => {
       if (!dragState?.active) return
       dragState.targetFrame = 0
       updateAssetDropTarget(dragState.latestPointer)
@@ -1333,7 +1092,7 @@ function mountTopologyWorkspace(container, {
 
   function clearAssetDrag(completed) {
     completed.autoPan?.stop()
-    if (completed.targetFrame) window.cancelAnimationFrame(completed.targetFrame)
+    if (completed.targetFrame) scope.cancelFrame(completed.targetFrame)
     dragState = null
     completed.viewport.classList.remove('is-dragging-asset')
     container.querySelectorAll('.topology-node.is-dragging')
@@ -1343,7 +1102,7 @@ function mountTopologyWorkspace(container, {
     }
     if (completed.active) {
       suppressViewportClick = true
-      window.setTimeout(() => { suppressViewportClick = false }, 0)
+      scope.timeout(() => { suppressViewportClick = false }, 0)
     }
   }
 
@@ -1445,196 +1204,6 @@ function mountTopologyWorkspace(container, {
     void feedback?.finish(container.querySelector(`[data-mounting-group-id="${cssEscape(box.id)}"]`))
   }
 
-  async function removeRelation(edgeId) {
-    if (!canEditTopology) return
-    const edge = model.edgeById.get(edgeId)
-    if (!edge || state.mutationBusy) return
-    const added = state.changes.find(change => change.type === 'add-relation' && change.draftEdgeId === edgeId)
-    if (added) state.changes = state.changes.filter(change => change !== added)
-    else stageChange({ type: 'remove-edge', edgeId })
-    graph = { ...graph, edges: graph.edges.filter(item => (item.id ?? item.relationId) !== edgeId) }
-    state.selectedEdgeId = null
-    rebuild()
-    showToast('Relasi dihapus. Gunakan Batal untuk memulihkannya sebelum disimpan.')
-  }
-
-  async function addRelation(sourceAssetId, targetAssetId) {
-    if (!canEditTopology) return
-    if (!sourceAssetId || !targetAssetId || sourceAssetId === targetAssetId || state.mutationBusy) return
-    const target = model.nodeById.get(targetAssetId)
-    if (!target) return
-    if ((model.adjacency.get(sourceAssetId) ?? []).some(item => item.id === targetAssetId)) return
-    const replacement = stageCameraRelationReplacement({
-      graph, changes: state.changes, nodes: [...model.nodeById.values()],
-      sourceAssetId, targetAssetId,
-    })
-    graph = replacement.graph
-    state.changes = replacement.changes
-    const savedEdge = savedSnapshot.graph.edges.find(edge => {
-      const a = edge.sourceAssetId ?? edge.sourceNodeId
-      const b = edge.targetAssetId ?? edge.targetNodeId
-      return (a === sourceAssetId && b === targetAssetId)
-        || (a === targetAssetId && b === sourceAssetId)
-    })
-    const savedEdgeId = savedEdge?.id ?? savedEdge?.relationId
-    if (savedEdgeId && state.changes.some(change =>
-      change.type === 'remove-edge' && change.edgeId === savedEdgeId)) {
-      state.changes = state.changes.filter(change =>
-        change.type !== 'remove-edge' || change.edgeId !== savedEdgeId)
-      graph = { ...graph, edges: [...graph.edges, savedEdge] }
-      state.relationSearch = ''
-      state.selectedAssetId = sourceAssetId
-      rebuild()
-      showToast('Relasi awal dipulihkan.')
-      return
-    }
-    const id = `draft-edge:${crypto.randomUUID()}`
-    graph = { ...graph, edges: [...graph.edges, { id, relationId: id, sourceAssetId, targetAssetId,
-      sourceNodeId: sourceAssetId, targetNodeId: targetAssetId, relationType: 'connected-to',
-      direction: 'undirected', verificationStatus: 'confirmed', provenance: 'manual_admin' }] }
-    stageChange({ type: 'add-relation', sourceAssetId, targetAssetId, draftEdgeId: id })
-    state.relationSearch = ''
-    state.selectedAssetId = sourceAssetId
-    rebuild()
-    if (replacement.replaced.length) showToast('Relasi JB utama sebelumnya diganti. Batal akan memulihkannya.')
-  }
-
-  function stageChange(change) {
-    if (!canEditTopology) return
-    if (['mount', 'move-frame', 'rename-frame','move-node'].includes(change.type)) {
-      state.changes = state.changes.filter(item => item.type !== change.type || item.assetId !== change.assetId)
-    }
-    if (change.type === 'create-frame') {
-      state.changes = state.changes.filter(item => item.type !== 'create-frame' || item.frame?.id !== change.frame?.id)
-    }
-    state.changes.push(change)
-    state.saveError = ''
-    updatePanelState()
-  }
-
-  function cancelDraft() {
-    if (state.mutationBusy) return
-    const snapshot = structuredClone(savedSnapshot)
-    graph = snapshot.graph
-    mapData.topologyGraph = graph
-    mapData.assets = snapshot.assets
-    applyMutationResponse({ mountingRelations: snapshot.mountingRelations })
-    mapData.topologyFrameAssignments = snapshot.topologyFrameAssignments ?? {}
-    mapData.topologyFrames = snapshot.topologyFrames ?? {}
-    mapData.nodePositions = snapshot.nodePositions ?? {}
-    state.frameNames = snapshot.frameNames
-    state.changes = []
-    state.saveError = ''
-    closeFrameNameEditor()
-    rebuild()
-  }
-
-  async function saveDraft() {
-    if (!canEditTopology) return
-    if (!state.changes.length || state.mutationBusy) return
-    await runMutation(async () => {
-      const response = await saveTopologyDiagram({ datasetId: activeContext.datasetId,
-        expectedRecordRevision: mapData.recordRevision,
-        changes: state.changes.map(({ draftEdgeId, ...change }) => change) })
-      applyMutationResponse(response)
-      mapData.recordRevision = response.recordRevision
-      mapData.topologyFrameAssignments = response.topologyFrameAssignments ?? {}
-      mapData.topologyFrames = response.topologyFrames ?? {}
-      mapData.nodePositions = response.nodePositions ?? {}
-      state.frameNames = Object.fromEntries(Object.entries(response.topologyFrameNames ?? {}).map(([id, name]) => [id.startsWith('pole-group:')||id.startsWith('excluded-mounting:')?id:`pole-group:${id}`, name]))
-      state.changes = []
-      state.saveError = ''
-      savedSnapshot = captureSavedSnapshot()
-      rebuild()
-      try {
-        const persisted = await loadActiveDataset({ datasetId: activeContext.datasetId,
-          branchId: activeContext.branchId, view: 'topology' })
-        if (persisted.datasetVersion?.id !== activeContext.datasetVersionId) {
-          throw new Error('Versi dataset berubah sesudah penyimpanan.')
-        }
-        const refreshed = adaptActiveDatasetForTopology(persisted)
-        mapData.assets = refreshed.assets
-        mapData.locationGroups = refreshed.locationGroups
-        applyMutationResponse({
-          graph: refreshed.topologyGraph,
-          mountingRelations: refreshed.mountingRelations,
-          topologyFrameAssignments: persisted.topologyFrameAssignments,
-          topologyFrames: persisted.topologyFrames,
-        })
-        mapData.recordRevision = persisted.recordRevision
-        const refreshedRoots = Array.isArray(persisted.topologyRoots)
-          ? { roots: persisted.topologyRoots }
-          : refreshed.topologyGraph.graphRevision
-            ? await loadTopologyRoots({ datasetVersionId: activeContext.datasetVersionId,
-              graphRevision: refreshed.topologyGraph.graphRevision }).catch(() => null)
-            : null
-        roots = refreshedRoots?.roots ?? refreshedRoots?.items ?? []
-        state.frameNames = Object.fromEntries(Object.entries(persisted.topologyFrameNames ?? {})
-          .map(([id, name]) => [id.startsWith('pole-group:')||id.startsWith('excluded-mounting:')?id:`pole-group:${id}`, name]))
-        savedSnapshot = captureSavedSnapshot()
-        rebuild()
-      } catch {
-        showToast('Perubahan tersimpan. Muat ulang halaman untuk menyegarkan diagram.')
-      }
-    })
-  }
-
-  async function runMutation(operation) {
-    if (state.mutationBusy) return
-    state.mutationBusy = true
-    updatePanelState()
-    try {
-      await operation()
-    } catch (error) {
-      state.saveError = error?.message || 'Perubahan belum dapat disimpan.'
-      showToast(error?.message || 'Perubahan belum dapat disimpan. Coba lagi.')
-    } finally {
-      state.mutationBusy = false
-      updatePanelState()
-    }
-  }
-
-  function applyMutationResponse(response) {
-    if (response?.graph) {
-      graph = response.graph
-      mapData.topologyGraph = response.graph
-    }
-    if (response && Object.prototype.hasOwnProperty.call(response, 'topologyFrameAssignments')) {
-      mapData.topologyFrameAssignments = structuredClone(response.topologyFrameAssignments ?? {})
-    }
-    if (response && Object.prototype.hasOwnProperty.call(response, 'topologyFrames')) {
-      mapData.topologyFrames = structuredClone(response.topologyFrames ?? {})
-    }
-    if (Array.isArray(response?.mountingRelations)) {
-      mapData.mountingRelations = response.mountingRelations
-      mapData.poleGroups = buildPoleGroups({
-        assets: mapData.assets,
-        mountingRelations: mapData.mountingRelations,
-      })
-      const mountedOnByAsset = new Map(response.mountingRelations.map((relation) => [
-        relation.sourceAssetId,
-        relation.targetAssetId,
-      ]))
-      const manualMounts = new Set(response.mountingRelations.filter(relation => relation.provenance === 'manual_admin').map(relation => relation.sourceAssetId))
-      const childrenByPole = new Map()
-      response.mountingRelations.forEach(relation => {
-        const children = childrenByPole.get(relation.targetAssetId) ?? []
-        children.push(relation.sourceAssetId)
-        childrenByPole.set(relation.targetAssetId, children)
-      })
-      mapData.assets.forEach((asset) => {
-        asset.mountedOnAssetId = mountedOnByAsset.get(asset.id) ?? null
-        asset.mountedAssetIds = childrenByPole.get(asset.id) ?? []
-        if (manualMounts.has(asset.id)) asset.mountingExpectation = 'pole'
-      })
-      graph.nodes?.forEach(node => {
-        node.mountedOnAssetId = mountedOnByAsset.get(node.id) ?? null
-        node.mountedAssetIds = childrenByPole.get(node.id) ?? []
-        if (manualMounts.has(node.id)) node.mountingExpectation = 'pole'
-      })
-    }
-  }
-
   function openFrameNameEditor(groupId, labelElement) {
     if (!canEditTopology) return
     const form = container.querySelector('[data-frame-name-form]')
@@ -1647,7 +1216,7 @@ function mountTopologyWorkspace(container, {
     form.hidden = false
     form.style.left = `${Math.min(window.innerWidth - 282, Math.max(12, rect.left - 12))}px`
     form.style.top = `${Math.min(window.innerHeight - 86, rect.bottom + 8)}px`
-    requestAnimationFrame(() => {
+    scope.frame(() => {
       input.focus()
       input.select()
     })
@@ -1683,7 +1252,7 @@ function mountTopologyWorkspace(container, {
     composer.hidden = false
     input.value = ''
     renderFrameOptions('')
-    requestAnimationFrame(() => {
+    scope.frame(() => {
       focusFrame(id)
       input.focus()
     })
@@ -1761,7 +1330,7 @@ function mountTopologyWorkspace(container, {
     stageChange({ type: 'create-frame', frame })
     closeFrameComposer({ discard: false })
     rebuild()
-    requestAnimationFrame(() => focusFrame(frame.id))
+    scope.frame(() => focusFrame(frame.id))
     showToast(`${frame.name} ditambahkan. Pilih Simpan untuk menerapkan.`)
   }
 
@@ -1776,28 +1345,9 @@ function mountTopologyWorkspace(container, {
     restoreViewportCenter(viewport, frame, { x: box.x + box.width / 2, y: box.y + box.height / 2 })
   }
 
-  function relationTargetsFor(nodeId, queryText) {
-    const query = String(queryText || '').trim().toLocaleLowerCase('id')
-    if (!query) return []
-    const connectedIds = new Set((model.adjacency.get(nodeId) ?? []).map(({ id }) => id))
-    const source = model.nodeById.get(nodeId)
-    return model.nodes
-      .filter((candidate) => candidate.id !== nodeId && !connectedIds.has(candidate.id))
-      .filter(candidate => candidate.areaKey === source?.areaKey)
-      .map((candidate) => {
-        const haystack = `${candidate.name || ''} ${candidate.id} ${candidate.type || ''}`
-          .toLocaleLowerCase('id')
-        const index = haystack.indexOf(query)
-        return { candidate, score: index === 0 ? 2 : index >= 0 ? 1 : 0 }
-      })
-      .filter(({ score }) => score > 0)
-      .sort((left, right) => right.score - left.score
-        || String(left.candidate.name || left.candidate.id).localeCompare(
-          String(right.candidate.name || right.candidate.id), 'id',
-        ))
-      .slice(0, 8)
-      .map(({ candidate }) => candidate)
-  }
+  function relationTargetsFor(nodeId,queryText){return findRelationTargets(model,nodeId,queryText)}
+  function networkPathFor(nodeId){return findNetworkPath(model,nodeId)}
+  function directRelationsFor(nodeId){return findDirectRelations(model,nodeId)}
 
   function renderRelationSearchResults() {
     const results = container.querySelector('[data-relation-search-results]')
@@ -1842,7 +1392,7 @@ function mountTopologyWorkspace(container, {
     const group = poleGroupForAsset(mapData.poleGroups, node.id)
     const path = networkPathFor(node.id)
     const relations = directRelationsFor(node.id)
-    const needsPrimaryReview = (graph.cameraRelationReview ?? []).some(item =>
+    const needsPrimaryReview = (documentController.graph.cameraRelationReview ?? []).some(item =>
       item.cameraAssetId === node.id)
       && !relations.some(({ other }) => ['junction-peer', 'junction-extended']
         .includes(other.diagramClass))
@@ -2099,55 +1649,20 @@ function mountTopologyWorkspace(container, {
     state.exportOpen = false
     updatePanelState()
     if (kind === 'png') {
-      void downloadSchematicPng(svg, filename).catch((error) => showToast(error.message))
+      void downloadSchematicPng(svg, filename,2,{signal:scope.signal,saveBlob:downloads.saveBlob}).catch((error) => {if(!scope.disposed)showToast(error.message)})
     } else {
-      downloadSchematicSvg(svg, filename)
+      downloadSchematicSvg(svg, filename,{signal:scope.signal,saveBlob:downloads.saveBlob})
     }
   }
 
   function openAssetMap(assetId) {
     if (!assetId) return
     const params = new URLSearchParams({
-      datasetId: activeContext.datasetId,      selectedAssetId: assetId,
+      datasetId: activeContext.datasetId,
+      selectedAssetId: assetId,
     })
     if (state.area) params.set('area', state.area)
     window.location.assign(`/map?${params.toString()}`)
-  }
-
-  function networkPathFor(nodeId) {
-    const component = model.components.find(({ nodeIds }) => nodeIds.includes(nodeId))
-    if (!component) return [model.nodeById.get(nodeId)].filter(Boolean)
-    const root = component.rootId
-    const previous = new Map([[root, null]])
-    const queue = [root]
-    while (queue.length) {
-      const current = queue.shift()
-      if (current === nodeId) break
-      for (const next of model.adjacency.get(current) ?? []) {
-        if (!previous.has(next.id)) {
-          previous.set(next.id, current)
-          queue.push(next.id)
-        }
-      }
-    }
-    if (!previous.has(nodeId)) return [model.nodeById.get(nodeId)].filter(Boolean)
-    const ids = []
-    let cursor = nodeId
-    while (cursor) {
-      ids.unshift(cursor)
-      cursor = previous.get(cursor)
-    }
-    return ids.map((id) => model.nodeById.get(id)).filter(Boolean)
-  }
-
-  function directRelationsFor(nodeId) {
-    const seen = new Set()
-    return (model.adjacency.get(nodeId) ?? []).filter(({ id, edge }) => {
-      const key = `${id}:${edge.id}`
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    }).map(({ id, edge }) => ({ other: model.nodeById.get(id), edge })).filter(({ other }) => other)
   }
 
   function showToast(message) {
@@ -2155,8 +1670,8 @@ function mountTopologyWorkspace(container, {
     if (!toast) return
     toast.textContent = message
     toast.classList.add('visible')
-    window.clearTimeout(state.toastTimer)
-    state.toastTimer = window.setTimeout(() => toast.classList.remove('visible'), 2200)
+    scope.clearTimeout(state.toastTimer)
+    state.toastTimer = scope.timeout(() => toast.classList.remove('visible'), 2200)
   }
 
   function syncUrl() {
@@ -2180,12 +1695,6 @@ function mountTopologyWorkspace(container, {
 function numericStyle(value, fallback = 0) {
   const parsed = Number.parseFloat(value)
   return Number.isFinite(parsed) ? parsed : Number(fallback) || 0
-}
-
-function getDeviceSearchResults(model, query) {
-  return getTopologyDiagramSearchResults(model, query, Number.POSITIVE_INFINITY)
-    .filter((result) => result.kind === 'asset')
-    .slice(0, 12)
 }
 
 function prefersReducedMotion() {
@@ -2364,7 +1873,8 @@ function readRequestedDatasetContext() {
     // Storage may be unavailable in a restricted browser context.
   }
   return {
-    datasetId: datasetId || DEFAULT_DATASET_ID,    siteId: query.get('siteId') || null,
+    datasetId: datasetId || DEFAULT_DATASET_ID,
+    siteId: query.get('siteId') || null,
   }
 }
 
@@ -2374,16 +1884,6 @@ function persistActiveContext(context) {
   } catch {
     // Storage is a convenience only.
   }
-}
-
-function graphFromPayload(payload, fallback) {
-  const graph = payload?.graph ?? payload
-  return hasGraph(graph) ? graph : fallback
-}
-
-function hasGraph(graph) {
-  return Array.isArray(graph?.nodes) && Array.isArray(graph?.edges)
-    && (graph.nodes.length > 0 || graph.edges.length > 0)
 }
 
 function areaName(area, locationGroups) {

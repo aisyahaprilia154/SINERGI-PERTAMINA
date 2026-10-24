@@ -7,25 +7,33 @@ const pageUrl = new URL('../src/pages/topology/topology-page.js', import.meta.ur
 
 test('topology route renders the Stitch-inspired data-driven workspace', async () => {
   const source = await readFile(pageUrl, 'utf8')
+  const [loader, document, model] = await Promise.all([
+    readFile(new URL('../src/services/topology-document-service.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/domain/topology-document.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/domain/topology-workspace-model.js', import.meta.url), 'utf8'),
+  ])
 
   assert.match(source, /topology-stitch-app/)
   assert.match(source, /renderLocationContextPanel\(\{/)
   assert.match(source, /surface: 'topology'/)
   assert.match(source, /renderTopologyDiagramSvg/)
-  assert.match(source, /loadActiveDataset/)
+  assert.match(source, /loadTopologyDocument\(requested,\{signal:scope.signal\}\)/)
+  assert.match(loader, /loadActiveDataset/)
   assert.match(source, /selectedAssetId/)
   assert.match(source, /localStorage\.getItem/)
-  assert.match(source, /overview: state\.area === null/)
+  assert.match(source, /buildTopologyWorkspaceLayout\(model/)
+  assert.match(model, /overview: state\.area === null/)
   assert.match(source, /data-action="remove-relation"/)
   assert.match(source, /data-relation-search/)
-  assert.match(source, /saveTopologyDiagram/)
+  assert.match(source, /createTopologyDocument\(\{mapData,graph,roots,state/)
+  assert.match(document, /saveTopologyDiagram/)
   assert.match(source, /data-action="save-diagram"/)
   assert.match(source, /data-action="cancel-diagram"/)
   assert.match(source, /createAssetDragFeedback/)
   assert.match(source, /lostpointercapture/)
   assert.match(source, /targetGroupId/)
   assert.match(source, /topologyFrameAssignments/)
-  assert.match(source, /frameAssignments/)
+  assert.match(model, /frameAssignments/)
   assert.match(source, /excluded/)
   assert.match(source, /data-frame-composer/)
   assert.match(source, /data-frame-search/)

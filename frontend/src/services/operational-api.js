@@ -18,6 +18,6 @@ export function listenForDatasetRevision({datasetId,revision,isDirty=()=>false,o
     if(isDirty())onDirty();else window.location.reload()
   }
   window.addEventListener('storage',listener)
-  const remove=()=>window.removeEventListener('storage',listener)
+  const remove=()=>{window.removeEventListener('storage',listener);window.removeEventListener('pagehide',remove)}
   window.addEventListener('pagehide',remove,{once:true});return remove
 }

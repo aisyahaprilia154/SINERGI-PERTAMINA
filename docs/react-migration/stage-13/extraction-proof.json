@@ -1,0 +1,306 @@
+{
+  "checkpoint": "bdb7358",
+  "engines": [
+    {
+      "file": "frontend/src/pages/topology/topology-connection-style.js",
+      "sha256": "0b19f45868853c6b475554a590a55809df23a4c3541401bfc91be74cd4191286",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-diagram-layout.js",
+      "sha256": "c855559d6906a9f254f0546f85112219e953e4c53e7a1c4a84b36aaa76fc4e62",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-diagram-svg.js",
+      "sha256": "55c14d36df1a015ed89d81af0ed1917a76ea9bb96051f636aaf32ae20a6c3eb6",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-document-meta.js",
+      "sha256": "61a7f54a6286579ca6dd601476b2cb5a83c9bd5d26ef15e0e89db34e261a7bfa",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-drag-auto-pan.js",
+      "sha256": "4600bc5a95a129f08f38e72b1d1a54409a7532e720617a96142a8667f81fab00",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-drag-feedback.js",
+      "sha256": "9197081cdb111e37398f5b8ac2df21466b091e8adba43f6b7824fb409000073a",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-drop-target.js",
+      "sha256": "7e00c605f27e9f63d34bd5647440e4699023c6d0366e658647564bdf97b76807",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-frame-descendants.js",
+      "sha256": "2726ed34ca3c5d4f9938dd66bf7115b1aa61ade125aa34194c226d3da805151c",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-layout.worker.js",
+      "sha256": "b985af0968bcf3d5c668f8b6b727f2502acb0ac2bc446515a01038d854e2cae3",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-line-jumps.js",
+      "sha256": "65e3f558715e0d6e48463e1f0035405d23890b146a4b047d016eae18dd74391a",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-obstacle-router.js",
+      "sha256": "1e999db61e347864230af9848c7dd09be2328a0dea752301d6a66a67763b5844",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-renderer.js",
+      "sha256": "505c98bca5d7dcab4b8f6aa5e5d22de808a4a78c5a5874cc11553e5c05a47131",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-spatial-layout.js",
+      "sha256": "963af10d8788a2804fac106dfcb07bceeb1858847a9ed1af0e8d166404711d70",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-viewport.js",
+      "sha256": "b59a8def1bf2b896542771517306b99fde1e9890ce5cc62cbe3b05ff1e88aefd",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/styles/topology-route.css",
+      "sha256": "6f01b432238d789931bfe6323ca23479c6af022f68db887b51386fd36afc477f",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/styles/topology-workspace.css",
+      "sha256": "7db085e21224877c5951248622958229595fcb7cfad3a543644f0f5207850e6f",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/styles/topology-refinement.css",
+      "sha256": "8e9da0aa3fa80bf9fd8f33867698fdbea8c477a73f2edc549dbf543aeda0a150",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/styles/app-harmony.css",
+      "sha256": "1c24d3a12e8fd5f7233870e1f80c0edfb3b5e544c4517bd33d15b74316c63936",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/domain/topology-diagram-model.js",
+      "sha256": "3b80800d18246e1d0dac6aa0dfd5fb560701f22e9257c021b7b70bb5ebba9768",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/domain/camera-relation-draft.js",
+      "sha256": "6225db9b319c0ebbe8ce2992367940279ea838f0e2b260ed4f9bc458469cb7e2",
+      "identical": true
+    },
+    {
+      "file": "frontend/src/domain/pole-groups.js",
+      "sha256": "6a67f7e7b9c6aef34bdf31372a32565b77789d18f15cc3af4ff10e63e95d6721",
+      "identical": true
+    }
+  ],
+  "functions": [
+    {
+      "name": "stageChange",
+      "normalization": "whitespace, export and explicit model parameter only",
+      "sha256": "66d9c19aa691fe532f861e287d41c1f88deaabded5534c04d266e483b7ec3822",
+      "identical": true
+    },
+    {
+      "name": "cancelDraft",
+      "normalization": "whitespace, export and explicit model parameter only",
+      "sha256": "73a5a09a1e9e3c31ee99c9b9a804b48ba297fc7b73b37b31dbbe40abb1749964",
+      "identical": true
+    },
+    {
+      "name": "applyMutationResponse",
+      "normalization": "whitespace, export and explicit model parameter only",
+      "sha256": "07c4f986759502c45262a9207f2ffdc51e22256fc295ca246b744578e7c2eff9",
+      "identical": true
+    },
+    {
+      "name": "getDeviceSearchResults",
+      "normalization": "whitespace, export and explicit model parameter only",
+      "sha256": "d3259e047f1e8b95c7668095aef49bc4811834b68a7e87e8f891b448603de44a",
+      "identical": true
+    },
+    {
+      "name": "networkPathFor",
+      "normalization": "whitespace, export and explicit model parameter only",
+      "sha256": "25ade64cbb861e03d54c91b79eb9c08f962c1066deef1cdb8a445b280523fbfe",
+      "identical": true
+    },
+    {
+      "name": "directRelationsFor",
+      "normalization": "whitespace, export and explicit model parameter only",
+      "sha256": "147fc3b1c97d269a6f0227581f04ce7c15223849da6af9e71d05028435054396",
+      "identical": true
+    },
+    {
+      "name": "relationTargetsFor",
+      "normalization": "whitespace, export and explicit model parameter only",
+      "sha256": "b395101c67eb00997fc8217072df16ef7191eb12b010f15e856811a936ba5fe3",
+      "identical": true
+    },
+    {
+      "name": "renderWorkspaceShell",
+      "normalization": "whitespace, export and explicit model parameter only",
+      "sha256": "304b4f17a14f0f89fe1a95e8faba82a35109082d29480794286338063e55c771",
+      "identical": true
+    },
+    {
+      "name": "renderTopologySidebarMarkup",
+      "normalization": "whitespace, export and explicit model parameter only",
+      "sha256": "8407570633014d78143e2f72ac3648479329def25a33ccede2c2ae55140c111c",
+      "identical": true
+    },
+    {
+      "name": "renderLoadingState",
+      "normalization": "whitespace, export and explicit model parameter only",
+      "sha256": "0e542690211e4bc30657a84f462021926c7b836a929e4a8d8266a4ffcdb50b32",
+      "identical": true
+    },
+    {
+      "name": "renderErrorState",
+      "normalization": "whitespace, export and explicit model parameter only",
+      "sha256": "9fc2a20cea462f9efbf7302e0e95e90f63a7ef09aaea6a215f158132ae1ec132",
+      "identical": true
+    }
+  ],
+  "modelLayoutCases": [
+    {
+      "width": 390,
+      "area": null,
+      "draft": false,
+      "identical": true,
+      "layoutSha256": "e359b250df5956e30a8014cd20267c7c074e91c4cca8a7355d7a04f2265a768e"
+    },
+    {
+      "width": 390,
+      "area": null,
+      "draft": true,
+      "identical": true,
+      "layoutSha256": "b0d00799e53cb7ebc8c808d367d9b3a07cca11871d9c67069babb64a0bfcf744"
+    },
+    {
+      "width": 390,
+      "area": "ft-semarang",
+      "draft": false,
+      "identical": true,
+      "layoutSha256": "54b29080e377a20560eabd26d2615f8085aa7fbe3425cade1abb6eeb5250d0c3"
+    },
+    {
+      "width": 390,
+      "area": "ft-semarang",
+      "draft": true,
+      "identical": true,
+      "layoutSha256": "33719594f39d09d2a6ab50f3c60ee384d1f1ed8ac7de9bf671c447c68284faa3"
+    },
+    {
+      "width": 390,
+      "area": "ft-tegal-baru",
+      "draft": false,
+      "identical": true,
+      "layoutSha256": "3425f85e834fb1c734f8b9ca0c0d1cb13d393b1aff4122113de303bfe3677bc1"
+    },
+    {
+      "width": 390,
+      "area": "ft-tegal-baru",
+      "draft": true,
+      "identical": true,
+      "layoutSha256": "9be018577ff71e58a83e294808cbad8e2eac17a12f03369612bc96a836f7784c"
+    },
+    {
+      "width": 800,
+      "area": null,
+      "draft": false,
+      "identical": true,
+      "layoutSha256": "0b03500ed0de6901a93b2536f7f850e5b900eed3c8c7cbfd812579b649ee3cc1"
+    },
+    {
+      "width": 800,
+      "area": null,
+      "draft": true,
+      "identical": true,
+      "layoutSha256": "a0f850d3edfc4c87e6b5551877d14bc0bb5180b4394d554ea63ef56ee6315e49"
+    },
+    {
+      "width": 800,
+      "area": "ft-semarang",
+      "draft": false,
+      "identical": true,
+      "layoutSha256": "75682123a84595fd626234359d94ec858e2256175feede2656fd9f3bdcee02f3"
+    },
+    {
+      "width": 800,
+      "area": "ft-semarang",
+      "draft": true,
+      "identical": true,
+      "layoutSha256": "c081da70fbe845d04e0e85d89f415cf0b82c60f59e1f0e84db26839150abd7ec"
+    },
+    {
+      "width": 800,
+      "area": "ft-tegal-baru",
+      "draft": false,
+      "identical": true,
+      "layoutSha256": "e2976451be3055119515ae58fafb2f8177871646daae91c4eba3810915e02974"
+    },
+    {
+      "width": 800,
+      "area": "ft-tegal-baru",
+      "draft": true,
+      "identical": true,
+      "layoutSha256": "36f74e0808f37188ef8eb28c348e3a4d1875b70b3fa41e5259e99366bddf7552"
+    },
+    {
+      "width": 1440,
+      "area": null,
+      "draft": false,
+      "identical": true,
+      "layoutSha256": "6d6f4b5d4765666d8d068cb6e6b5cbbc3f93a99f1c5a5f40f4cf4303e82df02e"
+    },
+    {
+      "width": 1440,
+      "area": null,
+      "draft": true,
+      "identical": true,
+      "layoutSha256": "92cfe56eff6c704e863c8a859d0f5b86eda0076f9e39fc27e9a1be25464ce3a1"
+    },
+    {
+      "width": 1440,
+      "area": "ft-semarang",
+      "draft": false,
+      "identical": true,
+      "layoutSha256": "d88564800241555bc4e2d110b7a6fe6710ec1c93f7656388bf5118a6016d2c11"
+    },
+    {
+      "width": 1440,
+      "area": "ft-semarang",
+      "draft": true,
+      "identical": true,
+      "layoutSha256": "ea339d294439e9965cbbdd091f944e8e494615601125db8e8ac2fa5ffe624b0b"
+    },
+    {
+      "width": 1440,
+      "area": "ft-tegal-baru",
+      "draft": false,
+      "identical": true,
+      "layoutSha256": "22220fc9731a8872c76948bc4f9ce984f928cb96258243d7a6ef0ec25fd1600a"
+    },
+    {
+      "width": 1440,
+      "area": "ft-tegal-baru",
+      "draft": true,
+      "identical": true,
+      "layoutSha256": "17ab1cc767b6ae5148ccd1d10aec5c41ec33e3e1abf956754ffca55ca5687026"
+    }
+  ]
+}

@@ -1,0 +1,317 @@
+{
+  "threshold": 12,
+  "results": [
+    {
+      "file": "area-desktop-dark.png",
+      "oldSize": [
+        1440,
+        900
+      ],
+      "newSize": [
+        1440,
+        900
+      ],
+      "changedPixels": 0,
+      "totalPixels": 1296000
+    },
+    {
+      "file": "area-desktop-light.png",
+      "oldSize": [
+        1440,
+        900
+      ],
+      "newSize": [
+        1440,
+        900
+      ],
+      "changedPixels": 0,
+      "totalPixels": 1296000
+    },
+    {
+      "file": "area-mobile-dark.png",
+      "oldSize": [
+        390,
+        844
+      ],
+      "newSize": [
+        390,
+        844
+      ],
+      "changedPixels": 0,
+      "totalPixels": 329160
+    },
+    {
+      "file": "area-mobile-light.png",
+      "oldSize": [
+        390,
+        844
+      ],
+      "newSize": [
+        390,
+        844
+      ],
+      "changedPixels": 238,
+      "totalPixels": 329160
+    },
+    {
+      "file": "detail-desktop-dark.png",
+      "oldSize": [
+        1440,
+        900
+      ],
+      "newSize": [
+        1440,
+        900
+      ],
+      "changedPixels": 394,
+      "totalPixels": 1296000
+    },
+    {
+      "file": "detail-desktop-light.png",
+      "oldSize": [
+        1440,
+        900
+      ],
+      "newSize": [
+        1440,
+        900
+      ],
+      "changedPixels": 0,
+      "totalPixels": 1296000
+    },
+    {
+      "file": "detail-mobile-dark.png",
+      "oldSize": [
+        390,
+        844
+      ],
+      "newSize": [
+        390,
+        844
+      ],
+      "changedPixels": 0,
+      "totalPixels": 329160
+    },
+    {
+      "file": "detail-mobile-light.png",
+      "oldSize": [
+        390,
+        844
+      ],
+      "newSize": [
+        390,
+        844
+      ],
+      "changedPixels": 0,
+      "totalPixels": 329160
+    },
+    {
+      "file": "empty-desktop-dark.png",
+      "oldSize": [
+        1440,
+        900
+      ],
+      "newSize": [
+        1440,
+        900
+      ],
+      "changedPixels": 0,
+      "totalPixels": 1296000
+    },
+    {
+      "file": "empty-desktop-light.png",
+      "oldSize": [
+        1440,
+        900
+      ],
+      "newSize": [
+        1440,
+        900
+      ],
+      "changedPixels": 0,
+      "totalPixels": 1296000
+    },
+    {
+      "file": "empty-mobile-dark.png",
+      "oldSize": [
+        390,
+        844
+      ],
+      "newSize": [
+        390,
+        844
+      ],
+      "changedPixels": 0,
+      "totalPixels": 329160
+    },
+    {
+      "file": "empty-mobile-light.png",
+      "oldSize": [
+        390,
+        844
+      ],
+      "newSize": [
+        390,
+        844
+      ],
+      "changedPixels": 0,
+      "totalPixels": 329160
+    },
+    {
+      "file": "error-desktop-dark.png",
+      "oldSize": [
+        1440,
+        900
+      ],
+      "newSize": [
+        1440,
+        900
+      ],
+      "changedPixels": 0,
+      "totalPixels": 1296000
+    },
+    {
+      "file": "error-desktop-light.png",
+      "oldSize": [
+        1440,
+        900
+      ],
+      "newSize": [
+        1440,
+        900
+      ],
+      "changedPixels": 0,
+      "totalPixels": 1296000
+    },
+    {
+      "file": "error-mobile-dark.png",
+      "oldSize": [
+        390,
+        844
+      ],
+      "newSize": [
+        390,
+        844
+      ],
+      "changedPixels": 0,
+      "totalPixels": 329160
+    },
+    {
+      "file": "error-mobile-light.png",
+      "oldSize": [
+        390,
+        844
+      ],
+      "newSize": [
+        390,
+        844
+      ],
+      "changedPixels": 0,
+      "totalPixels": 329160
+    },
+    {
+      "file": "overview-desktop-dark.png",
+      "oldSize": [
+        1440,
+        900
+      ],
+      "newSize": [
+        1440,
+        900
+      ],
+      "changedPixels": 207,
+      "totalPixels": 1296000
+    },
+    {
+      "file": "overview-desktop-light.png",
+      "oldSize": [
+        1440,
+        900
+      ],
+      "newSize": [
+        1440,
+        900
+      ],
+      "changedPixels": 3670,
+      "totalPixels": 1296000
+    },
+    {
+      "file": "overview-mobile-dark.png",
+      "oldSize": [
+        390,
+        844
+      ],
+      "newSize": [
+        390,
+        844
+      ],
+      "changedPixels": 258,
+      "totalPixels": 329160
+    },
+    {
+      "file": "overview-mobile-light.png",
+      "oldSize": [
+        390,
+        844
+      ],
+      "newSize": [
+        390,
+        844
+      ],
+      "changedPixels": 238,
+      "totalPixels": 329160
+    },
+    {
+      "file": "search-desktop-dark.png",
+      "oldSize": [
+        1440,
+        900
+      ],
+      "newSize": [
+        1440,
+        900
+      ],
+      "changedPixels": 0,
+      "totalPixels": 1296000
+    },
+    {
+      "file": "search-desktop-light.png",
+      "oldSize": [
+        1440,
+        900
+      ],
+      "newSize": [
+        1440,
+        900
+      ],
+      "changedPixels": 0,
+      "totalPixels": 1296000
+    },
+    {
+      "file": "search-mobile-dark.png",
+      "oldSize": [
+        390,
+        844
+      ],
+      "newSize": [
+        390,
+        844
+      ],
+      "changedPixels": 0,
+      "totalPixels": 329160
+    },
+    {
+      "file": "search-mobile-light.png",
+      "oldSize": [
+        390,
+        844
+      ],
+      "newSize": [
+        390,
+        844
+      ],
+      "changedPixels": 0,
+      "totalPixels": 329160
+    }
+  ]
+}

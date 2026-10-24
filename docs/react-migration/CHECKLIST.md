@@ -1,6 +1,6 @@
 # Migrasi React SINERGI — baseline dan checklist
 
-Terakhir diperbarui: 24 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **12 — Dialog peta dan ekspor**.
+Terakhir diperbarui: 24 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **13 — Pisahkan logika topologi**.
 Commit asal: `5375bd3` pada `main`. Branch kerja lokal: `react-migration-baseline`.
 Rencana asli pengguna disimpan tanpa perubahan di [PLAN.md](PLAN.md).
 
@@ -181,3 +181,16 @@ UI baca peta memakai JSX untuk sidebar, area/jaringan/preset, pencarian, CCTV, b
 - [x] Checkpoint Git lokal setelah pemeriksaan; perubahan pengguna, rahasia dan backup tidak disertakan. Tidak ada push/merge/deployment atau perubahan database.
 
 Enam halaman dan dialog peta aktif memakai React; topologi masih legacy. Diagram modal sebelumnya tersedia sebagai modul tetapi belum terhubung ke pemicu aktif; penghubungan baru ini dicatat sebagai perubahan perilaku dalam [STAGE-12.md](STAGE-12.md). Seluruh operasi tulis pengujian memakai API mock. Tahap berikutnya **13 — Pisahkan logika topologi**, setelah diminta; berhenti di tahap 12.
+
+## Hasil tahap 13
+
+- [x] Pisahkan working document/snapshot/draft/save/refresh, state awal, seleksi/pencarian/traversal, komposisi model/layout, loading, SVG renderer dan lifecycle workspace. Halaman topologi tetap legacy.
+- [x] Pertahankan aturan graph/layout, markup, CSS, API/payload/revision, URL/storage, serta efek tulis dari tindakan pengguna.
+- [x] Buktikan 17 modul mesin/domain + empat CSS identik dengan tahap 12, 11 fungsi identik setelah normalisasi batas modul, dan 18 kasus model/layout identik.
+- [x] Verifikasi draft/cancel/konflik/retry/save tunggal/Viewer, abort read/write terlambat, remount, debounce, ikon, listener/timer/RAF/observer/pointer/renderer serta cleanup subscription dan object URL. Worker lama tidak diaktifkan; kepemilikan worker diuji dengan stub.
+- [x] Frontend 341 tes Node lama + 163 Vitest, backend 77 lulus/1 skip, lint/build lulus. Tes statis memeriksa lokasi modul baru dengan assertion wiring tambahan.
+- [x] Browser awal 67/68 karena timeout canvas peta; run ulang penuh 68/68 lulus tanpa perubahan timeout/assertion. Empat kasus topologi baru lulus; smoke 10/10.
+- [x] Visual 24 sebelum + 24 sesudah, desktop/mobile terang/gelap: 18 pasangan identik, enam berbeda maksimal 0,284%, terbatas pada kontrol zoom/navigasi. Diagram fasilitas, overview, detail, pencarian, kosong dan error dibandingkan.
+- [x] Checkpoint Git lokal setelah pemeriksaan; perubahan pengguna, rahasia dan backup tidak disertakan. Tidak ada push/merge/deployment atau perubahan database operasional.
+
+Enam halaman dan dialog peta tetap React; topologi tetap legacy. Tahap ini tidak mengaktifkan halaman React baru. Semua operasi tulis UI diuji dengan API mock; integrasi PostgreSQL terpisah belum tersedia. [Laporan tahap 13](STAGE-13.md). Tahap berikutnya **14 — Topologi React untuk membaca data**, setelah diminta; berhenti di tahap 13.

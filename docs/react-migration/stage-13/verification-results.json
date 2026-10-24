@@ -1,0 +1,17 @@
+{
+  "frontendLegacy":{"passed":341,"failed":0},
+  "react":{"passed":163,"files":12,"failed":0,"newTests":12},
+  "backend":{"passed":77,"skipped":1,"failed":0,"skipReason":"SINERGI_TEST_DATABASE_URL unavailable"},
+  "browserFirstRun":{"passed":67,"failed":1,"failure":"MapLibre canvas missing at 5-second assertion before Viewer KML download flow"},
+  "browserFinalFullRun":{"passed":68,"failed":0},
+  "browserNewTopology":{"passed":4,"failed":0},
+  "smoke":{"passed":10,"failed":0},
+  "lint":["root","frontend including JSX/Hooks","backend"],
+  "build":["frontend dist/client and dist/server/index.js","backend"],
+  "extraction":{"sourceCheckpoint":"bdb7358","unchangedEngineAndDomainModules":17,"unchangedCssFiles":4,"identicalFunctions":11,"identicalModelLayoutCases":18},
+  "visual":{"before":24,"after":24,"pairs":24,"identicalPairs":18,"threshold":12,"maximumChangedPixels":3670,"maximumChangedPercent":0.284},
+  "writes":"UI API mocks only; operational database unchanged",
+  "runtime":{"node":"24.22.1","browser":"Chromium Headless Shell 156","workers":1},
+  "activeTopology":"legacy",
+  "nextStage":14
+}
