@@ -1,0 +1,85 @@
+vite v8.1.6 building client environment for production...
+[2K
+transforming...✓ 253 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                         1.44 kB │ gzip:   0.60 kB
+dist/assets/inter-latin-wght-normal-Dx4kXJAl.woff2     48.25 kB
+dist/assets/maplibre-gl-worker-BvEsDmg_.js            507.46 kB
+dist/assets/MapRoute-CClN_iHP.css                       0.77 kB │ gzip:   0.40 kB
+dist/assets/Overlay-BakDOvT4.css                        1.86 kB │ gzip:   0.65 kB
+dist/assets/session-presence-1Ea2q18s.css               2.32 kB │ gzip:   1.05 kB
+dist/assets/login-Cz_vXEOE.css                          3.68 kB │ gzip:   1.11 kB
+dist/assets/app-header-BkYzHR9f.css                     9.84 kB │ gzip:   2.11 kB
+dist/assets/admin-users-KG2PH8Mc.css                   16.68 kB │ gzip:   3.55 kB
+dist/assets/admin-route-ysqQlWGN.css                   18.97 kB │ gzip:   3.91 kB
+dist/assets/maplibre-map-CKRTiAqP.css                  82.86 kB │ gzip:  10.71 kB
+dist/assets/topology-page-C42UhhQv.css                126.90 kB │ gzip:  17.23 kB
+dist/assets/topology-route-C3ngMSZg.css               263.74 kB │ gzip:  40.41 kB
+dist/assets/map-route-CjL7EglM.css                    321.23 kB │ gzip:  46.89 kB
+dist/assets/login-BP7unZRv.js                           0.02 kB │ gzip:   0.03 kB
+dist/assets/map-route-CO3C9Im_.js                       0.03 kB │ gzip:   0.03 kB
+dist/assets/admin-route-DuCIumQR.js                     0.03 kB │ gzip:   0.03 kB
+dist/assets/admin-users-BfNx4CfY.js                     0.03 kB │ gzip:   0.03 kB
+dist/assets/map-diagrams-DOiIvrz-.js                    0.07 kB │ gzip:   0.08 kB
+dist/assets/production-CQi2wkm8.js                      0.13 kB │ gzip:   0.12 kB
+dist/assets/import-dataset-page-CYonZDDj.js             0.13 kB │ gzip:   0.12 kB
+dist/assets/Drawer-DMYZ62GF.js                          0.16 kB │ gzip:   0.16 kB
+dist/assets/import-view-utils-CGd2JEfB.js               0.17 kB │ gzip:   0.12 kB
+dist/assets/abortable-delay-C2rsnMzL.js                 0.23 kB │ gzip:   0.18 kB
+dist/assets/admin-users-service-C8wegOCN.js             0.32 kB │ gzip:   0.21 kB
+dist/assets/dataset-versions-service-BWRDkYDQ.js        0.41 kB │ gzip:   0.24 kB
+dist/assets/page-access-Bn0V8XJd.js                     0.47 kB │ gzip:   0.28 kB
+dist/assets/brand-logo-Bq74E4ix.js                      0.54 kB │ gzip:   0.30 kB
+dist/assets/LoadingScreen-BZlYMh5S.js                   0.55 kB │ gzip:   0.38 kB
+dist/assets/asset-icon-DDYQ1nNe.js                      0.93 kB │ gzip:   0.48 kB
+dist/assets/source-icon-loader-C2fCKE_h.js              1.14 kB │ gzip:   0.62 kB
+dist/assets/preload-helper-Czpn1I53.js                  1.19 kB │ gzip:   0.67 kB
+dist/assets/location-context-panel-DoF_S6dt.js          1.21 kB │ gzip:   0.46 kB
+dist/assets/operational-api-CtIkFzYa.js                 1.25 kB │ gzip:   0.72 kB
+dist/assets/session-presence-CGhfIshl.js                1.55 kB │ gzip:   0.78 kB
+dist/assets/import-preview-BQt5ueDX.js                  1.63 kB │ gzip:   0.71 kB
+dist/assets/account-session-BcRjarYN.js                 1.64 kB │ gzip:   0.71 kB
+dist/assets/DataTable-FXlRvHYd.js                       1.74 kB │ gzip:   0.84 kB
+dist/assets/admin-overlay-qUFEcsgk.js                   1.95 kB │ gzip:   0.94 kB
+dist/assets/index-Ds-juCoy.js                           2.14 kB │ gzip:   1.05 kB
+dist/assets/theme-DaSTeWor.js                           2.39 kB │ gzip:   0.94 kB
+dist/assets/network-colors-C_m1Yzdx.js                  2.43 kB │ gzip:   1.05 kB
+dist/assets/facility-branch-CCH4cjgG.js                 2.64 kB │ gzip:   1.27 kB
+dist/assets/import-dataset-service-D-6sSA-n.js          2.66 kB │ gzip:   1.18 kB
+dist/assets/asset-description-Bt6dxaDt.js               3.00 kB │ gzip:   1.51 kB
+dist/assets/routes-B1epWmX5.js                          3.26 kB │ gzip:   1.20 kB
+dist/assets/Overlay-C2W1WQCv.js                         3.66 kB │ gzip:   1.61 kB
+dist/assets/LoginRoute-DQgAhNav.js                      3.70 kB │ gzip:   1.48 kB
+dist/assets/legacy-main-BOuOhTTa.js                     3.74 kB │ gzip:   1.37 kB
+dist/assets/react-dom-CIc7lA_t.js                       3.85 kB │ gzip:   1.39 kB
+dist/assets/login-page-iaDuuaIA.js                      4.17 kB │ gzip:   1.52 kB
+dist/assets/AppHeader-BwaTaUgb.js                       4.42 kB │ gzip:   1.75 kB
+dist/assets/ThemeToggle-FI1taBy9.js                     4.71 kB │ gzip:   1.83 kB
+dist/assets/app-header-C61qhu2m.js                      4.99 kB │ gzip:   1.64 kB
+dist/assets/import-dataset-page-DaQxsxHo.js             6.85 kB │ gzip:   2.86 kB
+dist/assets/dataset-versions-page-CaToSo78.js           7.52 kB │ gzip:   2.83 kB
+dist/assets/react-DjGqiD24.js                           8.38 kB │ gzip:   3.22 kB
+dist/assets/users-page-B5XzV_SZ.js                      8.91 kB │ gzip:   3.20 kB
+dist/assets/preview-import-page-AftyEFDL.js             9.00 kB │ gzip:   3.40 kB
+dist/assets/VersionsRoute-BKRaG8pX.js                   9.38 kB │ gzip:   3.41 kB
+dist/assets/UsersRoute-eDHxLtHM.js                      9.40 kB │ gzip:   3.32 kB
+dist/assets/ImportsRoute-BJIpsrXS.js                   10.21 kB │ gzip:   3.84 kB
+dist/assets/PreviewRoute-BBXdjGYz.js                   10.58 kB │ gzip:   3.94 kB
+dist/assets/production-BxSKFpGC.js                     12.41 kB │ gzip:   5.17 kB
+dist/assets/asset-icon-editor-emrh_Yq6.js              16.18 kB │ gzip:   5.74 kB
+dist/assets/map-diagrams-DhQdAsVQ.js                   28.27 kB │ gzip:   8.75 kB
+dist/assets/active-dataset-map-adapter-BF3NcEaJ.js     41.48 kB │ gzip:  11.80 kB
+dist/assets/hooks-CGNHZzuQ.js                          61.94 kB │ gzip:  19.93 kB
+dist/assets/map-page-BPNU6JI7.js                       77.47 kB │ gzip:  20.02 kB
+dist/assets/MapRoute-OU-pTzTG.js                      102.67 kB │ gzip:  29.51 kB
+dist/assets/topology-page-EQY_RqGU.js                 225.53 kB │ gzip:  61.39 kB
+dist/assets/bootstrap-Bb9YJo3J.js                     232.22 kB │ gzip:  73.72 kB
+dist/assets/maplibre-map-BfqGvex_.js                1,072.25 kB │ gzip: 290.91 kB
+
+✓ built in 988ms
+[plugin builtin:vite-reporter]
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.

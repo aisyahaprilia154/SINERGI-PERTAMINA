@@ -47,6 +47,8 @@ export async function loadDatasetProjection(options={}) {
 export async function exportActiveKml(options={}) {
   const {datasetId,branchId,token,apiBase,signal,...query}=options
   const response=await fetch(`${activeUrl(options)}/exports/kml`,{method:'POST',signal,headers:{Authorization:`Bearer ${token ?? getDefaultMapToken()}`,'Content-Type':'application/json'},body:JSON.stringify(query)})
-  if(!response.ok) {const body=await response.json();throw new Error(body.error?.message || 'Ekspor gagal.')}
-  return {blob:await response.blob(),filename:'sinergi-active.kml',datasetVersionId:response.headers.get('x-dataset-version-id'),activePointerRevision:response.headers.get('x-active-pointer-revision')}
+  signal?.throwIfAborted()
+  if(!response.ok) {const body=await response.json();const error=new Error(body.error?.message || 'Ekspor gagal.');error.status=response.status;throw error}
+  const blob=await response.blob();signal?.throwIfAborted()
+  return {blob,filename:'sinergi-active.kml',datasetVersionId:response.headers.get('x-dataset-version-id'),activePointerRevision:response.headers.get('x-active-pointer-revision')}
 }

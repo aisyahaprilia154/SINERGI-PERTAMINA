@@ -8,16 +8,16 @@ import { documentNavigation } from '../../services/document-navigation.js'
 // wrong asset. Only server-confirmed projections replace the visible graph.
 export function useMapDocument(initial, canEdit) {
   const [model, setModel] = useState(initial), [busy, setBusy] = useState(false), [stale, setStale] = useState('')
-  const current = useRef(initial), owner = useRef(null), dirtyRef = useRef(false), blocked = useRef(false)
+  const current = useRef(initial), owner = useRef(null), dirtyRef = useRef(false), blocked = useRef(false), transferGuardRef = useRef({dirty:false,busy:false})
   useEffect(() => {
     const controller = new AbortController(); owner.current = { controller, busy: false }
     const revision = event => {
       if (event.key !== `sinergi:revision:${initial.activeContext.datasetId}` || !event.newValue || Number(event.newValue) <= current.current.recordRevision) return
       blocked.current = true
-      if (dirtyRef.current || owner.current.busy) setStale('Data berubah di halaman lain. Muat ulang sebelum menyimpan.')
+      if (dirtyRef.current || owner.current.busy || transferGuardRef.current.dirty || transferGuardRef.current.busy) setStale('Data berubah di halaman lain. Muat ulang sebelum menyimpan.')
       else documentNavigation.reload()
     }
-    const unload = event => { if (dirtyRef.current || owner.current?.busy) { event.preventDefault(); event.returnValue = '' } }
+    const unload = event => { if (dirtyRef.current || owner.current?.busy || transferGuardRef.current.dirty || transferGuardRef.current.busy) { event.preventDefault(); event.returnValue = '' } }
     const stop = () => controller.abort()
     window.addEventListener('storage', revision); window.addEventListener('beforeunload', unload); window.addEventListener('pagehide', stop)
     return () => { stop(); window.removeEventListener('storage', revision); window.removeEventListener('beforeunload', unload); window.removeEventListener('pagehide', stop) }
@@ -61,11 +61,12 @@ export function useMapDocument(initial, canEdit) {
     } finally { transaction.busy = false; if (!signal.aborted) setBusy(false) }
   }
   const permitLeave = useCallback((documentChange = false) => {
-    if (owner.current?.busy) return false
-    const permitted = !dirtyRef.current || window.confirm('Buang perubahan detail aset yang belum disimpan?')
+    if (owner.current?.busy || transferGuardRef.current.busy) return false
+    const permitted = !(dirtyRef.current || transferGuardRef.current.dirty) || window.confirm('Buang perubahan detail aset yang belum disimpan?')
     // A confirmed full-document action must not trigger a second native prompt.
-    if (permitted && documentChange) dirtyRef.current = false
+    if (permitted && documentChange) { dirtyRef.current = false; transferGuardRef.current = {dirty:false,busy:false} }
     return permitted
   }, [])
-  return { model, busy, stale, dirtyRef, write, permitLeave }
+  const setTransferGuard = useCallback(guard => { transferGuardRef.current = guard }, [])
+  return { model, busy, stale, dirtyRef, write, permitLeave, setTransferGuard }
 }

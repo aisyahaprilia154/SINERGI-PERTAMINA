@@ -1,0 +1,5 @@
+
+> sinergi-main@0.0.0 lint
+> node ../shared/lint.mjs && eslint . --max-warnings 0
+
+Syntax check passed for 183 JavaScript files.

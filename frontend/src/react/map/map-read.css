@@ -12,3 +12,5 @@
 @media (min-width: 961px) {
   .react-map-read .map-floating-top:has(.map-action-group > .diagram-toggle:only-child) { display: none; }
 }
+
+.map-body dialog[data-react-map-dialog] .material-symbols-outlined { pointer-events: none; }

@@ -1,6 +1,6 @@
 # Migrasi React SINERGI — baseline dan checklist
 
-Terakhir diperbarui: 24 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **11 — Detail dan edit aset di peta**.
+Terakhir diperbarui: 24 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **12 — Dialog peta dan ekspor**.
 Commit asal: `5375bd3` pada `main`. Branch kerja lokal: `react-migration-baseline`.
 Rencana asli pengguna disimpan tanpa perubahan di [PLAN.md](PLAN.md).
 
@@ -169,3 +169,15 @@ UI baca peta memakai JSX untuk sidebar, area/jaringan/preset, pencarian, CCTV, b
 ## Hasil tahap 11
 
 `/map` dan `/peta`, termasuk trailing slash, aktif memakai React. Drawer detail, ganti/hapus ikon, pencarian/tambah/ganti/hapus relasi, serta relasi pemasangan dikelola JSX. Kontrak revision schema 2 dan lama ditangani, write diserialkan, error/409 menjaga proyeksi dan draft, respons aset lama diabaikan. MapLibre mempertahankan canvas/kamera dan hanya memperbarui proyeksi miliknya; daftar aksesibilitas React tidak lagi ditulis renderer. Draft, fokus, mobile, request/decoder/object URL serta cleanup diverifikasi. Dialog transfer lama tetap tersedia melalui bridge sampai tahap 12; topologi tetap legacy. Frontend 341 Node + 129 React, backend 77 lulus/1 skip, browser 56/56 dalam satu run, smoke 10/10, lint/build lulus. Visual 40 halaman + 40 potongan: 20 pasangan berukuran sama, 12 identik, delapan berbeda paling banyak 0,26% karena fokus. [Laporan tahap 11](STAGE-11.md). Checkpoint lokal setelah pemeriksaan; berhenti sebelum tahap 12. Tidak ada push/deployment atau perubahan database.
+
+## Hasil tahap 12
+
+- [x] Dialog transfer memakai JSX: draft nama/file, validasi, progress, retry config/status, unggah tunggal dan preview dari importId respons.
+- [x] Ekspor KML mempertahankan pilihan jaringan; filter kosong ditolak. Unduhan sumber mempertahankan filename UTF-8.
+- [x] Dialog diagram React terhubung ke pemicu peta; tiga cakupan, pencarian, ringkasan, zoom/pan/fit/reset/fullscreen serta SVG/PNG memakai mesin lama. Header tetap menautkan halaman topologi legacy.
+- [x] Native modal/fokus/Escape, role/sesi, draft/revision guard, timer/polling/request/listener/observer/RAF/decoder/object URL dan respons terlambat diverifikasi.
+- [x] Frontend 341 Node + 151 React, backend 77 lulus/1 skip, browser penuh 64/64, smoke 10/10, lint/build lulus.
+- [x] Visual 56 halaman + 56 potongan, 28 pasangan berukuran sama: 10 identik, 10 diagram berbeda maksimal 46 pixel (<0,015%), delapan transfer maksimal 1,28% akibat whitespace kontrol. Desktop/mobile dan terang/gelap diperiksa.
+- [x] Checkpoint Git lokal setelah pemeriksaan; perubahan pengguna, rahasia dan backup tidak disertakan. Tidak ada push/merge/deployment atau perubahan database.
+
+Enam halaman dan dialog peta aktif memakai React; topologi masih legacy. Diagram modal sebelumnya tersedia sebagai modul tetapi belum terhubung ke pemicu aktif; penghubungan baru ini dicatat sebagai perubahan perilaku dalam [STAGE-12.md](STAGE-12.md). Seluruh operasi tulis pengujian memakai API mock. Tahap berikutnya **13 — Pisahkan logika topologi**, setelah diminta; berhenti di tahap 12.

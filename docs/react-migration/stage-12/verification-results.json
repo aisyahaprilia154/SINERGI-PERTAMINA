@@ -1,0 +1,14 @@
+{
+  "frontendLegacy": {"passed":341,"failed":0},
+  "react": {"passed":151,"files":11,"failed":0},
+  "backend": {"passed":77,"skipped":1,"failed":0,"skipReason":"SINERGI_TEST_DATABASE_URL unavailable"},
+  "browserFull": {"passed":64,"failed":0},
+  "browserNewDialogs": {"passed":8,"failed":0},
+  "smoke": {"passed":10,"failed":0},
+  "lint": ["root","frontend including JSX/Hooks","backend"],
+  "build": ["frontend dist/client and dist/server/index.js","backend"],
+  "visual": {"screenshots":56,"dialogCrops":56,"pairs":28,"sameDimensions":28,"identicalPairs":10,"threshold":12},
+  "databaseWrites": "API mocks only",
+  "runtime": {"node":"24.22.1","browser":"Chromium Headless Shell 156","workers":1},
+  "nextStage":13
+}

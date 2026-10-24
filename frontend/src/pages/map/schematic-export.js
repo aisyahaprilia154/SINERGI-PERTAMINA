@@ -11,9 +11,10 @@ export function serializeSchematicSvg(svgElement) {
   return `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clone)}`
 }
 
-export function downloadSchematicSvg(svgElement, filename) {
+export function downloadSchematicSvg(svgElement, filename, options = {}) {
+  options.signal?.throwIfAborted()
   const serializedSvg = serializeSchematicSvg(svgElement)
-  downloadBlob(new Blob([serializedSvg], { type: 'image/svg+xml;charset=utf-8' }), filename)
+  downloadBlob(new Blob([serializedSvg], { type: 'image/svg+xml;charset=utf-8' }), filename, options)
 }
 
 export function calculateSafePngScale({
@@ -32,11 +33,12 @@ export function calculateSafePngScale({
   ))
 }
 
-export async function downloadSchematicPng(svgElement, filename, requestedScale = 2) {
+export async function downloadSchematicPng(svgElement, filename, requestedScale = 2, options = {}) {
+  const {signal} = options; signal?.throwIfAborted()
   const serializedSvg = serializeSchematicSvg(svgElement)
   const sourceUrl = URL.createObjectURL(new Blob([serializedSvg], { type: 'image/svg+xml' }))
   try {
-    const image = await loadImage(sourceUrl)
+    const image = await loadImage(sourceUrl, signal)
     const viewBox = svgElement.viewBox.baseVal
     const scale = calculateSafePngScale({
       width: viewBox.width,
@@ -51,32 +53,42 @@ export async function downloadSchematicPng(svgElement, filename, requestedScale 
     context.fillStyle = SCHEMATIC_THEME.background
     context.fillRect(0, 0, canvas.width, canvas.height)
     context.drawImage(image, 0, 0, canvas.width, canvas.height)
-    const blob = await canvasToBlob(canvas)
-    downloadBlob(blob, filename)
+    const blob = await canvasToBlob(canvas, signal)
+    downloadBlob(blob, filename, options)
   } finally {
     URL.revokeObjectURL(sourceUrl)
   }
 }
 
-function loadImage(url) {
+function loadImage(url, signal) {
   return new Promise((resolve, reject) => {
     const image = new Image()
-    image.onload = () => resolve(image)
-    image.onerror = () => reject(new Error('SVG tidak dapat dikonversi menjadi PNG.'))
+    const cleanup = () => { image.onload = null; image.onerror = null; signal?.removeEventListener('abort', abort) }
+    const abort = () => { cleanup(); image.src = ''; reject(signal.reason) }
+    image.onload = () => { cleanup(); resolve(image) }
+    image.onerror = () => { cleanup(); reject(new Error('SVG tidak dapat dikonversi menjadi PNG.')) }
+    signal?.addEventListener('abort', abort, {once:true})
+    if (signal?.aborted) { abort(); return }
     image.src = url
   })
 }
-
-function canvasToBlob(canvas) {
+function canvasToBlob(canvas, signal) {
   return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
+    const abort = () => { signal?.removeEventListener('abort', abort); reject(signal.reason) }
+    signal?.addEventListener('abort', abort, {once:true})
+    if (signal?.aborted) { abort(); return }
+    canvas.toBlob(blob => {
+      signal?.removeEventListener('abort', abort)
+      if (signal?.aborted) return
       if (blob) resolve(blob)
       else reject(new Error('PNG tidak dapat dibuat oleh browser.'))
     }, 'image/png')
   })
 }
 
-function downloadBlob(blob, filename) {
+function downloadBlob(blob, filename, options = {}) {
+  options.signal?.throwIfAborted()
+  if (options.saveBlob) { options.saveBlob(blob, filename); return }
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
