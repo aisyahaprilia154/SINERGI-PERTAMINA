@@ -3,6 +3,7 @@ import {exportActiveKml} from '../../services/active-dataset-service.js'
 import {collectSelectedNetworkAssetIds} from './active-dataset-kml-export.js'
 import {escapeHtml as e} from '../admin/import-view-utils.js'
 import {isAdministrator} from '../../services/account-session.js'
+import {abortableDelay} from '../../services/abortable-delay.js'
 
 export function openMapDataTransferDialog({activeContext,networks=[],selectedNetworkIds=new Set(),initialMode='import',areaScopeLabel=null}) {
   const dialog=document.createElement('dialog');dialog.className='map-transfer-dialog'
@@ -23,15 +24,15 @@ export function openMapDataTransferDialog({activeContext,networks=[],selectedNet
           const status=await loadImportStatus({statusUrl:uploaded.statusUrl,signal:controller.signal})
           if(status.import.status==='ready'){window.location.assign(`/admin/datasets/import/${encodeURIComponent(uploaded.importId)}/preview`);return}
           if(status.import.status==='failed')throw new Error(status.import.error?.message || 'Impor gagal diproses.')
-          await new Promise(resolve=>setTimeout(resolve,1200))
+          await abortableDelay(controller.signal)
         }
       }catch(error){if(error.name!=='AbortError')state.error=error.message;state.busy=false;if(dialog.open)render()}
     })
     dialog.querySelector('[data-export]')?.addEventListener('click',()=>void perform(async()=>{
       const ids=collectSelectedNetworkAssetIds(networks,selectedNetworkIds)
-      saveDownload(await exportActiveKml({datasetId:activeContext.datasetId,assetIds:ids,signal:controller.signal}))
+      saveDownload(await exportActiveKml({datasetId:activeContext.datasetId,assetIds:ids,signal:controller.signal}),controller.signal)
     }))
-    dialog.querySelector('[data-source]')?.addEventListener('click',()=>void perform(async()=>saveDownload(await downloadDatasetSource({importId:activeContext.datasetVersionId,signal:controller.signal}))))
+    dialog.querySelector('[data-source]')?.addEventListener('click',()=>void perform(async()=>saveDownload(await downloadDatasetSource({importId:activeContext.datasetVersionId,signal:controller.signal}),controller.signal)))
   }
   const perform=async action=>{state.busy=true;state.error='';render();try{await action()}catch(error){state.error=error.message}finally{state.busy=false;if(dialog.open)render()}}
   dialog.addEventListener('close',()=>{controller.abort();dialog.remove()},{once:true})
@@ -49,4 +50,10 @@ export function renderMapDataTransferDialog({state,activeContext,areaScopeLabel}
       <button data-source ${state.busy||!activeContext.datasetVersionId?'disabled':''}>Unduh sumber terakhir</button>`}
       <p role="status">${e(state.progress)}</p>${state.error?`<p role="alert">${e(state.error)}</p>`:''}${state.canImport===false?'':'<a href="/admin/datasets/import">Buka riwayat impor</a>'}</div></div>`
 }
-function saveDownload({blob,filename}){const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=filename;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+function saveDownload({blob,filename},signal){
+  if(signal?.aborted)return
+  const url=URL.createObjectURL(blob),link=document.createElement('a')
+  const dispose=()=>{clearTimeout(timer);URL.revokeObjectURL(url);signal?.removeEventListener('abort',dispose)}
+  const timer=setTimeout(dispose,1000);signal?.addEventListener('abort',dispose,{once:true})
+  link.href=url;link.download=filename;link.click()
+}

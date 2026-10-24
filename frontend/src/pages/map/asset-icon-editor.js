@@ -7,13 +7,22 @@ export function validateAssetIconFile(file) {
   if (!file.size || file.size > MAX_FILE_BYTES) throw new Error('Ukuran gambar maksimal 5 MB.')
 }
 
-export async function prepareAssetIcon(file) {
+export async function prepareAssetIcon(file, { signal } = {}) {
   validateAssetIconFile(file)
+  signal?.throwIfAborted()
   const url = URL.createObjectURL(file)
+  let abort
   try {
     const image = new Image()
     image.src = url
-    await image.decode().catch(() => { throw new Error('Gambar tidak dapat dibaca. Pilih gambar lain.') })
+    const decoded = image.decode().catch(() => { throw new Error('Gambar tidak dapat dibaca. Pilih gambar lain.') })
+    if (signal) await Promise.race([decoded, new Promise((_, reject) => {
+      abort = () => { image.src = ''; reject(signal.reason) }
+      signal.addEventListener('abort', abort, {once:true})
+      if (signal.aborted) abort()
+    })])
+    else await decoded
+    signal?.throwIfAborted()
     if (!image.naturalWidth || !image.naturalHeight
       || image.naturalWidth * image.naturalHeight > 16_000_000) {
       throw new Error('Resolusi gambar terlalu besar. Pilih gambar yang lebih kecil.')
@@ -34,6 +43,7 @@ export async function prepareAssetIcon(file) {
     }
     return dataUrl
   } finally {
+    if (abort) signal.removeEventListener('abort', abort)
     URL.revokeObjectURL(url)
   }
 }

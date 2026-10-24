@@ -1,6 +1,13 @@
 /* Decorative glyphs must not intercept neighboring controls if the font fails. */
 .react-map-read .material-symbols-outlined { pointer-events: none; }
 
+.react-map-read .map-revision-warning { position: absolute; top: 80px; left: 50%; transform: translateX(-50%); z-index: 20; width: min(90%, 520px); padding: 12px; border-radius: 10px; background: var(--surface, #242424); border: 1px solid #d49e37; color: var(--text, inherit); }
+.react-map-read .map-revision-warning button { margin-left: 8px; }
+
+/* Legacy CSS hides the first summary paragraph; save/error feedback must remain visible. */
+.map-body .react-map-read .asset-drawer .drawer-topology-summary > p.drawer-relation-feedback,
+.map-body .react-map-read .asset-drawer .drawer-topology-summary > p.drawer-relation-success { display: block; }
+
 /* The existing desktop CSS hides this lone button; do not leave an empty shell. */
 @media (min-width: 961px) {
   .react-map-read .map-floating-top:has(.map-action-group > .diagram-toggle:only-child) { display: none; }

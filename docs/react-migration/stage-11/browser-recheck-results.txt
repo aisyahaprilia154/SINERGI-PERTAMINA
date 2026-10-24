@@ -1,0 +1,20 @@
+
+Running 13 tests using 1 worker
+
+(node:19572) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [desktop-edge] › e2e\map-edit.spec.js:32:1 › active React map adds, atomically replaces and removes relations with increasing revisions and a stable canvas (5.3s)
+  ok  2 [desktop-edge] › e2e\map-edit.spec.js:40:1 › mobile detail expands, searches poles, assigns and detaches confirmed mounting (3.0s)
+  ok  3 [desktop-edge] › e2e\map-edit.spec.js:45:1 › real image preparation uploads then deletes an icon with a revision-only response (3.5s)
+  ok  4 [desktop-edge] › e2e\map-edit.spec.js:51:1 › failure retains relation search; stale revision preserves draft and blocks another write (3.8s)
+  ok  5 [desktop-edge] › e2e\map-edit.spec.js:55:1 › Viewer map alias permits detail reading and transfer export without edit or import controls (3.1s)
+  ok  6 [desktop-edge] › e2e\map-edit.spec.js:60:1 › detail retry and switching selection ignore an old delayed detail response (3.0s)
+  ok  7 [desktop-edge] › e2e\map-edit.spec.js:66:1 › relation draft blocks closing and document unload; Escape closes picker before drawer (3.2s)
+  ok  8 [desktop-edge] › e2e\map-read.spec.js:27:1 › React map keeps one canvas through network, selection, URL history, theme and coverage changes (3.4s)
+  ok  9 [desktop-edge] › e2e\map-read.spec.js:46:1 › search keyboard, Ctrl K, presets, focus, basemap and legend controls stay usable (4.5s)
+  ok 10 [desktop-edge] › e2e\map-read.spec.js:61:1 › mobile map opens asset panel, supports selection and returns focus after Escape (2.7s)
+  ok 11 [desktop-edge] › e2e\map-read.spec.js:73:1 › Viewer read map handles error, retry and an empty dataset without admin actions (1.3s)
+  ok 12 [desktop-edge] › e2e\map-read.spec.js:84:1 › leaving the experimental page aborts its pending dataset request (745ms)
+  ok 13 [desktop-edge] › e2e\map-read.spec.js:102:1 › production map route now loads React without the legacy page renderer (2.0s)
+
+  13 passed (42.1s)

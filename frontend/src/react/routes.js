@@ -8,6 +8,10 @@ const loginRoute = async () => {
 // Preserve the old unknown-URL login fallback, without claiming protected pages.
 export const reactRoutes = [
   { path: '/', lazy: loginRoute },
+  ...['/map', '/peta'].map(path => ({ path, lazy: async () => {
+    const { MapRoute } = await import('./map/MapRoute.jsx')
+    return { Component: MapRoute }
+  } })),
   { path: '/admin/datasets/import/:importId/preview', lazy: async () => {
     const { PreviewRoute } = await import('./preview/PreviewRoute.jsx')
     return { Component: PreviewRoute }

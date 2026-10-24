@@ -1,0 +1,145 @@
+{
+  "threshold": 12,
+  "results": [
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "detail",
+      "changedPixels": 356,
+      "totalPixels": 267868
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "relation",
+      "changedPixels": 0,
+      "totalPixels": 274284
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "mounting",
+      "changedPixels": 0,
+      "totalPixels": 274284
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "icon",
+      "changedPixels": 440,
+      "totalPixels": 267868
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "error",
+      "changedPixels": 322,
+      "totalPixels": 131528
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "detail",
+      "changedPixels": 369,
+      "totalPixels": 274284
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "relation",
+      "changedPixels": 0,
+      "totalPixels": 274284
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "mounting",
+      "changedPixels": 0,
+      "totalPixels": 274284
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "icon",
+      "changedPixels": 551,
+      "totalPixels": 274284
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "error",
+      "changedPixels": 340,
+      "totalPixels": 131528
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "detail",
+      "changedPixels": 0,
+      "totalPixels": 209440
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "relation",
+      "changedPixels": 0,
+      "totalPixels": 209440
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "mounting",
+      "changedPixels": 0,
+      "totalPixels": 209440
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "icon",
+      "changedPixels": 426,
+      "totalPixels": 209440
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "error",
+      "changedPixels": 0,
+      "totalPixels": 209440
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "detail",
+      "changedPixels": 0,
+      "totalPixels": 209440
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "relation",
+      "changedPixels": 0,
+      "totalPixels": 209440
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "mounting",
+      "changedPixels": 0,
+      "totalPixels": 209440
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "icon",
+      "changedPixels": 511,
+      "totalPixels": 209440
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "error",
+      "changedPixels": 0,
+      "totalPixels": 209440
+    }
+  ]
+}

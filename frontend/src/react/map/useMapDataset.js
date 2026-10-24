@@ -13,7 +13,7 @@ async function readMapDataset(signal) {
   }
   signal.throwIfAborted()
   const model = createMapReadModel(payload, window.location.search)
-  return {model, revision:payload.recordRevision ?? payload.revision ?? 0}
+  return {...model, operationalSchema:payload.operationalSchema, recordRevision:payload.recordRevision ?? payload.revision ?? 0}
 }
 
 export function useMapDataset() {
@@ -21,23 +21,19 @@ export function useMapDataset() {
   const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     const controller = new AbortController(), signal = controller.signal
-    const owner = { active: true, datasetId: null, revision: 0 }
+    const owner = { active: true }
     const stop = () => { owner.active = false; controller.abort() }
-    const revision = event => {
-      if (owner.active && event.key === `sinergi:revision:${owner.datasetId}` && event.newValue && Number(event.newValue) > owner.revision) documentNavigation.reload()
-    }
-    window.addEventListener('pagehide', stop); window.addEventListener('storage', revision)
-    void readMapDataset(signal).then(({model, revision}) => {
+    window.addEventListener('pagehide', stop)
+    void readMapDataset(signal).then(model => {
       if (!owner.active || signal.aborted) return
       sessionStorage.setItem('sinergiActiveDatasetId', model.activeContext.datasetId)
-      owner.datasetId = model.activeContext.datasetId; owner.revision = revision
       setState({ model, loading: false, error: '' })
     }).catch(error => {
       if (signal.aborted || !owner.active) return
       if ([401, 403].includes(error.status)) { stop(); clearSession(); documentNavigation.replace('/'); return }
       setState({ model: null, loading: false, error: error.message })
     })
-    return () => { stop(); window.removeEventListener('pagehide', stop); window.removeEventListener('storage', revision) }
+    return () => { stop(); window.removeEventListener('pagehide', stop) }
   }, [attempt])
   const retry = () => { setState({ model: null, loading: true, error: '' }); setAttempt(previous => previous + 1) }
   return { ...state, retry }

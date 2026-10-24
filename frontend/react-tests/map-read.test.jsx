@@ -38,8 +38,8 @@ const current = () => state.adapters.at(-1)
 const search = () => screen.getByRole('combobox', { name: 'Cari Asset ID, nama aset, lokasi, atau hostname' })
 
 describe('prepared React map read UI', () => {
-  it('keeps active map routes legacy, renders read controls and performs no dataset writes', async () => {
-    await ready(); expect(await usesReactRoute('/map')).toBe(false); expect(await usesReactRoute('/peta')).toBe(false)
+  it('activates both map routes, renders read controls and performs no dataset writes', async () => {
+    await ready(); expect(await usesReactRoute('/map')).toBe(true); expect(await usesReactRoute('/peta')).toBe(true)
     expect(screen.getByRole('heading', { name: 'Jaringan aset' })).toBeVisible()
     expect(screen.getByLabelText('Area fasilitas')).toHaveValue('ft-semarang')
     expect(state.calls.every(call => call.method === 'GET')).toBe(true)

@@ -82,6 +82,7 @@ export function createMapLibreSurface(element, {
   onLayoutStatus = () => {},
   iconLoader = createSourceIconLoader(),
   initialCamera = null,
+  manageAccessibleAssets = true,
 } = {}) {
   let currentCandidates = candidates
   let currentTopologyGraph = topologyGraph
@@ -378,7 +379,7 @@ export function createMapLibreSurface(element, {
     drawKmlLineOverlay(markerOverlay.querySelector('.map-kml-line-overlay'))
   })
 
-  renderAccessibleAssets(element, assets, onSelectAsset)
+  if (manageAccessibleAssets) renderAccessibleAssets(element, assets, onSelectAsset)
 
   function syncSources() {
     if (!loaded || destroyed) return

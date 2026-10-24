@@ -1,0 +1,284 @@
+{
+  "results": [
+    {
+      "implementation": "legacy",
+      "state": "detail",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-detail-desktop-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "relation",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-relation-desktop-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "mounting",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-mounting-desktop-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "error",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-error-desktop-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "detail",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-detail-desktop-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "relation",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-relation-desktop-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "mounting",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-mounting-desktop-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "error",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-error-desktop-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "relation",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-relation-desktop-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "mounting",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-mounting-desktop-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "error",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-error-desktop-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "relation",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-relation-desktop-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "mounting",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-mounting-desktop-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "error",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-error-desktop-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "detail",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-detail-mobile-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "relation",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-relation-mobile-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "mounting",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-mounting-mobile-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "error",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-error-mobile-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "detail",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-detail-mobile-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "relation",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-relation-mobile-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "mounting",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-mounting-mobile-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "error",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-error-mobile-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "relation",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-relation-mobile-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "mounting",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-mounting-mobile-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "error",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-error-mobile-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "detail",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-detail-mobile-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "relation",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-relation-mobile-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "mounting",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-mounting-mobile-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "error",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-error-mobile-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "detail",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-detail-mobile-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "detail",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-detail-desktop-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "detail",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-detail-desktop-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "icon",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-icon-desktop-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "icon",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-icon-desktop-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "icon",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-icon-desktop-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "icon",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-icon-desktop-dark.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "icon",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-icon-mobile-light.png"
+    },
+    {
+      "implementation": "react",
+      "state": "icon",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-icon-mobile-light.png"
+    },
+    {
+      "implementation": "legacy",
+      "state": "icon",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-icon-mobile-dark.png"
+    },
+    {
+      "implementation": "react",
+      "state": "icon",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-icon-mobile-dark.png"
+    }
+  ]
+}

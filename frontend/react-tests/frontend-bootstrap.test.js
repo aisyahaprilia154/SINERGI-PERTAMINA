@@ -3,8 +3,8 @@ import { startFrontend, usesReactRoute } from '../src/frontend-bootstrap.js'
 import { reactRoutes } from '../src/react/routes.js'
 
 describe('transition entrypoint', () => {
-  it('activates React login, users and versions while preserving other legacy pages and aliases', async () => {
-    expect(reactRoutes).toHaveLength(6)
+  it('activates React map aliases and migrated admin pages while retaining legacy topology', async () => {
+    expect(reactRoutes).toHaveLength(8)
     expect(await usesReactRoute('/')).toBe(true)
     expect(await usesReactRoute('/unknown')).toBe(true)
     expect(await usesReactRoute('/admin/users')).toBe(true)
@@ -14,7 +14,8 @@ describe('transition entrypoint', () => {
     expect(await usesReactRoute('/admin/datasets/import')).toBe(true)
     expect(await usesReactRoute('/admin/datasets/import/')).toBe(true)
     expect(await usesReactRoute('/admin/datasets/import/id/preview')).toBe(true)
-    for (const pathname of ['/map', '/peta', '/topology', '/topologi']) {
+    for (const pathname of ['/map', '/peta', '/map/', '/peta/']) expect(await usesReactRoute(pathname)).toBe(true)
+    for (const pathname of ['/topology', '/topologi']) {
       expect(await usesReactRoute(pathname)).toBe(false)
     }
   })
@@ -24,7 +25,7 @@ describe('transition entrypoint', () => {
     container.textContent = 'Existing UI'
     const loadLegacy = vi.fn().mockResolvedValue({})
     const loadReact = vi.fn()
-    expect(await startFrontend({ pathname: '/map', container, loadLegacy, loadReact })).toEqual({ implementation: 'legacy' })
+    expect(await startFrontend({ pathname: '/topology', container, loadLegacy, loadReact })).toEqual({ implementation: 'legacy' })
     expect(loadLegacy).toHaveBeenCalledOnce()
     expect(loadReact).not.toHaveBeenCalled()
     expect(container.textContent).toBe('Existing UI')

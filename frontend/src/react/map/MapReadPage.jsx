@@ -3,13 +3,19 @@ import { AppHeader } from '../components/AppHeader.jsx'
 import { Icon } from '../components/Icon.jsx'
 import { useSession } from '../session/session-context.js'
 import { createMapReadAdapter } from '../../adapters/map-read-adapter.js'
-import { createNetworkSelectionState, parseMapUrlState, mapSelectionQuery, findAssetMatches, displayAssetName, networkMatchesPreset, buildExplicitRelationGraph, getConnectedAssets } from '../../domain/map-read-model.js'
+import { createNetworkSelectionState, readRequestedDatasetContext, parseMapUrlState, mapSelectionQuery, findAssetMatches, displayAssetName, networkMatchesPreset, buildExplicitRelationGraph, getConnectedAssets } from '../../domain/map-read-model.js'
 import { documentNavigation } from '../../services/document-navigation.js'
 import { useMapDataset } from './useMapDataset.js'
 import { MapSidebar } from './MapSidebar.jsx'
+import { useMapDocument } from './useMapDocument.js'
+import { AssetDetailDrawer } from './AssetDetailDrawer.jsx'
+import { useMapTransfer } from './useMapTransfer.js'
 import { MapStage } from './MapStage.jsx'
 
-function Workspace({ model, createAdapter }) {
+function Workspace({ model: initial, createAdapter }) {
+  const { user } = useSession(), canEdit = user?.role === 'Administrator'
+  const mapDocument = useMapDocument(initial, canEdit), model = mapDocument.model, transfer = useMapTransfer()
+  const [detailExpanded, setDetailExpanded] = useState(false)
   const [controller] = useState(() => createNetworkSelectionState({ ...model.selectionOptions, initialSelectedNetworkIds: model.urlState.selectedNetworkIds, initialSelectedAssetId: model.urlState.selectedAssetId }))
   const snapshot = useCallback(() => ({ selectedNetworkIds: controller.selectedNetworkIds, selectedAssetId: controller.selectedAssetId }), [controller])
   const [selection, setSelection] = useState(snapshot), [query, setQuery] = useState(''), [searchOpen, setSearchOpen] = useState(false)
@@ -18,24 +24,27 @@ function Workspace({ model, createAdapter }) {
   const [mapReady, setMapReady] = useState(false), [mapError, setMapError] = useState(''), [mapAttempt, setMapAttempt] = useState(0)
   const [basemap, setBasemap] = useState({ status: 'loading', mode: 'street', street: false, satellite: false })
   const api = useRef(null), search = useRef(null), results = useRef(null), reopen = useRef(null), focusReopen = useRef(false), focusSearch = useRef(false)
+  const closeDetail = () => { if (mapDocument.permitLeave()) { commit('selectAsset', null); setDetailExpanded(false) } }
+  const openDiagram = () => { if (!mapDocument.permitLeave(true)) return; const params = new URLSearchParams({datasetId:model.activeContext.datasetId}); if (model.selectedArea?.key) params.set('area', model.selectedArea.key); if (controller.selectedAssetId) params.set('selectedAssetId', controller.selectedAssetId); documentNavigation.assign(`/topology?${params}`) }
   const mobile = () => window.matchMedia?.('(max-width: 960px)').matches || false
   const writeUrl = useCallback(mode => {
     const params = mapSelectionQuery(window.location.search, { ...model, selection: controller })
     window.history[`${mode}State`](null, '', `${window.location.pathname}?${params}${window.location.hash}`)
   }, [model, controller])
-  const commit = useCallback((method, ...args) => { controller[method](...args); setSelection(snapshot()); writeUrl('push') }, [controller, snapshot, writeUrl])
-  const closeSidebar = useCallback(() => { if (window.matchMedia?.('(max-width: 960px)').matches) setSidebarOpen(false); else setCollapsed(true); setMobileTab('map'); focusReopen.current = true }, [])
-  const openSidebar = useCallback(mode => { if (window.matchMedia?.('(max-width: 960px)').matches) { setSidebarOpen(true); setMobileTab(mode) }; setCollapsed(false); if (mode === 'assets') { focusSearch.current = true; search.current?.focus() } }, [])
+  const commit = useCallback((method, ...args) => { controller[method](...args); setSelection(snapshot()); writeUrl('push') }, [controller, snapshot, writeUrl, setSelection])
+  const closeSidebar = useCallback(() => { if (window.matchMedia?.('(max-width: 960px)').matches) setSidebarOpen(false); else setCollapsed(true); setMobileTab('map'); focusReopen.current = true }, [setSidebarOpen, setCollapsed, setMobileTab])
+  const openSidebar = useCallback(mode => { if (window.matchMedia?.('(max-width: 960px)').matches) { setSidebarOpen(true); setMobileTab(mode) }; setCollapsed(false); if (mode === 'assets') { focusSearch.current = true; search.current?.focus() } }, [setSidebarOpen, setMobileTab, setCollapsed])
   useLayoutEffect(() => {
     if (focusReopen.current) { reopen.current?.focus(); focusReopen.current = false }
     if (focusSearch.current) { search.current?.focus(); focusSearch.current = false }
   }, [collapsed, sidebarOpen, mobileTab])
+  const permitLeave = mapDocument.permitLeave
   useEffect(() => {
     writeUrl('replace')
-    const restore = () => { controller.replace(parseMapUrlState(window.location.search, model.selectionOptions)); setSelection(snapshot()) }
+    const restore = () => { const next = parseMapUrlState(window.location.search, model.selectionOptions); if (next.selectedAssetId !== controller.selectedAssetId && !permitLeave()) { writeUrl('replace'); return }; controller.replace(next); setSelection(snapshot()) }
     window.addEventListener('popstate', restore)
     return () => window.removeEventListener('popstate', restore)
-  }, [model, controller, snapshot, writeUrl])
+  }, [model, controller, snapshot, writeUrl, permitLeave])
   useEffect(() => {
     const keyboard = event => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); openSidebar('assets'); search.current?.focus() }
@@ -49,7 +58,8 @@ function Workspace({ model, createAdapter }) {
     return () => { window.removeEventListener('keydown', keyboard); document.removeEventListener('pointerdown', outside) }
   }, [openSidebar, closeSidebar, sidebarOpen])
   const selectAsset = (id, fromSearch = false) => {
-    if (!model.assetById[id]) return
+    if (!model.assetById[id] || (id !== controller.selectedAssetId && !mapDocument.permitLeave())) return
+    if (id !== controller.selectedAssetId) setDetailExpanded(false)
     if (controller.selectedAssetId !== id) commit('selectAsset', id)
     else api.current?.focusAsset?.(id)
     if (fromSearch) { setQuery(displayAssetName(model.assetById[id])); setSearchOpen(false); api.current?.highlightAsset(id) }
@@ -64,20 +74,24 @@ function Workspace({ model, createAdapter }) {
   const onBasemapStatus = (status, details = {}) => setBasemap(previous => ({ ...previous, status, ...(details.mode ? { mode: details.mode } : {}) }))
   const onReady = capabilities => { setMapReady(true); setBasemap(previous => ({ ...previous, ...capabilities })) }
   const changeArea = key => {
-    if (!model.locationGroups.some(group => group.key === key) || key === model.selectedArea?.key) return
+    if (!model.locationGroups.some(group => group.key === key) || key === model.selectedArea?.key || !mapDocument.permitLeave(true)) return
     const params = new URLSearchParams(window.location.search); params.set('area', key); params.delete('selectedAssetId')
     api.current?.dispose(); documentNavigation.assign(`${window.location.pathname}?${params}${window.location.hash}`)
   }
   const matches = useMemo(() => findAssetMatches(model.assets, query), [model, query])
   const sidebarModel = { ...model, matches, changeArea }
-  return <div className="map-app react-map-read"><AppHeader active="map" context={{ ...model.activeContext, area: model.selectedArea?.key }} /><main className={`map-workspace${collapsed ? ' sidebar-collapsed' : ''}${sidebarOpen ? ' sidebar-open' : ''}`} data-mobile-panel={sidebarOpen ? mobileTab : undefined}>
+  return <div className="map-app react-map-read"><AppHeader active="map" context={{ ...model.activeContext, area: model.selectedArea?.key }} /><main className={`map-workspace${collapsed ? ' sidebar-collapsed' : ''}${sidebarOpen ? ' sidebar-open' : ''}${selection.selectedAssetId ? ' drawer-open' : ''}${selection.selectedAssetId && !detailExpanded ? ' drawer-compact' : ''}`} data-mobile-panel={sidebarOpen ? mobileTab : undefined}>
     <MapSidebar model={sidebarModel} selection={selection} query={query} setQuery={setQuery} searchOpen={searchOpen} setSearchOpen={setSearchOpen} searchRef={search} resultsRef={results} expanded={expanded} focused={focused} coverage={coverage} collapsed={collapsed} onClose={closeSidebar} onSelectAsset={selectAsset} onToggleNetwork={id => commit('toggleNetwork', id)} onPreset={preset => { if (preset === 'all') commit('showAllNetworks'); else commit('toggleNetworkGroup', model.networks.filter(network => networkMatchesPreset(network, preset)).map(network => network.id)) }} onExpand={id => setExpanded(previous => { const next = new Set(previous); if (next.has(id)) next.delete(id); else next.add(id); return next })} onFocus={id => { const next = focused === id ? null : id; setFocused(next); if (next) api.current?.focusNetwork(id) }} onCoverage={() => setCoverage(previous => !previous)} onHover={id => api.current?.highlightNetwork(id)} />
-    <MapStage model={model} selection={selection} surfaceState={surfaceState} createAdapter={createAdapter} apiRef={api} mapAttempt={mapAttempt} mapReady={mapReady} mapError={mapError} retryMap={() => { setMapReady(false); setMapError(''); setMapAttempt(previous => previous + 1) }} basemap={basemap} onReady={onReady} onError={error => { setMapReady(false); setMapError(error.message) }} onBasemapStatus={onBasemapStatus} onSelectAsset={selectAsset} onSelectNetwork={selectNetwork} popup={popup} setPopup={setPopup} sidebarOpen={sidebarOpen} openSidebar={openSidebar} closeSidebar={closeSidebar} reopenRef={reopen} mobileTab={mobileTab} setMobileTab={setMobileTab} />
+    <MapStage model={model} canvasModel={initial} canEdit={canEdit} onTransfer={mode => transfer(model, selection, mode)} onDiagram={openDiagram} onBackdrop={selection.selectedAssetId ? closeDetail : closeSidebar} selection={selection} surfaceState={surfaceState} createAdapter={createAdapter} apiRef={api} mapAttempt={mapAttempt} mapReady={mapReady} mapError={mapError} retryMap={() => { setMapReady(false); setMapError(''); setMapAttempt(previous => previous + 1) }} basemap={basemap} onReady={onReady} onError={error => { setMapReady(false); setMapError(error.message) }} onBasemapStatus={onBasemapStatus} onSelectAsset={selectAsset} onSelectNetwork={selectNetwork} popup={popup} setPopup={setPopup} sidebarOpen={sidebarOpen} openSidebar={openSidebar} closeSidebar={closeSidebar} reopenRef={reopen} mobileTab={mobileTab} setMobileTab={setMobileTab}>
+      {mapDocument.stale && <div className="map-revision-warning" role="alert">{mapDocument.stale}<button type="button" onClick={() => { if (mapDocument.permitLeave(true)) documentNavigation.reload() }}>Muat ulang peta</button></div>}
+      {selection.selectedAssetId && <AssetDetailDrawer key={selection.selectedAssetId} mapAsset={model.assetById[selection.selectedAssetId]} document={mapDocument} canEdit={canEdit} expanded={detailExpanded} onExpand={() => setDetailExpanded(value => !value)} onClose={closeDetail} onSelect={selectAsset} onFocus={id => { api.current?.focusAsset(id); api.current?.highlightAsset(id) }} onNetwork={id => {selectNetwork(id); api.current?.focusNetwork(id)}} onDiagram={openDiagram} />}
+    </MapStage>
   </main></div>
 }
 export function MapReadPage({ createAdapter = createMapReadAdapter }) {
-  const { model, loading, error, retry } = useMapDataset(), { user } = useSession()
+  const { model, loading, error, retry } = useMapDataset(), { user } = useSession(), transfer = useMapTransfer()
+  const importEmpty = () => transfer({activeContext:{...readRequestedDatasetContext(window.location.search, sessionStorage.getItem('sinergiActiveDatasetId')), datasetVersionId:null, branchName:'Seluruh fasilitas', version:'Belum ada dataset aktif'}, selectedArea:null, networks:[]}, {selectedNetworkIds:new Set()}, 'import')
   useLayoutEffect(() => { const body = document.body.className, title = document.title; document.body.className = 'map-body'; document.title = 'Peta Jaringan — SINERGI'; return () => { document.body.className = body; document.title = title } }, [])
-  if (!model) return <div className="map-app react-map-read"><AppHeader active="map" /><main className={`map-data-state${loading ? ' is-loading' : ' is-error'}`} aria-live="polite" aria-busy={loading}><Icon>{loading ? 'progress_activity' : 'error'}</Icon><h1>{loading ? 'Memuat dataset aktif' : 'Dataset aktif tidak dapat dimuat'}</h1><p>{loading ? 'Aset, geometri, dan relasi sedang dibaca dari versi aktif yang sama.' : error}</p>{!loading && <div><button className="button button-primary retry-active-dataset" type="button" onClick={() => void retry()}>Coba lagi</button>{user?.role === 'Administrator' && <button type="button" className="button button-secondary" onClick={() => documentNavigation.assign('/admin/datasets/import')}><Icon>upload_file</Icon>Import KML/KMZ</button>}</div>}</main></div>
+  if (!model) return <div className="map-app react-map-read"><AppHeader active="map" /><main className={`map-data-state${loading ? ' is-loading' : ' is-error'}`} aria-live="polite" aria-busy={loading}><Icon>{loading ? 'progress_activity' : 'error'}</Icon><h1>{loading ? 'Memuat dataset aktif' : 'Dataset aktif tidak dapat dimuat'}</h1><p>{loading ? 'Aset, geometri, dan relasi sedang dibaca dari versi aktif yang sama.' : error}</p>{!loading && <div><button className="button button-primary retry-active-dataset" type="button" onClick={() => void retry()}>Coba lagi</button>{user?.role === 'Administrator' && <button type="button" className="button button-secondary" onClick={importEmpty}><Icon>upload_file</Icon>Import KML/KMZ</button>}</div>}</main></div>
   return <Workspace model={model} createAdapter={createAdapter} />
 }

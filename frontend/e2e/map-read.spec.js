@@ -13,6 +13,7 @@ async function setup(page, { role = 'Administrator', theme = 'light', failure = 
       if (state.pending) await state.pending
       return route.fulfill({ status: state.failure || 200, json: state.failure ? { error: { message: 'Dataset gagal' } } : state.payload })
     }
+    if (path.includes('/active/assets/')) { const id = decodeURIComponent(path.split('/').at(-1)), asset = state.payload.assets.find(asset => asset.assetId === id || asset.id === id); return route.fulfill({json:{asset:{...asset,id},identity:{canonicalAssetId:id},activePointer:state.payload.activePointer}}) }
     if (path.endsWith('/planet')) return route.fulfill({ json: fixtures.basemap })
     if (path.endsWith('/overlays')) return route.fulfill({ json: { overlays: [] } })
     if (path.includes('/fonts/')) return route.fulfill({ body: Buffer.alloc(0) })
@@ -23,7 +24,7 @@ async function setup(page, { role = 'Administrator', theme = 'light', failure = 
   return { state, errors, modules }
 }
 const search = page => page.getByRole('combobox', { name: 'Cari Asset ID, nama aset, lokasi, atau hostname' })
-test('prepared React map keeps one canvas through network, selection, URL history, theme and coverage changes', async ({ page }) => {
+test('React map keeps one canvas through network, selection, URL history, theme and coverage changes', async ({ page }) => {
   const { state, errors, modules } = await setup(page)
   expect(modules.some(url => url.includes('/react/map/MapReadPage.jsx'))).toBe(true)
   expect(modules.some(url => url.includes('/pages/map/map-page.js'))).toBe(false)
@@ -63,6 +64,7 @@ test('mobile map opens asset panel, supports selection and returns focus after E
   await expect(page.locator('.map-workspace')).toHaveClass(/sidebar-open/)
   await search(page).fill('C-01'); await page.getByRole('option', { name: /Pilih C-01/ }).click()
   await expect(page.locator('.map-workspace')).not.toHaveClass(/sidebar-open/)
+  await page.getByRole('button', { name: 'Tutup detail aset' }).click()
   await page.getByRole('button', { name: 'Layer', exact: true }).click(); await page.keyboard.press('Escape')
   await expect(page.locator('.map-workspace')).not.toHaveClass(/sidebar-open/)
   await expect(page.getByRole('button', { name: 'Buka panel jaringan' })).toBeFocused()
@@ -97,8 +99,8 @@ test('leaving the experimental page aborts its pending dataset request', async (
   release()
   await expect(page.getByRole('heading', { name: 'Left map' })).toBeVisible(); expect(errors).toEqual([])
 })
-test('production map route still loads the legacy implementation in stage 10', async ({ page }) => {
+test('production map route now loads React without the legacy page renderer', async ({ page }) => {
   const { modules } = await setup(page, { url: '/map?datasetId=dataset-semarang' })
-  expect(modules.some(url => url.includes('/pages/map/map-page.js'))).toBe(true)
-  expect(modules.some(url => url.includes('/react/map/MapReadPage.jsx'))).toBe(false)
+  expect(modules.some(url => url.includes('/pages/map/map-page.js'))).toBe(false)
+  expect(modules.some(url => url.includes('/react/map/MapReadPage.jsx'))).toBe(true)
 })
