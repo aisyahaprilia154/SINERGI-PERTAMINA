@@ -12,6 +12,7 @@ export const reactRoutes = [
     const { MapRoute } = await import('./map/MapRoute.jsx')
     return { Component: MapRoute }
   } })),
+  ...['/topology','/topologi'].map(path=>({path,lazy:async()=>{const {TopologyRoute}=await import('./topology/TopologyRoute.jsx');return {Component:TopologyRoute}}})),
   { path: '/admin/datasets/import/:importId/preview', lazy: async () => {
     const { PreviewRoute } = await import('./preview/PreviewRoute.jsx')
     return { Component: PreviewRoute }

@@ -1,0 +1,94 @@
+{
+  "stage": 15,
+  "date": "2026-10-24",
+  "branch": "react-migration-baseline",
+  "baseCommit": "919d142",
+  "productionReactRoutes": [
+    "/topology",
+    "/topologi"
+  ],
+  "frontendLegacyTests": {
+    "passed": 341,
+    "failed": 0
+  },
+  "reactTests": {
+    "passed": 192,
+    "failed": 0,
+    "files": 13
+  },
+  "backendTests": {
+    "passed": 77,
+    "skipped": 1,
+    "failed": 0,
+    "skipReason": "SINERGI_TEST_DATABASE_URL unavailable"
+  },
+  "playwright": {
+    "fullSuitePassed": 80,
+    "finalTopologyRerunPassed": 16,
+    "failed": 0,
+    "note": "Full suite passed before the last topology-only redraw fix; all 16 affected topology cases were rerun on final code.",
+    "browser": "156.0.8078.4",
+    "channel": "chromium-headless-shell",
+    "workers": 1
+  },
+  "smoke": {
+    "checks": [
+      "Login toggle password, rejected login and retry control",
+      "User search, role filter and protected drawer draft",
+      "Empty versions, save dialog Escape and focus restoration",
+      "Import file validation blocks invalid upload before API write",
+      "Empty import history",
+      "Map API error, retry and asset search",
+      "Topology zoom and reset",
+      "Viewer admin-route redirect and hidden administrator menu",
+      "Anonymous protected-route redirect",
+      "Expired session redirects to login"
+    ],
+    "errors": [],
+    "unexpected": [],
+    "database": "not connected; all API responses mocked"
+  },
+  "lint": {
+    "root": "passed",
+    "frontendJsxHooks": "passed",
+    "backend": "passed"
+  },
+  "build": {
+    "frontend": "passed",
+    "backend": "passed",
+    "outputs": [
+      "frontend/dist/client/index.html",
+      "frontend/dist/server/index.js"
+    ],
+    "existingWarning": "MapLibre chunk exceeds 500 kB"
+  },
+  "visual": {
+    "pageScreenshots": 40,
+    "componentScreenshots": 40,
+    "pairs": 20,
+    "sameDimensions": true,
+    "exactCrops": 17,
+    "exactViewports": 20,
+    "exactRawSvg": 16,
+    "svgEqualIgnoringOnlyKeyboardAttributes": 20,
+    "differences": "Two desktop export panels now display above inspector; one mobile-light rename input selection highlight."
+  },
+  "proof": {
+    "unchangedSources": 21,
+    "identicalViewportFunctions": 13,
+    "identicalOverviewLabelPositions": true
+  },
+  "writes": "All UI writes mocked; operational database unchanged",
+  "runtime": {
+    "node": "24.22.1",
+    "vitePort": 5173,
+    "apiProxyPort": 5001,
+    "unauthenticatedProxyStatus": 401
+  },
+  "remaining": "Stage 16: SPA, internal draft guard, legacy cleanup, README, Docker frontend and deployment URL checks",
+  "excludedUserChanges": [
+    ".env.docker.example deletion",
+    "docs/figures/"
+  ],
+  "pushMergeDeploy": false
+}

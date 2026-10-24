@@ -1,0 +1,157 @@
+{
+  "checkpoint": "919d142",
+  "unchanged": [
+    {
+      "file": "frontend/src/pages/topology/topology-connection-style.js",
+      "sha256": "0b19f45868853c6b475554a590a55809df23a4c3541401bfc91be74cd4191286"
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-diagram-layout.js",
+      "sha256": "c855559d6906a9f254f0546f85112219e953e4c53e7a1c4a84b36aaa76fc4e62"
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-diagram-svg.js",
+      "sha256": "55c14d36df1a015ed89d81af0ed1917a76ea9bb96051f636aaf32ae20a6c3eb6"
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-document-meta.js",
+      "sha256": "61a7f54a6286579ca6dd601476b2cb5a83c9bd5d26ef15e0e89db34e261a7bfa"
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-drag-auto-pan.js",
+      "sha256": "4600bc5a95a129f08f38e72b1d1a54409a7532e720617a96142a8667f81fab00"
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-drag-feedback.js",
+      "sha256": "9197081cdb111e37398f5b8ac2df21466b091e8adba43f6b7824fb409000073a"
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-drop-target.js",
+      "sha256": "7e00c605f27e9f63d34bd5647440e4699023c6d0366e658647564bdf97b76807"
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-frame-descendants.js",
+      "sha256": "2726ed34ca3c5d4f9938dd66bf7115b1aa61ade125aa34194c226d3da805151c"
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-layout.worker.js",
+      "sha256": "b985af0968bcf3d5c668f8b6b727f2502acb0ac2bc446515a01038d854e2cae3"
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-line-jumps.js",
+      "sha256": "65e3f558715e0d6e48463e1f0035405d23890b146a4b047d016eae18dd74391a"
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-obstacle-router.js",
+      "sha256": "1e999db61e347864230af9848c7dd09be2328a0dea752301d6a66a67763b5844"
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-page.js",
+      "sha256": "a562e27d2b69a26af17652532a2e5356ddb13e2299c761a0e4ab1270997dd9a5"
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-renderer.js",
+      "sha256": "505c98bca5d7dcab4b8f6aa5e5d22de808a4a78c5a5874cc11553e5c05a47131"
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-spatial-layout.js",
+      "sha256": "963af10d8788a2804fac106dfcb07bceeb1858847a9ed1af0e8d166404711d70"
+    },
+    {
+      "file": "frontend/src/pages/topology/topology-viewport.js",
+      "sha256": "b59a8def1bf2b896542771517306b99fde1e9890ce5cc62cbe3b05ff1e88aefd"
+    },
+    {
+      "file": "frontend/src/domain/topology-diagram-model.js",
+      "sha256": "3b80800d18246e1d0dac6aa0dfd5fb560701f22e9257c021b7b70bb5ebba9768"
+    },
+    {
+      "file": "frontend/src/domain/topology-workspace-model.js",
+      "sha256": "ce30c68cf59df92c118bf34e70c76c9da5fedbeaf7e7012d974d5a4193c04716"
+    },
+    {
+      "file": "frontend/src/domain/topology-document.js",
+      "sha256": "95022c9857220c11330ef7e0db420e828f64baf60b59f1566efe7ceb74d3b586"
+    },
+    {
+      "file": "frontend/src/styles/topology-route.css",
+      "sha256": "6f01b432238d789931bfe6323ca23479c6af022f68db887b51386fd36afc477f"
+    },
+    {
+      "file": "frontend/src/styles/topology-workspace.css",
+      "sha256": "7db085e21224877c5951248622958229595fcb7cfad3a543644f0f5207850e6f"
+    },
+    {
+      "file": "frontend/src/styles/topology-refinement.css",
+      "sha256": "8e9da0aa3fa80bf9fd8f33867698fdbea8c477a73f2edc549dbf543aeda0a150"
+    }
+  ],
+  "viewportFunctions": [
+    {
+      "name": "changeZoom",
+      "identical": true,
+      "sha256": "012c4841263bbaad06ee8ec74be7ec883da79a93e8ce2bb3db2972d5febf1968"
+    },
+    {
+      "name": "setZoom",
+      "identical": true,
+      "sha256": "14048d3a9fae25c96e217c8e616ef09f2bb33dcb0023a0b488fc5394983fb18a"
+    },
+    {
+      "name": "graphSafeViewport",
+      "identical": true,
+      "sha256": "2ac73e8e2b84b903cc730ac2793bd980725ccf85257f9e3ab6d9c1803af551c2"
+    },
+    {
+      "name": "fitGraph",
+      "identical": true,
+      "sha256": "fe1bde0006b401a2460a9709ae37a8adc0476392029bb8605e96e01b63e2b4e7"
+    },
+    {
+      "name": "focusAssetCard",
+      "identical": true,
+      "sha256": "9cd13c0b0976582f56e3ed0faa47ecd16f10bfe9619b4316062c032449d305d0"
+    },
+    {
+      "name": "focusMountingGroup",
+      "identical": true,
+      "sha256": "52b2f3f07dbd15573cbb8bc25cb16ecaf0289bcce53090601d7fc181baef4212"
+    },
+    {
+      "name": "focusRelations",
+      "identical": true,
+      "sha256": "a9a217e2d41e29cbc40b28ce3dc99a0309396a7ceb1e2a83438ffd4533dcf077"
+    },
+    {
+      "name": "resetGraphViewport",
+      "identical": true,
+      "sha256": "9a5894ea30ffc81561f44923ed184b17f0c48404734601a3dc18deac79e51e23"
+    },
+    {
+      "name": "zoomGraphTo",
+      "identical": true,
+      "sha256": "2008b23b6c603e455315b41ec72ccf4ebb1e08dc9978062c22265254aa3b7c4f"
+    },
+    {
+      "name": "syncGraphSurface",
+      "identical": true,
+      "sha256": "58fc177c7f681c47635d64e65e6006aa8facf7cd3aa170135e7f41b09497a40c"
+    },
+    {
+      "name": "centerGraph",
+      "identical": true,
+      "sha256": "4f6f30bd8c14e9cb71b36e3e6eb6debef97e5fb16c63dd7b5dcf5766a7efd91a"
+    },
+    {
+      "name": "viewportCenterSnapshot",
+      "identical": true,
+      "sha256": "7aafaf0f535faa1c5e2d704df7f2719c209c8427ca482b3cc73aafaefdea367b"
+    },
+    {
+      "name": "restoreViewportCenter",
+      "identical": true,
+      "sha256": "31d2f8c078ced4285031f81fd2e7b1ed9c695e3cfbfdde086de79ea415c5f5d3"
+    }
+  ],
+  "overviewLabelPositionsIdentical": true
+}

@@ -1,3 +1,6 @@
+import {resolveTopologyDropTarget} from '../pages/topology/topology-drop-target.js'
+import {createAssetDragFeedback} from '../pages/topology/topology-drag-feedback.js'
+import {createDragAutoPan} from '../pages/topology/topology-drag-auto-pan.js'
 import {createTopologyWorkspaceScope} from './topology-workspace-scope.js'
 import {createTopologyGraphRenderer} from './topology-graph-renderer.js'
 import {createSourceIconLoader} from '../domain/source-icon-loader.js'
@@ -12,12 +15,12 @@ export function createTopologyReadAdapter(container,options={}) {
   try{return mountTopologyReadAdapter(container,options,scope)}catch(error){scope.dispose();throw error}
 }
 
-function mountTopologyReadAdapter(container,{onSelect,onZoom=()=>{},onLabels=()=>{},onResize=()=>{},onMessage=()=>{},onIcons=()=>{}},scope) {
+function mountTopologyReadAdapter(container,{onSelect,onZoom=()=>{},onLabels=()=>{},onResize=()=>{},onMessage=()=>{},onIcons=()=>{},canEdit=()=>false,onDrop=()=>{},onRename=()=>{}},scope) {
   const sourceIconLoader=createSourceIconLoader({signal:scope.signal})
   const viewport=container.querySelector('[data-topology-viewport]'),frame=container.querySelector('[data-topology-frame]')
-  let model=null,layout=null,mapData=null,activeContext=null,state={zoom:1},pan=null,scopeKey=null,lastFocus=null
-  const renderer=createTopologyGraphRenderer({frame,getSnapshot:()=>({model,layout,mapData,activeContext,state}),sourceIconLoader,scope,syncGraphSurface,renderOverviewLabels,onIconsReady:()=>onIcons(new Map(sourceIconLoader.dataByUrl)),isDragging:()=>false,preserveFocus:true})
-  function renderGraph(){renderer.render()}
+  let model=null,layout=null,mapData=null,activeContext=null,state={zoom:1},panState=null,dragState=null,suppressViewportClick=false,scopeKey=null,lastFocus=null
+  const renderer=createTopologyGraphRenderer({frame,getSnapshot:()=>({model,layout,mapData,activeContext,state}),sourceIconLoader,scope,syncGraphSurface,renderOverviewLabels,onIconsReady:()=>onIcons(new Map(sourceIconLoader.dataByUrl)),isDragging:()=>!!dragState?.active,preserveFocus:true})
+  function renderGraph(){renderer.render();if(canEdit())for(const label of frame.querySelectorAll('[data-frame-label]')){if(mapData?.topologyFrames?.[label.dataset.frameLabel]){label.setAttribute('tabindex','0');label.setAttribute('role','button');label.setAttribute('aria-label','Ganti nama frame')}}}
   function updateToolbar(){onZoom(state.zoom)}
   function showToast(message){onMessage(message)}
   function changeZoom(delta) {
@@ -397,6 +400,9 @@ function mountTopologyReadAdapter(container,{onSelect,onZoom=()=>{},onLabels=()=
   }
 
   const activate=event=>{
+    if(suppressViewportClick)return
+    const label=event.target.closest('[data-frame-label]')
+    if(label){if(event.type==='keydown'&&['Enter',' '].includes(event.key)&&canEdit()){event.preventDefault();onRename({id:label.dataset.frameLabel})}return}
     if(event.type==='keydown'&&!['Enter',' '].includes(event.key))return
     const node=event.target.closest('[data-node-id]'),edge=event.target.closest('[data-edge-id]'),group=event.target.closest('[data-mounting-group-id]'),area=event.target.closest('[data-overview-area]')
     const selected=node?{kind:'asset',id:node.dataset.nodeId}:edge?{kind:'edge',id:edge.dataset.edgeId}:group?{kind:'mounting',id:group.dataset.mountingGroupId}:area?{kind:'area',id:area.dataset.overviewArea}:null
@@ -404,28 +410,220 @@ function mountTopologyReadAdapter(container,{onSelect,onZoom=()=>{},onLabels=()=
   }
   scope.listen(frame,'click',activate);scope.listen(frame,'keydown',activate)
   scope.listen(viewport,'wheel',event=>{if(!event.ctrlKey&&!event.metaKey)return;event.preventDefault();zoomGraphTo(state.zoom+(event.deltaY>0?-.08:.08),event)},{passive:false})
-  scope.listen(viewport,'pointerdown',event=>{
-    if(event.button!==0||event.pointerType==='touch'||event.target.closest('[data-node-id],[data-edge-id],[data-mounting-group-id],button,a,input,select'))return
-    pan={id:event.pointerId,x:event.clientX,y:event.clientY,left:viewport.scrollLeft,top:viewport.scrollTop};viewport.setPointerCapture(event.pointerId);viewport.classList.add('is-panning')
-  })
-  scope.listen(viewport,'pointermove',event=>{if(pan?.id!==event.pointerId)return;viewport.scrollLeft=pan.left-(event.clientX-pan.x);viewport.scrollTop=pan.top-(event.clientY-pan.y)})
-  const end=event=>{if(pan?.id!==event.pointerId)return;const id=pan.id;pan=null;if(viewport.hasPointerCapture(id))viewport.releasePointerCapture(id);viewport.classList.remove('is-panning')}
-  scope.listen(viewport,'pointerup',end);scope.listen(viewport,'pointercancel',end);scope.listen(viewport,'lostpointercapture',end)
+  function beginPan(event) {
+    if (event.button !== 0 || state.mutationBusy || dragState || panState) return
+    const node = event.target.closest('[data-node-id]')
+    if (canEdit() && node?.dataset.nodeId && !state.mutationBusy) {
+      node.setPointerCapture(event.pointerId)
+      dragState = {
+        viewport: event.currentTarget,
+        captureElement: node,
+        pointerId: event.pointerId,
+        assetId: node.dataset.nodeId,
+        startX: event.clientX,
+        startY: event.clientY,
+        distance: 0,
+        active: false,
+        targetGroupId: null,
+      }
+      return
+    }
+    if (event.pointerType === 'touch') return
+    if (event.target.closest('[data-edge-id], [data-mounting-group-id], button, a, input, select')) return
+    const viewport = event.currentTarget
+    panState = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      left: viewport.scrollLeft,
+      top: viewport.scrollTop,
+      distance: 0,
+    }
+    viewport.setPointerCapture(event.pointerId)
+    viewport.classList.add('is-panning')
+  }
+
+  function beginTrayAssetDrag(event) {
+    if (!canEdit()) return
+    if (event.button !== 0 || state.mutationBusy || dragState || panState) return
+    const item = event.target.closest('[data-tray-asset]')
+    if (!item || !model?.nodeById.has(item.dataset.trayAsset)) return
+    item.setPointerCapture(event.pointerId)
+    dragState = {
+      viewport: container.querySelector('[data-topology-viewport]'),
+      captureElement: item,
+      pointerId: event.pointerId,
+      assetId: item.dataset.trayAsset,
+      startX: event.clientX,
+      startY: event.clientY,
+      distance: 0,
+      active: false,
+      targetGroupId: null,
+    }
+  }
+
+  function movePan(event) {
+    if (dragState && event.pointerId === dragState.pointerId) {
+      moveAssetDrag(event)
+      return
+    }
+    if (!panState || event.pointerId !== panState.pointerId) return
+    const viewport = event.currentTarget
+    const deltaX = event.clientX - panState.x
+    const deltaY = event.clientY - panState.y
+    panState.distance = Math.max(panState.distance, Math.hypot(deltaX, deltaY))
+    viewport.scrollLeft = panState.left - deltaX
+    viewport.scrollTop = panState.top - deltaY
+  }
+
+  function endPan(event) {
+    if (dragState && event.pointerId === dragState.pointerId) {
+      endAssetDrag(event)
+      return
+    }
+    if (!panState || event.pointerId !== panState.pointerId) return
+    suppressViewportClick = panState.distance >= 4
+    panState = null
+    event.currentTarget.classList.remove('is-panning')
+    scope.timeout(() => { suppressViewportClick = false }, 0)
+  }
+
+  function moveAssetDrag(event) {
+    const distance = Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY)
+    dragState.distance = Math.max(dragState.distance, distance)
+    if (!dragState.active && distance < 6) return
+    event.preventDefault()
+    if (!dragState.active) {
+      dragState.active = true
+      dragState.viewport.classList.add('is-dragging-asset')
+      const source = container.querySelector(`[data-node-id="${CSS.escape(dragState.assetId)}"]`)
+      if (!source) {
+        cancelAssetDrag()
+        return
+      }
+      dragState.feedback = createAssetDragFeedback(source, event, { reducedMotion: prefersReducedMotion() })
+      dragState.autoPan = createDragAutoPan(dragState.viewport, pointer => {
+        if (dragState?.active) scheduleAssetDropTarget(pointer)
+      })
+      scope.own(dragState.feedback.cancel)
+      scope.own(()=>dragState?.autoPan?.stop())
+      source.classList.add('is-dragging')
+    }
+    dragState.feedback.move(event)
+    scheduleAssetDropTarget(event)
+    dragState.autoPan.move(event)
+  }
+
+  function scheduleAssetDropTarget({ clientX, clientY }) {
+    if (!dragState?.active) return
+    dragState.latestPointer = { clientX, clientY }
+    if (dragState.targetFrame) return
+    dragState.targetFrame = scope.frame(() => {
+      if (!dragState?.active) return
+      dragState.targetFrame = 0
+      updateAssetDropTarget(dragState.latestPointer)
+    })
+  }
+
+  function updateAssetDropTarget(event) {
+    const viewport = dragState.viewport
+    const hit = document.elementFromPoint(event.clientX, event.clientY)
+    const inside = hit && viewport.contains(hit)
+    const hitNode = inside ? hit.closest('[data-node-id]') : null
+    const targetId = hitNode?.dataset.nodeId
+    const box = inside ? mountingGroupAtClientPoint(hit) : null
+    const sourceFrameId = layout?.nodes?.find(node => node.id === dragState.assetId)?.mountingBoxId ?? null
+    const drop = resolveTopologyDropTarget({ sourceId: dragState.assetId, targetId, box, model,
+      sourceFrameId })
+    dragState.drop = drop
+    dragState.targetGroupId = drop.kind === 'move' ? drop.box.id : null
+    dragState.feedback.target(drop.kind === 'move'
+      ? hit.closest('[data-mounting-group-id]') : null, drop.box)
+    dragState.feedback.connection(drop.kind === 'connect' ? hitNode : null)
+    dragState.feedback.hint(drop.message, drop.kind !== 'invalid')
+  }
+
+  function clearAssetDrag(completed) {
+    completed.autoPan?.stop()
+    if (completed.targetFrame) scope.cancelFrame(completed.targetFrame)
+    dragState = null
+    completed.viewport.classList.remove('is-dragging-asset')
+    container.querySelectorAll('.topology-node.is-dragging')
+      .forEach(element => element.classList.remove('is-dragging'))
+    if (completed.captureElement.hasPointerCapture(completed.pointerId)) {
+      completed.captureElement.releasePointerCapture(completed.pointerId)
+    }
+    if (completed.active) {
+      suppressViewportClick = true
+      scope.timeout(() => { suppressViewportClick = false }, 0)
+    }
+  }
+
+  function cancelAssetDrag() {
+    const completed = dragState
+    if (!completed) return
+    clearAssetDrag(completed)
+    completed.feedback?.cancel()
+  }
+
+  function endAssetDrag(event) {
+    // Losing capture or native touch cancellation must never commit a stale hover.
+    if (event.type !== 'pointerup') { cancelAssetDrag(); return }
+    if (dragState.active) updateAssetDropTarget(event)
+    const completed = dragState
+    clearAssetDrag(completed)
+    if (!completed.active) return
+    const drop = completed.drop
+    if (state.mutationBusy || drop?.kind === 'invalid' || !drop) {
+      void completed.feedback?.finish()
+      if (drop) showToast(drop.message)
+      return
+    }
+    onDrop({assetId:completed.assetId,drop,dx:event.clientX-completed.startX,dy:event.clientY-completed.startY,zoom:state.zoom})
+    void completed.feedback?.finish()
+  }
+
+  function mountingGroupAtClientPoint(hit) {
+    const frame = container.querySelector('[data-topology-frame]')
+    if (!frame || !layout?.mountingBoxes) return null
+    const group = hit?.closest('[data-mounting-group-id]')
+    if (!group || !frame.contains(group)) return null
+    // SVG rendering can reposition frames. Use the visible group's identity,
+    // not stale layout coordinates; labels and the expanded drop slot count too.
+    return layout.mountingBoxes.find(box => box.id === group.dataset.mountingGroupId
+      && ['confirmed', 'empty', 'excluded'].includes(box.kind)) ?? null
+  }
+
+  scope.listen(frame,'dblclick',event=>{const label=event.target.closest('[data-frame-label]');if(canEdit()&&label){event.preventDefault();onRename({id:label.dataset.frameLabel})}})
+  const tray=container.querySelector('[data-topology-tray]')
+  scope.listen(viewport,'pointerdown',beginPan)
+  scope.listen(tray,'pointerdown',beginTrayAssetDrag)
+  for(const element of [viewport,tray]){
+    scope.listen(element,'pointermove',movePan)
+    for(const type of ['pointerup','pointercancel','lostpointercapture'])scope.listen(element,type,endPan)
+  }
+  scope.listen(window,'keydown',event=>{if(event.key==='Escape')cancelAssetDrag()})
+  scope.listen(container,'click',event=>{if(suppressViewportClick){event.preventDefault();event.stopPropagation()}},true)
   scope.listen(viewport,'scroll',renderOverviewLabels,{passive:true})
   if(typeof ResizeObserver==='function')scope.observe(new ResizeObserver(()=>{if(scope.disposed)return;onResize();syncGraphSurface({preserveCenter:true});renderOverviewLabels()}),viewport)
-  scope.own(()=>{if(pan&&viewport.hasPointerCapture(pan.id))viewport.releasePointerCapture(pan.id);pan=null;viewport.classList.remove('is-panning')})
+  scope.own(()=>{cancelAssetDrag();if(panState&&viewport.hasPointerCapture(panState.pointerId))viewport.releasePointerCapture(panState.pointerId);panState=null;viewport.classList.remove('is-panning')})
   const alive=callback=>(...args)=>{if(!scope.disposed)return callback(...args)}
   return {
     update(snapshot,{key,focus=null}={}){
       if(scope.disposed)return
-      const reset=key!==scopeKey,focusChanged=focus&&focus.sequence!==lastFocus;scopeKey=key;if(focusChanged)lastFocus=focus.sequence;const previousZoom=state.zoom
+      const reset=key!==scopeKey,focusChanged=focus&&focus.sequence!==lastFocus
+      const graphChanged=model!==snapshot.model||layout!==snapshot.layout||mapData!==snapshot.mapData||['selectedAssetId','selectedEdgeId','selectedMountingGroupId','labelMode','showMountingPhysical','frameNames'].some(field=>state[field]!==snapshot.state[field])
+      const sidebarChanged=state.sidebarCollapsed!==snapshot.state.sidebarCollapsed
+      scopeKey=key;if(focusChanged)lastFocus=focus.sequence;const previousZoom=state.zoom
       ;({model,layout,mapData,activeContext}=snapshot);state={...snapshot.state,zoom:previousZoom}
-      renderGraph();updateToolbar()
-      const focusCurrent=()=>{if(focus.kind==='relations')focusRelations();else if(focus.kind==='asset')focusAssetCard(focus.id);else if(focus.kind==='mounting')focusMountingGroup(focus.id)}
+      if(!reset&&!focusChanged&&!graphChanged&&!sidebarChanged)return
+      if(!dragState?.active)renderGraph();updateToolbar()
+      const focusCurrent=()=>{if(focus.kind==='frame'){const box=layout.mountingBoxes?.find(item=>item.id===focus.id);if(box)restoreViewportCenter(viewport,frame,{x:box.x+box.width/2,y:box.y+box.height/2})}else if(focus.kind==='relations')focusRelations();else if(focus.kind==='asset')focusAssetCard(focus.id);else if(focus.kind==='mounting')focusMountingGroup(focus.id)}
       if(reset)scope.frame(()=>{if(focusChanged)focusCurrent();else if(window.matchMedia('(max-width: 960px)').matches)fitGraph();else resetGraphViewport()})
       else if(focusChanged)scope.frame(focusCurrent)
       else scope.frame(()=>syncGraphSurface({preserveCenter:true}))
     },
+    cancelDrag:alive(cancelAssetDrag),
     zoomIn:alive(()=>changeZoom(.1)),zoomOut:alive(()=>changeZoom(-.1)),resetZoom:alive(()=>zoomGraphTo(1)),fit:alive(fitGraph),reset:alive(resetGraphViewport),
     focusItem:alive(choice=>{const key=choice.kind==='asset'?'nodeId':'edgeId';[...frame.querySelectorAll('[data-node-id],[data-edge-id]')].find(node=>node.dataset[key]===choice.id)?.focus({preventScroll:true})}),
     focusAsset:alive(focusAssetCard),focusGroup:alive(focusMountingGroup),focusRelations:alive(focusRelations),

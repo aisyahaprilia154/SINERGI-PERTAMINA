@@ -1,0 +1,23 @@
+
+Running 16 tests using 1 worker
+
+(node:33212) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [desktop-edge] › frontend\e2e\topology-edit.spec.js:31:1 › React topology edits relations, preserves revision conflicts and serializes repeated saves (4.4s)
+  ok  2 [desktop-edge] › frontend\e2e\topology-edit.spec.js:38:1 › frame creation, rename, moving assets and saved documents survive reload (5.3s)
+  ok  3 [desktop-edge] › frontend\e2e\topology-edit.spec.js:46:1 › drag connects assets without pointer-motion UI redraws and cancellation never stages a drop (3.9s)
+  ok  4 [desktop-edge] › frontend\e2e\topology-edit.spec.js:54:1 › Viewer can export SVG and PNG while edits remain unavailable (3.2s)
+  ok  5 [desktop-edge] › frontend\e2e\topology-edit.spec.js:59:1 › unsaved navigation is guarded and pagehide cancels an in-flight save without late redraw (2.4s)
+  ok  6 [desktop-edge] › frontend\e2e\topology-edit.spec.js:64:1 › node drag positions are saved with the draft and rendered again after reload (5.0s)
+  ok  7 [desktop-edge] › frontend\e2e\topology-extraction.spec.js:25:1 › legacy topology retains selection/search, area and Viewer read-only controls after extraction (1.8s)
+  ok  8 [desktop-edge] › frontend\e2e\topology-extraction.spec.js:32:1 › draft cancel restores the relation; failed save retains draft and repeated retry sends once (1.8s)
+  ok  9 [desktop-edge] › frontend\e2e\topology-extraction.spec.js:39:1 › read error retries to empty state and ignores a pending load after pagehide (928ms)
+  ok 10 [desktop-edge] › frontend\e2e\topology-extraction.spec.js:46:1 › remount cleans old handlers and disposal stops debounced search and SVG updates (1.9s)
+  ok 11 [desktop-edge] › frontend\e2e\topology-read.spec.js:18:1 › prepared topology reads through the real SVG adapter without legacy UI or write requests (2.3s)
+  ok 12 [desktop-edge] › frontend\e2e\topology-read.spec.js:28:1 › search drills overview into a facility, focuses selection and supports result keyboard controls (2.1s)
+  ok 13 [desktop-edge] › frontend\e2e\topology-read.spec.js:34:1 › mobile sidebar, legend, asset and relation inspection remain usable for a Viewer (2.1s)
+  ok 14 [desktop-edge] › frontend\e2e\topology-read.spec.js:40:1 › API loading/error/retry and empty dataset do not leave active navigation controls (960ms)
+  ok 15 [desktop-edge] › frontend\e2e\topology-read.spec.js:45:1 › pagehide aborts pending reads and source icon work without a late mount (993ms)
+  ok 16 [desktop-edge] › frontend\e2e\topology-read.spec.js:49:1 › production topology alias activates React without importing the legacy page (1.6s)
+
+  16 passed (44.8s)

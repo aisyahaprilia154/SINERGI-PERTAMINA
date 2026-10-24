@@ -10,5 +10,5 @@ import {SessionProvider} from '../session/SessionProvider.jsx'
 import {SessionGate} from '../session/SessionGate.jsx'
 import {TopologyReadPage} from './TopologyReadPage.jsx'
 
-// Prepared in isolation; production aliases continue to use the legacy route until stage 15.
+// Stage 15: both production aliases use the React workspace.
 export function TopologyRoute(){return <ThemeProvider><SessionProvider><SessionGate pathname="/topology"><TopologyReadPage/></SessionGate></SessionProvider></ThemeProvider>}

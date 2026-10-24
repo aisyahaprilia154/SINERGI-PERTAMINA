@@ -17,7 +17,7 @@ async function open(page,query='area=ft-semarang'){await page.goto(`/e2e/fixture
 
 test('prepared topology reads through the real SVG adapter without legacy UI or write requests',async({page})=>{
  const state=await setup(page);await open(page);expect(state.modules.some(url=>url.includes('/react/topology/TopologyReadPage.jsx'))).toBe(true);expect(state.modules.some(url=>url.includes('/pages/topology/topology-page.js'))).toBe(false)
- await expect(page.getByRole('button',{name:'Tambah frame',exact:true})).toBeDisabled();await expect(page.getByRole('button',{name:'Ekspor diagram',exact:true})).toBeDisabled()
+ await expect(page.getByRole('button',{name:'Tambah frame',exact:true})).toBeEnabled();await expect(page.getByRole('button',{name:'Ekspor diagram',exact:true})).toBeEnabled()
  await page.locator('[data-topology-frame]').evaluate(element=>window.topologyFrame=element);await page.locator('[data-topology-frame] [data-node-id="C-01"]').click();await expect(page.getByRole('heading',{name:'C-01',exact:true})).toBeVisible();await expect(page).toHaveURL(/selectedAssetId=C-01/)
  await expect(page.getByRole('link',{name:'Peta Aset',exact:true})).toHaveAttribute('href',/selectedAssetId=C-01/);await page.getByRole('button',{name:'Perbesar diagram',exact:true}).click();await expect(page.locator('[data-topology-zoom-label]')).not.toHaveText('100%')
  const camera=await page.locator('[data-topology-viewport]').evaluate(element=>{element.scrollTo({left:25,top:40,behavior:'instant'});return [element.scrollLeft,element.scrollTop]});await page.getByRole('button',{name:'Aktifkan mode gelap',exact:true}).click();expect(await page.locator('[data-topology-frame]').evaluate(element=>element===window.topologyFrame)).toBe(true);expect(await page.locator('[data-topology-viewport]').evaluate(element=>[element.scrollLeft,element.scrollTop])).toEqual(camera)
@@ -46,6 +46,6 @@ test('pagehide aborts pending reads and source icon work without a late mount',a
  const state=await setup(page);let release;state.pending=new Promise(resolve=>release=resolve);await page.goto('/e2e/fixtures/topology.html',{waitUntil:'domcontentloaded'});await expect(page.getByRole('heading',{name:'Memuat dataset aktif'})).toBeVisible();await page.evaluate(()=>window.dispatchEvent(new Event('pagehide')));release();state.pending=null;await page.waitForTimeout(250);await expect(page.locator('[data-topology-frame]')).toHaveCount(0);expect(state.errors).toEqual([])
 })
 
-test('production topology aliases retain their legacy renderer until stage 15',async({page})=>{
- const state=await setup(page);await page.goto('/topologi?datasetId=dataset-semarang&area=ft-semarang',{waitUntil:'networkidle'});await expect(page.locator('[data-topology-frame] svg')).toBeVisible();expect(state.modules.some(url=>url.includes('/pages/topology/topology-page.js'))).toBe(true);expect(state.modules.some(url=>url.includes('/react/topology/TopologyReadPage.jsx'))).toBe(false)
+test('production topology alias activates React without importing the legacy page',async({page})=>{
+ const state=await setup(page);await page.goto('/topologi?datasetId=dataset-semarang&area=ft-semarang',{waitUntil:'networkidle'});await expect(page.locator('[data-topology-frame] svg')).toBeVisible();expect(state.modules.some(url=>url.includes('/pages/topology/topology-page.js'))).toBe(false);expect(state.modules.some(url=>url.includes('/react/topology/TopologyReadPage.jsx'))).toBe(true)
 })

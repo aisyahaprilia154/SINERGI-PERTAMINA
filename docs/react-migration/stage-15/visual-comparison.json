@@ -1,0 +1,425 @@
+{
+  "threshold": 12,
+  "results": [
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "detail",
+      "oldSize": [
+        352,
+        836
+      ],
+      "newSize": [
+        352,
+        836
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 294272,
+      "rawSvgIdentical": true,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc",
+      "newSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc"
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "composer",
+      "oldSize": [
+        380,
+        304
+      ],
+      "newSize": [
+        380,
+        304
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 115520,
+      "rawSvgIdentical": false,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": false,
+      "oldSvgSha256": "c8cfb0a963ba200eed702652feeb62b64c5121d14b5fb92318b30a0da6107742",
+      "newSvgSha256": "de66a760001b100d5933c86cee3fe515e13dd5fe5acf0f15aef5d28541c19bd6"
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "draft",
+      "oldSize": [
+        410,
+        56
+      ],
+      "newSize": [
+        410,
+        56
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 22960,
+      "rawSvgIdentical": true,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "abb921fdcf19e08bbd13c69d051ca3c7434f23207fb7dd96ff34338bf024f3df",
+      "newSvgSha256": "abb921fdcf19e08bbd13c69d051ca3c7434f23207fb7dd96ff34338bf024f3df"
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "export",
+      "oldSize": [
+        340,
+        185
+      ],
+      "newSize": [
+        340,
+        185
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 10519,
+      "totalPixels": 62900,
+      "rawSvgIdentical": true,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc",
+      "newSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc"
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "rename",
+      "oldSize": [
+        271,
+        105
+      ],
+      "newSize": [
+        271,
+        105
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 28455,
+      "rawSvgIdentical": true,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "5707fa6ef8fcc6a5e89c03eea7f9483bfb92116a18abf2526e8a0082849d8bd7",
+      "newSvgSha256": "5707fa6ef8fcc6a5e89c03eea7f9483bfb92116a18abf2526e8a0082849d8bd7"
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "detail",
+      "oldSize": [
+        352,
+        836
+      ],
+      "newSize": [
+        352,
+        836
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 294272,
+      "rawSvgIdentical": true,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc",
+      "newSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc"
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "composer",
+      "oldSize": [
+        380,
+        304
+      ],
+      "newSize": [
+        380,
+        304
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 115520,
+      "rawSvgIdentical": false,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": false,
+      "oldSvgSha256": "c8cfb0a963ba200eed702652feeb62b64c5121d14b5fb92318b30a0da6107742",
+      "newSvgSha256": "de66a760001b100d5933c86cee3fe515e13dd5fe5acf0f15aef5d28541c19bd6"
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "draft",
+      "oldSize": [
+        410,
+        56
+      ],
+      "newSize": [
+        410,
+        56
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 22960,
+      "rawSvgIdentical": true,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "abb921fdcf19e08bbd13c69d051ca3c7434f23207fb7dd96ff34338bf024f3df",
+      "newSvgSha256": "abb921fdcf19e08bbd13c69d051ca3c7434f23207fb7dd96ff34338bf024f3df"
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "export",
+      "oldSize": [
+        340,
+        185
+      ],
+      "newSize": [
+        340,
+        185
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 10494,
+      "totalPixels": 62900,
+      "rawSvgIdentical": true,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc",
+      "newSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc"
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "rename",
+      "oldSize": [
+        271,
+        105
+      ],
+      "newSize": [
+        271,
+        105
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 28455,
+      "rawSvgIdentical": true,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "5707fa6ef8fcc6a5e89c03eea7f9483bfb92116a18abf2526e8a0082849d8bd7",
+      "newSvgSha256": "5707fa6ef8fcc6a5e89c03eea7f9483bfb92116a18abf2526e8a0082849d8bd7"
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "detail",
+      "oldSize": [
+        352,
+        736
+      ],
+      "newSize": [
+        352,
+        736
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 259072,
+      "rawSvgIdentical": true,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc",
+      "newSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc"
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "composer",
+      "oldSize": [
+        366,
+        304
+      ],
+      "newSize": [
+        366,
+        304
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 111264,
+      "rawSvgIdentical": false,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": false,
+      "oldSvgSha256": "7b49011cb0e3a8fcf7df4c70ddbdd856a92b765e77768db3ed80c77c3e0857a9",
+      "newSvgSha256": "0cb048a843359039bcad8e6c1bc83db2a4b085d80690bb977a204d653f0aeded"
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "draft",
+      "oldSize": [
+        370,
+        100
+      ],
+      "newSize": [
+        370,
+        100
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 37000,
+      "rawSvgIdentical": true,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "abb921fdcf19e08bbd13c69d051ca3c7434f23207fb7dd96ff34338bf024f3df",
+      "newSvgSha256": "abb921fdcf19e08bbd13c69d051ca3c7434f23207fb7dd96ff34338bf024f3df"
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "export",
+      "oldSize": [
+        287,
+        185
+      ],
+      "newSize": [
+        287,
+        185
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 53095,
+      "rawSvgIdentical": true,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc",
+      "newSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc"
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "rename",
+      "oldSize": [
+        270,
+        106
+      ],
+      "newSize": [
+        270,
+        106
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 1200,
+      "totalPixels": 28620,
+      "rawSvgIdentical": true,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "d4596ae9939060f033da148482eb00ec94f4bc2121cd82ee728b8dd49c2f12b6",
+      "newSvgSha256": "d4596ae9939060f033da148482eb00ec94f4bc2121cd82ee728b8dd49c2f12b6"
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "detail",
+      "oldSize": [
+        352,
+        736
+      ],
+      "newSize": [
+        352,
+        736
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 259072,
+      "rawSvgIdentical": true,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc",
+      "newSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc"
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "composer",
+      "oldSize": [
+        366,
+        304
+      ],
+      "newSize": [
+        366,
+        304
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 111264,
+      "rawSvgIdentical": false,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": false,
+      "oldSvgSha256": "7b49011cb0e3a8fcf7df4c70ddbdd856a92b765e77768db3ed80c77c3e0857a9",
+      "newSvgSha256": "0cb048a843359039bcad8e6c1bc83db2a4b085d80690bb977a204d653f0aeded"
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "draft",
+      "oldSize": [
+        370,
+        100
+      ],
+      "newSize": [
+        370,
+        100
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 37000,
+      "rawSvgIdentical": true,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "abb921fdcf19e08bbd13c69d051ca3c7434f23207fb7dd96ff34338bf024f3df",
+      "newSvgSha256": "abb921fdcf19e08bbd13c69d051ca3c7434f23207fb7dd96ff34338bf024f3df"
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "export",
+      "oldSize": [
+        287,
+        185
+      ],
+      "newSize": [
+        287,
+        185
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 53095,
+      "rawSvgIdentical": true,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc",
+      "newSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc"
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "rename",
+      "oldSize": [
+        270,
+        106
+      ],
+      "newSize": [
+        270,
+        106
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 28620,
+      "rawSvgIdentical": true,
+      "svgWithoutKeyboardAttributesIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "d4596ae9939060f033da148482eb00ec94f4bc2121cd82ee728b8dd49c2f12b6",
+      "newSvgSha256": "d4596ae9939060f033da148482eb00ec94f4bc2121cd82ee728b8dd49c2f12b6"
+    }
+  ]
+}

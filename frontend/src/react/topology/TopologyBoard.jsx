@@ -1,11 +1,11 @@
 import {useEffect,useLayoutEffect,useRef,useState} from 'react'
 
-export function TopologyBoard({rootRef,snapshot,scopeKey,initialFocus,apiRef,createAdapter,onSelect,onZoom,onResize,onMessage,onIcons}){
+export function TopologyBoard({rootRef,snapshot,scopeKey,initialFocus,apiRef,createAdapter,onSelect,onZoom,onResize,onMessage,onIcons,canEdit,onDrop,onRename}){
  const [labels,setLabels]=useState([]),[error,setError]=useState(''),[attempt,setAttempt]=useState(0),callbacks=useRef(null)
- useLayoutEffect(()=>{callbacks.current={onSelect,onZoom,onResize,onMessage,onIcons}})
+ useLayoutEffect(()=>{callbacks.current={onSelect,onZoom,onResize,onMessage,onIcons,canEdit,onDrop,onRename}})
  useEffect(()=>{
   let api,active=true
-  try{api=createAdapter(rootRef.current,{onSelect:value=>callbacks.current.onSelect(value),onZoom:value=>callbacks.current.onZoom(value),onResize:()=>callbacks.current.onResize(),onMessage:value=>callbacks.current.onMessage(value),onIcons:value=>callbacks.current.onIcons(value),onLabels:setLabels})}
+  try{api=createAdapter(rootRef.current,{onSelect:value=>callbacks.current.onSelect(value),onZoom:value=>callbacks.current.onZoom(value),onResize:()=>callbacks.current.onResize(),onMessage:value=>callbacks.current.onMessage(value),onIcons:value=>callbacks.current.onIcons(value),canEdit:()=>callbacks.current.canEdit,onDrop:value=>callbacks.current.onDrop(value),onRename:value=>callbacks.current.onRename(value),onLabels:setLabels})}
   catch(cause){queueMicrotask(()=>{if(active)setError(cause.message)});return()=>{active=false}}
   apiRef.current=api
   const stop=()=>api.dispose();window.addEventListener('pagehide',stop)

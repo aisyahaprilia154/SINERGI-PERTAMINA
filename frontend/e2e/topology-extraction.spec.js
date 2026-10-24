@@ -20,7 +20,7 @@ async function setup(page,role='Administrator'){
  })
  return {state,errors,modules}
 }
-async function open(page){await page.goto('/topology?datasetId=dataset-semarang&area=ft-semarang&selectedAssetId=C-01',{waitUntil:'networkidle'});await expect(page.locator('[data-topology-frame] svg')).toBeVisible()}
+async function open(page){await page.goto('/e2e/fixtures/topology-legacy.html?datasetId=dataset-semarang&area=ft-semarang&selectedAssetId=C-01',{waitUntil:'networkidle'});await expect(page.locator('[data-topology-frame] svg')).toBeVisible()}
 
 test('legacy topology retains selection/search, area and Viewer read-only controls after extraction',async({page})=>{
  const {state,errors,modules}=await setup(page,'Viewer');await open(page);expect(modules.some(url=>url.includes('/pages/topology/topology-page.js'))).toBe(true);expect(modules.some(url=>url.includes('/react/topology/'))).toBe(false)
@@ -37,7 +37,7 @@ test('draft cancel restores the relation; failed save retains draft and repeated
 })
 
 test('read error retries to empty state and ignores a pending load after pagehide',async({page})=>{
- const {state,errors}=await setup(page);state.failRead=true;await page.goto('/topology');await expect(page.getByText('Pembacaan gagal')).toBeVisible();state.failRead=false;state.payload={...state.payload,assets:[],relations:[],topologyGraph:{nodes:[],edges:[]},topologyRoots:[]}
+ const {state,errors}=await setup(page);state.failRead=true;await page.goto('/e2e/fixtures/topology-legacy.html');await expect(page.getByText('Pembacaan gagal')).toBeVisible();state.failRead=false;state.payload={...state.payload,assets:[],relations:[],topologyGraph:{nodes:[],edges:[]},topologyRoots:[]}
  await page.getByRole('button',{name:'Coba lagi',exact:true}).click();await expect(page.locator('[data-topology-frame]')).toContainText('Pilih area lain');let release;state.readPending=new Promise(resolve=>release=resolve)
  await page.evaluate(()=>{void import('/src/pages/topology/topology-page.js').then(module=>module.renderTopologyPage(document.querySelector('#app')))})
  await expect(page.getByRole('heading',{name:/Memuat/})).toBeVisible();await page.evaluate(()=>window.dispatchEvent(new Event('pagehide')));release();state.readPending=null;await page.waitForTimeout(250);await expect(page.getByRole('heading',{name:/Memuat/})).toBeVisible();expect(errors).toEqual([])

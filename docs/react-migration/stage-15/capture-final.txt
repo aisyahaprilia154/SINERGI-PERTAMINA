@@ -1,0 +1,8 @@
+Captured react desktop-light
+Captured react desktop-dark
+Captured react mobile-light
+Captured react mobile-dark
+Captured legacy desktop-light
+Captured legacy desktop-dark
+Captured legacy mobile-light
+Captured legacy mobile-dark

@@ -3,3 +3,6 @@
 .react-topology-read .topology-toolbar-edit-actions button:disabled { cursor: default; }
 
 .react-topology-read .map-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/* Export remains reachable while the asset inspector is open. */
+.topology-body #app .react-topology-read .topology-stitch-export-panel { z-index: 60; }

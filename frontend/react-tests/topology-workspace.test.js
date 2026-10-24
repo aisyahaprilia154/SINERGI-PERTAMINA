@@ -1,6 +1,7 @@
 import {beforeEach,afterEach,describe,it,expect,vi} from 'vitest'
 import fixtures from '../../docs/react-migration/map-edit-fixtures.cjs'
 import {adaptActiveDatasetForTopology} from '../src/adapters/active-dataset-map-adapter.js'
+import {createTopologyEditing} from '../src/domain/topology-editing.js'
 import {createTopologyDocument} from '../src/domain/topology-document.js'
 import {createTopologyWorkspaceState} from '../src/domain/topology-workspace-state.js'
 import {buildTopologyWorkspaceModel,buildTopologyWorkspaceLayout} from '../src/domain/topology-workspace-model.js'
@@ -93,5 +94,21 @@ describe('loading and renderer lifetime',()=>{
   const loader={preload:vi.fn().mockReturnValueOnce(pending.promise).mockReturnValue(null),dataByUrl:new Map()},getSnapshot=vi.fn(()=>({model,layout,state:w.state,mapData:w.mapData,activeContext:w.mapData.activeContext}))
   const renderer=createTopologyGraphRenderer({frame,getSnapshot,sourceIconLoader:loader,scope,syncGraphSurface:vi.fn(),renderOverviewLabels:vi.fn(),onIconsReady,isDragging:()=>false});renderer.render();w.state.selectedAssetId='C-01';renderer.render();pending.resolve();await pending.promise
   expect(onIconsReady).toHaveBeenCalledOnce();expect(getSnapshot).toHaveBeenCalledTimes(3);expect(w.state.selectedAssetId).toBe('C-01');expect(frame.querySelector('[data-node-id="C-01"]')).not.toBeNull();scope.dispose();frame.remove()
+ })
+})
+
+describe('topology edit commands',()=>{
+ function editor(){const w=workspace();w.state.area='ft-semarang';const getLayout=()=>buildTopologyWorkspaceLayout(w.getModel(),{mapData:w.mapData,state:w.state});const editing=createTopologyEditing({mapData:w.mapData,state:w.state,document:w.document,getModel:w.getModel,getLayout,publish:w.callbacks.rebuild,message:w.callbacks.showToast});return {...w,getLayout,editing}}
+ it('converts pointer deltas to diagram coordinates, deduplicates moves and saves the final position',async()=>{
+  const w=editor(),source=w.getLayout().nodes.find(item=>item.id==='C-01'),box=w.getLayout().mountingBoxes.find(item=>item.id===source.mountingBoxId)
+  w.editing.drop({assetId:source.id,drop:{kind:'move',box},dx:20,dy:40,zoom:.5});const position={x:source.diagram.x+40,y:source.diagram.y+80};expect(w.mapData.nodePositions[source.id]).toEqual(position)
+  saveTopologyDiagram.mockResolvedValue({recordRevision:5,nodePositions:w.mapData.nodePositions});await w.document.saveDraft();expect(saveTopologyDiagram).toHaveBeenCalledWith(expect.objectContaining({changes:[{type:'move-node',assetId:source.id,...position}]}))
+ })
+ it('updates physical mounting when moving to a pole and restores it on cancel',()=>{
+  const w=editor();w.editing.openComposer();w.editing.chooseFrame('pole:T-01');const box=w.getLayout().mountingBoxes.find(item=>item.hostId==='T-01');expect(box).toBeDefined();w.editing.moveAssetToFrame('C-01',box);expect(w.mapData.mountingRelations).toContainEqual(expect.objectContaining({sourceAssetId:'C-01',targetAssetId:'T-01',provenance:'manual_admin'}));w.document.cancelDraft();expect(w.mapData.mountingRelations??[]).not.toContainEqual(expect.objectContaining({sourceAssetId:'C-01',targetAssetId:'T-01'}))
+ })
+ it('discards only provisional frames, deduplicates custom rename and blocks edits during save',()=>{
+  const w=editor();w.editing.openComposer();const id=w.state.pendingFrameId;w.editing.closeComposer();expect(w.mapData.topologyFrames[id]).toBeUndefined();expect(w.state.changes).toEqual([])
+  w.editing.openComposer();w.editing.chooseFrame('type:indoor');const frameId=Object.keys(w.mapData.topologyFrames)[0];w.editing.renameFrame(frameId,'Kontrol');w.editing.renameFrame(frameId,'Kontrol 2');expect(w.state.changes).toEqual([expect.objectContaining({type:'create-frame',frame:expect.objectContaining({id:frameId,name:'Kontrol 2'})})]);w.state.mutationBusy=true;w.editing.renameFrame(frameId,'Blocked');expect(w.mapData.topologyFrames[frameId].name).toBe('Kontrol 2')
  })
 })

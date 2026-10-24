@@ -1,0 +1,765 @@
+{
+  "browserVersion": "156.0.8078.4",
+  "results": [
+    {
+      "implementation": "legacy",
+      "state": "detail",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-detail-desktop-light.png",
+      "crop": "legacy-detail-crop-desktop-light.png",
+      "svgFile": "legacy-detail-desktop-light.svg",
+      "rawSvgSha256": "8847ae2df4b630428dce157572585615b438800accbfdd448e8e4365b50db97e",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "30px",
+        "frameTop": "84px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "composer",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-composer-desktop-light.png",
+      "crop": "legacy-composer-crop-desktop-light.png",
+      "svgFile": "legacy-composer-desktop-light.svg",
+      "rawSvgSha256": "19a4088e8402fa44f8087c1b640d8e13c173caf58df617e3ce2ee079a47cb1c2",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 44,
+        "frameLeft": "56.5px",
+        "frameTop": "84px",
+        "transform": "scale(1)",
+        "zoom": "100%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "export",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-export-desktop-light.png",
+      "crop": "legacy-export-crop-desktop-light.png",
+      "svgFile": "legacy-export-desktop-light.svg",
+      "rawSvgSha256": "8847ae2df4b630428dce157572585615b438800accbfdd448e8e4365b50db97e",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "30px",
+        "frameTop": "84px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "rename",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-rename-desktop-light.png",
+      "crop": "legacy-rename-crop-desktop-light.png",
+      "svgFile": "legacy-rename-desktop-light.svg",
+      "rawSvgSha256": "d23622c61f0fbba0cfa3d22ee1adf0644657588132a707d7695cf60fa0a52869",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 44,
+        "frameLeft": "56.5px",
+        "frameTop": "84px",
+        "transform": "scale(1)",
+        "zoom": "100%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "detail",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-detail-desktop-dark.png",
+      "crop": "legacy-detail-crop-desktop-dark.png",
+      "svgFile": "legacy-detail-desktop-dark.svg",
+      "rawSvgSha256": "8847ae2df4b630428dce157572585615b438800accbfdd448e8e4365b50db97e",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "30px",
+        "frameTop": "84px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "composer",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-composer-desktop-dark.png",
+      "crop": "legacy-composer-crop-desktop-dark.png",
+      "svgFile": "legacy-composer-desktop-dark.svg",
+      "rawSvgSha256": "19a4088e8402fa44f8087c1b640d8e13c173caf58df617e3ce2ee079a47cb1c2",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 44,
+        "frameLeft": "56.5px",
+        "frameTop": "84px",
+        "transform": "scale(1)",
+        "zoom": "100%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "export",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-export-desktop-dark.png",
+      "crop": "legacy-export-crop-desktop-dark.png",
+      "svgFile": "legacy-export-desktop-dark.svg",
+      "rawSvgSha256": "8847ae2df4b630428dce157572585615b438800accbfdd448e8e4365b50db97e",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "30px",
+        "frameTop": "84px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "rename",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-rename-desktop-dark.png",
+      "crop": "legacy-rename-crop-desktop-dark.png",
+      "svgFile": "legacy-rename-desktop-dark.svg",
+      "rawSvgSha256": "d23622c61f0fbba0cfa3d22ee1adf0644657588132a707d7695cf60fa0a52869",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 44,
+        "frameLeft": "56.5px",
+        "frameTop": "84px",
+        "transform": "scale(1)",
+        "zoom": "100%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "detail",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-detail-mobile-light.png",
+      "crop": "legacy-detail-crop-mobile-light.png",
+      "svgFile": "legacy-detail-mobile-light.svg",
+      "rawSvgSha256": "8847ae2df4b630428dce157572585615b438800accbfdd448e8e4365b50db97e",
+      "viewportMetrics": {
+        "scrollLeft": 394,
+        "scrollTop": 0,
+        "frameLeft": "16px",
+        "frameTop": "24px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "composer",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-composer-mobile-light.png",
+      "crop": "legacy-composer-crop-mobile-light.png",
+      "svgFile": "legacy-composer-mobile-light.svg",
+      "rawSvgSha256": "4c096ee38f87ad5430bda0e2a150214536ac0a1cd0c21787af89712caf178003",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "30px",
+        "frameTop": "259.907px",
+        "transform": "scale(0.231303)",
+        "zoom": "23%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "export",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-export-mobile-light.png",
+      "crop": "legacy-export-crop-mobile-light.png",
+      "svgFile": "legacy-export-mobile-light.svg",
+      "rawSvgSha256": "8847ae2df4b630428dce157572585615b438800accbfdd448e8e4365b50db97e",
+      "viewportMetrics": {
+        "scrollLeft": 394,
+        "scrollTop": 0,
+        "frameLeft": "16px",
+        "frameTop": "24px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "rename",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-rename-mobile-light.png",
+      "crop": "legacy-rename-crop-mobile-light.png",
+      "svgFile": "legacy-rename-mobile-light.svg",
+      "rawSvgSha256": "a150a6765192c1064ce9dcf1b123a70201a52bf1265b3597be704dbdd98e403f",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "30px",
+        "frameTop": "259.907px",
+        "transform": "scale(0.231303)",
+        "zoom": "23%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "detail",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-detail-mobile-dark.png",
+      "crop": "legacy-detail-crop-mobile-dark.png",
+      "svgFile": "legacy-detail-mobile-dark.svg",
+      "rawSvgSha256": "8847ae2df4b630428dce157572585615b438800accbfdd448e8e4365b50db97e",
+      "viewportMetrics": {
+        "scrollLeft": 394,
+        "scrollTop": 0,
+        "frameLeft": "16px",
+        "frameTop": "24px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "composer",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-composer-mobile-dark.png",
+      "crop": "legacy-composer-crop-mobile-dark.png",
+      "svgFile": "legacy-composer-mobile-dark.svg",
+      "rawSvgSha256": "4c096ee38f87ad5430bda0e2a150214536ac0a1cd0c21787af89712caf178003",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "30px",
+        "frameTop": "259.907px",
+        "transform": "scale(0.231303)",
+        "zoom": "23%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "export",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-export-mobile-dark.png",
+      "crop": "legacy-export-crop-mobile-dark.png",
+      "svgFile": "legacy-export-mobile-dark.svg",
+      "rawSvgSha256": "8847ae2df4b630428dce157572585615b438800accbfdd448e8e4365b50db97e",
+      "viewportMetrics": {
+        "scrollLeft": 394,
+        "scrollTop": 0,
+        "frameLeft": "16px",
+        "frameTop": "24px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "rename",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-rename-mobile-dark.png",
+      "crop": "legacy-rename-crop-mobile-dark.png",
+      "svgFile": "legacy-rename-mobile-dark.svg",
+      "rawSvgSha256": "a150a6765192c1064ce9dcf1b123a70201a52bf1265b3597be704dbdd98e403f",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "30px",
+        "frameTop": "259.907px",
+        "transform": "scale(0.231303)",
+        "zoom": "23%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "detail",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-detail-desktop-light.png",
+      "crop": "react-detail-crop-desktop-light.png",
+      "svgFile": "react-detail-desktop-light.svg",
+      "rawSvgSha256": "8847ae2df4b630428dce157572585615b438800accbfdd448e8e4365b50db97e",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "30px",
+        "frameTop": "84px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "composer",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-composer-desktop-light.png",
+      "crop": "react-composer-crop-desktop-light.png",
+      "svgFile": "react-composer-desktop-light.svg",
+      "rawSvgSha256": "a998da38b7350d20739ff93f48ccdfbaf0bf313e314f7aa08b83ea67ea6b620e",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 44,
+        "frameLeft": "56.5px",
+        "frameTop": "84px",
+        "transform": "scale(1)",
+        "zoom": "100%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "rename",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-rename-desktop-light.png",
+      "crop": "react-rename-crop-desktop-light.png",
+      "svgFile": "react-rename-desktop-light.svg",
+      "rawSvgSha256": "d23622c61f0fbba0cfa3d22ee1adf0644657588132a707d7695cf60fa0a52869",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 44,
+        "frameLeft": "56.5px",
+        "frameTop": "84px",
+        "transform": "scale(1)",
+        "zoom": "100%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "detail",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-detail-desktop-dark.png",
+      "crop": "react-detail-crop-desktop-dark.png",
+      "svgFile": "react-detail-desktop-dark.svg",
+      "rawSvgSha256": "8847ae2df4b630428dce157572585615b438800accbfdd448e8e4365b50db97e",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "30px",
+        "frameTop": "84px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "composer",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-composer-desktop-dark.png",
+      "crop": "react-composer-crop-desktop-dark.png",
+      "svgFile": "react-composer-desktop-dark.svg",
+      "rawSvgSha256": "a998da38b7350d20739ff93f48ccdfbaf0bf313e314f7aa08b83ea67ea6b620e",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 44,
+        "frameLeft": "56.5px",
+        "frameTop": "84px",
+        "transform": "scale(1)",
+        "zoom": "100%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "rename",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-rename-desktop-dark.png",
+      "crop": "react-rename-crop-desktop-dark.png",
+      "svgFile": "react-rename-desktop-dark.svg",
+      "rawSvgSha256": "d23622c61f0fbba0cfa3d22ee1adf0644657588132a707d7695cf60fa0a52869",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 44,
+        "frameLeft": "56.5px",
+        "frameTop": "84px",
+        "transform": "scale(1)",
+        "zoom": "100%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "detail",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-detail-mobile-light.png",
+      "crop": "react-detail-crop-mobile-light.png",
+      "svgFile": "react-detail-mobile-light.svg",
+      "rawSvgSha256": "8847ae2df4b630428dce157572585615b438800accbfdd448e8e4365b50db97e",
+      "viewportMetrics": {
+        "scrollLeft": 394,
+        "scrollTop": 0,
+        "frameLeft": "16px",
+        "frameTop": "24px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "composer",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-composer-mobile-light.png",
+      "crop": "react-composer-crop-mobile-light.png",
+      "svgFile": "react-composer-mobile-light.svg",
+      "rawSvgSha256": "a9da7296c3ca48b0600e5a62993e5b605a7d73d2b88e37a025dafea1b7b100b0",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "30px",
+        "frameTop": "259.907px",
+        "transform": "scale(0.231303)",
+        "zoom": "23%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "rename",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-rename-mobile-light.png",
+      "crop": "react-rename-crop-mobile-light.png",
+      "svgFile": "react-rename-mobile-light.svg",
+      "rawSvgSha256": "a150a6765192c1064ce9dcf1b123a70201a52bf1265b3597be704dbdd98e403f",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "30px",
+        "frameTop": "259.907px",
+        "transform": "scale(0.231303)",
+        "zoom": "23%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "detail",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-detail-mobile-dark.png",
+      "crop": "react-detail-crop-mobile-dark.png",
+      "svgFile": "react-detail-mobile-dark.svg",
+      "rawSvgSha256": "8847ae2df4b630428dce157572585615b438800accbfdd448e8e4365b50db97e",
+      "viewportMetrics": {
+        "scrollLeft": 394,
+        "scrollTop": 0,
+        "frameLeft": "16px",
+        "frameTop": "24px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "composer",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-composer-mobile-dark.png",
+      "crop": "react-composer-crop-mobile-dark.png",
+      "svgFile": "react-composer-mobile-dark.svg",
+      "rawSvgSha256": "a9da7296c3ca48b0600e5a62993e5b605a7d73d2b88e37a025dafea1b7b100b0",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "30px",
+        "frameTop": "259.907px",
+        "transform": "scale(0.231303)",
+        "zoom": "23%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "rename",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-rename-mobile-dark.png",
+      "crop": "react-rename-crop-mobile-dark.png",
+      "svgFile": "react-rename-mobile-dark.svg",
+      "rawSvgSha256": "a150a6765192c1064ce9dcf1b123a70201a52bf1265b3597be704dbdd98e403f",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "30px",
+        "frameTop": "259.907px",
+        "transform": "scale(0.231303)",
+        "zoom": "23%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "draft",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "legacy-draft-desktop-light.png",
+      "crop": "legacy-draft-crop-desktop-light.png",
+      "svgFile": "legacy-draft-desktop-light.svg",
+      "rawSvgSha256": "5836f5992f7343711421624aba85deb75346020568515a2e2f0c05ee80695f47",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "153.775px",
+        "frameTop": "84px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "draft",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "legacy-draft-desktop-dark.png",
+      "crop": "legacy-draft-crop-desktop-dark.png",
+      "svgFile": "legacy-draft-desktop-dark.svg",
+      "rawSvgSha256": "5836f5992f7343711421624aba85deb75346020568515a2e2f0c05ee80695f47",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "153.775px",
+        "frameTop": "84px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "draft",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "legacy-draft-mobile-light.png",
+      "crop": "legacy-draft-crop-mobile-light.png",
+      "svgFile": "legacy-draft-mobile-light.svg",
+      "rawSvgSha256": "5836f5992f7343711421624aba85deb75346020568515a2e2f0c05ee80695f47",
+      "viewportMetrics": {
+        "scrollLeft": 394,
+        "scrollTop": 0,
+        "frameLeft": "16px",
+        "frameTop": "24px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "legacy",
+      "state": "draft",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "legacy-draft-mobile-dark.png",
+      "crop": "legacy-draft-crop-mobile-dark.png",
+      "svgFile": "legacy-draft-mobile-dark.svg",
+      "rawSvgSha256": "5836f5992f7343711421624aba85deb75346020568515a2e2f0c05ee80695f47",
+      "viewportMetrics": {
+        "scrollLeft": 394,
+        "scrollTop": 0,
+        "frameLeft": "16px",
+        "frameTop": "24px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "draft",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-draft-desktop-light.png",
+      "crop": "react-draft-crop-desktop-light.png",
+      "svgFile": "react-draft-desktop-light.svg",
+      "rawSvgSha256": "5836f5992f7343711421624aba85deb75346020568515a2e2f0c05ee80695f47",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "153.775px",
+        "frameTop": "84px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "export",
+      "size": "desktop",
+      "theme": "light",
+      "screenshot": "react-export-desktop-light.png",
+      "crop": "react-export-crop-desktop-light.png",
+      "svgFile": "react-export-desktop-light.svg",
+      "rawSvgSha256": "8847ae2df4b630428dce157572585615b438800accbfdd448e8e4365b50db97e",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "30px",
+        "frameTop": "84px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "draft",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-draft-desktop-dark.png",
+      "crop": "react-draft-crop-desktop-dark.png",
+      "svgFile": "react-draft-desktop-dark.svg",
+      "rawSvgSha256": "5836f5992f7343711421624aba85deb75346020568515a2e2f0c05ee80695f47",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "153.775px",
+        "frameTop": "84px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "export",
+      "size": "desktop",
+      "theme": "dark",
+      "screenshot": "react-export-desktop-dark.png",
+      "crop": "react-export-crop-desktop-dark.png",
+      "svgFile": "react-export-desktop-dark.svg",
+      "rawSvgSha256": "8847ae2df4b630428dce157572585615b438800accbfdd448e8e4365b50db97e",
+      "viewportMetrics": {
+        "scrollLeft": 0,
+        "scrollTop": 0,
+        "frameLeft": "30px",
+        "frameTop": "84px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "draft",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-draft-mobile-light.png",
+      "crop": "react-draft-crop-mobile-light.png",
+      "svgFile": "react-draft-mobile-light.svg",
+      "rawSvgSha256": "5836f5992f7343711421624aba85deb75346020568515a2e2f0c05ee80695f47",
+      "viewportMetrics": {
+        "scrollLeft": 394,
+        "scrollTop": 0,
+        "frameLeft": "16px",
+        "frameTop": "24px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "export",
+      "size": "mobile",
+      "theme": "light",
+      "screenshot": "react-export-mobile-light.png",
+      "crop": "react-export-crop-mobile-light.png",
+      "svgFile": "react-export-mobile-light.svg",
+      "rawSvgSha256": "8847ae2df4b630428dce157572585615b438800accbfdd448e8e4365b50db97e",
+      "viewportMetrics": {
+        "scrollLeft": 394,
+        "scrollTop": 0,
+        "frameLeft": "16px",
+        "frameTop": "24px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "draft",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-draft-mobile-dark.png",
+      "crop": "react-draft-crop-mobile-dark.png",
+      "svgFile": "react-draft-mobile-dark.svg",
+      "rawSvgSha256": "5836f5992f7343711421624aba85deb75346020568515a2e2f0c05ee80695f47",
+      "viewportMetrics": {
+        "scrollLeft": 394,
+        "scrollTop": 0,
+        "frameLeft": "16px",
+        "frameTop": "24px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    },
+    {
+      "implementation": "react",
+      "state": "export",
+      "size": "mobile",
+      "theme": "dark",
+      "screenshot": "react-export-mobile-dark.png",
+      "crop": "react-export-crop-mobile-dark.png",
+      "svgFile": "react-export-mobile-dark.svg",
+      "rawSvgSha256": "8847ae2df4b630428dce157572585615b438800accbfdd448e8e4365b50db97e",
+      "viewportMetrics": {
+        "scrollLeft": 394,
+        "scrollTop": 0,
+        "frameLeft": "16px",
+        "frameTop": "24px",
+        "transform": "scale(0.85)",
+        "zoom": "85%"
+      },
+      "reducedMotion": "reduce"
+    }
+  ]
+}

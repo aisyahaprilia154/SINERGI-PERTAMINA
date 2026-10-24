@@ -1,6 +1,6 @@
 # Migrasi React SINERGI — baseline dan checklist
 
-Terakhir diperbarui: 24 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **14 — Topologi React untuk membaca data**.
+Terakhir diperbarui: 24 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **15 — Edit topologi dan penyimpanan**.
 Commit asal: `5375bd3` pada `main`. Branch kerja lokal: `react-migration-baseline`.
 Rencana asli pengguna disimpan tanpa perubahan di [PLAN.md](PLAN.md).
 
@@ -207,3 +207,16 @@ Enam halaman dan dialog peta tetap React; topologi tetap legacy. Tahap ini tidak
 - [x] Checkpoint Git lokal sesudah pemeriksaan; perubahan pengguna, rahasia dan backup tidak disertakan. Tidak ada push/merge/deployment atau perubahan database operasional.
 
 Enam halaman dan dialog peta aktif tetap React; topologi produksi tetap legacy. JSX topologi siap dipakai tahap berikutnya melalui fixture development, belum masuk bundle halaman produksi. [Laporan tahap 14](STAGE-14.md). Tahap berikutnya **15 — Edit topologi dan penyimpanan**, termasuk aktivasi setelah kriterianya lulus; berhenti di tahap 14.
+
+
+## Hasil tahap 15
+
+- [x] Aktifkan `/topology` dan `/topologi` dengan UI React untuk edit relasi, frame/penempatan/nama, drag posisi dan perpindahan turunan JB, draft/Batal/Simpan/revision serta ekspor SVG/PNG. Operasi hapus frame tidak tersedia pada baseline dan tidak ditambahkan.
+- [x] Pertahankan mesin graph/layout, aturan kamera/mounting, kontrak API/payload/revision, sesi/role, URL/storage dan navigasi dokumen. Semua efek tulis berasal dari tindakan pengguna.
+- [x] Verifikasi cancel/rollback, konflik dan retry, submit tunggal, simpan/reload posisi dan frame, beforeunload, Viewer, async setelah unmount/pagehide, keyboard/fokus/Escape, listener/request/timer/RAF/observer/pointer/ghost/auto-pan/renderer/object URL. Gerakan drag dan zoom tidak merender ulang seluruh UI.
+- [x] Perbaiki input nama, akses keyboard custom frame, lapisan panel ekspor serta pergeseran kanvas mobile saat inspector ditutup; 21 sumber lama, 13 fungsi viewport dan posisi label tetap identik.
+- [x] Visual desktop/mobile terang/gelap: 40 halaman + 40 potongan; 17/20 pasangan potongan identik. Dua panel ekspor berbeda karena kini terlihat, satu input berbeda karena highlight teks. Seluruh 20 viewport identik; 16 SVG mentah identik dan empat hanya menambah atribut keyboard custom frame.
+- [x] Frontend 341 Node + 192 Vitest, backend 77 lulus/1 skip; browser seluruh suite 80/80 lalu 16/16 topologi setelah perbaikan akhir; smoke 10/10; lint/build lulus. Detail urutan dan batas verifikasi ada di laporan.
+- [x] Checkpoint Git lokal sesudah pemeriksaan; perubahan pengguna, rahasia dan backup tidak disertakan. Tidak ada push/merge/deployment atau perubahan database operasional.
+
+Semua tujuh halaman utama dan dialog peta sekarang aktif React. Entrypoint transisi serta kode halaman/binder lama masih disimpan untuk pembersihan tahap 16; navigasi tetap dokumen penuh. [Laporan tahap 15](STAGE-15.md). Tahap berikutnya **16 — Integrasi akhir dan hapus jalur lama**, setelah diminta; berhenti di tahap 15.

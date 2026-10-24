@@ -20,7 +20,7 @@ beforeEach(()=>{
  state={payload:structuredClone(fixtures.active),failure:0,pending:null,calls:[],adapters:[],mobile:false,rendererFailure:false}
  vi.stubGlobal('matchMedia',query=>({matches:query.includes('max-width')?(state.mobile?390:1440)<=Number(query.match(/\d+/)[0]):query.includes('min-width')?(state.mobile?390:1440)>=Number(query.match(/\d+/)[0]):false,addEventListener(){},removeEventListener(){}}))
  for(const method of ['assign','replace','reload'])vi.spyOn(documentNavigation,method).mockImplementation(()=>{})
- vi.stubGlobal('fetch',vi.fn(async(url,options={})=>{state.calls.push({url,...options});if(state.pending)return state.pending.promise;return Response.json(state.failure?{error:{message:'Data topologi gagal'}}:state.payload,{status:state.failure||200})}))
+ vi.stubGlobal('fetch',vi.fn(async(url,options={})=>{state.calls.push({url,...options});if(String(url).endsWith('/diagram')&&options.method==='POST'){if(state.writePending)await state.writePending.promise;if(state.failSave)return Response.json({error:{message:'Revision berubah'}},{status:409});const body=JSON.parse(options.body);for(const change of body.changes)if(change.type==='remove-edge')state.payload.topologyGraph.edges=state.payload.topologyGraph.edges.filter(edge=>edge.id!==change.edgeId);return Response.json({recordRevision:5,graph:state.payload.topologyGraph,mountingRelations:[],topologyFrames:{},topologyFrameNames:{},topologyFrameAssignments:{},nodePositions:{}})}if(state.pending)return state.pending.promise;return Response.json(state.failure?{error:{message:'Data topologi gagal'}}:state.payload,{status:state.failure||200})}))
 })
 afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();window.history.replaceState(null,'','/')})
 function factory(host,options){
@@ -34,9 +34,9 @@ const current=()=>state.adapters.at(-1)
 const search=()=>screen.getByRole('searchbox',{name:'Cari perangkat',exact:true})
 
 describe('prepared React topology read UI',()=>{
- it('keeps production routing legacy while the fixture renders React and performs only reads',async()=>{
-  await ready();expect(await usesReactRoute('/topology')).toBe(false);expect(await usesReactRoute('/topologi')).toBe(false);expect(document.querySelector('[data-react-topology-read]')).not.toBeNull();expect(state.calls.every(call=>call.method==='GET')).toBe(true)
-  expect(screen.getByRole('button',{name:'Tambah frame',exact:true})).toBeDisabled();expect(screen.getByRole('button',{name:'Ekspor diagram',exact:true})).toBeDisabled();expect(state.calls[0].signal.aborted).toBe(true)
+ it('activates both production routes while the fixture renders React and performs only reads',async()=>{
+  await ready();expect(await usesReactRoute('/topology')).toBe(true);expect(await usesReactRoute('/topologi')).toBe(true);expect(document.querySelector('[data-react-topology-read]')).not.toBeNull();expect(state.calls.every(call=>call.method==='GET')).toBe(true)
+  expect(screen.getByRole('button',{name:'Tambah frame',exact:true})).toBeEnabled();expect(screen.getByRole('button',{name:'Ekspor diagram',exact:true})).toBeEnabled();expect(state.calls[0].signal.aborted).toBe(true)
  })
  it('shows loading, API error and retry without submitting any writes',async()=>{
   state.failure=503;mount();expect(screen.getByRole('heading',{name:'Memuat dataset aktif'})).toBeVisible();expect(await screen.findByText('Data topologi gagal')).toBeVisible();state.failure=0;await userEvent.click(screen.getByRole('button',{name:'Coba lagi',exact:true}));await waitFor(()=>expect(screen.getByRole('button',{name:'Perbesar diagram',exact:true})).toBeEnabled());expect(state.calls.every(call=>call.method==='GET')).toBe(true)
@@ -80,6 +80,44 @@ describe('prepared React topology read UI',()=>{
  })
 })
 
+describe('React topology editing',()=>{
+ const select=()=>act(()=>current().options.onSelect({kind:'asset',id:'C-01'}))
+ const writes=()=>state.calls.filter(call=>call.method==='POST')
+ it('cancels a removed edge without writing and guards unsaved document navigation',async()=>{
+  await ready();select();await userEvent.click(screen.getByRole('button',{name:'Hapus relasi dengan SW-01'}));expect(screen.getByText('1 perubahan belum disimpan')).toBeVisible();expect(writes()).toHaveLength(0)
+  const event=new Event('beforeunload',{cancelable:true});window.dispatchEvent(event);expect(event.defaultPrevented).toBe(true)
+  await userEvent.click(screen.getByRole('button',{name:'Batal',exact:true}));expect(screen.getByRole('button',{name:'Hapus relasi dengan SW-01'})).toBeVisible();const clean=new Event('beforeunload',{cancelable:true});window.dispatchEvent(clean);expect(clean.defaultPrevented).toBe(false)
+ })
+ it('preserves a failed draft and revision, serializes retry, then accepts the saved graph',async()=>{
+  await ready();select();await userEvent.click(screen.getByRole('button',{name:'Hapus relasi dengan SW-01'}));state.failSave=true;await userEvent.click(screen.getByRole('button',{name:'Simpan perubahan'}));expect(await screen.findByText('Revision berubah',{selector:'small'})).toBeVisible();expect(JSON.parse(writes()[0].body)).toMatchObject({expectedRevision:fixtures.active.recordRevision,changes:[{type:'remove-edge',edgeId:'edge'}]})
+  state.failSave=false;state.writePending=deferred();await userEvent.dblClick(screen.getByRole('button',{name:'Simpan perubahan'}));expect(writes()).toHaveLength(2);expect(screen.getByRole('button',{name:'Batal',exact:true})).toBeDisabled();await act(async()=>state.writePending.resolve());await waitFor(()=>expect(document.querySelector('[data-draft-bar]')).not.toBeVisible());expect(screen.queryByRole('button',{name:'Hapus relasi dengan SW-01'})).not.toBeInTheDocument()
+ })
+ it('keeps relation search controlled, stages a new relation and restores it on cancel',async()=>{
+  await ready();select();await userEvent.type(screen.getByPlaceholderText('Cari aset untuk dihubungkan…'),'JB-01');await userEvent.click(screen.getByRole('listbox',{name:'Aset yang dapat dihubungkan'}).querySelector('button'));expect(screen.getByRole('button',{name:'Hapus relasi dengan JB-01'})).toBeVisible();expect(screen.getByPlaceholderText('Cari aset untuk dihubungkan…')).toHaveValue('');expect(writes()).toHaveLength(0);await userEvent.click(screen.getByRole('button',{name:'Batal',exact:true}));expect(screen.queryByRole('button',{name:'Hapus relasi dengan JB-01'})).not.toBeInTheDocument()
+ })
+ it('creates a provisional frame, discards on Escape, and stages the chosen indoor frame',async()=>{
+  await ready();await userEvent.click(screen.getByRole('button',{name:'Tambah frame',exact:true}));expect(screen.getByRole('heading',{name:'Frame baru'})).toBeVisible();expect(screen.getByRole('searchbox',{name:'Cari jenis frame atau tiang'})).toHaveFocus();await userEvent.keyboard('{Escape}');expect(screen.queryByRole('heading',{name:'Frame baru'})).not.toBeInTheDocument();expect(document.querySelector('[data-draft-bar]')).not.toBeVisible()
+  await userEvent.click(screen.getByRole('button',{name:'Tambah frame',exact:true}));await userEvent.click(screen.getByRole('option',{name:/Indoor/}));expect(screen.getByText('1 perubahan belum disimpan')).toBeVisible();expect(Object.values(current().adapter.update.mock.calls.at(-1)[0].mapData.topologyFrames)).toEqual([expect.objectContaining({type:'indoor',name:'Indoor'})])
+ })
+ it('renames the selected custom frame and retains its identity in the draft',async()=>{
+  await ready();await userEvent.click(screen.getByRole('button',{name:'Tambah frame',exact:true}));await userEvent.click(screen.getByRole('option',{name:/Indoor/}));const snapshot=current().adapter.update.mock.calls.at(-1)[0],id=Object.keys(snapshot.mapData.topologyFrames)[0]
+  act(()=>current().options.onRename({id}));await userEvent.clear(screen.getByLabelText('Nama frame'));await userEvent.type(screen.getByLabelText('Nama frame'),'Ruang kontrol');await userEvent.click(screen.getByRole('button',{name:'Terapkan nama'}));expect(current().adapter.update.mock.calls.at(-1)[0].state.changes).toEqual([expect.objectContaining({type:'create-frame',frame:expect.objectContaining({id,name:'Ruang kontrol'})})]);expect(writes()).toHaveLength(0)
+ })
+ it('moves assets through the accessible frame picker and cancels assignments',async()=>{
+  await ready();await userEvent.click(screen.getByRole('button',{name:'Tambah frame',exact:true}));await userEvent.click(screen.getByRole('option',{name:/Indoor/}));const id=Object.keys(current().adapter.update.mock.calls.at(-1)[0].mapData.topologyFrames)[0];select();await userEvent.selectOptions(screen.getByLabelText('Pindahkan ke frame'),id);expect(current().adapter.update.mock.calls.at(-1)[0].state.changes).toContainEqual({type:'move-frame',assetId:'C-01',frameId:id});await userEvent.click(screen.getByRole('button',{name:'Batal',exact:true}));expect(current().adapter.update.mock.calls.at(-1)[0].mapData.topologyFrameAssignments?.['C-01']).toBeUndefined()
+ })
+ it('blocks editor commands for Viewer and stops a pending save after unmount',async()=>{
+  const view=await ready('Viewer');select();act(()=>current().options.onDrop({assetId:'C-01',drop:{kind:'connect',targetId:'JB-01'}}));expect(writes()).toHaveLength(0);expect(screen.queryByLabelText('Pindahkan ke frame')).not.toBeInTheDocument();view.unmount()
+  const next=await ready();select();await userEvent.click(screen.getByRole('button',{name:'Hapus relasi dengan SW-01'}));state.writePending=deferred();await userEvent.click(screen.getByRole('button',{name:'Simpan perubahan'}));const write=writes()[0];next.unmount();expect(write.signal.aborted).toBe(true);await act(async()=>state.writePending.resolve());expect(writes()).toHaveLength(1)
+ })
+ it('updates zoom feedback without rendering the document or replacing SVG snapshots',async()=>{
+  await ready();const instance=current(),updates=instance.adapter.update.mock.calls.length;act(()=>{for(let index=0;index<20;index++)instance.options.onZoom(1+index/100)});expect(screen.getByRole('button',{name:'Kembalikan zoom ke 100%'})).toHaveTextContent('119%');expect(instance.adapter.update).toHaveBeenCalledTimes(updates)
+ })
+ it('opens export for Viewer, closes with Escape and restores its trigger focus',async()=>{
+  await ready('Viewer');await userEvent.click(screen.getByRole('button',{name:'Ekspor diagram',exact:true}));expect(screen.getByRole('button',{name:/SVG resolusi tinggi/})).toBeVisible();await userEvent.keyboard('{Escape}');expect(screen.getByRole('button',{name:'Ekspor diagram',exact:true})).toHaveFocus();expect(writes()).toHaveLength(0)
+ })
+})
+
 function adapterFixture(){
  const mapData=adaptActiveDatasetForTopology(structuredClone(fixtures.active)),viewState=createTopologyWorkspaceState({mapData});viewState.area='ft-semarang';const model=buildTopologyWorkspaceModel({mapData,graph:mapData.topologyGraph,roots:[],state:viewState}),layout=buildTopologyWorkspaceLayout(model,{mapData,state:viewState}),root=document.createElement('div')
  root.innerHTML='<main class="topology-stitch-main"><div data-topology-viewport><div class="topology-stitch-canvas"><div data-topology-frame></div></div></div><div data-topology-overview-labels></div></main>';document.body.append(root);const viewport=root.querySelector('[data-topology-viewport]');Object.defineProperties(viewport,{clientWidth:{value:900},clientHeight:{value:600}});viewport.scrollTo=vi.fn();const onSelect=vi.fn(),onZoom=vi.fn(),adapter=createTopologyReadAdapter(root,{onSelect,onZoom});const snapshot={model,layout,mapData,activeContext:mapData.activeContext,state:viewState};adapter.update(snapshot,{key:'fixture'});return {root,viewport,onSelect,onZoom,adapter,snapshot}
@@ -87,6 +125,11 @@ function adapterFixture(){
 describe('real topology SVG read adapter',()=>{
  it('preserves source data, frame ownership and keyboard focus through SVG redraws',()=>{
   const {root,onSelect,adapter,snapshot}=adapterFixture(),before=JSON.stringify(snapshot.mapData),frame=root.querySelector('[data-topology-frame]'),node=frame.querySelector('[data-node-id="C-01"]');node.focus();fireEvent.keyDown(node,{key:'Enter'});expect(onSelect).toHaveBeenCalledWith({kind:'asset',id:'C-01'});adapter.update({...snapshot,state:{...snapshot.state,selectedAssetId:'C-01'}},{key:'fixture'});expect(document.activeElement.dataset.nodeId).toBe('C-01');expect(root.querySelector('[data-topology-frame]')).toBe(frame);expect(JSON.stringify(snapshot.mapData)).toBe(before);adapter.dispose();root.remove()
+ })
+ it('keeps the exact SVG and viewport when only inspector, export or draft controls change',()=>{
+  const {root,adapter,snapshot}=adapterFixture(),svg=root.querySelector('svg'),frame=root.querySelector('[data-topology-frame]');frame.style.top='24px';const before=frame.style.cssText
+  adapter.update({...snapshot,state:{...snapshot.state,inspectorOpen:!snapshot.state.inspectorOpen,exportOpen:true,mutationBusy:true}},{key:'fixture'})
+  expect(root.querySelector('svg')).toBe(svg);expect(frame.style.cssText).toBe(before);adapter.dispose();root.remove()
  })
  it('keeps wheel zoom anchored, never selects after disposal and cancels owned observers',()=>{
   const disconnect=vi.fn();vi.stubGlobal('ResizeObserver',class{observe(){}disconnect=disconnect});const {root,viewport,adapter,onSelect,onZoom}=adapterFixture();viewport.dispatchEvent(new WheelEvent('wheel',{ctrlKey:true,deltaY:-100,cancelable:true}));expect(viewport.scrollTo).toHaveBeenCalled();const zooms=onZoom.mock.calls.length;adapter.dispose();adapter.dispose();adapter.zoomIn();fireEvent.click(root.querySelector('[data-node-id="C-01"]'));expect(onZoom).toHaveBeenCalledTimes(zooms);expect(onSelect).not.toHaveBeenCalled();expect(disconnect).toHaveBeenCalledOnce();root.remove()
