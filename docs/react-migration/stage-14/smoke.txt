@@ -1,0 +1,10 @@
+PASS Login toggle password, rejected login and retry control
+PASS User search, role filter and protected drawer draft
+PASS Empty versions, save dialog Escape and focus restoration
+PASS Import file validation blocks invalid upload before API write
+PASS Empty import history
+PASS Map API error, retry and asset search
+PASS Topology zoom and reset
+PASS Viewer admin-route redirect and hidden administrator menu
+PASS Anonymous protected-route redirect
+PASS Expired session redirects to login

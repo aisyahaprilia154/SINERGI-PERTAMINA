@@ -1,0 +1,529 @@
+{
+  "threshold": 12,
+  "results": [
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "overview",
+      "oldSize": [
+        1440,
+        836
+      ],
+      "newSize": [
+        1440,
+        836
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 351,
+      "totalPixels": 1203840,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "078161d9221e91d5b1b08c8f41c19580000fc51e9ecba4fbe20be12b10155aaf",
+      "newSvgSha256": "078161d9221e91d5b1b08c8f41c19580000fc51e9ecba4fbe20be12b10155aaf"
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "area",
+      "oldSize": [
+        1440,
+        836
+      ],
+      "newSize": [
+        1440,
+        836
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 351,
+      "totalPixels": 1203840,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "b2f924f656a021eb2a48dfc4b52129ef35bf554be04c7ff4b63ec3b53af8b2cd",
+      "newSvgSha256": "b2f924f656a021eb2a48dfc4b52129ef35bf554be04c7ff4b63ec3b53af8b2cd"
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "detail",
+      "oldSize": [
+        352,
+        836
+      ],
+      "newSize": [
+        352,
+        836
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 294272,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc",
+      "newSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc"
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "search",
+      "oldSize": [
+        336,
+        201
+      ],
+      "newSize": [
+        336,
+        201
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 67536,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "078161d9221e91d5b1b08c8f41c19580000fc51e9ecba4fbe20be12b10155aaf",
+      "newSvgSha256": "078161d9221e91d5b1b08c8f41c19580000fc51e9ecba4fbe20be12b10155aaf"
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "legend",
+      "oldSize": [
+        292,
+        404
+      ],
+      "newSize": [
+        292,
+        404
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 117968,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "b2f924f656a021eb2a48dfc4b52129ef35bf554be04c7ff4b63ec3b53af8b2cd",
+      "newSvgSha256": "b2f924f656a021eb2a48dfc4b52129ef35bf554be04c7ff4b63ec3b53af8b2cd"
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "empty",
+      "oldSize": [
+        1440,
+        836
+      ],
+      "newSize": [
+        1440,
+        836
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 472,
+      "totalPixels": 1203840
+    },
+    {
+      "size": "desktop",
+      "theme": "light",
+      "state": "error",
+      "oldSize": [
+        1440,
+        836
+      ],
+      "newSize": [
+        1440,
+        836
+      ],
+      "changedPixels": 0,
+      "totalPixels": 1203840
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "overview",
+      "oldSize": [
+        1440,
+        836
+      ],
+      "newSize": [
+        1440,
+        836
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 271,
+      "totalPixels": 1203840,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "078161d9221e91d5b1b08c8f41c19580000fc51e9ecba4fbe20be12b10155aaf",
+      "newSvgSha256": "078161d9221e91d5b1b08c8f41c19580000fc51e9ecba4fbe20be12b10155aaf"
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "area",
+      "oldSize": [
+        1440,
+        836
+      ],
+      "newSize": [
+        1440,
+        836
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 271,
+      "totalPixels": 1203840,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "b2f924f656a021eb2a48dfc4b52129ef35bf554be04c7ff4b63ec3b53af8b2cd",
+      "newSvgSha256": "b2f924f656a021eb2a48dfc4b52129ef35bf554be04c7ff4b63ec3b53af8b2cd"
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "detail",
+      "oldSize": [
+        352,
+        836
+      ],
+      "newSize": [
+        352,
+        836
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 294272,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc",
+      "newSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc"
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "search",
+      "oldSize": [
+        336,
+        201
+      ],
+      "newSize": [
+        336,
+        201
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 67536,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "078161d9221e91d5b1b08c8f41c19580000fc51e9ecba4fbe20be12b10155aaf",
+      "newSvgSha256": "078161d9221e91d5b1b08c8f41c19580000fc51e9ecba4fbe20be12b10155aaf"
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "legend",
+      "oldSize": [
+        292,
+        404
+      ],
+      "newSize": [
+        292,
+        404
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 117968,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "b2f924f656a021eb2a48dfc4b52129ef35bf554be04c7ff4b63ec3b53af8b2cd",
+      "newSvgSha256": "b2f924f656a021eb2a48dfc4b52129ef35bf554be04c7ff4b63ec3b53af8b2cd"
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "empty",
+      "oldSize": [
+        1440,
+        836
+      ],
+      "newSize": [
+        1440,
+        836
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 409,
+      "totalPixels": 1203840
+    },
+    {
+      "size": "desktop",
+      "theme": "dark",
+      "state": "error",
+      "oldSize": [
+        1440,
+        836
+      ],
+      "newSize": [
+        1440,
+        836
+      ],
+      "changedPixels": 0,
+      "totalPixels": 1203840
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "overview",
+      "oldSize": [
+        390,
+        736
+      ],
+      "newSize": [
+        390,
+        736
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 118,
+      "totalPixels": 287040,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "eed4d71be1212016e3dc7a4877e3885130f922bd1cfd3356816a3c28cc7aa2c1",
+      "newSvgSha256": "eed4d71be1212016e3dc7a4877e3885130f922bd1cfd3356816a3c28cc7aa2c1"
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "area",
+      "oldSize": [
+        390,
+        736
+      ],
+      "newSize": [
+        390,
+        736
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 118,
+      "totalPixels": 287040,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "0e68a4181924ccfa7e481afab949c610717b1f352d1912dd4b7c6a7d5bc491fe",
+      "newSvgSha256": "0e68a4181924ccfa7e481afab949c610717b1f352d1912dd4b7c6a7d5bc491fe"
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "detail",
+      "oldSize": [
+        352,
+        736
+      ],
+      "newSize": [
+        352,
+        736
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 259072,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc",
+      "newSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc"
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "search",
+      "oldSize": [
+        336,
+        201
+      ],
+      "newSize": [
+        336,
+        201
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 67536,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "eed4d71be1212016e3dc7a4877e3885130f922bd1cfd3356816a3c28cc7aa2c1",
+      "newSvgSha256": "eed4d71be1212016e3dc7a4877e3885130f922bd1cfd3356816a3c28cc7aa2c1"
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "legend",
+      "oldSize": [
+        292,
+        404
+      ],
+      "newSize": [
+        292,
+        404
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 117968,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "0e68a4181924ccfa7e481afab949c610717b1f352d1912dd4b7c6a7d5bc491fe",
+      "newSvgSha256": "0e68a4181924ccfa7e481afab949c610717b1f352d1912dd4b7c6a7d5bc491fe"
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "empty",
+      "oldSize": [
+        390,
+        736
+      ],
+      "newSize": [
+        390,
+        736
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 238,
+      "totalPixels": 287040
+    },
+    {
+      "size": "mobile",
+      "theme": "light",
+      "state": "error",
+      "oldSize": [
+        390,
+        736
+      ],
+      "newSize": [
+        390,
+        736
+      ],
+      "changedPixels": 0,
+      "totalPixels": 287040
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "overview",
+      "oldSize": [
+        390,
+        736
+      ],
+      "newSize": [
+        390,
+        736
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 287040,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "eed4d71be1212016e3dc7a4877e3885130f922bd1cfd3356816a3c28cc7aa2c1",
+      "newSvgSha256": "eed4d71be1212016e3dc7a4877e3885130f922bd1cfd3356816a3c28cc7aa2c1"
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "area",
+      "oldSize": [
+        390,
+        736
+      ],
+      "newSize": [
+        390,
+        736
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 287040,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "0e68a4181924ccfa7e481afab949c610717b1f352d1912dd4b7c6a7d5bc491fe",
+      "newSvgSha256": "0e68a4181924ccfa7e481afab949c610717b1f352d1912dd4b7c6a7d5bc491fe"
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "detail",
+      "oldSize": [
+        352,
+        736
+      ],
+      "newSize": [
+        352,
+        736
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 259072,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc",
+      "newSvgSha256": "e6fbfb21b439a15863ffef1cff8eed919ae337b2e3ec4f4d401c931e999bbabc"
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "search",
+      "oldSize": [
+        336,
+        201
+      ],
+      "newSize": [
+        336,
+        201
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 67536,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "eed4d71be1212016e3dc7a4877e3885130f922bd1cfd3356816a3c28cc7aa2c1",
+      "newSvgSha256": "eed4d71be1212016e3dc7a4877e3885130f922bd1cfd3356816a3c28cc7aa2c1"
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "legend",
+      "oldSize": [
+        292,
+        404
+      ],
+      "newSize": [
+        292,
+        404
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 0,
+      "totalPixels": 117968,
+      "rawSvgIdentical": true,
+      "svgIdentical": true,
+      "oldSvgSha256": "0e68a4181924ccfa7e481afab949c610717b1f352d1912dd4b7c6a7d5bc491fe",
+      "newSvgSha256": "0e68a4181924ccfa7e481afab949c610717b1f352d1912dd4b7c6a7d5bc491fe"
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "empty",
+      "oldSize": [
+        390,
+        736
+      ],
+      "newSize": [
+        390,
+        736
+      ],
+      "viewportIdentical": true,
+      "changedPixels": 138,
+      "totalPixels": 287040
+    },
+    {
+      "size": "mobile",
+      "theme": "dark",
+      "state": "error",
+      "oldSize": [
+        390,
+        736
+      ],
+      "newSize": [
+        390,
+        736
+      ],
+      "changedPixels": 0,
+      "totalPixels": 287040
+    }
+  ]
+}

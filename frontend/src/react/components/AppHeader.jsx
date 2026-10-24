@@ -20,6 +20,9 @@ export function AppHeader({ active = 'map', context = null }) {
   if (params && context.area) params.set('area', context.area)
   if (params && context.draftVersionId) params.set('draftVersionId', context.draftVersionId)
   const query = params ? `?${params}` : ''
+  const mapParams = params ? new URLSearchParams(params) : null
+  if (mapParams && context.selectedAssetId) mapParams.set('selectedAssetId', context.selectedAssetId)
+  const mapQuery = mapParams ? `?${mapParams}` : ''
   const name = user?.name || 'Pengguna'
 
   useLayoutEffect(() => {
@@ -50,10 +53,10 @@ export function AppHeader({ active = 'map', context = null }) {
 
   return (
     <header data-app-header className={`top-navigation app-header${active === 'topology' ? ' topology-top-navigation' : ''}`}>
-      <a className="brand-lockup nav-brand" href={`/map${query}`} aria-label="SINERGI — Peta Aset"><BrandLogo /></a>
+      <a className="brand-lockup nav-brand" href={`/map${mapQuery}`} aria-label="SINERGI — Peta Aset"><BrandLogo /></a>
       <nav aria-label="Navigasi utama" style={{ '--app-nav-count': 2 }}>
         {[['map', '/map', 'map', 'Peta Aset', 'Peta'], ['topology', '/topology', 'account_tree', 'Diagram Topologi', 'Diagram']].map(([view, path, icon, label, short]) =>
-          <a key={view} href={`${path}${query}`} aria-label={label} aria-current={active === view ? 'page' : undefined} className={active === view ? 'active' : ''}>
+          <a key={view} href={`${path}${view === 'map' ? mapQuery : query}`} aria-label={label} aria-current={active === view ? 'page' : undefined} className={active === view ? 'active' : ''}>
             <Icon>{icon}</Icon><span className="nav-label">{label}</span><span className="nav-label-short">{short}</span>
           </a>)}
       </nav>

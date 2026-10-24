@@ -1,6 +1,6 @@
 # Migrasi React SINERGI — baseline dan checklist
 
-Terakhir diperbarui: 24 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **13 — Pisahkan logika topologi**.
+Terakhir diperbarui: 24 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **14 — Topologi React untuk membaca data**.
 Commit asal: `5375bd3` pada `main`. Branch kerja lokal: `react-migration-baseline`.
 Rencana asli pengguna disimpan tanpa perubahan di [PLAN.md](PLAN.md).
 
@@ -194,3 +194,16 @@ Enam halaman dan dialog peta aktif memakai React; topologi masih legacy. Diagram
 - [x] Checkpoint Git lokal setelah pemeriksaan; perubahan pengguna, rahasia dan backup tidak disertakan. Tidak ada push/merge/deployment atau perubahan database operasional.
 
 Enam halaman dan dialog peta tetap React; topologi tetap legacy. Tahap ini tidak mengaktifkan halaman React baru. Semua operasi tulis UI diuji dengan API mock; integrasi PostgreSQL terpisah belum tersedia. [Laporan tahap 13](STAGE-13.md). Tahap berikutnya **14 — Topologi React untuk membaca data**, setelah diminta; berhenti di tahap 13.
+
+## Hasil tahap 14
+
+- [x] Siapkan JSX untuk topologi baca: pilihan fasilitas, pencarian/keyboard, panel aset/relasi, tray, legenda, zoom/pan/fit/reset, tema/mobile dan loading/error/kosong/retry. Header dan provider bersama dipakai; tidak membungkus halaman/binder lama.
+- [x] Adapter hanya memiliki SVG/viewport dan lifecycle; label overlay dikirim sebagai data ke React. Instance/frame bertahan selama seleksi/tema, source immutable, fokus SVG dan penutupan sidebar/inspector dipulihkan.
+- [x] Pertahankan URL/storage/context/role/sesi/revision; uji respons terlambat, StrictMode, retry renderer, abort, listener/timer/frame/observer/ikon dan disposal.
+- [x] Buktikan 21 sumber lama tetap identik, 13 fungsi viewport dan posisi label sama. Halaman/rute produksi `/topology` dan `/topologi` tetap legacy; React hanya pada fixture development.
+- [x] Visual 56 halaman + 56 potongan, 28 pasangan berukuran sama: 18 identik, 10 berbeda 118–472 pixel, maksimum 0,083% akibat kontrol nonaktif. Semua 20 SVG dan 24 metrik viewport identik. Desktop/mobile terang/gelap diperiksa dengan reduced motion untuk capture; tes interaktif memakai default.
+- [x] Frontend 341 tes Node lama + 179 Vitest, backend 77 lulus/1 skip, browser penuh 74/74 dan smoke 10/10 lulus. Build/lint lulus dan frontend diulang sesudah perbaikan fokus terakhir.
+- [x] Edit/drag/relasi/draft/save/ekspor belum diimplementasikan pada UI baru; kontrol terkait nonaktif, Viewer tidak mendapat kontrol Administrator. Tidak ada write dataset pada UI baca.
+- [x] Checkpoint Git lokal sesudah pemeriksaan; perubahan pengguna, rahasia dan backup tidak disertakan. Tidak ada push/merge/deployment atau perubahan database operasional.
+
+Enam halaman dan dialog peta aktif tetap React; topologi produksi tetap legacy. JSX topologi siap dipakai tahap berikutnya melalui fixture development, belum masuk bundle halaman produksi. [Laporan tahap 14](STAGE-14.md). Tahap berikutnya **15 — Edit topologi dan penyimpanan**, termasuk aktivasi setelah kriterianya lulus; berhenti di tahap 14.

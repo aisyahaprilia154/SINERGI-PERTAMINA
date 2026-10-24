@@ -3,7 +3,7 @@ import {assetIconUrl} from '../domain/asset-icon.js'
 import {renderTopologyDiagramSvg} from '../pages/topology/topology-diagram-svg.js'
 
 // Owns only the dedicated SVG frame; UI panels remain the caller's responsibility.
-export function createTopologyGraphRenderer({frame,getSnapshot,sourceIconLoader,scope,syncGraphSurface,renderOverviewLabels,onIconsReady,isDragging}) {
+export function createTopologyGraphRenderer({frame,getSnapshot,sourceIconLoader,scope,syncGraphSurface,renderOverviewLabels,onIconsReady,isDragging,preserveFocus=false}) {
   let disposed=false
   function renderGraph() {
     if(disposed||scope.disposed)return
@@ -58,7 +58,10 @@ export function createTopologyGraphRenderer({frame,getSnapshot,sourceIconLoader,
       sourceIconDataByUrl: sourceIconLoader.dataByUrl,
       mountingLabelById: state.frameNames,
     })
+    const focused=preserveFocus&&frame.contains(document.activeElement)?document.activeElement.closest('[data-node-id],[data-edge-id],[data-mounting-group-id]'):null
+    const focusKey=focused&&['nodeId','edgeId','mountingGroupId'].find(key=>focused.dataset[key]),focusId=focusKey?focused.dataset[focusKey]:null
     frame.innerHTML = svg
+    if(focusKey)[...frame.querySelectorAll('[data-node-id],[data-edge-id],[data-mounting-group-id]')].find(element=>element.dataset[focusKey]===focusId)?.focus({preventScroll:true})
     frame.style.width = `${layout.width}px`
     frame.style.height = `${layout.height}px`
     frame.style.transform = `scale(${state.zoom})`
