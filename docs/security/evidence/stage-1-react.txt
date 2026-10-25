@@ -1,0 +1,11 @@
+
+ RUN  v5.0.5 C:/Users/NITRO V 15/Downloads/SINERGI-PERTAMINA (2)/SINERGI-PERTAMINA/frontend
+
+
+ Test Files  14 passed (14)
+      Tests  196 passed (196)
+   Start at  08:39:14
+   Duration  69.25s (tests 61%, environment 22%, import 8%, setup 5%, transform 4%)
+
+    Isolate  14 workers spawned · ~1.20s startup each (spawn + environment, per file)
+             at least ~15.63s faster with isolate: false — reuses workers across files instead of one per file

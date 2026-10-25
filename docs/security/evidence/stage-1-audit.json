@@ -1,0 +1,20 @@
+{
+  "date": "2026-10-25",
+  "root": {
+    "high": 0,
+    "critical": 0,
+    "total": 0
+  },
+  "backend": {
+    "high": 0,
+    "critical": 0,
+    "total": 0
+  },
+  "frontend": {
+    "high": 0,
+    "critical": 0,
+    "total": 0
+  },
+  "update": "undici dev transitive via jsdom 8.11.2 to 8.12.3",
+  "scope": "npm advisory database only; not container/host/application pentest"
+}

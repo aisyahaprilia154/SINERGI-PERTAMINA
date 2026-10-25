@@ -1,0 +1,58 @@
+vite v8.1.6 building client environment for production...
+[2K
+transforming...✓ 252 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                         1.44 kB │ gzip:   0.60 kB
+dist/assets/inter-latin-wght-normal-Dx4kXJAl.woff2     48.25 kB
+dist/assets/maplibre-gl-worker-BvEsDmg_.js            507.46 kB
+dist/assets/Overlay-BakDOvT4.css                        1.86 kB │ gzip:   0.65 kB
+dist/assets/LoginRoute-Cz_vXEOE.css                     3.68 kB │ gzip:   1.11 kB
+dist/assets/UsersRoute-8nAtGG49.css                     6.84 kB │ gzip:   1.86 kB
+dist/assets/admin-route-gvwP9mLC.css                    9.13 kB │ gzip:   2.23 kB
+dist/assets/bootstrap-iKY8R2gR.css                     12.16 kB │ gzip:   2.86 kB
+dist/assets/maplibre-map-CKRTiAqP.css                  82.86 kB │ gzip:  10.71 kB
+dist/assets/MapRoute-CipGP9vu.css                     322.12 kB │ gzip:  47.07 kB
+dist/assets/TopologyRoute-Cqafs0uK.css                390.91 kB │ gzip:  56.85 kB
+dist/assets/map-diagrams-DOiIvrz-.js                    0.07 kB │ gzip:   0.08 kB
+dist/assets/production-BTbXgTk8.js                      0.13 kB │ gzip:   0.12 kB
+dist/assets/Drawer-D6Oyu0Gl.js                          0.16 kB │ gzip:   0.16 kB
+dist/assets/abortable-delay-C2rsnMzL.js                 0.23 kB │ gzip:   0.18 kB
+dist/assets/navigation-guards-BiNElMZk.js               0.33 kB │ gzip:   0.24 kB
+dist/assets/page-access-Bn0V8XJd.js                     0.47 kB │ gzip:   0.28 kB
+dist/assets/asset-icon-DDYQ1nNe.js                      0.93 kB │ gzip:   0.48 kB
+dist/assets/preload-helper-Czpn1I53.js                  1.19 kB │ gzip:   0.67 kB
+dist/assets/operational-api-mpM7alfj.js                 1.29 kB │ gzip:   0.73 kB
+dist/assets/account-session-BrBGCjbD.js                 1.72 kB │ gzip:   0.74 kB
+dist/assets/DataTable-Yl542Hom.js                       1.75 kB │ gzip:   0.84 kB
+dist/assets/index-Ci9RIUaP.js                           1.96 kB │ gzip:   1.00 kB
+dist/assets/ThemeToggle-B9AkoEi6.js                     2.39 kB │ gzip:   1.08 kB
+dist/assets/import-dataset-service-BQ8sxr6f.js          2.66 kB │ gzip:   1.18 kB
+dist/assets/network-colors-CwdDeADo.js                  3.06 kB │ gzip:   1.37 kB
+dist/assets/routes-CqoLUrOL.js                          3.18 kB │ gzip:   1.11 kB
+dist/assets/LoginRoute-D-wHiv4W.js                      3.58 kB │ gzip:   1.43 kB
+dist/assets/Overlay-WEsQge_B.js                         3.66 kB │ gzip:   1.61 kB
+dist/assets/react-dom-CIc7lA_t.js                       3.85 kB │ gzip:   1.39 kB
+dist/assets/AppHeader-BQ9-lGUa.js                       4.61 kB │ gzip:   1.83 kB
+dist/assets/schematic-export-xWirZa_c.js                6.10 kB │ gzip:   2.78 kB
+dist/assets/RouteProviders-MHWNwHNM.js                  7.40 kB │ gzip:   2.83 kB
+dist/assets/react-DjGqiD24.js                           8.38 kB │ gzip:   3.22 kB
+dist/assets/UsersRoute-CFqCQeyp.js                      9.61 kB │ gzip:   3.43 kB
+dist/assets/VersionsRoute-CtXznsQo.js                   9.68 kB │ gzip:   3.53 kB
+dist/assets/ImportsRoute-dOcTsJEU.js                   10.27 kB │ gzip:   3.86 kB
+dist/assets/PreviewRoute-C6WufbMu.js                   12.13 kB │ gzip:   4.49 kB
+dist/assets/production-BxSKFpGC.js                     12.41 kB │ gzip:   5.17 kB
+dist/assets/map-diagrams-DhQdAsVQ.js                   28.27 kB │ gzip:   8.75 kB
+dist/assets/active-dataset-map-adapter-DBASio7o.js     41.48 kB │ gzip:  11.80 kB
+dist/assets/hooks-F10RObWR.js                          62.52 kB │ gzip:  20.13 kB
+dist/assets/MapRoute-CPTI59Pu.js                      116.09 kB │ gzip:  33.32 kB
+dist/assets/TopologyRoute-Ci05_gCS.js                 229.39 kB │ gzip:  65.25 kB
+dist/assets/bootstrap-Bo86Hgv4.js                     233.72 kB │ gzip:  74.37 kB
+dist/assets/maplibre-map-5UFWtW6T.js                1,072.22 kB │ gzip: 290.86 kB
+
+✓ built in 1.19s
+[plugin builtin:vite-reporter]
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
