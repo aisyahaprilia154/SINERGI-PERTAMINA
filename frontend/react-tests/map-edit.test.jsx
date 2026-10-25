@@ -7,10 +7,10 @@ import { MapReadPage } from '../src/react/map/MapReadPage.jsx'
 import { ThemeProvider } from '../src/react/theme/ThemeProvider.jsx'
 import { SessionContext } from '../src/react/session/session-context.js'
 import { documentNavigation } from '../src/services/document-navigation.js'
-import { prepareAssetIcon } from '../src/pages/map/asset-icon-editor.js'
+import { prepareAssetIcon } from '../src/services/asset-icon-image.js'
 import { createMapReadAdapter } from '../src/adapters/map-read-adapter.js'
 
-vi.mock('../src/pages/map/asset-icon-editor.js', async importOriginal => { const original = await importOriginal(); return {...original, prepareAssetIcon:vi.fn(async file => {original.validateAssetIconFile(file);return 'data:image/png;base64,aGVsbG8='})} })
+vi.mock('../src/services/asset-icon-image.js', async importOriginal => { const original = await importOriginal(); return {...original, prepareAssetIcon:vi.fn(async file => {original.validateAssetIconFile(file);return 'data:image/png;base64,aGVsbG8='})} })
 let state
 const deferred = () => { let resolve; const promise = new Promise(done => {resolve=done});return {promise,resolve} }
 beforeEach(() => {
@@ -155,7 +155,7 @@ it('updates an existing native surface with independent asset copies, graph and 
 })
 
 it('releases the image object URL immediately when decoding is aborted',async()=>{
-  const original = await vi.importActual('../src/pages/map/asset-icon-editor.js'), revoke = vi.fn(), create = vi.fn(()=>'blob:owned-icon'), NativeURL = URL
+  const original = await vi.importActual('../src/services/asset-icon-image.js'), revoke = vi.fn(), create = vi.fn(()=>'blob:owned-icon'), NativeURL = URL
   vi.stubGlobal('URL',class extends NativeURL { static createObjectURL=create; static revokeObjectURL=revoke })
   vi.stubGlobal('Image',class { decode(){return new Promise(()=>{})} })
   const controller=new AbortController(), promise=original.prepareAssetIcon(new File(['png'],'icon.png',{type:'image/png'}),{signal:controller.signal})

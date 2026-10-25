@@ -1,0 +1,63 @@
+{
+  "base": "http://127.0.0.1:5186",
+  "routes": [
+    {
+      "route": "/",
+      "status": 200,
+      "script": "/assets/index-Ci9RIUaP.js",
+      "assetStatus": 200
+    },
+    {
+      "route": "/map?datasetId=dataset-semarang",
+      "status": 200,
+      "script": "/assets/index-Ci9RIUaP.js",
+      "assetStatus": 200
+    },
+    {
+      "route": "/peta",
+      "status": 200,
+      "script": "/assets/index-Ci9RIUaP.js",
+      "assetStatus": 200
+    },
+    {
+      "route": "/topology",
+      "status": 200,
+      "script": "/assets/index-Ci9RIUaP.js",
+      "assetStatus": 200
+    },
+    {
+      "route": "/topologi",
+      "status": 200,
+      "script": "/assets/index-Ci9RIUaP.js",
+      "assetStatus": 200
+    },
+    {
+      "route": "/admin/users",
+      "status": 200,
+      "script": "/assets/index-Ci9RIUaP.js",
+      "assetStatus": 200
+    },
+    {
+      "route": "/admin/datasets/versions",
+      "status": 200,
+      "script": "/assets/index-Ci9RIUaP.js",
+      "assetStatus": 200
+    },
+    {
+      "route": "/admin/datasets/import",
+      "status": 200,
+      "script": "/assets/index-Ci9RIUaP.js",
+      "assetStatus": 200
+    },
+    {
+      "route": "/admin/datasets/import/test/preview",
+      "status": 200,
+      "script": "/assets/index-Ci9RIUaP.js",
+      "assetStatus": 200
+    }
+  ],
+  "missingAssetStatus": 404,
+  "unauthenticatedApiStatus": 401,
+  "healthStatus": 200,
+  "databaseWrites": 0
+}

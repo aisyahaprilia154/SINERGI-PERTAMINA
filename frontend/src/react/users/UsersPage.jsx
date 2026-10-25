@@ -1,3 +1,4 @@
+import {registerNavigationGuard} from '../../services/navigation-guards.js'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { AdminLayout } from '../components/AdminLayout.jsx'
 import { DataTable } from '../components/DataTable.jsx'
@@ -24,8 +25,9 @@ function UserEditor({ selected, users, save, onClose, onSaved }) {
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   useEffect(() => {
     const guard = event => { if (dirty || flight.current) { event.preventDefault(); event.returnValue = '' } }
+    const removeGuard=registerNavigationGuard(()=>({dirty,busy:flight.current}))
     window.addEventListener('beforeunload', guard)
-    return () => window.removeEventListener('beforeunload', guard)
+    return () => {removeGuard();window.removeEventListener('beforeunload', guard)}
   }, [dirty])
   useLayoutEffect(() => { (discard ? cancelDiscard.current : field.current)?.focus() }, [mode, discard])
   const request = action => {

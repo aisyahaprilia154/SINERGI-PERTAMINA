@@ -1,3 +1,4 @@
+import {registerNavigationGuard} from '../../services/navigation-guards.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { buildPoleGroups, createAssetReferenceIndex, mergeMountingRelations } from '../../domain/pole-groups.js'
 import { saveActiveAssetIcon, saveTopologyDiagram } from '../../services/active-dataset-service.js'
@@ -19,8 +20,9 @@ export function useMapDocument(initial, canEdit) {
     }
     const unload = event => { if (dirtyRef.current || owner.current?.busy || transferGuardRef.current.dirty || transferGuardRef.current.busy) { event.preventDefault(); event.returnValue = '' } }
     const stop = () => controller.abort()
+    const removeGuard=registerNavigationGuard(()=>({dirty:dirtyRef.current||transferGuardRef.current.dirty,busy:owner.current?.busy||transferGuardRef.current.busy}))
     window.addEventListener('storage', revision); window.addEventListener('beforeunload', unload); window.addEventListener('pagehide', stop)
-    return () => { stop(); window.removeEventListener('storage', revision); window.removeEventListener('beforeunload', unload); window.removeEventListener('pagehide', stop) }
+    return () => { removeGuard();stop(); window.removeEventListener('storage', revision); window.removeEventListener('beforeunload', unload); window.removeEventListener('pagehide', stop) }
   }, [initial])
   async function write({ assetId, dataUrl, changes }) {
     const transaction = owner.current

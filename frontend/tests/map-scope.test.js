@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { scopeMapData } from '../src/pages/map/map-page.js'
+import { scopeMapData } from '../test-support/legacy/pages/map/map-page.js'
 
 test('area scope keeps geometry order, network counts, and pole mounting', () => {
   const assets = [

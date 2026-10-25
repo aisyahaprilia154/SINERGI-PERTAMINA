@@ -1,0 +1,22 @@
+
+Running 15 tests using 1 worker
+
+(node:25204) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [desktop-edge] › e2e\spa-portals.spec.js:5:1 › portal links navigate through the SPA and confirm a dirty import draft only once (3.0s)
+  ok  2 [desktop-edge] › e2e\spa-portals.spec.js:11:1 › explicit map navigation resets URL selection with a guarded draft while view history retains its canvas (2.9s)
+  ok  3 [desktop-edge] › e2e\spa.spec.js:8:1 › SPA keeps one document/session through all main protected pages and browser history (2.1s)
+  ok  4 [desktop-edge] › e2e\spa.spec.js:16:1 › Viewer mobile dark navigation and protected admin redirects remain in the same document (1.8s)
+  ok  5 [desktop-edge] › e2e\spa.spec.js:21:1 › dirty topology protects internal links and browser Back without losing the draft (2.7s)
+  ok  6 [desktop-edge] › e2e\spa.spec.js:28:1 › map selection Back/Forward preserves its canvas and URL state inside the SPA (2.3s)
+  ok  7 [desktop-edge] › e2e\spa.spec.js:33:1 › leaving a pending topology read aborts it and ignores its late result (1.7s)
+  ok  8 [desktop-edge] › e2e\spa.spec.js:37:238 › direct URL and refresh Administrator /peta?datasetId=dataset-semarang&area=ft-semarang (2.2s)
+  ok  9 [desktop-edge] › e2e\spa.spec.js:37:238 › direct URL and refresh Administrator /topologi?datasetId=dataset-semarang&area=ft-semarang (1.5s)
+  ok 10 [desktop-edge] › e2e\spa.spec.js:37:238 › direct URL and refresh Administrator /admin/users (1.3s)
+  ok 11 [desktop-edge] › e2e\spa.spec.js:37:238 › direct URL and refresh Administrator /admin/datasets/import/baseline-import/preview (1.8s)
+  ok 12 [desktop-edge] › e2e\spa.spec.js:37:238 › direct URL and refresh Viewer /peta?datasetId=dataset-semarang&area=ft-semarang (2.1s)
+  ok 13 [desktop-edge] › e2e\spa.spec.js:37:238 › direct URL and refresh Viewer /topologi?datasetId=dataset-semarang&area=ft-semarang (1.6s)
+  ok 14 [desktop-edge] › e2e\spa.spec.js:37:238 › direct URL and refresh Viewer /admin/users (2.0s)
+  ok 15 [desktop-edge] › e2e\spa.spec.js:37:238 › direct URL and refresh Viewer /admin/datasets/import/baseline-import/preview (1.9s)
+
+  15 passed (32.0s)

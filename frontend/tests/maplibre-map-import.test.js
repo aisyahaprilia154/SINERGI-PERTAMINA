@@ -39,11 +39,11 @@ test('operational network lines use a restrained contrast casing', async () => {
     'utf8',
   )
   const canvasSource = await readFile(
-    new URL('../src/pages/map/map-canvas.js', import.meta.url),
+    new URL('../test-support/legacy/pages/map/map-canvas.js', import.meta.url),
     'utf8',
   )
   const flatMapSource = await readFile(
-    new URL('../src/pages/map/flat-network-map.js', import.meta.url),
+    new URL('../test-support/legacy/pages/map/flat-network-map.js', import.meta.url),
     'utf8',
   )
 
@@ -65,11 +65,11 @@ test('Vite leaves MapLibre out of dependency optimization so its worker URL stay
 
 test('user map mounts MapLibre with area scope and never loads review candidates', async () => {
   const source = await readFile(
-    new URL('../src/pages/map/map-page.js', import.meta.url),
+    new URL('../test-support/legacy/pages/map/map-page.js', import.meta.url),
     'utf8',
   )
 
-  assert.match(source, /const mapSurfacePromise = import\('\.\/maplibre-map\.js'\)/)
+  assert.match(source, /const mapSurfacePromise = import\('\.\.\/\.\.\/\.\.\/\.\.\/src\/pages\/map\/maplibre-map\.js'\)/)
   assert.match(source, /const \{ createMapLibreSurface \} = await mapSurfacePromise/)
   assert.match(source, /projection: 'overlays'/)
   assert.match(source, /candidates: \[\]/)
@@ -96,11 +96,11 @@ test('MapLibre basemap is environment-configured and operational data is fail-sa
     'utf8',
   )
   const surfaceSource = await readFile(
-    new URL('../src/pages/map/map-surface.js', import.meta.url),
+    new URL('../test-support/legacy/pages/map/map-surface.js', import.meta.url),
     'utf8',
   )
   const mapPageSource = await readFile(
-    new URL('../src/pages/map/map-page.js', import.meta.url),
+    new URL('../test-support/legacy/pages/map/map-page.js', import.meta.url),
     'utf8',
   )
 
@@ -138,7 +138,7 @@ test('MapLibre basemap is environment-configured and operational data is fail-sa
   assert.match(surfaceSource, /basemap-status-overview/)
   assert.match(surfaceSource, /basemap-status-metrics/)
   assert.match(surfaceSource, /class="map-attribution"/)
-  const headerSource = await readFile(new URL('../src/components/app-header.js', import.meta.url), 'utf8')
+  const headerSource = await readFile(new URL('../test-support/legacy/components/app-header.js', import.meta.url), 'utf8')
   assert.match(headerSource, /account_tree<\/span><span class="nav-label">Diagram Topologi<\/span>/)
   assert.match(mapPageSource, /components\/app-header\.js/)
 })

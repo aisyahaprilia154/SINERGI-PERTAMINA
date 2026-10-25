@@ -1,3 +1,4 @@
+import {registerNavigationGuard} from '../../services/navigation-guards.js'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { AdminLayout } from '../components/AdminLayout.jsx'
 import { DataTable } from '../components/DataTable.jsx'
@@ -9,6 +10,7 @@ function VersionDialog({ snapshot, busy, onClose, onSubmit }) {
   const [name, setName] = useState(''), [message, setMessage] = useState('')
   const field = useRef(null), flight = useRef(false), alive = useRef(false), titleId = useId()
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
+  useEffect(()=>registerNavigationGuard(()=>({dirty:!!name.trim(),busy})),[name,busy])
   const version = snapshot.version
   const submit = async event => {
     event.preventDefault()

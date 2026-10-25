@@ -1,3 +1,4 @@
+import {bindThemeToggle} from '../test-support/legacy/theme.js'
 import { StrictMode, useRef, useState } from 'react'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -11,7 +12,6 @@ import { Dialog } from '../src/react/components/Dialog.jsx'
 import { Drawer } from '../src/react/components/Drawer.jsx'
 import { DataTable } from '../src/react/components/DataTable.jsx'
 import { WorkspaceControls } from '../src/react/components/WorkspaceControls.jsx'
-import { bindThemeToggle } from '../src/theme.js'
 
 const admin = { id: 'a', name: 'Administrator', role: 'Administrator' }
 const viewer = { id: 'v', name: 'Viewer', role: 'Viewer' }

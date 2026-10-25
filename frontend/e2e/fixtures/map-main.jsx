@@ -1,3 +1,5 @@
+import '../../src/style.css'
+import '../../src/styles/app-header.css'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MapRoute } from '../../src/react/map/MapRoute.jsx'

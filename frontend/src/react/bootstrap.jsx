@@ -1,7 +1,10 @@
+import '../style.css'
+import '../styles/app-header.css'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { RouterProvider } from 'react-router/dom'
 import { createAppRouter } from './router.jsx'
+import {installAppNavigation} from '../services/document-navigation.js'
 import { reactRoutes } from './routes.js'
 
 let activeApp = null
@@ -17,12 +20,14 @@ export function mountReactApp(container, { routes = reactRoutes, routerFactory }
     router.dispose()
     throw error
   }
+  const removeNavigation=installAppNavigation(router)
   let disposed = false
   const app = {
     router,
     dispose() {
       if (disposed) return
       disposed = true
+      removeNavigation()
       root.unmount()
       router.dispose()
       window.removeEventListener('pagehide', onPageHide)

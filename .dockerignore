@@ -23,3 +23,6 @@ backend/source-storage.zip
 .env.*
 !.env.docker.example
 
+
+# Legacy regression UI is never part of the production image build context.
+frontend/test-support

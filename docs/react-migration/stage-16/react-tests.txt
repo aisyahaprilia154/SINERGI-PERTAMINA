@@ -1,0 +1,12 @@
+
+ RUN  v5.0.5 C:/Users/NITRO V 15/Downloads/SINERGI-PERTAMINA (2)/SINERGI-PERTAMINA/frontend
+
+
+ Test Files  14 passed (14)
+      Tests  196 passed (196)
+   Start at  08:05:55
+   Duration  75.90s (tests 60%, environment 28%, setup 6%, import 4%, transform 1%)
+
+Environment  jsdom was created 14 times · 20.78s total, 28% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments

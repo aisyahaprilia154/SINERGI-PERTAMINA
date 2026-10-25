@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { renderFlatNetworkSvg } from '../src/pages/map/flat-network-map.js'
+import { renderFlatNetworkSvg } from '../test-support/legacy/pages/map/flat-network-map.js'
 
 test('flat network map renders clickable assets, physical cables, and candidate links', () => {
   const assets = [{

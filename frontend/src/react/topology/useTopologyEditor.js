@@ -1,3 +1,4 @@
+import {registerNavigationGuard} from '../../services/navigation-guards.js'
 import {useCallback,useLayoutEffect,useRef,useState} from 'react'
 import {createTopologyDocument} from '../../domain/topology-document.js'
 import {createTopologyEditing} from '../../domain/topology-editing.js'
@@ -29,8 +30,9 @@ export function useTopologyEditor({data,state,dispatch,canEdit,message,closeName
     const resource={working,document,editing,signal:controller.signal,downloads,model:null,layout:null,icons:new Map()};owner.current=resource
     const stop=()=>controller.abort(),guard=event=>{if(mutable.changes.length||mutable.mutationBusy){event.preventDefault();event.returnValue=''}}
     const removeRevision=listenForDatasetRevision({datasetId:working.mapData.activeContext.datasetId,revision:()=>working.mapData.recordRevision,isDirty:()=>mutable.changes.length>0||mutable.mutationBusy,onDirty:()=>current.current.message('Data berubah di halaman lain. Periksa perubahan sebelum menyimpan.')})
+    const removeGuard=registerNavigationGuard(()=>({dirty:mutable.changes.length>0,busy:mutable.mutationBusy}))
     window.addEventListener('pagehide',stop);window.addEventListener('beforeunload',guard)
-    return()=>{stop();downloads.dispose();removeRevision();window.removeEventListener('pagehide',stop);window.removeEventListener('beforeunload',guard);if(owner.current===resource)owner.current=null}
+    return()=>{removeGuard();stop();downloads.dispose();removeRevision();window.removeEventListener('pagehide',stop);window.removeEventListener('beforeunload',guard);if(owner.current===resource)owner.current=null}
   },[data,publish])
   const setSnapshot=useCallback((model,layout,icons)=>{if(owner.current)Object.assign(owner.current,{model,layout,icons})},[])
   const command=useCallback((name,...args)=>{

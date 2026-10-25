@@ -3,6 +3,7 @@ import { isAdministrator } from '../../services/account-session.js'
 import { useSession } from '../session/session-context.js'
 import { BrandLogo } from './BrandLogo.jsx'
 import { Icon } from './Icon.jsx'
+import { permitAppNavigation } from '../../services/navigation-guards.js'
 import { ThemeToggle } from './ThemeToggle.jsx'
 
 const adminLinks = [
@@ -75,7 +76,7 @@ export function AppHeader({ active = 'map', context = null }) {
               {adminLinks.map(([view, path, icon, label]) => <a key={view} className="user-menu-dropdown-item" href={`${path}${query}`} role="menuitem" tabIndex={-1} aria-current={active === view ? 'page' : undefined}><Icon>{icon}</Icon><span>{label}</span></a>)}
             </div><div className="user-menu-dropdown-divider" role="separator" /></>}
             <div className="user-menu-dropdown-items user-menu-dropdown-items-last">
-              <button className="user-menu-dropdown-item" data-user-account-logout type="button" role="menuitem" tabIndex={-1} disabled={status === 'signing-out'} onClick={() => { setOpen(false); void signOut() }}><Icon>logout</Icon><span>Keluar</span></button>
+              <button className="user-menu-dropdown-item" data-user-account-logout type="button" role="menuitem" tabIndex={-1} disabled={status === 'signing-out'} onClick={() => { if (!permitAppNavigation()) return; setOpen(false); void signOut() }}><Icon>logout</Icon><span>Keluar</span></button>
             </div>
           </div>
         </div>

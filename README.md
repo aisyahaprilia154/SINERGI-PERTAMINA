@@ -1,6 +1,6 @@
 # SINERGI Pertamina
 
-Aplikasi peta aset jaringan, impor KML/KMZ, dan diagram topologi. Frontend memakai Vite; API memakai Node.js dan PostgreSQL/PostGIS.
+Aplikasi peta aset jaringan, impor KML/KMZ, dan diagram topologi. Seluruh UI memakai React (JavaScript/JSX), Vite dan React Router sebagai SPA. API memakai Node.js dan PostgreSQL/PostGIS; peta memakai MapLibre, diagram mempertahankan mesin graph/layout dan ekspor SVG/PNG yang sama.
 
 ## Fitur
 
@@ -49,4 +49,17 @@ Konfigurasi akun/database, cache, output build, screenshot lokal, dan file semen
 
 Jalankan `npm run lint` dari root untuk memeriksa sintaks script peluncur, termasuk `scripts/dev.mjs`.
 
-Jalankan `npm run build`, `npm run lint`, dan `npm test` dari direktori `frontend` atau `backend` sesuai bagian yang diubah. Saat ini `lint` hanya menjalankan pemeriksaan sintaks Node.js; tes dan peninjauan kode tetap diperlukan. Build frontend menghasilkan `frontend/dist/client` untuk aset statis dan `frontend/dist/server` untuk worker.
+Jalankan `npm run build`, `npm run lint`, dan `npm test` dari direktori `frontend` atau `backend` sesuai bagian yang diubah. Lint frontend memeriksa JavaScript/JSX dan React Hooks dengan ESLint, selain pemeriksaan sintaks. Tes frontend menjalankan suite Node lama dan Vitest/React Testing Library secara terpisah. Pengujian browser memakai Playwright (`npm run test:e2e` dari `frontend`). Build frontend menghasilkan `frontend/dist/client` untuk aset statis dan `frontend/dist/server` untuk worker.
+
+
+## Arsitektur frontend React
+
+Entrypoint `frontend/src/main.js` memasang satu React root dan `createBrowserRouter`. Sesi, heartbeat dan tema dimiliki provider bersama yang bertahan selama navigasi SPA. Tujuh halaman utama memakai JSX: login, peta, topologi, kelola pengguna, versi database, riwayat/unggah impor, dan preview impor. Alias `/peta` dan `/topologi`, parameter dataset/area/aset, serta refresh URL langsung tetap didukung.
+
+React memiliki form, tabel, menu, toolbar, drawer dan dialog. MapLibre dan SVG hanya memiliki container renderer khusus dan dilepas saat route ditinggalkan. Draft pengguna/impor, detail aset, dialog versi, pilihan konflik dan draft topologi dijaga saat navigasi internal; refresh/menutup tab tetap memakai perlindungan browser. Navigasi Back/Forward memulihkan URL dan pilihan peta.
+
+Kode renderer/binder vanilla dipindahkan ke `frontend/test-support/legacy/` untuk menjalankan tes regresi lama dan baseline visual. Direktori ini bukan jalur aplikasi produksi dan tidak masuk aset build. Modul graph, layout, dataset, adapter dan service bersama tetap di `frontend/src/`.
+
+Build tetap menghasilkan `frontend/dist/client` dan worker `frontend/dist/server/index.js`, tanpa SSR. Nginx mempertahankan proxy `/api` dan fallback `index.html` untuk URL langsung. Menjalankan `docker build -f docker/frontend.Dockerfile -t sinergi-frontend:local .` dari root hanya membangun image; penggantian container operasional tetap langkah terpisah.
+
+Checklist dan bukti migrasi tersedia di [docs/react-migration/CHECKLIST.md](docs/react-migration/CHECKLIST.md). Semua pengujian operasi tulis UI memakai API mock; tes integrasi database memerlukan `SINERGI_TEST_DATABASE_URL` yang terpisah dari database operasional.

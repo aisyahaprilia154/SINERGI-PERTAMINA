@@ -1,0 +1,4 @@
+Captured SPA before/after desktop-light
+Captured SPA before/after desktop-dark
+Captured SPA before/after mobile-light
+Captured SPA before/after mobile-dark

@@ -1,3 +1,4 @@
+import {registerNavigationGuard} from '../../services/navigation-guards.js'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AdminLayout } from '../components/AdminLayout.jsx'
 import { DataTable } from '../components/DataTable.jsx'
@@ -19,6 +20,7 @@ function PreviewMap({ payload, createAdapter }) {
 }
 function Conflict({ item, baseline, preview, busy, act }) {
   const [draft, setDraft] = useState({ existing: '', start: '', end: '' })
+  useEffect(()=>registerNavigationGuard(()=>({dirty:Object.values(draft).some(Boolean),busy})),[draft,busy])
   const options = baseline.assets.filter(asset => !item.result?.candidates?.length || item.result.candidates.includes(asset.id))
   const available = [...baseline.assets.filter(asset => asset.objectRole === 'device_node'), ...preview.additions.assets.filter(asset => asset.kind === 'device')]
   const endpoints = [0, 1].map(index => item.result?.endpointCandidates?.[index]?.length ? item.result.endpointCandidates[index] : available.filter(asset => item.proposal.kind === 'mounting' && index === 1 ? asset.diagramRole === 'physical-mount' : asset.diagramRole !== 'physical-mount'))

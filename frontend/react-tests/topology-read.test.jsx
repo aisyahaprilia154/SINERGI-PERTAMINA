@@ -29,7 +29,7 @@ function factory(host,options){
  state.adapters.push({host,options,adapter});return adapter
 }
 function mount(role='Administrator'){return render(<StrictMode><ThemeProvider><SessionContext value={{user:{...fixtures.user,role},status:'authenticated',signOut:()=>{}}}><TopologyReadPage createAdapter={factory}/></SessionContext></ThemeProvider></StrictMode>)}
-async function ready(role){const view=mount(role);await waitFor(()=>expect(screen.getByRole('button',{name:'Perbesar diagram',exact:true})).toBeEnabled());return view}
+async function ready(role){const view=mount(role);await waitFor(()=>expect(screen.getByRole('button',{name:'Perbesar diagram',exact:true})).toBeEnabled());await waitFor(()=>expect(state.adapters.length).toBeGreaterThan(0));return view}
 const current=()=>state.adapters.at(-1)
 const search=()=>screen.getByRole('searchbox',{name:'Cari perangkat',exact:true})
 

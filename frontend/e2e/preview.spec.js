@@ -48,14 +48,17 @@ test('conflict draft survives failure and busy rejects duplicate decisions', asy
   release(); await expect(page.getByRole('alert')).toHaveText('Revision berubah')
   await expect(page.getByRole('combobox', { name: /^Aset lama/ })).toHaveValue('camera'); expect(errors).toEqual([])
 })
-test('recalculation polls, apply sends base revision and leaves through a new document', async ({ page }) => {
+test('recalculation polls, apply sends base revision and enters the map within the SPA', async ({ page }) => {
   const { state, errors } = await setup(page)
   await page.getByRole('button', { name: 'Hitung ulang preview' }).click()
   await expect(page.locator('[data-preview-status]')).toBeEmpty()
   expect(state.calls.some(call => call.path === '/api/imports/test' && call.method === 'GET')).toBe(true)
-  await page.route('**/map?datasetId=dataset-semarang', route => route.fulfill({ contentType: 'text/html', body: '<h1>Applied map</h1>' }))
+  await page.evaluate(()=>window.previewDocument='same-preview-document')
   await page.getByRole('button', { name: 'Terapkan tambahan' }).click()
-  await expect(page.getByRole('heading', { name: 'Applied map' })).toBeVisible()
+  await expect(page.locator('.maplibregl-canvas')).toBeVisible()
+  await expect.poll(()=>new URL(page.url()).pathname).toBe('/map')
+  expect(new URL(page.url()).searchParams.get('datasetId')).toBe('dataset-semarang')
+  expect(await page.evaluate(()=>window.previewDocument)).toBe('same-preview-document')
   expect(state.calls.find(call => call.path.endsWith('/apply')).body).toEqual({ expectedRevision: 4 }); expect(errors).toEqual([])
 })
 test('Viewer is redirected before preview is loaded', async ({ page }) => {

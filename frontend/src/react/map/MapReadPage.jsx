@@ -4,7 +4,7 @@ import { Icon } from '../components/Icon.jsx'
 import { useSession } from '../session/session-context.js'
 import { createMapReadAdapter } from '../../adapters/map-read-adapter.js'
 import { createNetworkSelectionState, readRequestedDatasetContext, parseMapUrlState, mapSelectionQuery, findAssetMatches, displayAssetName, networkMatchesPreset, buildExplicitRelationGraph, getConnectedAssets } from '../../domain/map-read-model.js'
-import { documentNavigation } from '../../services/document-navigation.js'
+import { documentNavigation,updateViewUrl,currentViewPageKey,canRestoreView } from '../../services/document-navigation.js'
 import { useMapDataset } from './useMapDataset.js'
 import { MapSidebar } from './MapSidebar.jsx'
 import { useMapDocument } from './useMapDocument.js'
@@ -32,7 +32,7 @@ function Workspace({ model: initial, createAdapter }) {
   const mobile = () => window.matchMedia?.('(max-width: 960px)').matches || false
   const writeUrl = useCallback(mode => {
     const params = mapSelectionQuery(window.location.search, { ...model, selection: controller })
-    window.history[`${mode}State`](null, '', `${window.location.pathname}?${params}${window.location.hash}`)
+    void updateViewUrl(`${window.location.pathname}?${params}${window.location.hash}`,{replace:mode==='replace'})
   }, [model, controller])
   const commit = useCallback((method, ...args) => { controller[method](...args); setSelection(snapshot()); writeUrl('push') }, [controller, snapshot, writeUrl, setSelection])
   const closeSidebar = useCallback(() => { if (window.matchMedia?.('(max-width: 960px)').matches) setSidebarOpen(false); else setCollapsed(true); setMobileTab('map'); focusReopen.current = true }, [setSidebarOpen, setCollapsed, setMobileTab])
@@ -43,8 +43,9 @@ function Workspace({ model: initial, createAdapter }) {
   }, [collapsed, sidebarOpen, mobileTab])
   const permitLeave = mapDocument.permitLeave
   useEffect(() => {
+    const pageKey=currentViewPageKey(),pathname=window.location.pathname
     writeUrl('replace')
-    const restore = () => { const next = parseMapUrlState(window.location.search, model.selectionOptions); if (next.selectedAssetId !== controller.selectedAssetId && !permitLeave()) { writeUrl('replace'); return }; controller.replace(next); setSelection(snapshot()) }
+    const restore = () => { if(window.location.pathname!==pathname||!canRestoreView(pageKey))return;const next = parseMapUrlState(window.location.search, model.selectionOptions); if (next.selectedAssetId !== controller.selectedAssetId && !permitLeave()) { writeUrl('replace'); return }; controller.replace(next); setSelection(snapshot()) }
     window.addEventListener('popstate', restore)
     return () => window.removeEventListener('popstate', restore)
   }, [model, controller, snapshot, writeUrl, permitLeave])

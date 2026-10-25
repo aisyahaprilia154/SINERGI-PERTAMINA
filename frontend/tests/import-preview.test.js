@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {previewMapPayload,renderAdditions} from '../src/pages/admin/preview-import-page.js'
+import {previewMapPayload,renderAdditions} from '../test-support/legacy/pages/admin/preview-import-page.js'
 import {adaptActiveDatasetForMap,adaptActiveDatasetForTopology} from '../src/adapters/active-dataset-map-adapter.js'
 
 const baseline={operationalSchema:2,datasetVersion:{id:'old-import',datasetId:'shared'},assets:[{id:'jb',name:'JB',type:'JB',category:'Infrastructure',objectRole:'device_node',diagramClass:'junction-peer',sourceFolderPath:'/RJBT/Site A/JB'}],

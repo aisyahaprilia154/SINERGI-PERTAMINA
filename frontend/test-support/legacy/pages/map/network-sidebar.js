@@ -1,0 +1,241 @@
+import {getNetworkSubcategories,formatDatasetCounts} from '../../../../src/domain/map-read-model.js'
+
+export function renderNetworkSidebar(activeContext, selectedCount, counts = {}, {
+  locationGroups = [],
+  selectedArea = null,
+  networks = [],
+} = {}) {
+  const countSummary = `${formatDatasetCounts(counts)} di ${selectedArea?.name || 'dataset aktif'}`
+  return `
+    <aside class="network-sidebar" id="network-sidebar"
+      aria-label="Pemilih jaringan. ${escapeAttribute(countSummary)}">
+      <header class="sidebar-heading">
+        <div>
+          <span class="eyebrow">PETA ASET</span>
+          <h1>Jaringan aset</h1>
+        </div>
+        <div class="sidebar-heading-actions">
+          <button class="icon-button sidebar-collapse desktop-only" type="button"
+            title="Tutup panel" aria-label="Tutup panel jaringan"
+            aria-controls="network-sidebar" aria-expanded="true">
+            <span class="material-symbols-outlined" aria-hidden="true">left_panel_close</span>
+          </button>
+          <button class="icon-button close-sidebar mobile-only" type="button"
+            aria-label="Tutup daftar jaringan" aria-controls="network-sidebar">
+            <span class="material-symbols-outlined" aria-hidden="true">close</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="sidebar-content">
+        <label class="area-selector">
+          <span>Area fasilitas</span>
+          <span class="area-selector-control">
+            <select aria-label="Area fasilitas" aria-haspopup="listbox" aria-expanded="false">
+              ${locationGroups.map((group) => `
+                <option value="${escapeAttribute(group.key)}"
+                  ${group.key === selectedArea?.key ? 'selected' : ''}>
+                  ${escapeHtml(group.name)}
+                </option>
+              `).join('')}
+            </select>
+            <span class="area-selector-icon material-symbols-outlined"
+              aria-hidden="true">expand_more</span>
+          </span>
+        </label>
+
+        <div class="asset-search-combobox">
+          <label class="search-control">
+            <span class="material-symbols-outlined" aria-hidden="true">search</span>
+            <input type="search" autocomplete="off" spellcheck="false"
+              placeholder="Cari ID, nama, atau lokasi aset"
+              aria-label="Cari Asset ID, nama aset, lokasi, atau hostname"
+              role="combobox" aria-autocomplete="list" aria-haspopup="listbox"
+              aria-controls="sidebar-asset-search-results" aria-expanded="false" />
+            <kbd>Ctrl K</kbd>
+          </label>
+          <div class="sidebar-asset-search-results" id="sidebar-asset-search-results"
+            role="listbox" aria-label="Hasil pencarian aset" hidden></div>
+        </div>
+
+        <div class="sidebar-filter-heading"><strong>Jaringan</strong><small>Pilih cepat</small></div>
+        <div class="map-category-presets" aria-label="Pilihan cepat jaringan yang tampil di peta">
+          <button type="button" data-category-preset="all" class="active"
+            aria-pressed="true">Semua</button>
+          <button type="button" data-category-preset="cctv" aria-pressed="false">CCTV</button>
+          <button type="button" data-category-preset="fiber" aria-pressed="false">Fiber Optic</button>
+          <button type="button" data-category-preset="power" aria-pressed="false">Power PLN</button>
+          <button type="button" data-category-preset="lan" aria-pressed="false">LAN</button>
+          <button type="button" data-category-preset="infrastructure"
+            aria-pressed="false">Infrastruktur</button>
+          ${networks.filter(({ categoryKey }) => categoryKey?.startsWith('custom:'))
+    .map(({ categoryKey, categoryLabel, name }) => `<button type="button"
+              data-category-preset="${escapeAttribute(categoryKey)}" aria-pressed="false">${escapeHtml(categoryLabel || name)}</button>`)
+    .join('')}
+        </div>
+        <div class="sidebar-list-header">
+          <div class="selection-summary" aria-live="polite">
+            <span><strong class="selected-count">${selectedCount}</strong> jaringan tampil di peta</span>
+          </div>
+        </div>
+
+        <div class="network-list" aria-label="Daftar jaringan" aria-busy="true"></div>
+
+      </div>
+    </aside>
+  `
+}
+
+export function renderNetworkList({
+  status,
+  errorMessage,
+  networks,
+  assets,
+  selectedNetworkIds,
+  expandedNetworkIds,
+  focusedNetworkId = null,
+  showCctvCoverage = false,
+}) {
+  if (status === 'loading') return renderLoadingSkeleton()
+  if (status === 'error') return renderErrorState(errorMessage)
+  if (!networks.length) return renderEmptyState('Belum ada jaringan pada dataset aktif.', 'dataset')
+
+  const assetById = Object.fromEntries(assets.map((asset) => [asset.id, asset]))
+
+  // Pencarian aset ditampilkan di combobox terpisah. Daftar jaringan tetap utuh
+  // agar pengguna dapat mengubah visibilitas jaringan tanpa kehilangan konteks.
+  return networks.map((network) => renderNetworkItem({
+    network,
+    assetById,
+    selected: selectedNetworkIds.has(network.id),
+    expanded: expandedNetworkIds.has(network.id),
+    focused: focusedNetworkId === network.id,
+    showCctvCoverage,
+  })).join('')
+}
+
+function renderNetworkItem({
+  network,
+  assetById,
+  selected,
+  expanded,
+  focused,
+  showCctvCoverage,
+}) {
+  const subcategories = getNetworkSubcategories(network, assetById)
+  const networkId = escapeAttribute(network.id)
+  const networkName = escapeHtml(network.name)
+  const isCctvNetwork = network.categoryKey === 'cctv' || network.id === 'network:cctv'
+  const showHealth = network.health && String(network.health).toLocaleLowerCase('id') !== 'aktif'
+
+  return `
+    <article class="network-item ${selected ? 'selected' : ''} ${focused ? 'focused' : ''}"
+      data-network-category="${escapeAttribute(network.categoryKey || 'unmapped')}"
+      data-network-id="${networkId}" style="--network-color:${escapeAttribute(network.color)}">
+      <div class="network-row">
+        <button class="network-main" type="button" data-network-select="${networkId}"
+          aria-pressed="${selected}" aria-label="${selected ? 'Sembunyikan' : 'Tampilkan'} ${networkName}">
+          <span class="network-checkbox ${selected ? 'checked' : ''}" aria-hidden="true">
+            ${selected ? '<span class="material-symbols-outlined">check</span>' : ''}
+          </span>
+          <i class="network-color-indicator" style="--network-color:${network.color}" aria-hidden="true"></i>
+          <span class="network-copy">
+            <strong>${networkName}</strong>
+            <small>
+              ${showHealth ? `<span class="network-health"><i></i>${escapeHtml(network.health)}</span>` : ''}
+              <span>${Number(network.confirmedConnectionCount) || 0} koneksi</span>
+              ${network.isolatedAssetCount ? `
+                <span class="network-relation-warning"
+                  title="${Number(network.isolatedAssetCount)} aset belum tersambung">
+                  <span class="material-symbols-outlined" aria-hidden="true">warning</span>
+                  ${Number(network.isolatedAssetCount)}
+                </span>
+              ` : ''}
+            </small>
+          </span>
+        </button>
+        <div class="network-row-actions${isCctvNetwork ? ' has-coverage-toggle' : ''}">
+          ${isCctvNetwork ? `
+            <button class="network-coverage-toggle" type="button"
+              data-cctv-coverage-toggle
+              role="switch"
+              aria-checked="${showCctvCoverage}"
+              aria-label="${showCctvCoverage ? 'Sembunyikan' : 'Tampilkan'} arah keterbacaan CCTV"
+              title="${showCctvCoverage ? 'Sembunyikan' : 'Tampilkan'} arah keterbacaan CCTV dari KMZ">
+              <span class="coverage-toggle-label">${showCctvCoverage ? 'ON' : 'OFF'}</span>
+              <span class="coverage-toggle-dot" aria-hidden="true"></span>
+            </button>
+          ` : ''}
+          <button class="network-icon-action focus-network" type="button" data-network-focus="${networkId}"
+            aria-pressed="${focused}" aria-label="${focused ? 'Keluar dari fokus' : 'Fokuskan peta ke'} ${networkName}"
+            title="${focused ? 'Keluar dari fokus' : 'Fokuskan peta ke'} ${networkName}"
+            ${network.assetCount ? '' : 'disabled'}>
+            <span class="material-symbols-outlined" aria-hidden="true">center_focus_strong</span>
+          </button>
+          <button class="network-icon-action expand-network" type="button" data-network-expand="${networkId}"
+            aria-label="${expanded ? 'Tutup' : 'Buka'} subkategori ${networkName}"
+            title="${expanded ? 'Tutup' : 'Buka'} detail ${networkName}"
+            aria-expanded="${expanded}" aria-controls="network-subcategories-${networkId}">
+            <span class="material-symbols-outlined" aria-hidden="true">${expanded ? 'expand_less' : 'expand_more'}</span>
+          </button>
+        </div>
+      </div>
+      <div class="network-subcategories" id="network-subcategories-${networkId}"
+        ${expanded ? '' : 'hidden'}>
+        ${subcategories.map((subcategory) => `
+          <span><i style="--network-color:${network.color}" aria-hidden="true"></i>${escapeHtml(subcategory.label)}</span>
+          <strong>${subcategory.count}</strong>
+        `).join('')}
+      </div>
+    </article>
+  `
+}
+
+function renderLoadingSkeleton() {
+  return `
+    <div class="network-loading" aria-label="Memuat jaringan">
+      ${Array.from({ length: 4 }, () => `
+        <div class="network-skeleton">
+          <i></i><span><b></b><small></small></span><em></em>
+        </div>
+      `).join('')}
+    </div>
+  `
+}
+
+function renderErrorState(message) {
+  return `
+    <div class="network-state">
+      <span class="material-symbols-outlined state-error-icon" aria-hidden="true">error</span>
+      <strong>Jaringan gagal dimuat</strong>
+      <span>${escapeHtml(message || 'Terjadi kendala saat membaca dataset aktif.')}</span>
+      <button class="button secondary retry-networks" type="button">
+        <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
+        Coba lagi
+      </button>
+    </div>
+  `
+}
+
+function renderEmptyState(message, type) {
+  return `
+    <div class="network-state">
+      <span class="material-symbols-outlined" aria-hidden="true">${type === 'search' ? 'search_off' : 'lan'}</span>
+      <strong>${type === 'search' ? 'Tidak ada hasil' : 'Jaringan belum tersedia'}</strong>
+      <span>${escapeHtml(message)}</span>
+    </div>
+  `
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value)
+}

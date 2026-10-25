@@ -41,7 +41,7 @@ function Workspace({data,createAdapter}){
  useEffect(()=>{const timer=setTimeout(()=>dispatch({search:state.query}),120);const stop=()=>clearTimeout(timer);window.addEventListener('pagehide',stop);return()=>{stop();window.removeEventListener('pagehide',stop)}},[state.query])
  useEffect(()=>{
   const params=new URLSearchParams(window.location.search);params.set('datasetId',mapData.activeContext.datasetId);params.delete('branchId');params.set('area',state.area??'all');if(validAsset)params.set('selectedAssetId',validAsset);else params.delete('selectedAssetId')
-  window.history.replaceState(null,'',`${window.location.pathname}?${params}`)
+  window.history.replaceState(window.history.state,'',`${window.location.pathname}?${params}`)
   try{localStorage.setItem(`sinergi.topology.last-area:${mapData.activeContext.datasetId}`,state.area??'all')}catch{/* Optional storage. */}
  },[mapData,state.area,validAsset])
  useEffect(()=>{if(!message)return;const timer=setTimeout(()=>setMessage(''),2200),stop=()=>clearTimeout(timer);window.addEventListener('pagehide',stop);return()=>{stop();window.removeEventListener('pagehide',stop)}},[message])
@@ -102,7 +102,7 @@ function Workspace({data,createAdapter}){
 
 export function TopologyReadPage({createAdapter=createTopologyReadAdapter}){
  const data=useTopologyDataset()
- useEffect(()=>{document.title='Diagram Topologi — SINERGI';document.body.className='map-body topology-body'},[])
+ useLayoutEffect(()=>{const body=document.body.className,title=document.title;document.title='Diagram Topologi — SINERGI';document.body.className='map-body topology-body';return()=>{document.body.className=body;document.title=title}},[])
  if(data.loading||data.error)return <div className="topology-stitch-app topology-stitch-state-app react-topology-read"><AppHeader active="topology"/><main className={data.error?'topology-stitch-state error':'map-data-state is-loading'} aria-live="polite" aria-busy={data.loading}><Icon>{data.error?'error':'progress_activity'}</Icon><h1>{data.error?'Diagram Topologi belum tersedia':'Memuat dataset aktif'}</h1><p>{data.error||'Aset dan relasi sedang dibaca dari versi aktif yang sama.'}</p>{data.error&&<button type="button" className="topology-stitch-primary-button" onClick={data.retry}>Coba lagi</button>}</main></div>
  return <Workspace data={data.data} createAdapter={createAdapter}/>
 }

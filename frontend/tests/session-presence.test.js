@@ -2,7 +2,7 @@ import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {sendSessionHeartbeat,startSessionPresence} from '../src/services/session-presence.js'
 import {saveSession,getSessionToken} from '../src/services/account-session.js'
-import {renderUserRows,lastSeenLabel} from '../src/pages/admin/users-page.js'
+import {renderUserRows,lastSeenLabel} from '../test-support/legacy/pages/admin/users-page.js'
 
 test('heartbeat sends the actual session and does not report success on network failure',async()=>{
  let request

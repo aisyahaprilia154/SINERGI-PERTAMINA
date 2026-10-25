@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { assetIconUrl, assetIconCanReset } from '../src/domain/asset-icon.js'
-import { renderAssetDetailDrawer } from '../src/pages/map/asset-detail-drawer.js'
-import { validateAssetIconFile, bindAssetIconControl } from '../src/pages/map/asset-icon-editor.js'
+import { renderAssetDetailDrawer } from '../test-support/legacy/pages/map/asset-detail-drawer.js'
+import { validateAssetIconFile, bindAssetIconControl } from '../test-support/legacy/pages/map/asset-icon-editor.js'
 import { adaptActiveAssetDetail } from '../src/adapters/active-dataset-map-adapter.js'
 import { isAdministrator, loadCurrentUser, getSessionUser, saveSession } from '../src/services/account-session.js'
 

@@ -43,7 +43,7 @@ async function seedSession(page, user = fixtures.user) {
   }, user)
 }
 
-test('login success preserves session keys and enters the legacy map through a new document', async ({ page }) => {
+test('login success preserves session keys and enters the React map in the same document', async ({ page }) => {
   const state = await installApi(page)
   await page.goto('/')
   await page.evaluate(() => { window.loginDocumentMarker = true })
@@ -51,7 +51,7 @@ test('login success preserves session keys and enters the legacy map through a n
   await page.getByLabel('Kata sandi', { exact: true }).fill('secret')
   await page.getByRole('button', { name: 'Masuk', exact: true }).click()
   await expect(page.locator('.maplibregl-canvas')).toBeVisible()
-  expect(await page.evaluate(() => window.loginDocumentMarker)).toBeUndefined()
+  expect(await page.evaluate(() => window.loginDocumentMarker)).toBe(true)
   expect(await page.evaluate(() => sessionStorage.getItem('sinergiSessionToken'))).toBe('browser-auth-token')
   expect(state.calls.filter(call => call.pathname === '/api/auth/login')).toHaveLength(1)
   expect(state.calls.find(call => call.pathname === '/api/auth/login').body).toEqual({ identifier: 'admin', password: 'secret' })

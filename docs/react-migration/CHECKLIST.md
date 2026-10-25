@@ -1,6 +1,6 @@
 # Migrasi React SINERGI — baseline dan checklist
 
-Terakhir diperbarui: 24 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **15 — Edit topologi dan penyimpanan**.
+Terakhir diperbarui: 25 Oktober 2026 (Asia/Jakarta). Tahap terakhir selesai: **16 — Integrasi akhir dan hapus jalur lama**.
 Commit asal: `5375bd3` pada `main`. Branch kerja lokal: `react-migration-baseline`.
 Rencana asli pengguna disimpan tanpa perubahan di [PLAN.md](PLAN.md).
 
@@ -168,7 +168,7 @@ UI baca peta memakai JSX untuk sidebar, area/jaringan/preset, pencarian, CCTV, b
 
 ## Hasil tahap 11
 
-`/map` dan `/peta`, termasuk trailing slash, aktif memakai React. Drawer detail, ganti/hapus ikon, pencarian/tambah/ganti/hapus relasi, serta relasi pemasangan dikelola JSX. Kontrak revision schema 2 dan lama ditangani, write diserialkan, error/409 menjaga proyeksi dan draft, respons aset lama diabaikan. MapLibre mempertahankan canvas/kamera dan hanya memperbarui proyeksi miliknya; daftar aksesibilitas React tidak lagi ditulis renderer. Draft, fokus, mobile, request/decoder/object URL serta cleanup diverifikasi. Dialog transfer lama tetap tersedia melalui bridge sampai tahap 12; topologi tetap legacy. Frontend 341 Node + 129 React, backend 77 lulus/1 skip, browser 56/56 dalam satu run, smoke 10/10, lint/build lulus. Visual 40 halaman + 40 potongan: 20 pasangan berukuran sama, 12 identik, delapan berbeda paling banyak 0,26% karena fokus. [Laporan tahap 11](STAGE-11.md). Checkpoint lokal setelah pemeriksaan; berhenti sebelum tahap 12. Tidak ada push/deployment atau perubahan database.
+`/map` dan `/peta`, termasuk trailing slash, aktif memakai React. Drawer detail, ganti/hapus ikon, pencarian/tambah/ganti/hapus relasi, serta relasi pemasangan dikelola JSX. Kontrak revision schema 2 dan lama ditangani, write diserialkan, error/409 menjaga proyeksi dan draft, respons aset lama diabaikan. MapLibre mempertahankan canvas/kamera dan hanya memperbarui proyeksi miliknya; daftar aksesibilitas React tidak lagi ditulis renderer. Draft, fokus, mobile, request/decoder/object URL serta cleanup diverifikasi. Dialog transfer lama tetap tersedia melalui bridge sampai tahap 12; topologi tetap legacy. Frontend 341 Node + 129 React, backend 77 lulus/1 skip, browser 56/56 dalam satu run, smoke 10/10, lint/build lulus. Visual 44 halaman + 44 potongan: 20 pasangan berukuran sama, 12 identik, delapan berbeda paling banyak 0,26% karena fokus. [Laporan tahap 11](STAGE-11.md). Checkpoint lokal setelah pemeriksaan; berhenti sebelum tahap 12. Tidak ada push/deployment atau perubahan database.
 
 ## Hasil tahap 12
 
@@ -215,8 +215,23 @@ Enam halaman dan dialog peta aktif tetap React; topologi produksi tetap legacy. 
 - [x] Pertahankan mesin graph/layout, aturan kamera/mounting, kontrak API/payload/revision, sesi/role, URL/storage dan navigasi dokumen. Semua efek tulis berasal dari tindakan pengguna.
 - [x] Verifikasi cancel/rollback, konflik dan retry, submit tunggal, simpan/reload posisi dan frame, beforeunload, Viewer, async setelah unmount/pagehide, keyboard/fokus/Escape, listener/request/timer/RAF/observer/pointer/ghost/auto-pan/renderer/object URL. Gerakan drag dan zoom tidak merender ulang seluruh UI.
 - [x] Perbaiki input nama, akses keyboard custom frame, lapisan panel ekspor serta pergeseran kanvas mobile saat inspector ditutup; 21 sumber lama, 13 fungsi viewport dan posisi label tetap identik.
-- [x] Visual desktop/mobile terang/gelap: 40 halaman + 40 potongan; 17/20 pasangan potongan identik. Dua panel ekspor berbeda karena kini terlihat, satu input berbeda karena highlight teks. Seluruh 20 viewport identik; 16 SVG mentah identik dan empat hanya menambah atribut keyboard custom frame.
+- [x] Visual desktop/mobile terang/gelap: 44 halaman + 44 potongan; 17/20 pasangan potongan identik. Dua panel ekspor berbeda karena kini terlihat, satu input berbeda karena highlight teks. Seluruh 20 viewport identik; 16 SVG mentah identik dan empat hanya menambah atribut keyboard custom frame.
 - [x] Frontend 341 Node + 192 Vitest, backend 77 lulus/1 skip; browser seluruh suite 80/80 lalu 16/16 topologi setelah perbaikan akhir; smoke 10/10; lint/build lulus. Detail urutan dan batas verifikasi ada di laporan.
 - [x] Checkpoint Git lokal sesudah pemeriksaan; perubahan pengguna, rahasia dan backup tidak disertakan. Tidak ada push/merge/deployment atau perubahan database operasional.
 
 Semua tujuh halaman utama dan dialog peta sekarang aktif React. Entrypoint transisi serta kode halaman/binder lama masih disimpan untuk pembersihan tahap 16; navigasi tetap dokumen penuh. [Laporan tahap 15](STAGE-15.md). Tahap berikutnya **16 — Integrasi akhir dan hapus jalur lama**, setelah diminta; berhenti di tahap 15.
+
+
+## Hasil tahap 16
+
+- [x] Aktifkan SPA dengan satu root/provider sesi/tema; login, logout, alias, URL langsung, refresh dan Back/Forward tetap bekerja. Tidak ada reload dokumen pada navigasi internal yang didukung.
+- [x] Jaga draft/proses pada navigasi internal, termasuk tautan portal dialog, logout sebelum request, dan Back lintas instance peta. Penolakan tidak menghilangkan draft atau membuat ulang canvas; riwayat seleksi tetap sinkron.
+- [x] Hapus entrypoint legacy dan keluarkan halaman/binder DOM lama dari sumber produksi. Simpan 36 modul khusus regresi di `frontend/test-support/legacy`, di luar konteks Docker. Audit 166 sumber/bundle tanpa jalur halaman vanilla; 73 sumber fondasi tetap identik.
+- [x] Rapikan CSS bersama dan import; perbaiki pengaruh tema gelap pada login setelah logout serta urutan CSS header setelah halaman admin. Perbaiki lapisan menu akun di atas inspector topologi; uji logout batal/setuju tanpa force-click. README diperbarui.
+- [x] Frontend 341 Node + 196 React, backend 77 lulus/1 integrasi PostgreSQL skip; lint root/frontend/backend, JSX/Hooks dan build frontend/worker/backend lulus.
+- [x] Browser penuh 95/95; setelah perbaikan akhir, React/lint/browser penuh/build diulang dan 15/15 kasus SPA diperiksa pada bundle Docker final. Smoke 10/10 dan tes Node lama diulang setelah perbaikan CSS. Urutan lengkap dan batas verifikasi dicatat di laporan.
+- [x] Capture tujuh halaman desktop/mobile terang/gelap: 44 halaman + 44 potongan. Seluruh 12 pasangan potongan login/header sebelum-sesudah siklus SPA identik pada threshold RGB 12; 11/12 halaman identik, satu berbeda 117 piksel (0,009%) pada kontrol sidebar peta. Empat pasangan SVG identik. Tambahan empat tampilan menu akun di atas inspector topologi diperiksa. Contact sheet dan screenshot diperiksa.
+- [x] Docker frontend berhasil dibangun; sembilan URL langsung, hashed asset/cache, missing asset, health dan proxy `/api` diperiksa. Output `dist/client` dan worker `dist/server/index.js` dipertahankan. Container pengujian terpisah dihentikan, compose operasional tidak diganti.
+- [x] Operasi tulis UI memakai mock; tidak ada perubahan database operasional. Perubahan pengguna, rahasia dan backup tidak ikut checkpoint; tidak ada push/merge/deployment.
+
+Semua tujuh halaman dan dialog aktif memakai React. Arsip vanilla hanya dipakai tes dan tidak masuk produksi. [Laporan tahap 16](STAGE-16.md) dan [hasil pemeriksaan](stage-16/verification-results.json). **Rencana migrasi 16 tahap selesai; tidak ada tahap berikutnya.**

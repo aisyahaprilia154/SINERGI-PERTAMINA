@@ -6,3 +6,6 @@
 
 /* Export remains reachable while the asset inspector is open. */
 .topology-body #app .react-topology-read .topology-stitch-export-panel { z-index: 60; }
+
+/* Keep the account dropdown above the selected-asset inspector (z-index 42). */
+.topology-body #app .react-topology-read > .app-header.top-navigation[data-app-header] { z-index: 70; }

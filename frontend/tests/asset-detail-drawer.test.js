@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { renderAssetDetailDrawer } from '../src/pages/map/asset-detail-drawer.js'
+import { renderAssetDetailDrawer } from '../test-support/legacy/pages/map/asset-detail-drawer.js'
 
 const asset = {
   id: 'cam-01',

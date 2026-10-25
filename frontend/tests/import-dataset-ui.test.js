@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { renderDatasetDropzone } from '../src/pages/admin/dataset-dropzone.js'
-import { renderImportDatasetForm } from '../src/pages/admin/import-dataset-form.js'
+import { renderDatasetDropzone } from '../test-support/legacy/pages/admin/dataset-dropzone.js'
+import { renderImportDatasetForm } from '../test-support/legacy/pages/admin/import-dataset-form.js'
 import {
   getImportStepState,
   getOverallProgress,
   validateImportFile,
-} from '../src/pages/admin/import-dataset-state.js'
-import { renderImportSummary } from '../src/pages/admin/import-summary.js'
+} from '../test-support/legacy/pages/admin/import-dataset-state.js'
+import { renderImportSummary } from '../test-support/legacy/pages/admin/import-summary.js'
 
 test('file validation accepts one KML/KMZ within the configured limit', () => {
   assert.equal(validateImportFile({

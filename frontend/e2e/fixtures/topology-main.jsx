@@ -1,3 +1,5 @@
+import '../../src/style.css'
+import '../../src/styles/app-header.css'
 import {StrictMode} from 'react'
 import {createRoot} from 'react-dom/client'
 import {TopologyRoute} from '../../src/react/topology/TopologyRoute.jsx'

@@ -1,0 +1,297 @@
+{
+  "threshold": 12,
+  "results": [
+    {
+      "view": "login",
+      "size": "desktop",
+      "theme": "light",
+      "beforeSize": [
+        440,
+        558
+      ],
+      "afterSize": [
+        440,
+        558
+      ],
+      "changedPixels": 0,
+      "totalPixels": 245520,
+      "beforePageSize": [
+        1440,
+        900
+      ],
+      "afterPageSize": [
+        1440,
+        900
+      ],
+      "pageChangedPixels": 0
+    },
+    {
+      "view": "map",
+      "size": "desktop",
+      "theme": "light",
+      "beforeSize": [
+        1440,
+        64
+      ],
+      "afterSize": [
+        1440,
+        64
+      ],
+      "changedPixels": 0,
+      "totalPixels": 92160,
+      "beforePageSize": [
+        1440,
+        900
+      ],
+      "afterPageSize": [
+        1440,
+        900
+      ],
+      "pageChangedPixels": 117
+    },
+    {
+      "view": "topology",
+      "size": "desktop",
+      "theme": "light",
+      "beforeSize": [
+        1440,
+        64
+      ],
+      "afterSize": [
+        1440,
+        64
+      ],
+      "changedPixels": 0,
+      "totalPixels": 92160,
+      "beforePageSize": [
+        1440,
+        900
+      ],
+      "afterPageSize": [
+        1440,
+        900
+      ],
+      "pageChangedPixels": 0,
+      "svgIdentical": true
+    },
+    {
+      "view": "login",
+      "size": "desktop",
+      "theme": "dark",
+      "beforeSize": [
+        440,
+        558
+      ],
+      "afterSize": [
+        440,
+        558
+      ],
+      "changedPixels": 0,
+      "totalPixels": 245520,
+      "beforePageSize": [
+        1440,
+        900
+      ],
+      "afterPageSize": [
+        1440,
+        900
+      ],
+      "pageChangedPixels": 0
+    },
+    {
+      "view": "map",
+      "size": "desktop",
+      "theme": "dark",
+      "beforeSize": [
+        1440,
+        64
+      ],
+      "afterSize": [
+        1440,
+        64
+      ],
+      "changedPixels": 0,
+      "totalPixels": 92160,
+      "beforePageSize": [
+        1440,
+        900
+      ],
+      "afterPageSize": [
+        1440,
+        900
+      ],
+      "pageChangedPixels": 0
+    },
+    {
+      "view": "topology",
+      "size": "desktop",
+      "theme": "dark",
+      "beforeSize": [
+        1440,
+        64
+      ],
+      "afterSize": [
+        1440,
+        64
+      ],
+      "changedPixels": 0,
+      "totalPixels": 92160,
+      "beforePageSize": [
+        1440,
+        900
+      ],
+      "afterPageSize": [
+        1440,
+        900
+      ],
+      "pageChangedPixels": 0,
+      "svgIdentical": true
+    },
+    {
+      "view": "login",
+      "size": "mobile",
+      "theme": "light",
+      "beforeSize": [
+        358,
+        554
+      ],
+      "afterSize": [
+        358,
+        554
+      ],
+      "changedPixels": 0,
+      "totalPixels": 198332,
+      "beforePageSize": [
+        390,
+        844
+      ],
+      "afterPageSize": [
+        390,
+        844
+      ],
+      "pageChangedPixels": 0
+    },
+    {
+      "view": "map",
+      "size": "mobile",
+      "theme": "light",
+      "beforeSize": [
+        390,
+        108
+      ],
+      "afterSize": [
+        390,
+        108
+      ],
+      "changedPixels": 0,
+      "totalPixels": 42120,
+      "beforePageSize": [
+        390,
+        844
+      ],
+      "afterPageSize": [
+        390,
+        844
+      ],
+      "pageChangedPixels": 0
+    },
+    {
+      "view": "topology",
+      "size": "mobile",
+      "theme": "light",
+      "beforeSize": [
+        390,
+        108
+      ],
+      "afterSize": [
+        390,
+        108
+      ],
+      "changedPixels": 0,
+      "totalPixels": 42120,
+      "beforePageSize": [
+        390,
+        844
+      ],
+      "afterPageSize": [
+        390,
+        844
+      ],
+      "pageChangedPixels": 0,
+      "svgIdentical": true
+    },
+    {
+      "view": "login",
+      "size": "mobile",
+      "theme": "dark",
+      "beforeSize": [
+        358,
+        554
+      ],
+      "afterSize": [
+        358,
+        554
+      ],
+      "changedPixels": 0,
+      "totalPixels": 198332,
+      "beforePageSize": [
+        390,
+        844
+      ],
+      "afterPageSize": [
+        390,
+        844
+      ],
+      "pageChangedPixels": 0
+    },
+    {
+      "view": "map",
+      "size": "mobile",
+      "theme": "dark",
+      "beforeSize": [
+        390,
+        108
+      ],
+      "afterSize": [
+        390,
+        108
+      ],
+      "changedPixels": 0,
+      "totalPixels": 42120,
+      "beforePageSize": [
+        390,
+        844
+      ],
+      "afterPageSize": [
+        390,
+        844
+      ],
+      "pageChangedPixels": 0
+    },
+    {
+      "view": "topology",
+      "size": "mobile",
+      "theme": "dark",
+      "beforeSize": [
+        390,
+        108
+      ],
+      "afterSize": [
+        390,
+        108
+      ],
+      "changedPixels": 0,
+      "totalPixels": 42120,
+      "beforePageSize": [
+        390,
+        844
+      ],
+      "afterPageSize": [
+        390,
+        844
+      ],
+      "pageChangedPixels": 0,
+      "svgIdentical": true
+    }
+  ]
+}

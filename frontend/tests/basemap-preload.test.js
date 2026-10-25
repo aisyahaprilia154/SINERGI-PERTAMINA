@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { preloadBasemapResources } from '../src/pages/map/basemap-preload.js'
+import { preloadBasemapResources } from '../test-support/legacy/pages/map/basemap-preload.js'
 
 test('first map metadata and label font preload together without blocking on provider failure', async () => {
   const requests = []

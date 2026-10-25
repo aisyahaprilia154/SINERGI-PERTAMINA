@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {renderMapDataTransferDialog} from '../src/pages/map/map-data-transfer-dialog.js'
+import {renderMapDataTransferDialog} from '../test-support/legacy/pages/map/map-data-transfer-dialog.js'
 import {collectSelectedNetworkAssetIds} from '../src/pages/map/active-dataset-kml-export.js'
 test('map upload stages data for preview and has no replacement mode',()=>{
  const html=renderMapDataTransferDialog({state:{mode:'import',busy:false},activeContext:{datasetId:'shared'}})

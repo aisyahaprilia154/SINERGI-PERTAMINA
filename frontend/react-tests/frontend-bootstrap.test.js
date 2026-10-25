@@ -20,13 +20,13 @@ describe('transition entrypoint', () => {
     }
   })
 
-  it('loads only the legacy entrypoint without taking ownership of its DOM', async () => {
+  it('rejects missing routes without loading legacy code or changing the DOM', async () => {
     const container = document.createElement('div')
     container.textContent = 'Existing UI'
     const loadLegacy = vi.fn().mockResolvedValue({})
     const loadReact = vi.fn()
-    expect(await startFrontend({ pathname: '/unmigrated-fixture', routes:[], container, loadLegacy, loadReact })).toEqual({ implementation: 'legacy' })
-    expect(loadLegacy).toHaveBeenCalledOnce()
+    await expect(startFrontend({ pathname: '/unmigrated-fixture', routes:[], container, loadLegacy, loadReact })).rejects.toThrow('Rute React tidak tersedia')
+    expect(loadLegacy).not.toHaveBeenCalled()
     expect(loadReact).not.toHaveBeenCalled()
     expect(container.textContent).toBe('Existing UI')
   })

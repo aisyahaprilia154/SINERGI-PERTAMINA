@@ -57,7 +57,7 @@ test('Viewer can export SVG and PNG while edits remain unavailable',async({page}
  expect(state.writes).toHaveLength(0);expect(errors).toEqual([])
 })
 test('unsaved navigation is guarded and pagehide cancels an in-flight save without late redraw',async({page})=>{
- const {state,errors}=await setup(page);await open(page);await page.getByRole('button',{name:'Hapus relasi dengan SW-01'}).click();const dialog=page.waitForEvent('dialog').then(async dialog=>{expect(dialog.type()).toBe('beforeunload');await dialog.dismiss()});await Promise.all([dialog,page.getByRole('link',{name:'Peta Aset',exact:true}).click()]);await expect(page).toHaveURL(/topology/)
+ const {state,errors}=await setup(page);await open(page);await page.getByRole('button',{name:'Hapus relasi dengan SW-01'}).click();const dialog=page.waitForEvent('dialog').then(async dialog=>{expect(dialog.type()).toBe('confirm');await dialog.dismiss()});await Promise.all([dialog,page.getByRole('link',{name:'Peta Aset',exact:true}).click()]);await expect(page).toHaveURL(/topology/)
  let release;state.pending=new Promise(resolve=>release=resolve);await page.getByRole('button',{name:'Simpan perubahan'}).click();await expect.poll(()=>state.writes.length).toBe(1);await page.evaluate(()=>window.dispatchEvent(new Event('pagehide')));const html=await page.locator('#app').innerHTML();release();state.pending=null;await page.waitForTimeout(250);expect(await page.locator('#app').innerHTML()).toBe(html);expect(errors).toEqual([])
 })
 

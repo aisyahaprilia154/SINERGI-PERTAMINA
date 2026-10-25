@@ -3098,16 +3098,16 @@
   --topology-shadow: 0 12px 32px rgba(0, 0, 0, .38);
 }
 
-:root[data-theme="dark"] body {
+:root[data-theme="dark"] :is(.map-body, .topology-body, .admin-body) {
   color: #f5f5f7;
   background: #000;
 }
 
-:root[data-theme="dark"] .brand-logo-wordmark strong {
+:root[data-theme="dark"] :is(.map-body, .topology-body, .admin-body) .brand-logo-wordmark strong {
   color: #f5f5f7;
 }
 
-:root[data-theme="dark"] .brand-logo-wordmark small {
+:root[data-theme="dark"] :is(.map-body, .topology-body, .admin-body) .brand-logo-wordmark small {
   color: #ff7b80;
 }
 

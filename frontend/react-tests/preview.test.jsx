@@ -34,7 +34,7 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); window.history.replaceState(null, '', '/') })
 const factory = () => { const adapter = { update: vi.fn(), dispose: vi.fn() }; state.adapters.push(adapter); return adapter }
 function mount() { return render(<StrictMode><ThemeProvider><SessionContext value={{ user: fixtures.user, status: 'authenticated', signOut: () => {} }}><PreviewPage importId="test" createAdapter={factory} /></SessionContext></ThemeProvider></StrictMode>) }
-async function ready() { const view = mount(); await waitFor(() => expect(screen.getByRole('button', { name: 'Hitung ulang preview' })).toBeEnabled()); return view }
+async function ready() { const view = mount(); await waitFor(() => expect(screen.getByRole('button', { name: 'Hitung ulang preview' })).toBeEnabled()); await waitFor(()=>expect(state.adapters.at(-1)?.update).toHaveBeenCalled()); return view }
 const writes = () => state.calls.filter(call => call.method && call.method !== 'GET')
 
 describe('React import preview', () => {

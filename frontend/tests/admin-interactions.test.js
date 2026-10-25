@@ -2,9 +2,9 @@ import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {JSDOM} from 'jsdom'
 import {saveSession} from '../src/services/account-session.js'
-import {renderImportDatasetPage} from '../src/pages/admin/import-dataset-page.js'
-import {renderPreviewImportPage} from '../src/pages/admin/preview-import-page.js'
-import {renderUsersPage} from '../src/pages/admin/users-page.js'
+import {renderImportDatasetPage} from '../test-support/legacy/pages/admin/import-dataset-page.js'
+import {renderPreviewImportPage} from '../test-support/legacy/pages/admin/preview-import-page.js'
+import {renderUsersPage} from '../test-support/legacy/pages/admin/users-page.js'
 
 test('admin operations retain drafts, context and map position',async t=>{
   const dom=new JSDOM('<html><body><div id="app"></div></body></html>',{url:'http://localhost/admin/datasets/import',pretendToBeVisual:true})

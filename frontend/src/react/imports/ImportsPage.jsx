@@ -1,3 +1,4 @@
+import {registerNavigationGuard} from '../../services/navigation-guards.js'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { AdminLayout } from '../components/AdminLayout.jsx'
 import { DataTable } from '../components/DataTable.jsx'
@@ -15,8 +16,9 @@ function ImportEditor({ datasetId, maxFileSize, uploading, uploadStatus, upload,
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   useEffect(() => {
     const guard = event => { if (!leaving.current && (dirty || flight.current)) { event.preventDefault(); event.returnValue = '' } }
+    const removeGuard=registerNavigationGuard(()=>({dirty:!leaving.current&&dirty,busy:!leaving.current&&flight.current}))
     window.addEventListener('beforeunload', guard)
-    return () => window.removeEventListener('beforeunload', guard)
+    return () => {removeGuard();window.removeEventListener('beforeunload', guard)}
   }, [dirty])
   useLayoutEffect(() => { (discard ? keep.current : field.current)?.focus() }, [discard])
   const requestClose = () => { if (flight.current) return; if (discard) setDiscard(false); else if (dirty) setDiscard(true); else onClose() }

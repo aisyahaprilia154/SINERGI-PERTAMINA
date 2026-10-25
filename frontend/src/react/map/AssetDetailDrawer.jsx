@@ -8,7 +8,7 @@ import { isJunctionBoxAsset, JUNCTION_BOX_ICON_URL } from '../../domain/junction
 import { getAssetCategory, assetIcon, networkDisplayName, networkDisplayType, connectedNetworkIcon, mountingAssetSubtitle, mountingCandidateMetadata, mountedOnAssetTooltip, isMountableAsset, isPoleAsset, hasMapPosition } from '../../domain/map-asset-detail.js'
 import { buildRelationOptions, isPoleLikeAsset, buildExplicitRelationGraph, getConnectedAssets, displayAssetName } from '../../domain/map-read-model.js'
 import { createAssetReferenceIndex, mergeMountingRelations, mountingRelationsFromAssetProjection, mountedChildrenForPole } from '../../domain/pole-groups.js'
-import { prepareAssetIcon } from '../../pages/map/asset-icon-editor.js'
+import { prepareAssetIcon } from '../../services/asset-icon-image.js'
 
 function AssetImage({ asset, identity = false }) {
   const url = assetIconUrl(asset), [loaded, setLoaded] = useState(null)

@@ -5,7 +5,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL: process.env.SINERGI_E2E_BASE_URL || 'http://127.0.0.1:5173',
     trace: 'retain-on-failure',
     locale: 'id-ID',
     timezoneId: 'Asia/Jakarta',
@@ -14,7 +14,7 @@ export default defineConfig({
     name: 'desktop-edge',
     use: { ...devices['Desktop Edge'], channel: process.env.BASELINE_BROWSER_CHANNEL || 'msedge' },
   }],
-  webServer: {
+  webServer: process.env.SINERGI_E2E_BASE_URL ? undefined : {
     command: `"${process.execPath}" node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173`,
     url: 'http://127.0.0.1:5173',
     reuseExistingServer: !process.env.CI,

@@ -23,6 +23,7 @@ export function clearSession() {
     window.sessionStorage.removeItem(TOKEN_KEY)
     window.sessionStorage.removeItem(USER_KEY)
   } catch { /* A failed storage write already prevents a session. */ }
+  window.dispatchEvent?.(new (window.Event??Event)('sinergi:session-cleared'))
 }
 
 export async function login(identifier, password, { signal } = {}) {

@@ -1,0 +1,1929 @@
+import '../../../../src/styles/topology-workspace.css'
+import '../../../../src/styles/topology-refinement.css'
+import '../../../../src/styles/app-harmony.css'
+import { branchNameForFacility } from '../../../../src/domain/facility-branch.js'
+import { renderLocationContextPanel } from '../../components/location-context-panel.js'
+import { createSourceIconLoader } from '../../../../src/domain/source-icon-loader.js'
+import { JUNCTION_BOX_ICON_URL } from '../../../../src/domain/junction-box-icon.js'
+import { assetIconUrl } from '../../../../src/domain/asset-icon.js'
+import { CONNECTION_STYLES } from '../../../../src/pages/topology/topology-connection-style.js'
+import {
+  networkFamilyLabel,
+} from '../../../../src/domain/topology-diagram-model.js'
+import { poleGroupForAsset } from '../../../../src/domain/pole-groups.js'
+import { downloadSchematicPng, downloadSchematicSvg } from '../../../../src/pages/map/schematic-export.js'
+import { bindUserAccountMenu, renderTopNavigation } from '../../components/app-header.js'
+import { bindThemeToggle } from '../../theme.js'
+import { getSessionUser } from '../../../../src/services/account-session.js'
+import {listenForDatasetRevision} from '../../../../src/services/operational-api.js'
+import { renderTopologyDiagramSvg } from '../../../../src/pages/topology/topology-diagram-svg.js'
+import { resolveTopologyDropTarget } from '../../../../src/pages/topology/topology-drop-target.js'
+import { frameMoveAssetIds } from '../../../../src/pages/topology/topology-frame-descendants.js'
+import { createAssetDragFeedback } from '../../../../src/pages/topology/topology-drag-feedback.js'
+import { createDragAutoPan } from '../../../../src/pages/topology/topology-drag-auto-pan.js'
+import {
+  anchoredZoomScrollPosition,
+  computeFitZoom,
+  computeReadableZoom,
+  effectiveViewportFor,
+  zoomSurfaceMetrics,
+} from '../../../../src/pages/topology/topology-viewport.js'
+
+import {createTopologyDocument} from '../../../../src/domain/topology-document.js'
+import {createTopologyWorkspaceState} from '../../../../src/domain/topology-workspace-state.js'
+import {createTopologySelection} from '../../../../src/domain/topology-selection.js'
+import {getDeviceSearchResults,relationTargetsFor as findRelationTargets,networkPathFor as findNetworkPath,directRelationsFor as findDirectRelations} from '../../../../src/domain/topology-search.js'
+import {buildTopologyWorkspaceModel,buildTopologyWorkspaceLayout} from '../../../../src/domain/topology-workspace-model.js'
+import {loadTopologyDocument} from '../../../../src/services/topology-document-service.js'
+import {createTopologyWorkspaceScope} from '../../../../src/adapters/topology-workspace-scope.js'
+import {createTopologyGraphRenderer} from '../../../../src/adapters/topology-graph-renderer.js'
+import {createDownloadScope} from '../../../../src/services/download-scope.js'
+
+const mountedWorkspaces=new WeakMap()
+
+const DEFAULT_DATASET_ID = 'dataset-semarang'
+const DEFAULT_BRANCH_ID = 'semarang'
+const DEFAULT_ZOOM = 1
+const MIN_ZOOM = 0.001
+const MAX_ZOOM = 1.35
+const CANVAS_HORIZONTAL_PADDING = 30
+const CANVAS_TOP_PADDING = 24
+const CANVAS_BOTTOM_PADDING = 30
+
+function topologyAreaStorageKey(activeContext) {
+  return `sinergi.topology.last-area:${activeContext.datasetId}`
+}
+
+function readStoredTopologyArea(key) {
+  try {
+    return window.localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function persistTopologyArea(key, area) {
+  try {
+    window.localStorage.setItem(key, area ?? 'all')
+  } catch {
+    // Storage can be disabled; URL state still remains authoritative.
+  }
+}
+
+export async function renderTopologyPage(container) {
+  mountedWorkspaces.get(container)?.dispose()
+  const scope=createTopologyWorkspaceScope()
+  mountedWorkspaces.set(container,scope)
+  document.title = 'Diagram Topologi — SINERGI'
+  document.body.className = 'map-body topology-body'
+  const requested = readRequestedDatasetContext()
+
+  container.innerHTML = renderLoadingState(requested)
+  bindUserAccountMenu()
+  bindThemeToggle()
+
+  try {
+    const documentData=await loadTopologyDocument(requested,{signal:scope.signal})
+    if(scope.disposed)return ()=>scope.dispose()
+    persistActiveContext(documentData.mapData.activeContext)
+    mountTopologyWorkspace(container,{...documentData,context:requested,scope})
+  } catch (error) {
+    if(scope.disposed)return ()=>scope.dispose()
+    container.innerHTML = renderErrorState(requested, error)
+    bindUserAccountMenu()
+    bindThemeToggle()
+    scope.listen(container.querySelector('[data-retry-topology]'),'click', () => {
+      void renderTopologyPage(container)
+    })
+  }
+  return ()=>scope.dispose()
+}
+
+function mountTopologyWorkspace(container, {
+  mapData,
+  graph,
+  roots,
+  context,
+  scope,
+}) {
+  const canEditTopology = getSessionUser()?.role === 'Administrator'
+  const activeContext = mapData.activeContext
+  const areaStorageKey=topologyAreaStorageKey(activeContext)
+  const state=createTopologyWorkspaceState({mapData,search:window.location.search,storedArea:readStoredTopologyArea(areaStorageKey),compact:window.matchMedia?.('(max-width: 960px)').matches ?? false})
+
+  let model = null
+  let layout = null
+  let searchTimer = null
+  let panState = null
+  let dragState = null
+  let suppressViewportClick = false
+  const sourceIconLoader=createSourceIconLoader({signal:scope.signal})
+  const downloads=createDownloadScope(scope.signal)
+  scope.own(downloads.dispose)
+  const documentController=createTopologyDocument({mapData,graph,roots,state,canEditTopology,getModel:()=>model,signal:scope.signal,
+    rebuild:(...args)=>rebuild(...args),updatePanelState,showToast,closeFrameNameEditor})
+  const {stageChange,cancelDraft,saveDraft,applyMutationResponse,addRelation,removeRelation}=documentController
+  const {selectSearchResult,selectAsset,selectEdge,selectMountingGroup,clearSelection}=createTopologySelection({state,mapData,getModel:()=>model,getLayout:()=>layout,
+    persistArea:area=>persistTopologyArea(areaStorageKey,area),rebuild:(...args)=>rebuild(...args),renderGraph,renderInspector,renderTopologySidebar,updatePanelState,syncUrl,focusAssetCard,focusMountingGroup})
+  scope.own(listenForDatasetRevision({datasetId:activeContext.datasetId,revision:()=>mapData.recordRevision,isDirty:()=>state.changes.length>0||state.mutationBusy,
+    onDirty:()=>showToast('Data berubah di halaman lain. Periksa perubahan sebelum menyimpan.')}))
+  scope.own(()=>{
+    cancelAssetDrag()
+    const viewport=container.querySelector('[data-topology-viewport]')
+    if(panState&&viewport?.hasPointerCapture?.(panState.pointerId))viewport.releasePointerCapture(panState.pointerId)
+    panState=null;viewport?.classList.remove('is-panning')
+  })
+  const buildModel=()=>buildTopologyWorkspaceModel({mapData,graph:documentController.graph,roots:documentController.roots,state})
+  const buildLayout=(overrides={})=>buildTopologyWorkspaceLayout(model,{mapData,state,narrow:window.matchMedia('(max-width: 620px)').matches,compact:window.matchMedia('(max-width: 960px)').matches,overrides})
+  let graphRenderer=null
+
+  const rebuild = ({ fit = false } = {}) => {
+    model = buildModel()
+    if (!model.nodeById.has(state.selectedAssetId)) state.selectedAssetId = null
+    layout = buildLayout()
+    renderGraph()
+    renderInspector()
+    renderTray()
+    renderTopologySidebar()
+    updateToolbar()
+    updatePanelState()
+    if (fit) scope.frame(() => {
+      if (window.matchMedia('(max-width: 960px)').matches) fitGraph()
+      else resetGraphViewport()
+    })
+    syncUrl()
+  }
+
+  model = buildModel()
+  state.selectedAssetId = model.nodeById.has(state.selectedAssetId)
+    ? state.selectedAssetId
+    : null
+  layout = buildLayout()
+
+  container.innerHTML = renderWorkspaceShell({
+    mapData,
+    activeContext,
+    context,
+    state,
+    model,
+    canEditTopology,
+  })
+  bindThemeToggle()
+  graphRenderer=createTopologyGraphRenderer({frame:container.querySelector('[data-topology-frame]'),getSnapshot:()=>({model,layout,state,mapData,activeContext}),sourceIconLoader,scope,syncGraphSurface,renderOverviewLabels,onIconsReady:()=>{renderInspector();renderTray()},isDragging:()=>!!dragState?.active})
+  bindWorkspaceEvents()
+  renderGraph()
+  renderInspector()
+  renderTray()
+  renderTopologySidebar()
+  updateToolbar()
+  updatePanelState()
+  scope.frame(() => {
+    if (state.selectedAssetId) focusRelations()
+    else if (window.matchMedia('(max-width: 960px)').matches) fitGraph()
+    else resetGraphViewport()
+  })
+
+  function bindWorkspaceEvents() {
+    scope.listen(container,'click', handleClick)
+    scope.listen(container,'change', handleChange)
+    scope.listen(container,'input', handleInput)
+    scope.listen(container,'keydown', handleKeydown)
+    scope.listen(container,'dblclick', handleDoubleClick)
+    scope.listen(container,'submit', handleSubmit)
+    const viewport = container.querySelector('[data-topology-viewport]')
+    const warnUnsaved = event => {
+      if (!viewport?.isConnected) { window.removeEventListener('beforeunload', warnUnsaved); return }
+      if (state.changes.length) { event.preventDefault(); event.returnValue = '' }
+    }
+    scope.listen(window,'beforeunload',warnUnsaved)
+    scope.listen(viewport,'wheel', (event) => {
+      if (!event.ctrlKey && !event.metaKey) return
+      event.preventDefault()
+      const direction = event.deltaY > 0 ? -1 : 1
+      zoomGraphTo(state.zoom + direction * 0.08, {
+        clientX: event.clientX,
+        clientY: event.clientY,
+      })
+    }, { passive: false })
+
+    scope.listen(viewport,'pointerdown', beginPan)
+    scope.listen(viewport,'pointermove', movePan)
+    scope.listen(viewport,'pointerup', endPan)
+    scope.listen(viewport,'pointercancel', endPan)
+    scope.listen(viewport,'lostpointercapture', endPan)
+    scope.listen(viewport,'scroll', renderOverviewLabels, { passive: true })
+    const tray = container.querySelector('[data-topology-tray]')
+    scope.listen(tray,'pointerdown', beginTrayAssetDrag)
+    scope.listen(tray,'pointermove', movePan)
+    scope.listen(tray,'pointerup', endPan)
+    scope.listen(tray,'pointercancel', endPan)
+    scope.listen(tray,'lostpointercapture', endPan)
+
+    if (viewport && typeof ResizeObserver === 'function') {
+      let wasCompact = window.matchMedia('(max-width: 960px)').matches
+      let rootColumns = wasCompact ? window.matchMedia('(max-width: 620px)').matches ? 3 : 5 : null
+      const resizeObserver = new ResizeObserver(() => {
+        if (scope.disposed) return
+        const compact = window.matchMedia('(max-width: 960px)').matches
+        const nextRootColumns = compact ? window.matchMedia('(max-width: 620px)').matches ? 3 : 5 : null
+        if (nextRootColumns !== rootColumns) {
+          rootColumns = nextRootColumns
+          layout = buildLayout()
+          renderGraph()
+          updateToolbar()
+        }
+        const shouldFit = compact && !state.selectedAssetId
+          && !state.selectedMountingGroupId && (!wasCompact || state.zoom < 0.5)
+        wasCompact = compact
+        if (shouldFit) fitGraph()
+        else syncGraphSurface({ preserveCenter: true })
+      })
+      scope.observe(resizeObserver,viewport)
+    }
+  }
+
+  function handleClick(event) {
+    if (suppressViewportClick) {
+      suppressViewportClick = false
+      return
+    }
+    if (state.actionsOpen && !event.target?.closest?.('[data-topology-actions-menu], [data-action="toggle-actions"]')) {
+      state.actionsOpen = false
+      updatePanelState()
+    }
+    // Do not replace the SVG label between the clicks of a double-click.
+    if (event.target?.closest?.('[data-frame-label]')) return
+    const target = event.target?.closest?.('[data-node-id], [data-edge-id], [data-mounting-group-id]')
+    if (target?.dataset.nodeId) {
+      selectAsset(target.dataset.nodeId, {
+        focus: window.matchMedia('(max-width: 960px)').matches,
+      })
+      return
+    }
+    if (target?.dataset.edgeId) {
+      selectEdge(target.dataset.edgeId)
+      return
+    }
+    if (target?.dataset.mountingGroupId) {
+      selectMountingGroup(target.dataset.mountingGroupId)
+      if (window.matchMedia('(max-width: 960px)').matches) {
+        focusMountingGroup(target.dataset.mountingGroupId)
+      }
+      return
+    }
+
+    const overviewTarget = event.target?.closest?.(
+      '[data-overview-area], [data-overview-mounting-id]',
+    )
+    if (overviewTarget?.dataset.overviewArea) {
+      state.area = overviewTarget.dataset.overviewArea
+      persistTopologyArea(areaStorageKey, state.area)
+      rebuild({ fit: true })
+      return
+    }
+    if (overviewTarget?.dataset.overviewMountingId) {
+      const groupId = overviewTarget.dataset.overviewMountingId
+      selectMountingGroup(groupId)
+      focusMountingGroup(groupId)
+      return
+    }
+
+    const relationAsset = event.target?.closest?.('[data-select-asset]')
+    if (relationAsset?.dataset.selectAsset) {
+      selectAsset(relationAsset.dataset.selectAsset)
+      return
+    }
+
+    const areaOverview = event.target?.closest?.('[data-area-overview]')
+    if (areaOverview?.dataset.areaOverview) {
+      state.area = areaOverview.dataset.areaOverview
+      persistTopologyArea(areaStorageKey, state.area)
+      rebuild({ fit: true })
+      return
+    }
+
+    const action = event.target?.closest?.('[data-action]')?.dataset.action
+    if (!canEditTopology && [
+      'save-diagram', 'cancel-diagram', 'add-pole-frame',
+      'toggle-actions', 'rename-selected-frame', 'remove-relation',
+    ].includes(action)) return
+    if (action === 'save-diagram') return void saveDraft()
+    if (action === 'cancel-diagram') return cancelDraft()
+    if (action === 'add-pole-frame') return openFrameComposer()
+    if (action === 'toggle-actions') {
+      state.actionsOpen = !state.actionsOpen
+      state.exportOpen = false
+      state.legendOpen = false
+      updatePanelState()
+      return
+    }
+    if (action === 'close-frame-composer') return closeFrameComposer()
+    if (action === 'rename-selected-frame') {
+      state.actionsOpen = false
+      updatePanelState()
+      const label = container.querySelector(`[data-frame-label="${cssEscape(state.selectedMountingGroupId)}"]`)
+      if (label) openFrameNameEditor(state.selectedMountingGroupId, label)
+      return
+    }
+    if (action === 'zoom-in') return changeZoom(0.1)
+    if (action === 'zoom-out') return changeZoom(-0.1)
+    if (action === 'zoom-reset') return zoomGraphTo(DEFAULT_ZOOM)
+    if (action === 'fit') return fitGraph()
+    if (action === 'focus-relations') return focusRelations()
+    if (action === 'toggle-export') {
+      state.exportOpen = !state.exportOpen
+      state.legendOpen = false
+      updatePanelState()
+      return
+    }
+    if (action === 'toggle-legend') {
+      state.legendOpen = !state.legendOpen
+      state.exportOpen = false
+      updatePanelState()
+      return
+    }
+    if (action === 'toggle-sidebar') {
+      state.sidebarCollapsed = !state.sidebarCollapsed
+      updatePanelState()
+      scope.frame(() => syncGraphSurface({ preserveCenter: true }))
+      return
+    }
+    if (action === 'close-export') {
+      state.exportOpen = false
+      updatePanelState()
+      return
+    }
+    if (action === 'close-legend') {
+      state.legendOpen = false
+      updatePanelState()
+      return
+    }
+    if (action === 'close-inspector') {
+      state.inspectorOpen = false
+      updatePanelState()
+      return
+    }
+    if (action === 'clear-selection') {
+      clearSelection()
+      return
+    }
+    if (action === 'cancel-frame-name') {
+      closeFrameNameEditor()
+      return
+    }
+    if (action === 'remove-relation') {
+      const relationId = event.target.closest('[data-action]')?.dataset.relationId
+      if (relationId) void removeRelation(relationId)
+      return
+    }
+    if (action === 'open-map') return openAssetMap(event.target.closest('[data-action]')?.dataset.assetId)
+    if (action === 'retry') return void renderTopologyPage(container)
+    if (action === 'help') {
+      showToast('Tarik aset ke aset untuk membuat relasi, atau ke ruang kosong frame untuk memindahkan.')
+      return
+    }
+
+    const family = event.target?.closest?.('[data-family]')
+    if (family?.dataset.family) {
+      if (family.dataset.family === '__reset__') {
+        state.selectedFamilies.clear()
+        rebuild()
+        return
+      }
+      toggleFamily(family.dataset.family)
+      return
+    }
+    const trayAsset = event.target?.closest?.('[data-tray-asset]')
+    if (trayAsset?.dataset.trayAsset) {
+      selectAsset(trayAsset.dataset.trayAsset)
+      return
+    }
+    const searchResult = event.target?.closest?.('[data-search-result]')
+    if (searchResult?.dataset.searchResult) {
+      const [kind, ...idParts] = searchResult.dataset.searchResult.split(':')
+      const id = idParts.join(':')
+      const result = state.searchResults.find((item) => item.kind === kind && item.id === id)
+      selectSearchResult(result ?? {kind, id})
+      return
+    }
+
+    const relationTarget = event.target?.closest?.('[data-relation-target]')
+    if (relationTarget?.dataset.relationTarget) {
+      if (!canEditTopology) return
+      void addRelation(state.selectedAssetId, relationTarget.dataset.relationTarget)
+      return
+    }
+    const frameOption = event.target?.closest?.('[data-frame-option]')
+    if (frameOption) return canEditTopology ? chooseFrameOption(frameOption.dataset.frameOption) : undefined
+
+    const exportButton = event.target?.closest?.('[data-export]')
+    if (exportButton?.dataset.export) {
+      exportDiagram(exportButton.dataset.export)
+      return
+    }
+
+    if (event.target?.closest?.('[data-topology-viewport]')) {
+      if (state.zoom < 0.5 && event.target?.closest?.('[data-topology-frame]')) {
+        zoomGraphTo(0.75, event)
+        return
+      }
+      clearSelection()
+    }
+  }
+
+  function handleChange(event) {
+    const target = event.target
+    if (target.matches('[data-asset-frame-select]')) {
+      if (!canEditTopology) return
+      const box = layout?.mountingBoxes?.find(item => item.id === target.value)
+      if (box && state.selectedAssetId) void moveAssetToFrame(state.selectedAssetId, box)
+      return
+    }
+    if (target.matches('[data-area-filter]')) {
+      state.area = target.value === 'all' ? null : target.value
+      persistTopologyArea(areaStorageKey, state.area)
+      state.selectedAssetId = null
+      state.search = ''
+      state.searchResults = []
+      rebuild({ fit: true })
+    } else if (target.matches('[data-label-mode]')) {
+      state.labelMode = target.value
+      renderGraph()
+    } else if (target.matches('[data-mounting-toggle]')) {
+      state.showMountingPhysical = target.checked
+      rebuild()
+    }
+  }
+
+  function handleInput(event) {
+    const target = event.target
+    if (target.matches('[data-topology-search]')) {
+      state.search = target.value
+      scope.clearTimeout(searchTimer)
+      searchTimer = scope.timeout(() => {
+        state.searchResults = getDeviceSearchResults(model, state.search)
+        rebuild()
+      }, 120)
+      return
+    }
+    if (target.matches('[data-relation-search]')) {
+      state.relationSearch = target.value
+      renderRelationSearchResults()
+    }
+    if (target.matches('[data-frame-search]')) renderFrameOptions(target.value)
+  }
+
+  function handleKeydown(event) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault()
+      state.sidebarCollapsed = false
+      updatePanelState()
+      container.querySelector('[data-topology-search]')?.focus()
+      return
+    }
+    if (event.key === 'Escape') {
+      const openPanel = state.legendOpen ? 'legend' : state.exportOpen ? 'export' : null
+      state.exportOpen = false
+      state.legendOpen = false
+      state.actionsOpen = false
+      updatePanelState()
+      if (openPanel) container.querySelector(`[data-action="toggle-${openPanel}"]`)?.focus()
+      if (dragState) cancelAssetDrag()
+      closeFrameComposer()
+      closeFrameNameEditor()
+      return
+    }
+    if (event.target?.matches?.('[data-topology-search]')) {
+      if (event.key !== 'Enter') return
+      event.preventDefault()
+      const results = state.searchResults.length
+        ? state.searchResults
+        : getDeviceSearchResults(model, event.target.value)
+      if (results[0]) selectSearchResult(results[0])
+      else showToast('Perangkat tidak ditemukan.')
+      return
+    }
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    const frameLabel = event.target?.closest?.('[data-frame-label]')
+    if (frameLabel) {
+      if (!canEditTopology) return
+      event.preventDefault()
+      openFrameNameEditor(frameLabel.dataset.frameLabel, frameLabel)
+      return
+    }
+    const target = event.target?.closest?.('[data-node-id], [data-edge-id], [data-mounting-group-id]')
+    if (!target) return
+    event.preventDefault()
+    if (target.dataset.nodeId) selectAsset(target.dataset.nodeId, {
+      focus: window.matchMedia('(max-width: 960px)').matches,
+    })
+    else if (target.dataset.edgeId) selectEdge(target.dataset.edgeId)
+    else if (target.dataset.mountingGroupId) {
+      selectMountingGroup(target.dataset.mountingGroupId)
+      if (window.matchMedia('(max-width: 960px)').matches) {
+        focusMountingGroup(target.dataset.mountingGroupId)
+      }
+    }
+  }
+
+  function handleDoubleClick(event) {
+    if (!canEditTopology) return
+    const label = event.target?.closest?.('[data-frame-label]')
+    if (!label?.dataset.frameLabel) return
+    event.preventDefault()
+    openFrameNameEditor(label.dataset.frameLabel, label)
+  }
+
+  function handleSubmit(event) {
+    if (!event.target?.matches?.('[data-frame-name-form]')) return
+    event.preventDefault()
+    if (!canEditTopology) return
+    const form = event.target
+    const groupId = form.dataset.groupId
+    const input = form.querySelector('[data-frame-name-input]')
+    const value = String(input?.value ?? '').trim()
+    const box = layout?.mountingBoxes?.find(item => item.id === groupId)
+    if (!groupId || !box || (!box.hostId && !mapData.topologyFrames?.[groupId]) || state.mutationBusy) return
+    if (value) state.frameNames[groupId] = value
+    else delete state.frameNames[groupId]
+    if (mapData.topologyFrames?.[groupId]) {
+      const frame = { ...mapData.topologyFrames[groupId], name: value || box.hostName }
+      mapData.topologyFrames = { ...mapData.topologyFrames, [groupId]: frame }
+      stageChange({ type: 'create-frame', frame })
+    } else {
+      stageChange({ type: 'rename-frame', assetId: box.hostId, name: value })
+    }
+    closeFrameNameEditor()
+    renderGraph()
+  }
+
+  function toggleFamily(family) {
+    if (state.selectedFamilies.has(family)) state.selectedFamilies.delete(family)
+    else state.selectedFamilies.add(family)
+    rebuild()
+  }
+
+  function changeZoom(delta) {
+    zoomGraphTo(state.zoom + delta)
+  }
+
+  function setZoom(value) {
+    state.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Number(value) || DEFAULT_ZOOM))
+  }
+
+  function graphSafeViewport(viewport) {
+    const bounds = viewport.getBoundingClientRect()
+    const visibleOverlay = (selector) => {
+      const element = container.querySelector(selector)
+      if (!element || element.hidden || getComputedStyle(element).visibility === 'hidden') return null
+      return element.getBoundingClientRect()
+    }
+    const context = visibleOverlay('.topology-context-card')
+    const actions = visibleOverlay('.topology-stitch-toolbar')
+    const navigation = visibleOverlay('.topology-canvas-navigation')
+    const overviewHint = visibleOverlay('.topology-overview-hint')
+    const sidebar = !state.sidebarCollapsed && window.matchMedia?.('(min-width: 961px)').matches
+      ? visibleOverlay('.topology-sidebar') : null
+    const sidebarLeft = sidebar ? Math.max(0, sidebar.right - bounds.left + 20) : 0
+    const overlayTop = Math.max(CANVAS_TOP_PADDING,
+      ...[context, actions].filter(Boolean).map((rect) => rect.bottom - bounds.top + 16))
+    const overlayBottom = Math.max(CANVAS_BOTTOM_PADDING,
+      ...[navigation, overviewHint].filter(Boolean).map((rect) => bounds.bottom - rect.top + 12))
+    return effectiveViewportFor({
+      viewportWidth: viewport.clientWidth,
+      viewportHeight: viewport.clientHeight,
+      paddingLeft: Math.max(CANVAS_HORIZONTAL_PADDING, sidebarLeft),
+      paddingRight: CANVAS_HORIZONTAL_PADDING,
+      overlayTop,
+      overlayBottom,
+    })
+  }
+
+  function fitGraph() {
+    if (!layout?.width || !layout?.height) return
+    const viewport = container.querySelector('[data-topology-viewport]')
+    if (!viewport) return
+    const safe = graphSafeViewport(viewport)
+    setZoom(computeFitZoom({
+      viewportWidth: viewport.clientWidth,
+      viewportHeight: viewport.clientHeight,
+      layoutWidth: layout.width,
+      layoutHeight: layout.height,
+      minZoom: MIN_ZOOM,
+      maxZoom: 1.12,
+      horizontalPadding: viewport.clientWidth - safe.width,
+      verticalPadding: viewport.clientHeight - safe.height,
+    }))
+    renderGraph()
+    updateToolbar()
+    scope.frame(() => centerGraph({ smooth: true, wholeContent: true }))
+  }
+
+  function focusAssetCard(assetId) {
+    const target = layout?.nodes?.find((node) => node.id === assetId)
+    if (!target?.diagram) return
+    const viewport = container.querySelector('[data-topology-viewport]')
+    if (!viewport) return
+    const relatedIds = new Set([assetId])
+    for (const edgeId of model.nodeById.get(assetId)?.directEdgeIds ?? []) {
+      const edge = model.edgeById.get(edgeId)
+      if (edge) {
+        relatedIds.add(edge.sourceId)
+        relatedIds.add(edge.targetId)
+      }
+    }
+    const related = layout.nodes.map((node) => node.diagram)
+      .filter((box, index) => box && relatedIds.has(layout.nodes[index].id))
+    const left = Math.min(...related.map((box) => box.x)) - 48
+    const right = Math.max(...related.map((box) => box.x + box.width)) + 48
+    const top = Math.min(...related.map((box) => box.y)) - 64
+    const bottom = Math.max(...related.map((box) => box.y + box.height)) + 64
+    const safe = graphSafeViewport(viewport)
+    const fitZoom = Math.min(.85, safe.width / Math.max(1, right - left),
+      safe.height / Math.max(1, bottom - top))
+    const nextZoom = Math.max(state.zoom, fitZoom)
+    if (nextZoom !== state.zoom) {
+      setZoom(nextZoom)
+      renderGraph()
+      updateToolbar()
+    }
+    scope.frame(() => {
+      const frame = container.querySelector('[data-topology-frame]')
+      if (!frame) return
+      restoreViewportCenter(viewport, frame, {
+        x: (left + right) / 2,
+        y: (top + bottom) / 2,
+      }, { respectOverlays: true })
+    })
+  }
+
+  function focusMountingGroup(groupId) {
+    const target = layout?.mountingBoxes?.find((box) => box.id === groupId)
+    if (!target) return
+    const viewport = container.querySelector('[data-topology-viewport]')
+    if (!viewport) return
+    const center = {
+      x: target.x + target.width / 2,
+      y: target.y + target.height / 2,
+    }
+    const viewportSafe = graphSafeViewport(viewport)
+    const fitZoom = Math.min(.85,
+      viewportSafe.width / Math.max(1, target.width + 72),
+      viewportSafe.height / Math.max(1, target.height + 112))
+    const nextZoom = Math.max(state.zoom, fitZoom)
+    if (nextZoom !== state.zoom) {
+      setZoom(nextZoom)
+      renderGraph()
+      updateToolbar()
+    }
+    scope.frame(() => {
+      const frame = container.querySelector('[data-topology-frame]')
+      if (!frame) return
+      restoreViewportCenter(viewport, frame, center, { respectOverlays: true })
+    })
+  }
+
+  function focusRelations() {
+    const selected = model.nodeById.get(state.selectedAssetId)
+    if (!selected) return showToast('Pilih JB atau kamera, lalu klik Fokus relasi.')
+    const ids = new Set([selected.id])
+    for (const edgeId of selected.directEdgeIds ?? []) {
+      const edge = model.edgeById.get(edgeId)
+      if (edge) { ids.add(edge.sourceId); ids.add(edge.targetId) }
+    }
+    const nodes = layout.nodes.filter(node => ids.has(node.id))
+    const bounds = nodes.map(node => node.diagram)
+    const left = Math.min(...bounds.map(box => box.x)) - 36
+    const right = Math.max(...bounds.map(box => box.x + box.width)) + 36
+    const top = Math.min(...bounds.map(box => box.y)) - 72
+    const bottom = Math.max(...bounds.map(box => box.y + box.height)) + 36
+    const viewport = container.querySelector('[data-topology-viewport]')
+    const frame = container.querySelector('[data-topology-frame]')
+    if (!viewport || !frame) return
+    const safe = graphSafeViewport(viewport)
+    const fittedZoom = Math.min(1.12, safe.width / (right - left),
+      safe.height / (bottom - top))
+    setZoom(Math.min(.85, fittedZoom))
+    renderGraph()
+    updateToolbar()
+    const selectedDiagram = nodes.find((node) => node.id === selected.id)?.diagram
+    scope.frame(() => restoreViewportCenter(viewport, frame, {
+      x: fittedZoom < 0.5 && selectedDiagram ? selectedDiagram.centerX : (left + right) / 2,
+      y: fittedZoom < 0.5 && selectedDiagram ? selectedDiagram.centerY : (top + bottom) / 2,
+    }, { respectOverlays: true }))
+  }
+
+  function resetGraphViewport() {
+    if (!layout?.width || !layout?.height) return
+    const viewport = container.querySelector('[data-topology-viewport]')
+    if (!viewport) return
+    const safe = graphSafeViewport(viewport)
+    if (layout.options?.layoutStyle === 'facility-schematic') {
+      setZoom(Math.max(viewport.clientWidth < 620 ? 0.7 : 0.8, Math.min(DEFAULT_ZOOM,
+        safe.width / layout.width)))
+      renderGraph()
+      updateToolbar()
+      scope.frame(() => centerGraph())
+      return
+    }
+    const readableFloor = viewport.clientWidth < 620 ? 0.85 : DEFAULT_ZOOM
+    setZoom(computeReadableZoom({
+      viewportWidth: viewport.clientWidth,
+      viewportHeight: viewport.clientHeight,
+      layoutWidth: layout.width,
+      layoutHeight: layout.height,
+      minZoom: readableFloor,
+      maxZoom: DEFAULT_ZOOM,
+      horizontalPadding: viewport.clientWidth - safe.width,
+      verticalPadding: viewport.clientHeight - safe.height,
+    }))
+    renderGraph()
+    updateToolbar()
+    scope.frame(() => centerGraph())
+  }
+
+  function renderGraph() {graphRenderer?.render()}
+
+  function renderOverviewLabels() {
+    const layer = container.querySelector('[data-topology-overview-labels]')
+    const viewport = container.querySelector('[data-topology-viewport]')
+    const frame = container.querySelector('[data-topology-frame]')
+    const main = container.querySelector('.topology-stitch-main')
+    if (!layer || !viewport || !frame || !main || !layout || state.zoom >= 0.52) {
+      if (layer) {
+        layer.hidden = true
+        layer.replaceChildren()
+      }
+      return
+    }
+    const viewportBounds = viewport.getBoundingClientRect()
+    const mainBounds = main.getBoundingClientRect()
+    const frameLeft = numericStyle(frame.style.left, frame.offsetLeft)
+    const frameTop = numericStyle(frame.style.top, frame.offsetTop)
+    const areaOverview = layout.mode === 'area-overview'
+    const items = areaOverview
+      ? (layout.overviewAreas ?? []).map((area) => ({
+        kind: 'area',
+        id: area.key,
+        name: area.name,
+        count: area.nodeCount,
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: area.height,
+      }))
+      : (layout.mountingBoxes ?? [])
+        .filter((box) => (
+          box.kind !== 'needs-mounting'
+            && (box.kind !== 'empty' || box.custom)
+        ))
+        .map((box) => ({
+          kind: 'mounting',
+          id: box.id,
+          name: state.frameNames[box.id] || box.label || box.hostName || box.hostId
+            || 'Kelompok pemasangan',
+          count: box.nodeIds?.length ?? 0,
+          x: box.x,
+          y: box.y,
+          width: box.width,
+          height: box.height,
+        }))
+    const positions = items.map((item) => {
+      const x = viewportBounds.left - mainBounds.left + frameLeft
+        + (item.x + item.width / 2) * state.zoom - viewport.scrollLeft
+      const y = viewportBounds.top - mainBounds.top + frameTop
+        + (item.y + item.height / 2) * state.zoom - viewport.scrollTop
+      const width = Math.min(196, Math.max(112, String(item.name).length * 7 + 38))
+      return { ...item, x, y, labelWidth: width }
+    }).filter((item) => (
+      item.x >= viewportBounds.left - mainBounds.left + item.labelWidth / 2 + 6
+        && item.x <= viewportBounds.right - mainBounds.left - item.labelWidth / 2 - 6
+        && item.y >= viewportBounds.top - mainBounds.top + 22
+        && item.y <= viewportBounds.bottom - mainBounds.top - 22
+    )).sort((left, right) => right.count - left.count || left.name.localeCompare(right.name, 'id'))
+    const placed = []
+    const visible = positions.filter((item) => {
+      const bounds = {
+        left: item.x - item.labelWidth / 2,
+        right: item.x + item.labelWidth / 2,
+        top: item.y - 19,
+        bottom: item.y + 19,
+      }
+      if (placed.some((other) => (
+        bounds.left < other.right && bounds.right > other.left
+          && bounds.top < other.bottom && bounds.bottom > other.top
+      ))) return false
+      placed.push(bounds)
+      return true
+    })
+    layer.innerHTML = visible.map((item) => `
+      <button type="button" class="topology-overview-label"
+        ${item.kind === 'area'
+          ? `data-overview-area="${escapeAttribute(item.id)}"`
+          : `data-overview-mounting-id="${escapeAttribute(item.id)}"`}
+        aria-label="${escapeAttribute(`${item.name} · ${item.count} aset · pilih untuk fokus`)}"
+        title="${escapeAttribute(`${item.name} · ${item.count} aset`)}"
+        style="left:${item.x}px;top:${item.y}px">
+        <strong>${escapeHtml(item.name)}</strong>
+        <small>${item.count} aset</small>
+      </button>
+    `).join('')
+    layer.hidden = !visible.length
+  }
+
+  function zoomGraphTo(value, pointer = null) {
+    const viewport = container.querySelector('[data-topology-viewport]')
+    const frame = container.querySelector('[data-topology-frame]')
+    if (!viewport || !frame || !layout?.width || !layout?.height) return
+    const previousZoom = state.zoom
+    const rect = viewport.getBoundingClientRect()
+    const anchorX = pointer ? pointer.clientX - rect.left : viewport.clientWidth / 2
+    const anchorY = pointer ? pointer.clientY - rect.top : viewport.clientHeight / 2
+    const oldScrollLeft = viewport.scrollLeft
+    const oldScrollTop = viewport.scrollTop
+    const oldFrameLeft = numericStyle(frame.style.left, frame.offsetLeft)
+    const oldFrameTop = numericStyle(frame.style.top, frame.offsetTop)
+
+    setZoom(value)
+    if (state.zoom === previousZoom) return
+    renderGraph()
+
+    const position = anchoredZoomScrollPosition({
+      scrollLeft: oldScrollLeft,
+      scrollTop: oldScrollTop,
+      anchorX,
+      anchorY,
+      oldZoom: previousZoom,
+      newZoom: state.zoom,
+      oldFrameLeft,
+      oldFrameTop,
+      newFrameLeft: numericStyle(frame.style.left, frame.offsetLeft),
+      newFrameTop: numericStyle(frame.style.top, frame.offsetTop),
+    })
+    viewport.scrollTo({ ...position, behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
+    updateToolbar()
+  }
+
+  function syncGraphSurface({ preserveCenter = false } = {}) {
+    const viewport = container.querySelector('[data-topology-viewport]')
+    const canvas = container.querySelector('.topology-stitch-canvas')
+    const frame = container.querySelector('[data-topology-frame]')
+    if (!viewport || !canvas || !frame || !layout?.width || !layout?.height) return
+    const snapshot = preserveCenter ? viewportCenterSnapshot(viewport, frame) : null
+    const safe = graphSafeViewport(viewport)
+    const metrics = zoomSurfaceMetrics({
+      layoutWidth: layout.width,
+      layoutHeight: layout.height,
+      zoom: state.zoom,
+      viewportWidth: viewport.clientWidth,
+      viewportHeight: viewport.clientHeight,
+      horizontalPadding: viewport.clientWidth < 820 ? 16 : CANVAS_HORIZONTAL_PADDING,
+      topPadding: safe.top,
+      bottomPadding: viewport.clientHeight - safe.bottom,
+    })
+    canvas.style.width = `${metrics.width}px`
+    canvas.style.height = `${metrics.height}px`
+    frame.style.left = `${metrics.frameLeft}px`
+    frame.style.top = `${metrics.frameTop}px`
+    if (snapshot) restoreViewportCenter(viewport, frame, snapshot)
+  }
+
+  function centerGraph({ smooth = false, wholeContent = false } = {}) {
+    const viewport = container.querySelector('[data-topology-viewport]')
+    const frame = container.querySelector('[data-topology-frame]')
+    if (!viewport || !frame) return
+    const mountedBoxes = (layout.mountingBoxes ?? [])
+      .map(({ x, y, width, height }) => ({ x, y, width, height }))
+    const diagramBoxes = mountedBoxes.length ? mountedBoxes
+      : (layout.nodes ?? []).map(({ diagram }) => diagram).filter(Boolean)
+    const boxes = diagramBoxes.length ? diagramBoxes
+      : [{ x: 0, y: 0, width: layout.width, height: layout.height }]
+    const content = boxes.length ? {
+      left: Math.min(...boxes.map((box) => box.x)),
+      right: Math.max(...boxes.map((box) => box.x + box.width)),
+      top: Math.min(...boxes.map((box) => box.y)),
+      bottom: Math.max(...boxes.map((box) => box.y + box.height)),
+    } : { left: 0, right: layout.width, top: 0, bottom: layout.height }
+    const frameLeft = numericStyle(frame.style.left, frame.offsetLeft)
+    const frameTop = numericStyle(frame.style.top, frame.offsetTop)
+    const safe = graphSafeViewport(viewport)
+    const root = !wholeContent && layout.nodes?.find((node) => (
+      node.diagramClass === 'rack-root' && node.diagram
+    ))
+    const contentWidth = (content.right - content.left) * state.zoom
+    const left = root
+      ? frameLeft + root.diagram.centerX * state.zoom - (safe.left + safe.width / 2)
+      : contentWidth <= viewport.clientWidth - 64
+      ? frameLeft + (content.left + content.right) * state.zoom / 2 - viewport.clientWidth / 2
+      : frameLeft + content.left * state.zoom - 32
+    const visibleContent = boxes.filter((box) => (
+      box.x + box.width > (Math.max(0, left) - frameLeft) / state.zoom
+      && box.x < (Math.max(0, left) - frameLeft + viewport.clientWidth) / state.zoom
+    ))
+    const verticalBoxes = visibleContent.length ? visibleContent : boxes
+    const visibleTop = Math.min(...verticalBoxes.map((box) => box.y))
+    const firstRow = verticalBoxes.filter((box) => box.y <= visibleTop + 40)
+    const visibleBottom = Math.max(...firstRow.map((box) => box.y + box.height))
+    const focusY = wholeContent ? (content.top + content.bottom) / 2
+      : (visibleTop + visibleBottom) / 2
+    const targetY = wholeContent ? safe.top + safe.height / 2
+      : safe.top + safe.height * .43
+    const top = root
+      ? frameTop + root.diagram.centerY * state.zoom - (safe.top + safe.height * .28)
+      : frameTop + focusY * state.zoom - targetY
+    viewport.scrollTo({
+      left: Math.max(0, Math.min(left, viewport.scrollWidth - viewport.clientWidth)),
+      top: Math.max(0, Math.min(top, viewport.scrollHeight - viewport.clientHeight)),
+      behavior: smooth && !prefersReducedMotion() ? 'smooth' : 'auto',
+    })
+  }
+
+  function viewportCenterSnapshot(viewport, frame) {
+    return {
+      x: (viewport.scrollLeft + viewport.clientWidth / 2
+        - numericStyle(frame.style.left, frame.offsetLeft)) / state.zoom,
+      y: (viewport.scrollTop + viewport.clientHeight / 2
+        - numericStyle(frame.style.top, frame.offsetTop)) / state.zoom,
+    }
+  }
+
+  function restoreViewportCenter(viewport, frame, snapshot, { respectOverlays = false } = {}) {
+    const safe = respectOverlays ? graphSafeViewport(viewport) : null
+    const targetX = safe ? safe.left + safe.width / 2 : viewport.clientWidth / 2
+    const targetY = safe ? safe.top + safe.height / 2 : viewport.clientHeight / 2
+    viewport.scrollLeft = Math.max(0, numericStyle(frame.style.left, frame.offsetLeft)
+      + snapshot.x * state.zoom - targetX)
+    viewport.scrollTop = Math.max(0, numericStyle(frame.style.top, frame.offsetTop)
+      + snapshot.y * state.zoom - targetY)
+  }
+
+  function beginPan(event) {
+    if (event.button !== 0 || state.mutationBusy || dragState || panState) return
+    const node = event.target.closest('[data-node-id]')
+    if (canEditTopology && node?.dataset.nodeId && !state.mutationBusy) {
+      node.setPointerCapture(event.pointerId)
+      dragState = {
+        viewport: event.currentTarget,
+        captureElement: node,
+        pointerId: event.pointerId,
+        assetId: node.dataset.nodeId,
+        startX: event.clientX,
+        startY: event.clientY,
+        distance: 0,
+        active: false,
+        targetGroupId: null,
+      }
+      return
+    }
+    if (event.pointerType === 'touch') return
+    if (event.target.closest('[data-edge-id], [data-mounting-group-id], button, a, input, select')) return
+    const viewport = event.currentTarget
+    panState = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      left: viewport.scrollLeft,
+      top: viewport.scrollTop,
+      distance: 0,
+    }
+    viewport.setPointerCapture(event.pointerId)
+    viewport.classList.add('is-panning')
+  }
+
+  function beginTrayAssetDrag(event) {
+    if (!canEditTopology) return
+    if (event.button !== 0 || state.mutationBusy || dragState || panState) return
+    const item = event.target.closest('[data-tray-asset]')
+    if (!item || !model?.nodeById.has(item.dataset.trayAsset)) return
+    item.setPointerCapture(event.pointerId)
+    dragState = {
+      viewport: container.querySelector('[data-topology-viewport]'),
+      captureElement: item,
+      pointerId: event.pointerId,
+      assetId: item.dataset.trayAsset,
+      startX: event.clientX,
+      startY: event.clientY,
+      distance: 0,
+      active: false,
+      targetGroupId: null,
+    }
+  }
+
+  function movePan(event) {
+    if (dragState && event.pointerId === dragState.pointerId) {
+      moveAssetDrag(event)
+      return
+    }
+    if (!panState || event.pointerId !== panState.pointerId) return
+    const viewport = event.currentTarget
+    const deltaX = event.clientX - panState.x
+    const deltaY = event.clientY - panState.y
+    panState.distance = Math.max(panState.distance, Math.hypot(deltaX, deltaY))
+    viewport.scrollLeft = panState.left - deltaX
+    viewport.scrollTop = panState.top - deltaY
+  }
+
+  function endPan(event) {
+    if (dragState && event.pointerId === dragState.pointerId) {
+      endAssetDrag(event)
+      return
+    }
+    if (!panState || event.pointerId !== panState.pointerId) return
+    suppressViewportClick = panState.distance >= 4
+    panState = null
+    event.currentTarget.classList.remove('is-panning')
+    scope.timeout(() => { suppressViewportClick = false }, 0)
+  }
+
+  function moveAssetDrag(event) {
+    const distance = Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY)
+    dragState.distance = Math.max(dragState.distance, distance)
+    if (!dragState.active && distance < 6) return
+    event.preventDefault()
+    if (!dragState.active) {
+      dragState.active = true
+      dragState.viewport.classList.add('is-dragging-asset')
+      const source = container.querySelector(`[data-node-id="${cssEscape(dragState.assetId)}"]`)
+      if (!source) {
+        cancelAssetDrag()
+        return
+      }
+      dragState.feedback = createAssetDragFeedback(source, event, { reducedMotion: prefersReducedMotion() })
+      dragState.autoPan = createDragAutoPan(dragState.viewport, pointer => {
+        if (dragState?.active) scheduleAssetDropTarget(pointer)
+      })
+      scope.own(dragState.feedback.cancel)
+      scope.own(()=>dragState?.autoPan?.stop())
+      source.classList.add('is-dragging')
+    }
+    dragState.feedback.move(event)
+    scheduleAssetDropTarget(event)
+    dragState.autoPan.move(event)
+  }
+
+  function scheduleAssetDropTarget({ clientX, clientY }) {
+    if (!dragState?.active) return
+    dragState.latestPointer = { clientX, clientY }
+    if (dragState.targetFrame) return
+    dragState.targetFrame = scope.frame(() => {
+      if (!dragState?.active) return
+      dragState.targetFrame = 0
+      updateAssetDropTarget(dragState.latestPointer)
+    })
+  }
+
+  function updateAssetDropTarget(event) {
+    const viewport = dragState.viewport
+    const hit = document.elementFromPoint(event.clientX, event.clientY)
+    const inside = hit && viewport.contains(hit)
+    const hitNode = inside ? hit.closest('[data-node-id]') : null
+    const targetId = hitNode?.dataset.nodeId
+    const box = inside ? mountingGroupAtClientPoint(hit) : null
+    const sourceFrameId = layout?.nodes?.find(node => node.id === dragState.assetId)?.mountingBoxId ?? null
+    const drop = resolveTopologyDropTarget({ sourceId: dragState.assetId, targetId, box, model,
+      sourceFrameId })
+    dragState.drop = drop
+    dragState.targetGroupId = drop.kind === 'move' ? drop.box.id : null
+    dragState.feedback.target(drop.kind === 'move'
+      ? hit.closest('[data-mounting-group-id]') : null, drop.box)
+    dragState.feedback.connection(drop.kind === 'connect' ? hitNode : null)
+    dragState.feedback.hint(drop.message, drop.kind !== 'invalid')
+  }
+
+  function clearAssetDrag(completed) {
+    completed.autoPan?.stop()
+    if (completed.targetFrame) scope.cancelFrame(completed.targetFrame)
+    dragState = null
+    completed.viewport.classList.remove('is-dragging-asset')
+    container.querySelectorAll('.topology-node.is-dragging')
+      .forEach(element => element.classList.remove('is-dragging'))
+    if (completed.captureElement.hasPointerCapture(completed.pointerId)) {
+      completed.captureElement.releasePointerCapture(completed.pointerId)
+    }
+    if (completed.active) {
+      suppressViewportClick = true
+      scope.timeout(() => { suppressViewportClick = false }, 0)
+    }
+  }
+
+  function cancelAssetDrag() {
+    const completed = dragState
+    if (!completed) return
+    clearAssetDrag(completed)
+    completed.feedback?.cancel()
+  }
+
+  function endAssetDrag(event) {
+    // Losing capture or native touch cancellation must never commit a stale hover.
+    if (event.type !== 'pointerup') { cancelAssetDrag(); return }
+    if (dragState.active) updateAssetDropTarget(event)
+    const completed = dragState
+    clearAssetDrag(completed)
+    if (!completed.active) return
+    const drop = completed.drop
+    if (state.mutationBusy || drop?.kind === 'invalid' || !drop) {
+      void completed.feedback?.finish()
+      if (drop) showToast(drop.message)
+      return
+    }
+    if (drop.kind === 'connect') {
+      void addRelation(completed.assetId, drop.targetId)
+      void completed.feedback?.finish(container.querySelector(`[data-node-id="${cssEscape(drop.targetId)}"]`))
+      showToast('Relasi ditambahkan. Pilih Simpan untuk menerapkan.')
+      return
+    }
+    const source=layout.nodes.find(n=>n.id===completed.assetId)
+    if(source&&drop.box?.id===source.mountingBoxId) {
+      const x=source.diagram.x+(event.clientX-completed.startX)/state.zoom
+      const y=source.diagram.y+(event.clientY-completed.startY)/state.zoom
+      mapData.nodePositions={...mapData.nodePositions,[source.id]:{x,y}}
+      stageChange({type:'move-node',assetId:source.id,x,y})
+      void completed.feedback?.finish();rebuild();showToast('Posisi tampilan diubah. Pilih Simpan untuk menerapkan.')
+      return
+    }
+    void moveAssetToFrame(completed.assetId, drop.box, completed.feedback)
+  }
+
+  function mountingGroupAtClientPoint(hit) {
+    const frame = container.querySelector('[data-topology-frame]')
+    if (!frame || !layout?.mountingBoxes) return null
+    const group = hit?.closest('[data-mounting-group-id]')
+    if (!group || !frame.contains(group)) return null
+    // SVG rendering can reposition frames. Use the visible group's identity,
+    // not stale layout coordinates; labels and the expanded drop slot count too.
+    return layout.mountingBoxes.find(box => box.id === group.dataset.mountingGroupId
+      && ['confirmed', 'empty', 'excluded'].includes(box.kind)) ?? null
+  }
+
+  async function moveAssetToFrame(assetId, box, feedback = null) {
+    if (!canEditTopology) { feedback?.cancel(); return }
+    const node = model.nodeById.get(assetId)
+    if (!node || !box || state.mutationBusy) { feedback?.cancel(); return }
+    if (box.kind !== 'excluded' && !box.hostId) { feedback?.cancel(); return }
+    if (box.kind !== 'excluded' && !canMountAssetOnPole(node)) {
+      feedback?.cancel()
+      showToast('Pilih perangkat akhir atau Junction Box untuk pemasangan pada tiang.')
+      return
+    }
+    const source = layout?.nodes?.find(item => item.id === assetId)
+    const assetIds = ['junction-peer', 'junction-extended'].includes(source?.diagramClass)
+      ? frameMoveAssetIds(layout.nodes, assetId, mapData.mountingRelations)
+      : [assetId]
+    const assignments = { ...(mapData.topologyFrameAssignments ?? {}) }
+    let relations = [...(mapData.mountingRelations ?? [])]
+    let changed = false
+    let mountingChanged = false
+    for (const id of assetIds) {
+      const member = model.nodeById.get(id)
+      if (!member) continue
+      if (box.kind !== 'excluded' && !canMountAssetOnPole(member)) continue
+      const displayedFrameId = layout?.nodes?.find(item => item.id === id)?.mountingBoxId ?? null
+      if (assignments[id] !== box.id || displayedFrameId !== box.id) {
+        assignments[id] = box.id
+        stageChange({ type: 'move-frame', assetId: id, frameId: box.id })
+        changed = true
+      }
+      const current = relations.find(relation => relation.sourceAssetId === id
+        && !['rejected', 'revoked'].includes(String(relation.verificationStatus).toLowerCase()))
+      if (box.kind === 'excluded' && current) {
+        relations = relations.filter(relation => relation.sourceAssetId !== id)
+        mountingChanged = true
+      } else if (box.kind !== 'excluded' && canMountAssetOnPole(member)
+        && current?.targetAssetId !== box.hostId) {
+        relations = [
+          ...relations.filter(relation => relation.sourceAssetId !== id),
+          { sourceAssetId: id, targetAssetId: box.hostId, relationType: 'mounted_on',
+            verificationStatus: 'confirmed', provenance: 'manual_admin' },
+        ]
+        mountingChanged = true
+      }
+    }
+    mapData.topologyFrameAssignments = assignments
+    if (mountingChanged) applyMutationResponse({ mountingRelations: relations })
+    if (changed || mountingChanged) rebuild()
+    void feedback?.finish(container.querySelector(`[data-mounting-group-id="${cssEscape(box.id)}"]`))
+  }
+
+  function openFrameNameEditor(groupId, labelElement) {
+    if (!canEditTopology) return
+    const form = container.querySelector('[data-frame-name-form]')
+    const input = form?.querySelector('[data-frame-name-input]')
+    const box = layout?.mountingBoxes?.find(({ id }) => id === groupId)
+    if (!form || !input || !box || (!box.hostId && !mapData.topologyFrames?.[groupId]) || state.mutationBusy) return
+    const rect = labelElement.getBoundingClientRect()
+    form.dataset.groupId = groupId
+    input.value = state.frameNames[groupId] || box.label || box.hostName || box.hostId || ''
+    form.hidden = false
+    form.style.left = `${Math.min(window.innerWidth - 282, Math.max(12, rect.left - 12))}px`
+    form.style.top = `${Math.min(window.innerHeight - 86, rect.bottom + 8)}px`
+    scope.frame(() => {
+      input.focus()
+      input.select()
+    })
+  }
+
+  function closeFrameNameEditor() {
+    const form = container.querySelector('[data-frame-name-form]')
+    if (!form || form.hidden) return
+    form.hidden = true
+    form.removeAttribute('data-group-id')
+  }
+
+  function openFrameComposer() {
+    if (!canEditTopology) return
+    if (state.mutationBusy || state.frameComposerOpen) return
+    const areaKey = state.area ?? model.areas?.[0]?.key ?? mapData.locationGroups?.[0]?.key
+    if (!areaKey) { showToast('Area untuk frame belum tersedia.'); return }
+    if (!state.area) {
+      state.area = areaKey
+      persistTopologyArea(areaStorageKey, areaKey)
+    }
+    const id = `excluded-mounting:${areaKey}:custom:${crypto.randomUUID()}`
+    mapData.topologyFrames = {
+      ...(mapData.topologyFrames ?? {}),
+      [id]: { id, type: 'non-pole', areaKey, name: 'Frame baru' },
+    }
+    state.pendingFrameId = id
+    state.frameComposerOpen = true
+    rebuild()
+    const composer = container.querySelector('[data-frame-composer]')
+    const input = composer?.querySelector('[data-frame-search]')
+    if (!composer || !input) return
+    composer.hidden = false
+    input.value = ''
+    renderFrameOptions('')
+    scope.frame(() => {
+      focusFrame(id)
+      input.focus()
+    })
+  }
+
+  function closeFrameComposer({ discard = true } = {}) {
+    const composer = container.querySelector('[data-frame-composer]')
+    if (composer) composer.hidden = true
+    const pendingId = state.pendingFrameId
+    state.frameComposerOpen = false
+    state.pendingFrameId = null
+    if (!discard || !pendingId || !mapData.topologyFrames?.[pendingId]) return
+    const next = { ...(mapData.topologyFrames ?? {}) }
+    delete next[pendingId]
+    mapData.topologyFrames = next
+    rebuild()
+  }
+
+  function frameChoices(queryText = '') {
+    const query = String(queryText).trim().toLocaleLowerCase('id')
+    const custom = [
+      { value: 'type:indoor', label: 'Indoor', detail: 'Frame perangkat di dalam ruangan', icon: 'home' },
+      { value: 'type:non-pole', label: 'Non-tiang', detail: 'Frame perangkat tanpa tiang', icon: 'deployed_code' },
+    ]
+    const poles = (model.physicalMounts ?? [])
+      .slice()
+      .sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), 'id', { numeric: true }))
+      .map((pole) => ({
+        value: `pole:${pole.id}`,
+        label: state.frameNames[`pole-group:${pole.id}`] || pole.name || pole.id,
+        detail: pole.areaName || pole.locationGroupName || areaName(pole.areaKey, mapData.locationGroups),
+        icon: 'cell_tower',
+      }))
+    return [...custom, ...poles].filter(({ label, detail }) => (
+      !query || `${label} ${detail}`.toLocaleLowerCase('id').includes(query)
+    )).slice(0, 80)
+  }
+
+  function renderFrameOptions(query) {
+    const results = container.querySelector('[data-frame-options]')
+    if (!results) return
+    const choices = frameChoices(query)
+    results.innerHTML = choices.map((choice, index) => `${index === 2 ? '<div class="topology-frame-option-separator"><span>Tiang</span></div>' : ''}
+      <button type="button" role="option" data-frame-option="${escapeAttribute(choice.value)}">
+        <span class="material-symbols-outlined" aria-hidden="true">${choice.icon}</span>
+        <span><strong>${escapeHtml(choice.label)}</strong><small>${escapeHtml(choice.detail)}</small></span>
+        <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
+      </button>`).join('') || '<p class="topology-frame-options-empty">Frame tidak ditemukan.</p>'
+  }
+
+  function chooseFrameOption(value) {
+    if (!canEditTopology) return
+    const pendingId = state.pendingFrameId
+    const pending = mapData.topologyFrames?.[pendingId]
+    if (!pending || state.mutationBusy) return
+    let frame
+    if (value === 'type:indoor' || value === 'type:non-pole') {
+      const type = value.slice(5)
+      frame = { ...pending, type, name: type === 'indoor' ? 'Indoor' : 'Non-tiang' }
+      const next = { ...(mapData.topologyFrames ?? {}), [pendingId]: frame }
+      mapData.topologyFrames = next
+    } else if (value.startsWith('pole:')) {
+      const poleId = value.slice(5)
+      const pole = model.physicalMounts.find(item => item.id === poleId)
+      if (!pole) return
+      const next = { ...(mapData.topologyFrames ?? {}) }
+      delete next[pendingId]
+      frame = { id: `pole-group:${pole.id}`, type: 'pole', areaKey: pole.areaKey,
+        poleAssetId: pole.id, name: pole.name || pole.id }
+      next[frame.id] = frame
+      mapData.topologyFrames = next
+      state.area = pole.areaKey
+      persistTopologyArea(areaStorageKey, state.area)
+    } else return
+    stageChange({ type: 'create-frame', frame })
+    closeFrameComposer({ discard: false })
+    rebuild()
+    scope.frame(() => focusFrame(frame.id))
+    showToast(`${frame.name} ditambahkan. Pilih Simpan untuk menerapkan.`)
+  }
+
+  function focusFrame(frameId) {
+    const box = layout?.mountingBoxes?.find(item => item.id === frameId)
+    const viewport = container.querySelector('[data-topology-viewport]')
+    const frame = container.querySelector('[data-topology-frame]')
+    if (!box || !viewport || !frame) return
+    state.selectedMountingGroupId = box.id
+    renderGraph()
+    updatePanelState()
+    restoreViewportCenter(viewport, frame, { x: box.x + box.width / 2, y: box.y + box.height / 2 })
+  }
+
+  function relationTargetsFor(nodeId,queryText){return findRelationTargets(model,nodeId,queryText)}
+  function networkPathFor(nodeId){return findNetworkPath(model,nodeId)}
+  function directRelationsFor(nodeId){return findDirectRelations(model,nodeId)}
+
+  function renderRelationSearchResults() {
+    const results = container.querySelector('[data-relation-search-results]')
+    if (!results) return
+    const targets = relationTargetsFor(state.selectedAssetId, state.relationSearch)
+    const hasQuery = Boolean(state.relationSearch.trim())
+    results.hidden = !hasQuery
+    results.innerHTML = targets.length
+      ? targets.map((target) => `
+        <button type="button" data-relation-target="${escapeAttribute(target.id)}">
+          <span class="topology-stitch-relation-result-icon">${renderNodeIcon(target)}</span>
+          <span><strong>${escapeHtml(target.name || target.id)}</strong><small>${escapeHtml(target.type || target.assetType || 'Aset')} · ${escapeHtml(target.areaName || '')}</small></span>
+          <span class="material-symbols-outlined" aria-hidden="true">add</span>
+        </button>
+      `).join('')
+      : hasQuery ? '<p>Tidak ada aset lain yang cocok atau aset sudah terhubung.</p>' : ''
+  }
+
+  function renderNodeIcon(node) {
+    const iconUrl = assetIconUrl(node)
+    const imageUrl = sourceIconLoader.dataByUrl.get(iconUrl)
+      || (iconUrl === JUNCTION_BOX_ICON_URL ? iconUrl : null)
+    if (imageUrl) {
+      return `<img class="topology-node-image" src="${escapeAttribute(imageUrl)}" alt="" aria-hidden="true">`
+    }
+    return `<span class="material-symbols-outlined" aria-hidden="true">${iconForNode(node)}</span>`
+  }
+
+  function renderInspector() {
+    const inspector = container.querySelector('[data-topology-inspector]')
+    if (!inspector) return
+    inspector.innerHTML = state.selectedAssetId
+      ? renderAssetInspector(model.nodeById.get(state.selectedAssetId))
+      : state.selectedEdgeId
+        ? renderEdgeInspector(model.edgeById.get(state.selectedEdgeId))
+        : renderNoSelectionInspector()
+    if (state.selectedAssetId) renderRelationSearchResults()
+  }
+
+  function renderAssetInspector(node) {
+    if (!node) return renderNoSelectionInspector()
+    const group = poleGroupForAsset(mapData.poleGroups, node.id)
+    const path = networkPathFor(node.id)
+    const relations = directRelationsFor(node.id)
+    const needsPrimaryReview = (documentController.graph.cameraRelationReview ?? []).some(item =>
+      item.cameraAssetId === node.id)
+      && !relations.some(({ other }) => ['junction-peer', 'junction-extended']
+        .includes(other.diagramClass))
+    const availableFrames = (layout?.mountingBoxes ?? []).filter(box =>
+      ['confirmed', 'empty', 'excluded'].includes(box.kind)
+        && (!box.areaKey || box.areaKey === node.areaKey))
+    const displayedFrameId = layout?.nodes?.find(item => item.id === node.id)?.mountingBoxId ?? ''
+    return `
+      <div class="topology-stitch-inspector-head">
+        <h3>Detail Perangkat</h3>
+        <button class="topology-stitch-icon-button" type="button" data-action="close-inspector" aria-label="Tutup detail">
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
+        </button>
+      </div>
+      <div class="topology-stitch-inspector-body">
+        <div class="topology-stitch-asset-heading">
+          <div class="topology-stitch-asset-icon">${renderNodeIcon(node)}</div>
+          <div class="topology-stitch-asset-title">
+            <div class="topology-stitch-name-row">
+              <h4>${escapeHtml(node.name || node.id)}</h4>
+            </div>
+            <span>${escapeHtml(node.type || node.assetType || 'Aset')}</span>
+          </div>
+        </div>
+        ${needsPrimaryReview && canEditTopology ? `<p class="topology-primary-review" role="status">Beberapa kandidat JB memiliki bukti setara. Pilih satu relasi utama untuk kamera ini.</p>` : ''}
+        <section class="topology-stitch-inspector-card">
+          <div class="topology-stitch-section-label"><span class="material-symbols-outlined" aria-hidden="true">location_on</span>Lokasi Fisik</div>
+          <p>${escapeHtml(physicalLocation(node, group))}</p>
+        </section>
+        ${canEditTopology ? `<section class="topology-stitch-inspector-section topology-frame-picker">
+          <label for="topology-asset-frame">Pindahkan ke frame</label>
+          <select id="topology-asset-frame" data-asset-frame-select ${state.mutationBusy ? 'disabled' : ''}>
+            <option value="">Pilih frame tujuan…</option>
+            ${availableFrames.map(box => `<option value="${escapeAttribute(box.id)}" ${box.id === displayedFrameId ? 'selected' : ''}>${escapeHtml(box.label || box.hostName || box.id)}</option>`).join('')}
+          </select>
+          <small>${canMountAssetOnPole(node)
+            ? 'Penempatan tiang juga memperbarui mounting di Peta Aset setelah disimpan.'
+            : 'Aset ini ditempatkan dalam frame diagram tanpa mengubah mounting fisik.'}</small>
+          ${['junction-peer', 'junction-extended'].includes(node.diagramClass)
+            ? '<small>Turunan di frame yang sama ikut pindah. Setelahnya, tiap aset dapat dipindahkan sendiri.</small>'
+            : ''}
+        </section>` : ''}
+        <section class="topology-stitch-inspector-section">
+          <label>Jalur Jaringan</label>
+          <div class="topology-stitch-path">${path.map((item, index) => `
+            ${index ? '<span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>' : ''}
+            <span class="${item.id === node.id ? 'current' : ''}">${escapeHtml(item.name || item.id)}</span>
+          `).join('') || `<span class="current">${escapeHtml(node.name || node.id)}</span>`}</div>
+        </section>
+        <section class="topology-stitch-inspector-section">
+          <div class="topology-stitch-section-heading">
+            <label>Relasi (${relations.length})</label>
+            ${canEditTopology ? '<span>Simpan untuk menerapkan perubahan</span>' : ''}
+          </div>
+          <div class="topology-stitch-relations">
+            ${relations.length ? relations.map(({ other, edge }) => `
+              <div class="topology-stitch-relation-row">
+                <button type="button" class="topology-stitch-relation" data-select-asset="${escapeAttribute(other.id)}">
+                  <span class="topology-stitch-relation-main">${renderNodeIcon(other)}<strong>${escapeHtml(other.name || other.id)}</strong></span>
+                  <span class="topology-stitch-relation-meta">${escapeHtml(edge.networkFamilyLabel || networkFamilyLabel(other.networkFamily))}</span>
+                </button>
+                ${canEditTopology ? `<button type="button" class="topology-stitch-relation-remove" data-action="remove-relation"
+                  data-relation-id="${escapeAttribute(edge.id)}" aria-label="Hapus relasi dengan ${escapeAttribute(other.name || other.id)}"
+                  title="Hapus relasi" ${state.mutationBusy ? 'disabled' : ''}>
+                  <span class="material-symbols-outlined" aria-hidden="true">close</span>
+                </button>` : ''}
+              </div>
+            `).join('') : '<p class="topology-stitch-muted">Belum ada relasi terkonfirmasi pada perangkat ini.</p>'}
+          </div>
+          ${canEditTopology ? `<div class="topology-relation-editor">
+            <label class="topology-stitch-search-field search-control" for="topology-relation-search">
+              <span class="material-symbols-outlined" aria-hidden="true">search</span>
+              <input id="topology-relation-search" data-relation-search type="search"
+                value="${escapeAttribute(state.relationSearch)}" placeholder="Cari aset untuk dihubungkan…"
+                autocomplete="off" spellcheck="false" ${state.mutationBusy ? 'disabled' : ''}/>
+            </label>
+            <div class="topology-relation-search-results" data-relation-search-results
+              role="listbox" aria-label="Aset yang dapat dihubungkan" hidden></div>
+            <small>Pilih aset dan garis akan dibuat otomatis.</small>
+          </div>` : ''}
+        </section>
+      </div>
+      <div class="topology-stitch-inspector-footer">
+        <button type="button" class="topology-stitch-secondary-button" data-action="open-map" data-asset-id="${escapeAttribute(node.id)}">
+          <span class="material-symbols-outlined" aria-hidden="true">map</span>Buka di Peta Aset
+        </button>
+        <button type="button" class="topology-stitch-detail-link" data-action="open-map" data-asset-id="${escapeAttribute(node.id)}">Lihat detail aset</button>
+      </div>
+    `
+  }
+
+  function renderEdgeInspector(edge) {
+    if (!edge) return renderNoSelectionInspector()
+    const source = model.nodeById.get(edge.sourceId)
+    const target = model.nodeById.get(edge.targetId)
+    return `
+      <div class="topology-stitch-inspector-head">
+        <h3>Detail Relasi</h3>
+        <button class="topology-stitch-icon-button" type="button" data-action="close-inspector" aria-label="Tutup detail">
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
+        </button>
+      </div>
+      <div class="topology-stitch-inspector-body">
+        <div class="topology-stitch-asset-heading">
+          <div class="topology-stitch-asset-icon"><span class="material-symbols-outlined" aria-hidden="true">cable</span></div>
+          <div class="topology-stitch-asset-title"><div class="topology-stitch-name-row"><h4>${escapeHtml(edge.relationId || edge.id)}</h4></div><span>${escapeHtml(edge.networkFamilyLabel || 'Relasi terkonfirmasi')}</span></div>
+        </div>
+        <section class="topology-stitch-inspector-card"><div class="topology-stitch-section-label"><span class="material-symbols-outlined" aria-hidden="true">route</span>Endpoint Relasi</div><p>${escapeHtml(source?.name || edge.sourceId)} <span class="material-symbols-outlined topology-stitch-inline-icon" aria-hidden="true">arrow_forward</span> ${escapeHtml(target?.name || edge.targetId)}</p></section>
+        <section class="topology-stitch-inspector-section"><label>Provenance</label><p class="topology-stitch-provenance">${escapeHtml(edge.provenance || edge.sourceGeometryId || 'Relasi aktif dari dataset topology.')}</p></section>
+        <section class="topology-stitch-inspector-section"><label>Metadata</label><dl class="topology-stitch-facts"><div><dt>Status</dt><dd>Terkonfirmasi</dd></div><div><dt>Arah</dt><dd>${escapeHtml(edge.direction || 'undirected')}</dd></div>${edge.lengthMeters != null ? `<div><dt>Panjang</dt><dd>${escapeHtml(String(edge.lengthMeters))} m</dd></div>` : ''}</dl></section>
+      </div>
+      <div class="topology-stitch-inspector-footer"><button type="button" class="topology-stitch-secondary-button" data-action="open-map" data-asset-id="${escapeAttribute(source?.id || '')}"><span class="material-symbols-outlined" aria-hidden="true">map</span>Buka di Peta Aset</button></div>
+    `
+  }
+
+  function renderNoSelectionInspector() {
+    return `
+      <div class="topology-stitch-inspector-head"><h3>Detail Perangkat</h3><button class="topology-stitch-icon-button" type="button" data-action="close-inspector" aria-label="Tutup detail"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>
+      <div class="topology-stitch-inspector-empty"><span class="material-symbols-outlined" aria-hidden="true">touch_app</span><strong>Pilih perangkat atau garis</strong><p>Detail identitas, lokasi, jalur, dan koneksi akan muncul di panel ini.</p></div>
+    `
+  }
+
+  function renderTray() {
+    const tray = container.querySelector('[data-topology-tray]')
+    if (!tray) return
+    const isolated = model?.isolatedNodes ?? []
+    const hasIsolated = isolated.length > 0
+    tray.hidden = !hasIsolated
+    tray.closest('.topology-stitch-main')?.classList.toggle('has-disconnected-tray', hasIsolated)
+    tray.innerHTML = `
+      <div class="topology-stitch-tray-title"><span class="material-symbols-outlined" aria-hidden="true">link_off</span><span>Belum terhubung</span><strong>${isolated.length}</strong></div>
+      <div class="topology-stitch-tray-list">
+        ${isolated.map((node) => `<button type="button" class="topology-stitch-tray-item" data-tray-asset="${escapeAttribute(node.id)}" title="${canEditTopology ? 'Klik untuk memilih, atau tarik ke frame' : 'Klik untuk memilih'}: ${escapeAttribute(node.name || node.id)}"><span class="topology-stitch-tray-icon">${renderNodeIcon(node)}</span><span>${escapeHtml(node.name || node.id)}</span></button>`).join('')}
+      </div>
+    `
+  }
+
+  function renderTopologySidebar() {
+    const sidebar = container.querySelector('[data-topology-sidebar]')
+    if (!sidebar) return
+    const input = sidebar.querySelector('[data-topology-search]')
+    if (input && input.value !== state.search) input.value = state.search
+    const results = sidebar.querySelector('[data-topology-search-results]')
+    if (!results) return
+    const hasQuery = Boolean(String(state.search || '').trim())
+    results.hidden = !hasQuery
+    results.setAttribute('aria-expanded', String(hasQuery))
+    input?.setAttribute('aria-expanded', String(hasQuery))
+    results.innerHTML = state.searchResults.length
+      ? state.searchResults.map((result) => `<button type="button" data-search-result="${escapeAttribute(`${result.kind}:${result.id}`)}"><span class="material-symbols-outlined" aria-hidden="true">device_hub</span><span><strong>${escapeHtml(result.label)}</strong><small>${escapeHtml(`${result.typeLabel} · ${result.area}`)}</small></span><span class="material-symbols-outlined" aria-hidden="true">chevron_right</span></button>`).join('')
+      : hasQuery
+        ? '<p>Perangkat tidak ditemukan.</p>'
+        : ''
+  }
+
+  function updateToolbar() {
+    const summary = model?.summary ?? {}
+    const setText = (selector, value) => {
+      container.querySelectorAll(selector).forEach((element) => {
+        element.textContent = value
+      })
+    }
+    const currentAreaName = areaName(state.area, mapData.locationGroups)
+    setText('[data-topology-area-title]', currentAreaName)
+    container.querySelector('[data-topology-area-title]')?.setAttribute('title', currentAreaName)
+    const branchLabel = branchNameForFacility(
+      mapData.locationGroups.find(({ key }) => key === state.area),
+      activeContext.branchName,
+    ) || activeContext.branchId
+    setText('[data-topology-branch-title]', branchLabel)
+    container.querySelector('[data-topology-branch-title]')?.setAttribute('title', branchLabel)
+    setText('[data-topology-pole-count]', `${summary.physicalMountCount ?? 0} Tiang${
+      summary.emptyPhysicalMountCount ? ` · ${summary.emptyPhysicalMountCount} kosong` : ''
+    }`)
+    setText('[data-topology-zoom-label]', `${Math.round(state.zoom * 100)}%`)
+    const overviewHint = container.querySelector('[data-topology-overview-hint]')
+    if (overviewHint) overviewHint.hidden = !(state.zoom < 0.5
+      && window.matchMedia('(max-width: 960px)').matches)
+    setText('[data-topology-asset-count]', String(summary.totalAssetCount ?? 0))
+    setText('[data-topology-edge-count]', String(summary.confirmedEdgeCount ?? 0))
+  }
+
+  function updatePanelState() {
+    const setHidden = (selector, hidden) => {
+      const element = container.querySelector(selector)
+      if (element) element.hidden = hidden
+    }
+    setHidden('[data-topology-export-panel]', !state.exportOpen)
+    setHidden('[data-topology-legend]', !state.legendOpen)
+    setHidden('[data-topology-actions-menu]', !state.actionsOpen)
+    const actionsToggle = container.querySelector('[data-action="toggle-actions"]')
+    actionsToggle?.setAttribute('aria-expanded', String(state.actionsOpen))
+    const inspector = container.querySelector('.topology-stitch-inspector')
+    if (inspector) inspector.hidden = !state.inspectorOpen
+    const app = container.querySelector('[data-topology-app]')
+    app?.classList.toggle('topology-sidebar-collapsed', state.sidebarCollapsed)
+    app?.classList.toggle('is-saving', state.mutationBusy)
+    const draftBar = container.querySelector('[data-draft-bar]')
+    if (draftBar) {
+      draftBar.hidden = !state.changes.length
+      draftBar.querySelector('[data-draft-count]').textContent = state.mutationBusy
+        ? 'Menyimpan perubahan…' : `${state.changes.length} perubahan belum disimpan`
+      draftBar.querySelector('[data-draft-error]').textContent = state.saveError
+      draftBar.querySelectorAll('button').forEach(button => { button.disabled = state.mutationBusy })
+      draftBar.setAttribute('aria-busy', String(state.mutationBusy))
+    }
+    const focusButton = container.querySelector('[data-action="focus-relations"]')
+    if (focusButton) focusButton.disabled = !state.selectedAssetId
+    const renameButton = container.querySelector('[data-action="rename-selected-frame"]')
+    if (renameButton) {
+      renameButton.disabled = !state.selectedMountingGroupId || state.mutationBusy
+      renameButton.title = state.selectedMountingGroupId
+        ? 'Ubah nama frame terpilih'
+        : 'Pilih frame terlebih dahulu'
+    }
+    container.querySelectorAll('[data-action="toggle-sidebar"]').forEach((button) => {
+      button.setAttribute('aria-expanded', String(!state.sidebarCollapsed))
+    })
+    const actionStates = {
+      'toggle-export': state.exportOpen,
+      'toggle-legend': state.legendOpen,
+    }
+    Object.entries(actionStates).forEach(([action, active]) => {
+      container.querySelectorAll(`[data-action="${action}"]`).forEach((button) => {
+        button.classList.toggle('active', active)
+        button.setAttribute('aria-pressed', String(active))
+        if (['toggle-export', 'toggle-legend'].includes(action)) {
+          button.setAttribute('aria-expanded', String(active))
+          button.setAttribute('aria-controls', action === 'toggle-legend' ? 'topology-legend' : 'topology-export-panel')
+        }
+      })
+    })
+    const legendToggle = container.querySelector('[data-action="toggle-legend"]')
+    legendToggle?.setAttribute('aria-label', state.legendOpen ? 'Sembunyikan legenda diagram' : 'Tampilkan legenda diagram')
+  }
+
+  function exportDiagram(kind) {
+    if (!layout || layout.status !== 'ready') return showToast('Diagram belum siap untuk diekspor.')
+    const exportLayout = layout
+    const displayBranchName = branchNameForFacility(
+      mapData.locationGroups.find(({ key }) => key === state.area),
+      activeContext.branchName,
+    )
+    const svg = new DOMParser().parseFromString(renderTopologyDiagramSvg({
+      model,
+      layout: exportLayout,
+      context: {...activeContext, branchName: displayBranchName, areaKey: state.area},
+      renderMode: 'export', showMountingPhysical: state.showMountingPhysical,
+      sourceIconDataByUrl: sourceIconLoader.dataByUrl,
+      mountingLabelById: state.frameNames,
+    }), 'image/svg+xml').documentElement
+    const slug = slugify(`${displayBranchName || activeContext.branchId}-${areaName(state.area, mapData.locationGroups)}`)
+    const filename = `sinergi-topologi-${slug}.${kind}`
+    state.exportOpen = false
+    updatePanelState()
+    if (kind === 'png') {
+      void downloadSchematicPng(svg, filename,2,{signal:scope.signal,saveBlob:downloads.saveBlob}).catch((error) => {if(!scope.disposed)showToast(error.message)})
+    } else {
+      downloadSchematicSvg(svg, filename,{signal:scope.signal,saveBlob:downloads.saveBlob})
+    }
+  }
+
+  function openAssetMap(assetId) {
+    if (!assetId) return
+    const params = new URLSearchParams({
+      datasetId: activeContext.datasetId,
+      selectedAssetId: assetId,
+    })
+    if (state.area) params.set('area', state.area)
+    window.location.assign(`/map?${params.toString()}`)
+  }
+
+  function showToast(message) {
+    const toast = container.querySelector('[data-topology-toast]')
+    if (!toast) return
+    toast.textContent = message
+    toast.classList.add('visible')
+    scope.clearTimeout(state.toastTimer)
+    state.toastTimer = scope.timeout(() => toast.classList.remove('visible'), 2200)
+  }
+
+  function syncUrl() {
+    const params = new URLSearchParams(window.location.search)
+    params.set('datasetId', activeContext.datasetId)
+    params.delete('branchId')
+    params.set('area', state.area ?? 'all')
+    if (state.selectedAssetId) params.set('selectedAssetId', state.selectedAssetId)
+    else params.delete('selectedAssetId')
+    window.history.replaceState(null, '', `/topology?${params.toString()}`)
+    const mapLink = container.querySelector('.top-navigation nav a[href^="/map"]')
+    if (mapLink) {
+      const mapParams = new URLSearchParams({ datasetId: activeContext.datasetId })
+      mapParams.set('area', state.area ?? 'all')
+      if (state.selectedAssetId) mapParams.set('selectedAssetId', state.selectedAssetId)
+      mapLink.href = `/map?${mapParams.toString()}`
+    }
+  }
+}
+
+function numericStyle(value, fallback = 0) {
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) ? parsed : Number(fallback) || 0
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+}
+
+function renderTopologySidebarMarkup({ mapData, state }) {
+  const areas = mapData.locationGroups ?? []
+  return `
+    <aside class="network-sidebar topology-sidebar" id="topology-sidebar"
+      data-topology-sidebar aria-label="Kontrol diagram topologi">
+      <header class="sidebar-heading">
+        <div>
+          <h1>Diagram topologi</h1>
+        </div>
+        <div class="sidebar-heading-actions">
+          <button class="icon-button sidebar-collapse desktop-only" type="button"
+            title="Tutup panel" aria-label="Tutup panel diagram" aria-expanded="true"
+            data-action="toggle-sidebar">
+            <span class="material-symbols-outlined" aria-hidden="true">left_panel_close</span>
+          </button>
+          <button class="icon-button close-sidebar mobile-only" type="button"
+            aria-label="Tutup panel diagram" aria-expanded="true" data-action="toggle-sidebar">
+            <span class="material-symbols-outlined" aria-hidden="true">close</span>
+          </button>
+        </div>
+      </header>
+      <div class="sidebar-content">
+        <label class="area-selector">
+          <span>Cabang / fasilitas</span>
+          <span class="area-selector-control">
+            <select aria-label="Cabang atau fasilitas" data-area-filter>
+              <option value="all" ${state.area === null ? 'selected' : ''}>Semua area</option>
+              ${areas.map((area) => `<option value="${escapeAttribute(area.key)}" ${state.area === area.key ? 'selected' : ''}>${escapeHtml(`${branchNameForFacility(area) || 'Cabang'} · ${area.name}`)}</option>`).join('')}
+            </select>
+            <span class="area-selector-icon material-symbols-outlined" aria-hidden="true">expand_more</span>
+          </span>
+        </label>
+
+        <div class="asset-search-combobox">
+          <label class="search-control">
+            <span class="material-symbols-outlined" aria-hidden="true">search</span>
+            <input id="topology-search" data-topology-search type="search" value="${escapeAttribute(state.search)}"
+              placeholder="Cari perangkat" autocomplete="off" spellcheck="false"
+              aria-label="Cari perangkat" aria-autocomplete="list" aria-haspopup="listbox"
+              aria-controls="topology-search-results" aria-expanded="false" />
+            <kbd>Ctrl K</kbd>
+          </label>
+          <div class="sidebar-asset-search-results topology-search-results" id="topology-search-results"
+            data-topology-search-results role="listbox" aria-label="Hasil pencarian diagram" hidden></div>
+        </div>
+
+      </div>
+    </aside>
+  `
+}
+
+function cssEscape(value) {
+  if (globalThis.CSS?.escape) return globalThis.CSS.escape(String(value))
+  return String(value).replace(/[^a-zA-Z0-9_-]/g, (character) => `\\${character}`)
+}
+
+function canMountAssetOnPole(node) {
+  if(['endpoint','junction-peer','junction-extended'].includes(node?.diagramClass))return true
+  const identity = `${node?.type ?? ''} ${node?.assetType ?? ''} ${node?.name ?? ''}`
+  return !/\btiang\b|\bpole\b|\bpylon\b/i.test(identity)
+    && /junction\s*box|\bjb\b|cctv|camera|kamera/i.test(identity)
+}
+
+function renderWorkspaceShell({ activeContext, mapData, state, model, canEditTopology }) {
+  const branchLabel = branchNameForFacility(
+    mapData.locationGroups.find(({ key }) => key === state.area),
+    activeContext.branchName,
+  ) || activeContext.branchId
+  return `
+    <div class="topology-stitch-app" data-topology-app>
+      ${renderTopNavigation('topology', { ...activeContext, area: state.area ?? 'all' })}
+      <div class="topology-stitch-shell">
+        ${renderTopologySidebarMarkup({ mapData, state })}
+        <main class="topology-stitch-main" aria-label="Workspace Diagram Topologi">
+          <button type="button" class="topology-sidebar-reopen" data-action="toggle-sidebar" aria-label="Buka panel diagram">
+            <span class="material-symbols-outlined" aria-hidden="true">left_panel_open</span>
+          </button>
+          ${renderLocationContextPanel({
+            surface: 'topology',
+            branchName: branchLabel,
+            areaName: areaName(state.area, mapData.locationGroups),
+          })}
+          <div class="topology-stitch-toolbar" role="group" aria-label="Alat diagram">
+            <div class="topology-stitch-toolbar-actions">
+              <div class="topology-toolbar-group topology-toolbar-edit-actions" aria-label="Edit diagram">
+                ${canEditTopology ? `<button type="button" class="topology-stitch-toolbar-button topology-toolbar-labeled topology-toolbar-primary" data-action="add-pole-frame"
+                  title="Tambah frame Indoor, Non-tiang, atau tiang" aria-label="Tambah frame"><span class="material-symbols-outlined" aria-hidden="true">add_box</span><span>Tambah frame</span></button>
+                ` : ''}
+                <button type="button" class="topology-stitch-toolbar-button topology-toolbar-labeled" data-action="toggle-export" title="Ekspor diagram" aria-label="Ekspor diagram"><span class="material-symbols-outlined" aria-hidden="true">ios_share</span><span>Ekspor</span></button>
+                ${canEditTopology ? `<button type="button" class="topology-stitch-toolbar-button topology-toolbar-labeled" data-action="toggle-actions" aria-label="Tindakan lainnya" aria-controls="topology-actions-menu" aria-expanded="false" title="Tindakan lainnya"><span class="material-symbols-outlined" aria-hidden="true">more_horiz</span><span>Lainnya</span></button>` : ''}
+              </div>
+            </div>
+          </div>
+          ${canEditTopology ? `<div class="topology-actions-menu" id="topology-actions-menu" data-topology-actions-menu hidden>
+            <span class="topology-actions-heading">Tindakan diagram</span>
+            <button type="button" data-action="rename-selected-frame" title="Pilih frame terlebih dahulu" disabled><span class="material-symbols-outlined" aria-hidden="true">edit</span><span>Ubah nama frame</span></button>
+          </div>` : ''}
+          <div class="topology-stitch-viewport" data-topology-viewport tabindex="0" aria-label="Canvas diagram topologi">
+            <div class="topology-stitch-canvas"><div class="topology-stitch-graph-frame" data-topology-frame></div></div>
+          </div>
+          <div class="topology-overview-labels" data-topology-overview-labels hidden></div>
+          <p class="topology-overview-hint" data-topology-overview-hint hidden>Ketuk diagram untuk memperbesar, atau cari aset di panel.</p>
+          <div class="topology-canvas-navigation" role="group" aria-label="Navigasi kanvas">
+              <div class="topology-toolbar-group topology-toolbar-navigation" aria-label="Navigasi diagram">
+                <div class="topology-stitch-zoom-control"><button type="button" data-action="zoom-out" aria-label="Perkecil diagram"><span class="material-symbols-outlined" aria-hidden="true">remove</span></button><button type="button" class="topology-zoom-reset" data-action="zoom-reset" data-topology-zoom-label title="Kembalikan zoom ke 100%" aria-label="Kembalikan zoom ke 100%">${Math.round(state.zoom * 100)}%</button><button type="button" data-action="zoom-in" aria-label="Perbesar diagram"><span class="material-symbols-outlined" aria-hidden="true">add</span></button></div>
+                <button type="button" class="topology-stitch-toolbar-button topology-toolbar-navigation-button" data-action="fit" title="Tampilkan seluruh diagram" aria-label="Tampilkan seluruh diagram"><span class="material-symbols-outlined" aria-hidden="true">fit_screen</span><span>Semua</span></button>
+                <button type="button" class="topology-stitch-toolbar-button topology-toolbar-navigation-button" data-action="focus-relations" title="Fokus ke relasi aset terpilih" aria-label="Fokus ke relasi aset terpilih"><span class="material-symbols-outlined" aria-hidden="true">center_focus_strong</span><span>Aset</span></button>
+                <span class="topology-navigation-divider" aria-hidden="true"></span>
+                <button type="button" class="topology-stitch-toolbar-button topology-toolbar-navigation-button topology-legend-toggle"
+                  data-action="toggle-legend" title="Legenda diagram" aria-label="Tampilkan legenda diagram"
+                  aria-controls="topology-legend" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">info</span></button>
+              </div>
+          </div>
+          <div class="topology-stitch-tray" data-topology-tray></div>
+          ${canEditTopology ? `<div class="topology-draft-bar" data-draft-bar hidden role="status" aria-live="polite">
+            <span class="topology-draft-indicator"></span><div><strong data-draft-count></strong><small data-draft-error></small></div>
+            <button type="button" data-action="cancel-diagram">Batal</button>
+            <button type="button" class="topology-save-button" data-action="save-diagram">Simpan perubahan</button>
+          </div>` : ''}
+          <aside class="topology-legend-popover" id="topology-legend" data-topology-legend hidden>
+            <header><strong>Legenda diagram</strong><button type="button" data-action="close-legend" aria-label="Tutup legenda"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></header>
+            <section><small>Frame</small><span><i class="topology-legend-frame pole"></i>Tiang</span><span><i class="topology-legend-frame indoor"></i>Indoor</span><span><i class="topology-legend-frame standalone"></i>Non-tiang</span></section>
+            <section><small>Perangkat</small><span><i class="topology-legend-device server"></i>Server</span><span><img class="topology-legend-device junction-icon" src="${JUNCTION_BOX_ICON_URL}" alt="" aria-hidden="true">Junction Box</span><span><i class="topology-legend-device camera"></i>Kamera</span></section>
+            <section><small>Jenis koneksi</small>${Object.values(CONNECTION_STYLES).map(style => `<span><i class="topology-legend-route" style="--legend-route:${escapeAttribute(style.color)}"></i>${escapeHtml(style.label)}</span>`).join('')}</section>
+            <footer>Warna garis menunjukkan jenis koneksi.</footer>
+          </aside>
+        </main>
+        <aside class="topology-stitch-inspector" data-topology-inspector aria-label="Detail perangkat"></aside>
+      </div>
+      <aside class="topology-stitch-floating-panel topology-stitch-export-panel" id="topology-export-panel" data-topology-export-panel hidden>
+        <div class="topology-stitch-panel-head"><div><span class="topology-stitch-eyebrow">Ekspor</span><h2>Export diagram</h2></div><button type="button" class="topology-stitch-icon-button" data-action="close-export" aria-label="Tutup export"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>
+        <button type="button" class="topology-stitch-export-option" data-export="svg"><span class="material-symbols-outlined" aria-hidden="true">code</span><span><strong>SVG resolusi tinggi</strong><small>Vektor lengkap dengan susunan frame dan legenda.</small></span></button>
+        <button type="button" class="topology-stitch-export-option" data-export="png"><span class="material-symbols-outlined" aria-hidden="true">image</span><span><strong>PNG resolusi tinggi</strong><small>Gambar 2× dengan kartu dan teks tetap tajam.</small></span></button>
+      </aside>
+      ${canEditTopology ? `<section class="topology-frame-composer" data-frame-composer aria-labelledby="frame-composer-title" hidden>
+        <header><div><span class="material-symbols-outlined" aria-hidden="true">add_box</span><div><h2 id="frame-composer-title">Frame baru</h2><p>Frame sudah terlihat di kanvas. Pilih jenis atau tiangnya.</p></div></div>
+          <button type="button" data-action="close-frame-composer" aria-label="Batalkan frame baru"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></header>
+        <label class="topology-frame-search"><span class="material-symbols-outlined" aria-hidden="true">search</span>
+          <input type="search" data-frame-search aria-label="Cari jenis frame atau tiang" placeholder="Cari Indoor, Non-tiang, atau tiang…" autocomplete="off" />
+        </label>
+        <div class="topology-frame-options" data-frame-options role="listbox" aria-label="Pilihan frame"></div>
+      </section>
+      <form class="topology-frame-name-editor" data-frame-name-form hidden>
+        <label for="topology-frame-name">Nama frame</label>
+        <div><input id="topology-frame-name" data-frame-name-input maxlength="48" autocomplete="off" />
+          <button type="button" data-action="cancel-frame-name" aria-label="Batal"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
+          <button type="submit" aria-label="Terapkan nama"><span class="material-symbols-outlined" aria-hidden="true">check</span></button>
+        </div>
+        <small>Nama tampilan saja; nama aset KMZ tetap. Tekan Enter, lalu Simpan perubahan.</small>
+      </form>` : ''}
+      <div class="topology-stitch-toast" data-topology-toast role="status" aria-live="polite"></div>
+    </div>
+  `
+}
+
+function renderLoadingState(context) {
+  return `<div class="topology-stitch-app topology-stitch-state-app">${renderTopNavigation('topology', context)}<main class="map-data-state is-loading" aria-live="polite" aria-busy="true"><span class="material-symbols-outlined" aria-hidden="true">progress_activity</span><h1>Memuat dataset aktif</h1><p>Aset dan relasi sedang dibaca dari versi aktif yang sama.</p></main></div>`
+}
+
+function renderErrorState(context, error) {
+  return `<div class="topology-stitch-app topology-stitch-state-app">${renderTopNavigation('topology', context)}<main class="topology-stitch-state error"><span class="material-symbols-outlined" aria-hidden="true">error</span><h1>Diagram Topologi belum tersedia</h1><p>${escapeHtml(error?.message || 'Dataset aktif tidak dapat dimuat.')}</p><button type="button" class="topology-stitch-primary-button" data-retry-topology>Coba lagi</button></main></div>`
+}
+
+function readRequestedDatasetContext() {
+  const query = new URLSearchParams(window.location.search)
+  let datasetId = query.get('datasetId')
+  try {
+    datasetId ||= window.sessionStorage.getItem('sinergiActiveDatasetId')
+  } catch {
+    // Storage may be unavailable in a restricted browser context.
+  }
+  return {
+    datasetId: datasetId || DEFAULT_DATASET_ID,
+    siteId: query.get('siteId') || null,
+  }
+}
+
+function persistActiveContext(context) {
+  try {
+    if (context?.datasetId) window.sessionStorage.setItem('sinergiActiveDatasetId', context.datasetId)
+  } catch {
+    // Storage is a convenience only.
+  }
+}
+
+function areaName(area, locationGroups) {
+  if (!area) return 'Semua Area'
+  return locationGroups?.find(({ key }) => key === area)?.name
+    ?? String(area).replaceAll('-', ' ')
+}
+
+function physicalLocation(node, group) {
+  const area = node.areaName || node.areaKey || 'Area belum tersedia'
+  if (!group) return area
+  return `${area} · Mounting ${group.pole?.name || group.poleAssetId} · ${group.childCount} aset terpasang`
+}
+
+function iconForNode(node) {
+  const icon = String(node?.iconType ?? '').toLowerCase()
+  const type = `${node?.type ?? ''} ${node?.name ?? ''}`.toLowerCase()
+  if (icon.includes('server') || /server|nvr|rack/.test(type)) return 'dns'
+  if (icon.includes('junction') || /junction|\bjb\b/.test(type)) return 'device_hub'
+  if (icon.includes('switch') || /switch|router/.test(type)) return 'router'
+  if (icon.includes('cctv') || /cctv|camera|kamera/.test(type)) return 'videocam'
+  if (/sensor/.test(type)) return 'sensors'
+  if (/printer|peripheral/.test(type)) return 'developer_board'
+  return 'hub'
+}
+
+function slugify(value) {
+  return String(value ?? 'topology').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'topology'
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[character]))
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value).replace(/`/g, '&#96;')
+}

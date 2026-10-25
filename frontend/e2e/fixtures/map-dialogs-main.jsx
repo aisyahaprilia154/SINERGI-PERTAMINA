@@ -20,8 +20,8 @@ function Lab(){
  const [dialog,setDialog]=useState(null)
  async function open(kind){
   if(params.get('implementation')!=='legacy'){setDialog(kind);return}
-  if(kind==='diagram'){const {openSchematicDialog}=await import('../../src/pages/map/diagram-dialog.js');openSchematicDialog({diagrams:createMapDiagrams(model,'C-01'),activeContext:context,selectedAssetId:'C-01'})}
-  else{const {openMapDataTransferDialog}=await import('../../src/pages/map/map-data-transfer-dialog.js');openMapDataTransferDialog({activeContext:context,networks:model.networks,selectedNetworkIds:new Set(model.networks.map(network=>network.id)),initialMode:kind,areaScopeLabel:model.selectedArea?.name})}
+  if(kind==='diagram'){const {openSchematicDialog}=await import('../../test-support/legacy/pages/map/diagram-dialog.js');openSchematicDialog({diagrams:createMapDiagrams(model,'C-01'),activeContext:context,selectedAssetId:'C-01'})}
+  else{const {openMapDataTransferDialog}=await import('../../test-support/legacy/pages/map/map-data-transfer-dialog.js');openMapDataTransferDialog({activeContext:context,networks:model.networks,selectedNetworkIds:new Set(model.networks.map(network=>network.id)),initialMode:kind,areaScopeLabel:model.selectedArea?.name})}
  }
  return <ThemeProvider><SessionContext value={{user}}><button onClick={()=>void open('import')}>Fixture import</button><button onClick={()=>void open('export')}>Fixture export</button><button onClick={()=>void open('diagram')}>Fixture diagram</button>{dialog==='diagram'?<SchematicDialog snapshot={{model,context,selectedAssetId:'C-01'}} onClose={()=>setDialog(null)}/>:dialog&&<MapTransferDialog snapshot={{context,networks:model.networks,selectedNetworkIds:new Set(model.networks.map(network=>network.id)),areaScopeLabel:model.selectedArea?.name,mode:dialog}} onClose={()=>setDialog(null)}/>}</SessionContext></ThemeProvider>
 }

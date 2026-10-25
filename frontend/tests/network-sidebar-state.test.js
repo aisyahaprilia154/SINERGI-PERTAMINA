@@ -4,8 +4,8 @@ import {
   createNetworkSelectionState,
   parseMapUrlState,
   serializeMapUrlState,
-} from '../src/pages/map/network-sidebar-state.js'
-import { renderNetworkList, renderNetworkSidebar } from '../src/pages/map/network-sidebar.js'
+} from '../test-support/legacy/pages/map/network-sidebar-state.js'
+import { renderNetworkList, renderNetworkSidebar } from '../test-support/legacy/pages/map/network-sidebar.js'
 
 const validIds = {
   networkIds: ['cctv', 'fiber-optic', 'lan'],

@@ -3,10 +3,10 @@ import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
 import {JSDOM} from 'jsdom'
 import {saveSession} from '../src/services/account-session.js'
-import {renderTopNavigation} from '../src/components/app-header.js'
-import {renderUsersPage} from '../src/pages/admin/users-page.js'
-import {renderImportDatasetPage} from '../src/pages/admin/import-dataset-page.js'
-import {renderPreviewImportPage} from '../src/pages/admin/preview-import-page.js'
+import {renderTopNavigation} from '../test-support/legacy/components/app-header.js'
+import {renderUsersPage} from '../test-support/legacy/pages/admin/users-page.js'
+import {renderImportDatasetPage} from '../test-support/legacy/pages/admin/import-dataset-page.js'
+import {renderPreviewImportPage} from '../test-support/legacy/pages/admin/preview-import-page.js'
 
 test('admin shares navigation and retains working forms, focus and drafts',async t=>{
  const dom=new JSDOM('<html><body><div id="app"></div></body></html>',{url:'http://localhost/admin/users?datasetId=shared&area=Site+A',pretendToBeVisual:true})

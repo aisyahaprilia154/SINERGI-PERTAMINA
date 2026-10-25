@@ -1,3 +1,4 @@
+import {registerNavigationGuard} from '../../services/navigation-guards.js'
 import { useId, useLayoutEffect, useRef, useState } from 'react'
 import { MapDialog } from './MapDialog.jsx'
 import { useTransferActions } from './useTransferActions.js'
@@ -17,7 +18,8 @@ export function MapTransferDialog({ snapshot, onClose, onGuardChange }) {
   },[dirty,actions.busy,onGuardChange])
   useLayoutEffect(()=>{
     const unload=event=>{if(guardRef.current.dirty||guardRef.current.busy){event.preventDefault();event.returnValue=''}}
-    window.addEventListener('beforeunload',unload);return()=>window.removeEventListener('beforeunload',unload)
+    const removeGuard=registerNavigationGuard(()=>guardRef.current)
+    window.addEventListener('beforeunload',unload);return()=>{removeGuard();window.removeEventListener('beforeunload',unload)}
   },[])
   const close=()=>{
     if(actions.busy&&!window.confirm('Batalkan proses dan tutup dialog?'))return

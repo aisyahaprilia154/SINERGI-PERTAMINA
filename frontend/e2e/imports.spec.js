@@ -16,7 +16,9 @@ async function setup(page, role = 'Administrator') {
       return route.fulfill({ status: state.uploadFailure || 202, json: state.uploadFailure ? { error: { message: 'Unggah gagal' } } : { importId: 'returned-id', statusUrl: '/api/jobs/different-id' } })
     }
     if (path === '/api/jobs/different-id') return route.fulfill({ json: { import: { status: state.process, error: { message: 'Pemrosesan gagal' } } } })
-    // Viewer redirect and legacy preview are outside this stage: prevent operational requests.
+    if (path.endsWith('/preview')) return route.fulfill({json:{...fixtures.preview,import:{...fixtures.preview.import,id:'returned-id',dataset_id:'shared'}}})
+    if (path.endsWith('/active')) return route.fulfill({json:fixtures.active})
+    // Unmocked endpoints never reach the operational API.
     return route.fulfill({ status: 404, json: { error: { message: 'Mock endpoint' } } })
   })
   await page.goto('/admin/datasets/import?datasetId=shared', { waitUntil: 'networkidle' })
@@ -28,7 +30,7 @@ async function fill(page) {
   await page.getByLabel('File KML/KMZ').setInputFiles({ name: 'Peta.KMZ', mimeType: 'application/octet-stream', buffer: Buffer.from('<kml/>') })
 }
 const submit = page => page.getByRole('button', { name: 'Unggah dan lihat preview' })
-test('imports route uses React, filters dataset/search/status and keeps preview as document link', async ({ page }) => {
+test('imports route uses React, filters dataset/search/status and keeps the preview URL and supports SPA navigation', async ({ page }) => {
   const modules = []; page.on('request', request => modules.push(request.url()))
   await setup(page)
   expect(modules.some(url => url.includes('/react/imports/ImportsPage.jsx'))).toBe(true)
@@ -62,10 +64,9 @@ test('failed upload preserves file and draft, busy blocks repeat and Escape, dis
 })
 test('polls processing then navigates to preview ID from upload response', async ({ page }) => {
   const state = await setup(page); await fill(page)
-  await page.route('**/admin/datasets/import/returned-id/preview', route => route.fulfill({ contentType: 'text/html', body: '<h1>Mock preview</h1>' }))
   await submit(page).click(); await expect(page.locator('[data-upload-status]')).toHaveText('Membaca aset dan mencari tambahan…')
   state.process = 'ready'; await expect(page).toHaveURL(/\/returned-id\/preview$/)
-  await expect(page.getByRole('heading', { name: 'Mock preview' })).toBeVisible()
+  await expect(page.locator('[data-preview-name]')).toHaveText('Tambahan CCTV')
   expect(state.calls.some(call => call.path === '/api/jobs/different-id')).toBe(true)
 })
 test('downloads authenticated source preserving encoded filename', async ({ page }) => {
@@ -77,6 +78,7 @@ test('downloads authenticated source preserving encoded filename', async ({ page
 })
 test('Viewer cannot access import management', async ({ page }) => {
   const state = await setup(page, 'Viewer')
-  await expect(page).toHaveURL(/\/map$/)
+  await expect.poll(()=>new URL(page.url()).pathname).toBe('/map')
+  await expect(page.locator('.maplibregl-canvas')).toBeVisible()
   expect(state.calls.some(call => call.path === '/api/imports')).toBe(false)
 })

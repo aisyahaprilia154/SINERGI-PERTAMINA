@@ -1,0 +1,401 @@
+{
+  "browserVersion": "156.0.8078.4",
+  "results": [
+    {
+      "view": "login",
+      "phase": "before",
+      "size": "desktop",
+      "theme": "light",
+      "file": "login-before-desktop-light.png",
+      "crop": "login-before-desktop-light-crop.png",
+      "url": "http://127.0.0.1:5173/"
+    },
+    {
+      "view": "map",
+      "phase": "before",
+      "size": "desktop",
+      "theme": "light",
+      "file": "map-before-desktop-light.png",
+      "crop": "map-before-desktop-light-crop.png",
+      "url": "http://127.0.0.1:5173/map?datasetId=dataset-semarang&area=ft-semarang&selectedNetworkIds=network%3Acctv"
+    },
+    {
+      "view": "topology",
+      "phase": "before",
+      "size": "desktop",
+      "theme": "light",
+      "file": "topology-before-desktop-light.png",
+      "crop": "topology-before-desktop-light-crop.png",
+      "url": "http://127.0.0.1:5173/topology?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "users",
+      "phase": "after",
+      "size": "desktop",
+      "theme": "light",
+      "file": "users-after-desktop-light.png",
+      "crop": "users-after-desktop-light-crop.png",
+      "url": "http://127.0.0.1:5173/admin/users?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "versions",
+      "phase": "after",
+      "size": "desktop",
+      "theme": "light",
+      "file": "versions-after-desktop-light.png",
+      "crop": "versions-after-desktop-light-crop.png",
+      "url": "http://127.0.0.1:5173/admin/datasets/versions?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "imports",
+      "phase": "after",
+      "size": "desktop",
+      "theme": "light",
+      "file": "imports-after-desktop-light.png",
+      "crop": "imports-after-desktop-light-crop.png",
+      "url": "http://127.0.0.1:5173/admin/datasets/import?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "preview",
+      "phase": "after",
+      "size": "desktop",
+      "theme": "light",
+      "file": "preview-after-desktop-light.png",
+      "crop": "preview-after-desktop-light-crop.png",
+      "url": "http://127.0.0.1:5173/admin/datasets/import/baseline-import/preview"
+    },
+    {
+      "view": "map",
+      "phase": "after",
+      "size": "desktop",
+      "theme": "light",
+      "file": "map-after-desktop-light.png",
+      "crop": "map-after-desktop-light-crop.png",
+      "url": "http://127.0.0.1:5173/map?datasetId=dataset-semarang&selectedNetworkIds=network%3Acctv&area=ft-semarang"
+    },
+    {
+      "view": "topology",
+      "phase": "after",
+      "size": "desktop",
+      "theme": "light",
+      "file": "topology-after-desktop-light.png",
+      "crop": "topology-after-desktop-light-crop.png",
+      "url": "http://127.0.0.1:5173/topology?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "topology-account",
+      "phase": "after",
+      "size": "desktop",
+      "theme": "light",
+      "file": "topology-account-after-desktop-light.png",
+      "crop": "topology-account-after-desktop-light-crop.png",
+      "url": "http://127.0.0.1:5173/topology?datasetId=dataset-semarang&area=ft-semarang&selectedAssetId=C-01"
+    },
+    {
+      "view": "login",
+      "phase": "after",
+      "size": "desktop",
+      "theme": "light",
+      "file": "login-after-desktop-light.png",
+      "crop": "login-after-desktop-light-crop.png",
+      "url": "http://127.0.0.1:5173/"
+    },
+    {
+      "view": "login",
+      "phase": "before",
+      "size": "desktop",
+      "theme": "dark",
+      "file": "login-before-desktop-dark.png",
+      "crop": "login-before-desktop-dark-crop.png",
+      "url": "http://127.0.0.1:5173/"
+    },
+    {
+      "view": "map",
+      "phase": "before",
+      "size": "desktop",
+      "theme": "dark",
+      "file": "map-before-desktop-dark.png",
+      "crop": "map-before-desktop-dark-crop.png",
+      "url": "http://127.0.0.1:5173/map?datasetId=dataset-semarang&area=ft-semarang&selectedNetworkIds=network%3Acctv"
+    },
+    {
+      "view": "topology",
+      "phase": "before",
+      "size": "desktop",
+      "theme": "dark",
+      "file": "topology-before-desktop-dark.png",
+      "crop": "topology-before-desktop-dark-crop.png",
+      "url": "http://127.0.0.1:5173/topology?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "users",
+      "phase": "after",
+      "size": "desktop",
+      "theme": "dark",
+      "file": "users-after-desktop-dark.png",
+      "crop": "users-after-desktop-dark-crop.png",
+      "url": "http://127.0.0.1:5173/admin/users?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "versions",
+      "phase": "after",
+      "size": "desktop",
+      "theme": "dark",
+      "file": "versions-after-desktop-dark.png",
+      "crop": "versions-after-desktop-dark-crop.png",
+      "url": "http://127.0.0.1:5173/admin/datasets/versions?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "imports",
+      "phase": "after",
+      "size": "desktop",
+      "theme": "dark",
+      "file": "imports-after-desktop-dark.png",
+      "crop": "imports-after-desktop-dark-crop.png",
+      "url": "http://127.0.0.1:5173/admin/datasets/import?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "preview",
+      "phase": "after",
+      "size": "desktop",
+      "theme": "dark",
+      "file": "preview-after-desktop-dark.png",
+      "crop": "preview-after-desktop-dark-crop.png",
+      "url": "http://127.0.0.1:5173/admin/datasets/import/baseline-import/preview"
+    },
+    {
+      "view": "map",
+      "phase": "after",
+      "size": "desktop",
+      "theme": "dark",
+      "file": "map-after-desktop-dark.png",
+      "crop": "map-after-desktop-dark-crop.png",
+      "url": "http://127.0.0.1:5173/map?datasetId=dataset-semarang&selectedNetworkIds=network%3Acctv&area=ft-semarang"
+    },
+    {
+      "view": "topology",
+      "phase": "after",
+      "size": "desktop",
+      "theme": "dark",
+      "file": "topology-after-desktop-dark.png",
+      "crop": "topology-after-desktop-dark-crop.png",
+      "url": "http://127.0.0.1:5173/topology?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "topology-account",
+      "phase": "after",
+      "size": "desktop",
+      "theme": "dark",
+      "file": "topology-account-after-desktop-dark.png",
+      "crop": "topology-account-after-desktop-dark-crop.png",
+      "url": "http://127.0.0.1:5173/topology?datasetId=dataset-semarang&area=ft-semarang&selectedAssetId=C-01"
+    },
+    {
+      "view": "login",
+      "phase": "after",
+      "size": "desktop",
+      "theme": "dark",
+      "file": "login-after-desktop-dark.png",
+      "crop": "login-after-desktop-dark-crop.png",
+      "url": "http://127.0.0.1:5173/"
+    },
+    {
+      "view": "login",
+      "phase": "before",
+      "size": "mobile",
+      "theme": "light",
+      "file": "login-before-mobile-light.png",
+      "crop": "login-before-mobile-light-crop.png",
+      "url": "http://127.0.0.1:5173/"
+    },
+    {
+      "view": "map",
+      "phase": "before",
+      "size": "mobile",
+      "theme": "light",
+      "file": "map-before-mobile-light.png",
+      "crop": "map-before-mobile-light-crop.png",
+      "url": "http://127.0.0.1:5173/map?datasetId=dataset-semarang&area=ft-semarang&selectedNetworkIds=network%3Acctv"
+    },
+    {
+      "view": "topology",
+      "phase": "before",
+      "size": "mobile",
+      "theme": "light",
+      "file": "topology-before-mobile-light.png",
+      "crop": "topology-before-mobile-light-crop.png",
+      "url": "http://127.0.0.1:5173/topology?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "users",
+      "phase": "after",
+      "size": "mobile",
+      "theme": "light",
+      "file": "users-after-mobile-light.png",
+      "crop": "users-after-mobile-light-crop.png",
+      "url": "http://127.0.0.1:5173/admin/users?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "versions",
+      "phase": "after",
+      "size": "mobile",
+      "theme": "light",
+      "file": "versions-after-mobile-light.png",
+      "crop": "versions-after-mobile-light-crop.png",
+      "url": "http://127.0.0.1:5173/admin/datasets/versions?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "imports",
+      "phase": "after",
+      "size": "mobile",
+      "theme": "light",
+      "file": "imports-after-mobile-light.png",
+      "crop": "imports-after-mobile-light-crop.png",
+      "url": "http://127.0.0.1:5173/admin/datasets/import?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "preview",
+      "phase": "after",
+      "size": "mobile",
+      "theme": "light",
+      "file": "preview-after-mobile-light.png",
+      "crop": "preview-after-mobile-light-crop.png",
+      "url": "http://127.0.0.1:5173/admin/datasets/import/baseline-import/preview"
+    },
+    {
+      "view": "map",
+      "phase": "after",
+      "size": "mobile",
+      "theme": "light",
+      "file": "map-after-mobile-light.png",
+      "crop": "map-after-mobile-light-crop.png",
+      "url": "http://127.0.0.1:5173/map?datasetId=dataset-semarang&selectedNetworkIds=network%3Acctv&area=ft-semarang"
+    },
+    {
+      "view": "topology",
+      "phase": "after",
+      "size": "mobile",
+      "theme": "light",
+      "file": "topology-after-mobile-light.png",
+      "crop": "topology-after-mobile-light-crop.png",
+      "url": "http://127.0.0.1:5173/topology?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "topology-account",
+      "phase": "after",
+      "size": "mobile",
+      "theme": "light",
+      "file": "topology-account-after-mobile-light.png",
+      "crop": "topology-account-after-mobile-light-crop.png",
+      "url": "http://127.0.0.1:5173/topology?datasetId=dataset-semarang&area=ft-semarang&selectedAssetId=C-01"
+    },
+    {
+      "view": "login",
+      "phase": "after",
+      "size": "mobile",
+      "theme": "light",
+      "file": "login-after-mobile-light.png",
+      "crop": "login-after-mobile-light-crop.png",
+      "url": "http://127.0.0.1:5173/"
+    },
+    {
+      "view": "login",
+      "phase": "before",
+      "size": "mobile",
+      "theme": "dark",
+      "file": "login-before-mobile-dark.png",
+      "crop": "login-before-mobile-dark-crop.png",
+      "url": "http://127.0.0.1:5173/"
+    },
+    {
+      "view": "map",
+      "phase": "before",
+      "size": "mobile",
+      "theme": "dark",
+      "file": "map-before-mobile-dark.png",
+      "crop": "map-before-mobile-dark-crop.png",
+      "url": "http://127.0.0.1:5173/map?datasetId=dataset-semarang&area=ft-semarang&selectedNetworkIds=network%3Acctv"
+    },
+    {
+      "view": "topology",
+      "phase": "before",
+      "size": "mobile",
+      "theme": "dark",
+      "file": "topology-before-mobile-dark.png",
+      "crop": "topology-before-mobile-dark-crop.png",
+      "url": "http://127.0.0.1:5173/topology?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "users",
+      "phase": "after",
+      "size": "mobile",
+      "theme": "dark",
+      "file": "users-after-mobile-dark.png",
+      "crop": "users-after-mobile-dark-crop.png",
+      "url": "http://127.0.0.1:5173/admin/users?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "versions",
+      "phase": "after",
+      "size": "mobile",
+      "theme": "dark",
+      "file": "versions-after-mobile-dark.png",
+      "crop": "versions-after-mobile-dark-crop.png",
+      "url": "http://127.0.0.1:5173/admin/datasets/versions?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "imports",
+      "phase": "after",
+      "size": "mobile",
+      "theme": "dark",
+      "file": "imports-after-mobile-dark.png",
+      "crop": "imports-after-mobile-dark-crop.png",
+      "url": "http://127.0.0.1:5173/admin/datasets/import?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "preview",
+      "phase": "after",
+      "size": "mobile",
+      "theme": "dark",
+      "file": "preview-after-mobile-dark.png",
+      "crop": "preview-after-mobile-dark-crop.png",
+      "url": "http://127.0.0.1:5173/admin/datasets/import/baseline-import/preview"
+    },
+    {
+      "view": "map",
+      "phase": "after",
+      "size": "mobile",
+      "theme": "dark",
+      "file": "map-after-mobile-dark.png",
+      "crop": "map-after-mobile-dark-crop.png",
+      "url": "http://127.0.0.1:5173/map?datasetId=dataset-semarang&selectedNetworkIds=network%3Acctv&area=ft-semarang"
+    },
+    {
+      "view": "topology",
+      "phase": "after",
+      "size": "mobile",
+      "theme": "dark",
+      "file": "topology-after-mobile-dark.png",
+      "crop": "topology-after-mobile-dark-crop.png",
+      "url": "http://127.0.0.1:5173/topology?datasetId=dataset-semarang&area=ft-semarang"
+    },
+    {
+      "view": "topology-account",
+      "phase": "after",
+      "size": "mobile",
+      "theme": "dark",
+      "file": "topology-account-after-mobile-dark.png",
+      "crop": "topology-account-after-mobile-dark-crop.png",
+      "url": "http://127.0.0.1:5173/topology?datasetId=dataset-semarang&area=ft-semarang&selectedAssetId=C-01"
+    },
+    {
+      "view": "login",
+      "phase": "after",
+      "size": "mobile",
+      "theme": "dark",
+      "file": "login-after-mobile-dark.png",
+      "crop": "login-after-mobile-dark-crop.png",
+      "url": "http://127.0.0.1:5173/"
+    }
+  ]
+}

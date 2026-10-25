@@ -2,7 +2,7 @@ import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {JSDOM} from 'jsdom'
 import {saveSession} from '../src/services/account-session.js'
-import {renderDatasetVersionsPage} from '../src/pages/admin/dataset-versions-page.js'
+import {renderDatasetVersionsPage} from '../test-support/legacy/pages/admin/dataset-versions-page.js'
 
 test('database version page saves/restores with focus and failure handling',async()=>{
  const dom=new JSDOM('<html><body><div id="app"></div></body></html>',{url:'http://localhost/admin/datasets/versions',pretendToBeVisual:true})

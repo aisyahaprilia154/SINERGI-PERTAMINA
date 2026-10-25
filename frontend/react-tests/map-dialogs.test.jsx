@@ -54,7 +54,9 @@ function Wrapper({children,role='Administrator'}){return <StrictMode><ThemeProvi
 function TransferHarness({role='Administrator',guard}){const [open,setOpen]=useState(true);return <Wrapper role={role}>{open&&<MapTransferDialog snapshot={snapshot} onClose={()=>setOpen(false)} onGuardChange={guard}/>}</Wrapper>}
 async function transfer(role,guard){const view=render(<TransferHarness role={role} guard={guard}/>);if(role!=='Viewer')await waitFor(()=>expect(screen.getByRole('button',{name:'Unggah dan lihat preview'})).toBeEnabled());return view}
 async function form(name='Draft',filename='tambahan.kmz',contents='KMZ'){
-  await userEvent.clear(screen.getByLabelText('Nama impor'));await userEvent.type(screen.getByLabelText('Nama impor'),name)
+  // These cases exercise validation/payloads; one input change also covers pasting a complete name.
+  // Browser tests retain real keyboard input and focus coverage.
+  fireEvent.change(screen.getByLabelText('Nama impor'),{target:{value:name}})
   const file=new File([contents],filename,{type:'application/octet-stream'});await userEvent.setup({applyAccept:false}).upload(screen.getByLabelText('File KML/KMZ'),file);return file
 }
 const submit=async()=>{fireEvent.submit(document.querySelector('[data-upload]'));await act(async()=>{})}

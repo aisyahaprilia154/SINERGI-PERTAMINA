@@ -10,6 +10,7 @@ export function SessionProvider({ children, presence = true }) {
   const loginFlight = useRef(null)
   const logoutFlight = useRef(null)
   const stopPresence = useRef(null)
+  const signingOut=useRef(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -21,6 +22,8 @@ export function SessionProvider({ children, presence = true }) {
         if (!controller.signal.aborted && error.name !== 'AbortError') setSession({ status: 'anonymous', user: null })
       })
     }
+    const cleared=()=>{if(signingOut.current)return;stopPresence.current?.();setSession({status:'anonymous',user:null})}
+    window.addEventListener('sinergi:session-cleared',cleared)
     const cancelRequests = () => {
       controller.abort()
       loginFlight.current?.controller.abort()
@@ -30,6 +33,7 @@ export function SessionProvider({ children, presence = true }) {
     return () => {
       cancelRequests()
       window.removeEventListener('pagehide', cancelRequests)
+      window.removeEventListener('sinergi:session-cleared',cleared)
     }
   }, [])
 
@@ -58,9 +62,10 @@ export function SessionProvider({ children, presence = true }) {
     loginFlight.current?.controller.abort()
     stopPresence.current?.()
     const controller = new AbortController()
+    signingOut.current=true
     setSession({ status: 'signing-out', user: null })
     const promise = logout({ signal: controller.signal }).then(() => {
-      if (!controller.signal.aborted) documentNavigation.assign('/')
+      if (!controller.signal.aborted) {signingOut.current=false;setSession({status:'anonymous',user:null});documentNavigation.assign('/')}
     }).finally(() => { if (logoutFlight.current?.controller === controller) logoutFlight.current = null })
     logoutFlight.current = { controller, promise }
     return promise

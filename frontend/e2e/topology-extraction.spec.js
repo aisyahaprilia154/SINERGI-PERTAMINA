@@ -39,13 +39,13 @@ test('draft cancel restores the relation; failed save retains draft and repeated
 test('read error retries to empty state and ignores a pending load after pagehide',async({page})=>{
  const {state,errors}=await setup(page);state.failRead=true;await page.goto('/e2e/fixtures/topology-legacy.html');await expect(page.getByText('Pembacaan gagal')).toBeVisible();state.failRead=false;state.payload={...state.payload,assets:[],relations:[],topologyGraph:{nodes:[],edges:[]},topologyRoots:[]}
  await page.getByRole('button',{name:'Coba lagi',exact:true}).click();await expect(page.locator('[data-topology-frame]')).toContainText('Pilih area lain');let release;state.readPending=new Promise(resolve=>release=resolve)
- await page.evaluate(()=>{void import('/src/pages/topology/topology-page.js').then(module=>module.renderTopologyPage(document.querySelector('#app')))})
+ await page.evaluate(()=>{void import('/test-support/legacy/pages/topology/topology-page.js').then(module=>module.renderTopologyPage(document.querySelector('#app')))})
  await expect(page.getByRole('heading',{name:/Memuat/})).toBeVisible();await page.evaluate(()=>window.dispatchEvent(new Event('pagehide')));release();state.readPending=null;await page.waitForTimeout(250);await expect(page.getByRole('heading',{name:/Memuat/})).toBeVisible();expect(errors).toEqual([])
 })
 
 test('remount cleans old handlers and disposal stops debounced search and SVG updates',async({page})=>{
  const {errors}=await setup(page);await open(page)
- await page.evaluate(async()=>{const module=await import('/src/pages/topology/topology-page.js');window.topologyDispose=await module.renderTopologyPage(document.querySelector('#app'))})
+ await page.evaluate(async()=>{const module=await import('/test-support/legacy/pages/topology/topology-page.js');window.topologyDispose=await module.renderTopologyPage(document.querySelector('#app'))})
  const label=page.locator('[data-topology-zoom-label]'),before=parseInt(await label.textContent());await page.getByRole('button',{name:'Perbesar diagram',exact:true}).click();await expect(label).toHaveText(`${Math.min(before+10,135)}%`)
  await page.getByRole('searchbox',{name:'Cari perangkat',exact:true}).fill('not-found');await page.evaluate(()=>window.topologyDispose());const markup=await page.locator('[data-topology-frame]').innerHTML();await page.waitForTimeout(250);expect(await page.locator('[data-topology-frame]').innerHTML()).toBe(markup);expect(errors).toEqual([])
 })

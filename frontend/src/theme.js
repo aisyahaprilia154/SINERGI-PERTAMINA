@@ -1,7 +1,6 @@
 const THEME_STORAGE_KEY = 'sinergi.theme'
 const THEME_VALUES = new Set(['light', 'dark', 'system'])
 
-let themeInteractionsBound = false
 let themeOwners = 0
 let detachSystemTheme = null
 let transitionFrame = null
@@ -43,19 +42,6 @@ function persistThemePreference(preference) {
   }
 }
 
-function updateThemeToggleButtons(theme) {
-  if (typeof document === 'undefined') return
-
-  const dark = theme === 'dark'
-  document.querySelectorAll('[data-theme-toggle]:not([data-react-theme-control])').forEach((button) => {
-    button.setAttribute('aria-pressed', String(dark))
-    button.setAttribute('aria-label', dark ? 'Aktifkan mode terang' : 'Aktifkan mode gelap')
-    button.setAttribute('title', dark ? 'Mode terang' : 'Mode gelap')
-    const icon = button.querySelector('[data-theme-icon]')
-    if (icon) icon.textContent = dark ? 'light_mode' : 'dark_mode'
-  })
-}
-
 export function applyTheme(preference = readThemePreference(), { persist = false } = {}) {
   const safePreference = THEME_VALUES.has(preference) ? preference : 'system'
   const theme = resolvedTheme(safePreference)
@@ -77,7 +63,6 @@ export function applyTheme(preference = readThemePreference(), { persist = false
   }
 
   if (persist) persistThemePreference(safePreference)
-  updateThemeToggleButtons(theme)
   if (typeof window !== 'undefined' && previousTheme && previousTheme !== theme) {
     window.dispatchEvent(new CustomEvent('sinergi:theme-change', { detail: { theme } }))
   }
@@ -111,20 +96,4 @@ export function initializeTheme() {
 export function toggleTheme() {
   const currentTheme = document.documentElement.dataset.theme || applyTheme()
   return applyTheme(currentTheme === 'dark' ? 'light' : 'dark', { persist: true })
-}
-
-export function bindThemeToggle() {
-  if (typeof document === 'undefined') return
-
-  if (!themeInteractionsBound) {
-    document.addEventListener('click', (event) => {
-      const trigger = event.target?.closest?.('[data-theme-toggle]:not([data-react-theme-control])')
-      if (!trigger) return
-      event.preventDefault()
-      toggleTheme()
-    })
-    themeInteractionsBound = true
-  }
-
-  updateThemeToggleButtons(document.documentElement.dataset.theme || applyTheme())
 }

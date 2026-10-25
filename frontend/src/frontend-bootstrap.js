@@ -11,12 +11,10 @@ export async function startFrontend({
   pathname = window.location.pathname,
   container = document.querySelector('#app'),
   routes = reactRoutes,
-  loadLegacy = () => import('./legacy-main.js'),
   loadReact = () => import('./react/bootstrap.jsx'),
 } = {}) {
   if (!await usesReactRoute(pathname, routes)) {
-    await loadLegacy()
-    return { implementation: 'legacy' }
+    throw new Error(`Rute React tidak tersedia: ${pathname}`)
   }
   const { mountReactApp } = await loadReact()
   return { implementation: 'react', ...mountReactApp(container, { routes }) }

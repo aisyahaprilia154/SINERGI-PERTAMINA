@@ -1,0 +1,146 @@
+[
+  {
+    "from": "components/admin-overlay.js",
+    "to": "frontend/test-support/legacy/components/admin-overlay.js"
+  },
+  {
+    "from": "components/admin-shell.js",
+    "to": "frontend/test-support/legacy/components/admin-shell.js"
+  },
+  {
+    "from": "components/app-header.js",
+    "to": "frontend/test-support/legacy/components/app-header.js"
+  },
+  {
+    "from": "components/location-context-panel.js",
+    "to": "frontend/test-support/legacy/components/location-context-panel.js"
+  },
+  {
+    "from": "pages/admin/dataset-dropzone.js",
+    "to": "frontend/test-support/legacy/pages/admin/dataset-dropzone.js"
+  },
+  {
+    "from": "pages/admin/dataset-versions-page.js",
+    "to": "frontend/test-support/legacy/pages/admin/dataset-versions-page.js"
+  },
+  {
+    "from": "pages/admin/dataset-versions-panel.js",
+    "to": "frontend/test-support/legacy/pages/admin/dataset-versions-panel.js"
+  },
+  {
+    "from": "pages/admin/import-dataset-form.js",
+    "to": "frontend/test-support/legacy/pages/admin/import-dataset-form.js"
+  },
+  {
+    "from": "pages/admin/import-dataset-page.js",
+    "to": "frontend/test-support/legacy/pages/admin/import-dataset-page.js"
+  },
+  {
+    "from": "pages/admin/import-dataset-state.js",
+    "to": "frontend/test-support/legacy/pages/admin/import-dataset-state.js"
+  },
+  {
+    "from": "pages/admin/import-progress.js",
+    "to": "frontend/test-support/legacy/pages/admin/import-progress.js"
+  },
+  {
+    "from": "pages/admin/import-status-badge.js",
+    "to": "frontend/test-support/legacy/pages/admin/import-status-badge.js"
+  },
+  {
+    "from": "pages/admin/import-summary.js",
+    "to": "frontend/test-support/legacy/pages/admin/import-summary.js"
+  },
+  {
+    "from": "pages/admin/import-view-utils.js",
+    "to": "frontend/test-support/legacy/pages/admin/import-view-utils.js"
+  },
+  {
+    "from": "pages/admin/preview-asset-drawer.js",
+    "to": "frontend/test-support/legacy/pages/admin/preview-asset-drawer.js"
+  },
+  {
+    "from": "pages/admin/preview-import-page.js",
+    "to": "frontend/test-support/legacy/pages/admin/preview-import-page.js"
+  },
+  {
+    "from": "pages/admin/preview-import-state.js",
+    "to": "frontend/test-support/legacy/pages/admin/preview-import-state.js"
+  },
+  {
+    "from": "pages/admin/preview-map-canvas.js",
+    "to": "frontend/test-support/legacy/pages/admin/preview-map-canvas.js"
+  },
+  {
+    "from": "pages/admin/preview-sidebar.js",
+    "to": "frontend/test-support/legacy/pages/admin/preview-sidebar.js"
+  },
+  {
+    "from": "pages/admin/preview-toolbar.js",
+    "to": "frontend/test-support/legacy/pages/admin/preview-toolbar.js"
+  },
+  {
+    "from": "pages/admin/users-page.js",
+    "to": "frontend/test-support/legacy/pages/admin/users-page.js"
+  },
+  {
+    "from": "pages/login-page.js",
+    "to": "frontend/test-support/legacy/pages/login-page.js"
+  },
+  {
+    "from": "pages/brand-logo.js",
+    "to": "frontend/test-support/legacy/pages/brand-logo.js"
+  },
+  {
+    "from": "pages/topology/topology-page.js",
+    "to": "frontend/test-support/legacy/pages/topology/topology-page.js"
+  },
+  {
+    "from": "pages/map/asset-detail-drawer.js",
+    "to": "frontend/test-support/legacy/pages/map/asset-detail-drawer.js"
+  },
+  {
+    "from": "pages/map/asset-icon-editor.js",
+    "to": "frontend/test-support/legacy/pages/map/asset-icon-editor.js"
+  },
+  {
+    "from": "pages/map/basemap-preload.js",
+    "to": "frontend/test-support/legacy/pages/map/basemap-preload.js"
+  },
+  {
+    "from": "pages/map/diagram-dialog.js",
+    "to": "frontend/test-support/legacy/pages/map/diagram-dialog.js"
+  },
+  {
+    "from": "pages/map/flat-network-map.js",
+    "to": "frontend/test-support/legacy/pages/map/flat-network-map.js"
+  },
+  {
+    "from": "pages/map/map-canvas.js",
+    "to": "frontend/test-support/legacy/pages/map/map-canvas.js"
+  },
+  {
+    "from": "pages/map/map-data-transfer-dialog.js",
+    "to": "frontend/test-support/legacy/pages/map/map-data-transfer-dialog.js"
+  },
+  {
+    "from": "pages/map/map-page.js",
+    "to": "frontend/test-support/legacy/pages/map/map-page.js"
+  },
+  {
+    "from": "pages/map/map-surface.js",
+    "to": "frontend/test-support/legacy/pages/map/map-surface.js"
+  },
+  {
+    "from": "pages/map/network-sidebar-state.js",
+    "to": "frontend/test-support/legacy/pages/map/network-sidebar-state.js"
+  },
+  {
+    "from": "pages/map/network-sidebar.js",
+    "to": "frontend/test-support/legacy/pages/map/network-sidebar.js"
+  },
+  {
+    "from": "theme.js",
+    "to": "frontend/test-support/legacy/theme.js"
+  }
+]

@@ -1,0 +1,121 @@
+{
+  "date": "2026-10-25",
+  "timezone": "Asia/Jakarta",
+  "baseCommit": "e66de30",
+  "branch": "react-migration-baseline",
+  "frontendNode": {
+    "passed": 341,
+    "failed": 0,
+    "log": "legacy-tests.txt"
+  },
+  "react": {
+    "passed": 196,
+    "failed": 0,
+    "files": 14,
+    "log": "react-tests.txt"
+  },
+  "backend": {
+    "passed": 77,
+    "failed": 0,
+    "skipped": 1,
+    "skipReason": "SINERGI_TEST_DATABASE_URL unavailable; no isolated PostgreSQL test database",
+    "log": "backend-tests.txt"
+  },
+  "lint": {
+    "root": "passed",
+    "frontendSyntax": "passed",
+    "jsxAndHooks": "passed",
+    "backend": "passed",
+    "eslintExitCode": 0
+  },
+  "build": {
+    "frontend": "passed",
+    "worker": "passed",
+    "backend": "passed",
+    "dockerFrontend": "passed",
+    "output": [
+      "frontend/dist/client",
+      "frontend/dist/server/index.js"
+    ]
+  },
+  "browser": {
+    "channel": "chromium-headless-shell",
+    "version": "156.0.8078.4",
+    "fullSuite": {
+      "passed": 95,
+      "failed": 0,
+      "log": "playwright-full.txt"
+    },
+    "dockerFinalBundle": {
+      "passed": 15,
+      "failed": 0,
+      "log": "docker-browser.txt"
+    },
+    "smoke": {
+      "passed": 10,
+      "failed": 0,
+      "log": "smoke.txt"
+    },
+    "order": "After final logout guard and topology header stacking fix: JSX/Hooks lint, full browser suite 95, local/Docker builds, Docker SPA tests 15, smoke 10 and visual captures repeated. React 196 passed after logout JavaScript change, before CSS-only stacking fix; Node 341 repeated after CSS scoping change; backend unchanged."
+  },
+  "visual": {
+    "pages": 44,
+    "crops": 44,
+    "viewportThemes": [
+      "desktop-light",
+      "desktop-dark",
+      "mobile-light",
+      "mobile-dark"
+    ],
+    "pagesCovered": [
+      "login",
+      "map",
+      "topology",
+      "users",
+      "versions",
+      "imports",
+      "preview"
+    ],
+    "rgbChannelThreshold": 12,
+    "identicalSvgPairs": 4,
+    "manualReview": "all-pages-contact-sheet.jpg and spa-contact-sheet.jpg plus representative full screenshots inspected",
+    "identicalCropPairs": 12,
+    "identicalPagePairs": 11,
+    "pageDifference": {
+      "view": "map-desktop-light",
+      "changedPixels": 117,
+      "percent": 0.009,
+      "location": "sidebar controls",
+      "inspected": true
+    },
+    "accountMenuOverInspector": "Four viewport/theme screenshots captured and inspected"
+  },
+  "productionAudit": {
+    "reachableSources": 166,
+    "legacyEntrypoints": 0,
+    "retainedFoundationFilesUnchanged": 73,
+    "testOnlyArchiveModules": 36,
+    "artifact": "production-audit.json"
+  },
+  "docker": {
+    "image": "sinergi-react-stage16:local",
+    "probe": "docker-http-results.json",
+    "testContainer": "sinergi-react-stage16-check",
+    "testContainerStopped": true,
+    "operationalComposeRebuilt": false
+  },
+  "writes": "UI writes use API mocks; operational database unchanged",
+  "limitations": [
+    "One PostgreSQL integration test skipped",
+    "No operational-credential login or real-data write test",
+    "Existing large MapLibre chunk build warning remains"
+  ],
+  "preservedUserChanges": [
+    "deleted .env.docker.example",
+    "untracked docs/figures/"
+  ],
+  "push": false,
+  "merge": false,
+  "operationalDeployment": false,
+  "nextStage": null
+}
