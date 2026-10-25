@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import {AppError} from '../errors.js'
+import {validNewPassword} from './password-policy.js'
 
 const scrypt = promisify(scryptCallback)
 const DUMMY_SALT = Buffer.alloc(16).toString('hex')
@@ -52,7 +53,7 @@ export class PostgresAccountStore {
   async manage({actorId,userId=null,body={},resetPassword=false}){
     if(Object.hasOwn(body,'active'))throw new AppError('Status akun tidak lagi didukung.',{code:'unsupported_account_status',statusCode:400})
     const password=body.password
-    if((!userId||resetPassword)&&(typeof password!=='string'||password.length<8||password.length>1024))throw new AppError('Password harus terdiri dari 8–1024 karakter.',{code:'invalid_password',statusCode:400})
+    if((!userId||resetPassword)&&!validNewPassword(password))throw new AppError('Password harus terdiri dari 15–1024 karakter.',{code:'invalid_password',statusCode:400})
     if(!userId&&!/^[a-z0-9._-]{1,64}$/.test(String(body.username ?? '').trim().toLowerCase()))throw new AppError('Username tidak valid.',{code:'invalid_username',statusCode:400})
     if(body.role!==undefined&&!['Administrator','Viewer'].includes(body.role))throw new AppError('Role tidak valid.',{code:'invalid_role',statusCode:400})
     const email=body.email===undefined?undefined:String(body.email ?? '').trim().toLowerCase()||null
@@ -92,8 +93,8 @@ export class PostgresAccountStore {
   async save({ username, password, role, email = null }) {
     const name = String(username ?? '').trim().toLowerCase()
     if (!/^[a-z0-9._-]{1,64}$/.test(name)) throw new TypeError('Username tidak valid.')
-    if (typeof password !== 'string' || !password || password.length > 1024) {
-      throw new TypeError('Kata sandi tidak valid.')
+    if (!validNewPassword(password)) {
+      throw new TypeError('Password baru harus terdiri dari 15–1024 karakter.')
     }
     if (!['Administrator', 'Viewer'].includes(role)) throw new TypeError('Role tidak valid.')
     const salt = randomBytes(16).toString('hex')

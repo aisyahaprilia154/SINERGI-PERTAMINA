@@ -105,6 +105,7 @@ export function createConfig(env=process.env,overrides={}) {
   dataRoot:path.resolve(overrides.dataRoot ?? env.SINERGI_DATA_ROOT ?? '.data'),storageMode:'postgres',
   database:{databaseUrl,poolMax:overrides.database?.poolMax ?? number(env.SINERGI_DATABASE_POOL_MAX,10),ssl:overrides.database?.ssl ?? env.SINERGI_DATABASE_SSL==='true'},
   authTokens:overrides.authTokens ?? json(env.SINERGI_AUTH_TOKENS,{}),
+  trustedProxies:overrides.trustedProxies ?? String(env.SINERGI_TRUSTED_PROXIES ?? '').split(',').map(v=>v.trim()).filter(Boolean),
   upload:{maxFileSize:number(env.SINERGI_MAX_UPLOAD_BYTES,50*MEBIBYTE),maxArchiveEntries:number(env.SINERGI_MAX_ARCHIVE_ENTRIES,1000),
    maxExtractedSize:number(env.SINERGI_MAX_EXTRACTED_BYTES,250*MEBIBYTE),maxCompressionRatio:number(env.SINERGI_MAX_COMPRESSION_RATIO,100),
    maxKmlSize:number(env.SINERGI_MAX_KML_BYTES,50*MEBIBYTE),...overrides.upload},

@@ -1,0 +1,146 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from frontend.Dockerfile
+#1 transferring dockerfile: 1.13kB 0.1s done
+#1 DONE 0.1s
+
+#2 [internal] load metadata for docker.io/library/node:24-bookworm-slim
+#2 DONE 0.2s
+
+#3 [internal] load metadata for docker.io/library/nginx:1.27-alpine
+#3 DONE 2.1s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 588B done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 DONE 0.0s
+
+#6 [build 1/7] FROM docker.io/library/node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205
+#6 resolve docker.io/library/node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 0.0s done
+#6 DONE 0.1s
+
+#7 [stage-1 1/4] FROM docker.io/library/nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+#7 resolve docker.io/library/nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10 0.0s done
+#7 DONE 0.1s
+
+#5 [internal] load build context
+#5 transferring context: 200.47kB 0.1s done
+#5 DONE 0.2s
+
+#7 [stage-1 1/4] FROM docker.io/library/nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+#7 CACHED
+
+#8 [build 2/7] WORKDIR /app
+#8 CACHED
+
+#9 [stage-1 2/4] COPY docker/nginx.conf /etc/nginx/nginx.conf
+#9 DONE 0.1s
+
+#10 [build 3/7] COPY frontend/package.json frontend/package-lock.json ./
+#10 DONE 0.1s
+
+#11 [stage-1 3/4] COPY docker/security-headers.conf /etc/nginx/security-headers.conf
+#11 DONE 0.1s
+
+#12 [build 4/7] RUN npm ci --include=optional
+#12 21.58
+#12 21.58 added 244 packages, and audited 245 packages in 20s
+#12 21.58
+#12 21.58 48 packages are looking for funding
+#12 21.58   run `npm fund` for details
+#12 21.58
+#12 21.58 found 0 vulnerabilities
+#12 21.60 npm notice
+#12 21.60 npm notice New major version of npm available! 11.19.1 -> 12.2.1
+#12 21.60 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+#12 21.60 npm notice To update run: npm install -g npm@12.2.1
+#12 21.60 npm notice
+#12 DONE 22.0s
+
+#13 [build 5/7] COPY frontend/ ./
+#13 DONE 0.7s
+
+#14 [build 6/7] COPY shared/ /shared/
+#14 DONE 0.1s
+
+#15 [build 7/7] RUN npm run build
+#15 0.968
+#15 0.968 > sinergi-main@0.0.0 build
+#15 0.968 > vite build && node scripts/build-worker.mjs
+#15 0.968
+#15 1.896 vite v8.1.6 building client environment for production...
+#15 1.945 [2K
+transforming...✓ 252 modules transformed.
+#15 3.441 rendering chunks...
+#15 4.101 computing gzip size...
+#15 4.182 dist/index.html                                         1.44 kB │ gzip:   0.61 kB
+#15 4.182 dist/assets/inter-latin-wght-normal-Dx4kXJAl.woff2     48.25 kB
+#15 4.182 dist/assets/maplibre-gl-worker-BvEsDmg_.js            507.46 kB
+#15 4.182 dist/assets/Overlay-BakDOvT4.css                        1.86 kB │ gzip:   0.65 kB
+#15 4.182 dist/assets/LoginRoute-Cz_vXEOE.css                     3.68 kB │ gzip:   1.11 kB
+#15 4.182 dist/assets/UsersRoute-8nAtGG49.css                     6.84 kB │ gzip:   1.86 kB
+#15 4.182 dist/assets/admin-route-gvwP9mLC.css                    9.13 kB │ gzip:   2.23 kB
+#15 4.182 dist/assets/bootstrap-iKY8R2gR.css                     12.16 kB │ gzip:   2.86 kB
+#15 4.182 dist/assets/maplibre-map-CKRTiAqP.css                  82.86 kB │ gzip:  10.71 kB
+#15 4.182 dist/assets/MapRoute-CipGP9vu.css                     322.12 kB │ gzip:  47.07 kB
+#15 4.182 dist/assets/TopologyRoute-Cqafs0uK.css                390.91 kB │ gzip:  56.85 kB
+#15 4.182 dist/assets/map-diagrams-DOiIvrz-.js                    0.07 kB │ gzip:   0.08 kB
+#15 4.182 dist/assets/production-D5-g8fo3.js                      0.13 kB │ gzip:   0.12 kB
+#15 4.182 dist/assets/Drawer-D6Oyu0Gl.js                          0.16 kB │ gzip:   0.16 kB
+#15 4.182 dist/assets/abortable-delay-C2rsnMzL.js                 0.23 kB │ gzip:   0.18 kB
+#15 4.182 dist/assets/navigation-guards-BiNElMZk.js               0.33 kB │ gzip:   0.24 kB
+#15 4.182 dist/assets/page-access-Bn0V8XJd.js                     0.47 kB │ gzip:   0.28 kB
+#15 4.182 dist/assets/asset-icon-DDYQ1nNe.js                      0.93 kB │ gzip:   0.48 kB
+#15 4.182 dist/assets/preload-helper-Czpn1I53.js                  1.19 kB │ gzip:   0.67 kB
+#15 4.182 dist/assets/operational-api-mpM7alfj.js                 1.29 kB │ gzip:   0.73 kB
+#15 4.182 dist/assets/account-session-BrBGCjbD.js                 1.72 kB │ gzip:   0.74 kB
+#15 4.182 dist/assets/DataTable-Yl542Hom.js                       1.75 kB │ gzip:   0.84 kB
+#15 4.182 dist/assets/index-CUQEnNrF.js                           1.96 kB │ gzip:   1.00 kB
+#15 4.182 dist/assets/ThemeToggle-B9AkoEi6.js                     2.39 kB │ gzip:   1.08 kB
+#15 4.182 dist/assets/import-dataset-service-BQ8sxr6f.js          2.66 kB │ gzip:   1.18 kB
+#15 4.182 dist/assets/network-colors-CwdDeADo.js                  3.06 kB │ gzip:   1.37 kB
+#15 4.182 dist/assets/routes-CIRCB1B0.js                          3.18 kB │ gzip:   1.12 kB
+#15 4.182 dist/assets/LoginRoute-D-wHiv4W.js                      3.58 kB │ gzip:   1.43 kB
+#15 4.182 dist/assets/Overlay-WEsQge_B.js                         3.66 kB │ gzip:   1.61 kB
+#15 4.182 dist/assets/react-dom-CIc7lA_t.js                       3.85 kB │ gzip:   1.39 kB
+#15 4.182 dist/assets/AppHeader-BQ9-lGUa.js                       4.61 kB │ gzip:   1.83 kB
+#15 4.182 dist/assets/schematic-export-xWirZa_c.js                6.10 kB │ gzip:   2.78 kB
+#15 4.182 dist/assets/RouteProviders-MHWNwHNM.js                  7.40 kB │ gzip:   2.83 kB
+#15 4.182 dist/assets/react-DjGqiD24.js                           8.38 kB │ gzip:   3.22 kB
+#15 4.182 dist/assets/UsersRoute-DmoG-g56.js                      9.61 kB │ gzip:   3.43 kB
+#15 4.182 dist/assets/VersionsRoute-CtXznsQo.js                   9.68 kB │ gzip:   3.53 kB
+#15 4.182 dist/assets/ImportsRoute-dOcTsJEU.js                   10.27 kB │ gzip:   3.86 kB
+#15 4.182 dist/assets/PreviewRoute-C6WufbMu.js                   12.13 kB │ gzip:   4.49 kB
+#15 4.182 dist/assets/production-BxSKFpGC.js                     12.41 kB │ gzip:   5.17 kB
+#15 4.182 dist/assets/map-diagrams-DhQdAsVQ.js                   28.27 kB │ gzip:   8.75 kB
+#15 4.182 dist/assets/active-dataset-map-adapter-DBASio7o.js     41.48 kB │ gzip:  11.80 kB
+#15 4.182 dist/assets/hooks-F10RObWR.js                          62.52 kB │ gzip:  20.13 kB
+#15 4.182 dist/assets/MapRoute-CPTI59Pu.js                      116.09 kB │ gzip:  33.32 kB
+#15 4.182 dist/assets/TopologyRoute-Ci05_gCS.js                 229.39 kB │ gzip:  65.25 kB
+#15 4.182 dist/assets/bootstrap-CexZcKpA.js                     233.72 kB │ gzip:  74.37 kB
+#15 4.182 dist/assets/maplibre-map-5UFWtW6T.js                1,072.22 kB │ gzip: 290.86 kB
+#15 4.182
+#15 4.191 ✓ built in 2.29s
+#15 4.197 [plugin builtin:vite-reporter]
+#15 4.197 (!) Some chunks are larger than 500 kB after minification. Consider:
+#15 4.197 - Using dynamic import() to code-split the application
+#15 4.197 - Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+#15 4.197 - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+#15 DONE 4.8s
+
+#16 [stage-1 4/4] COPY --from=build /app/dist/client/ /usr/share/nginx/html/
+#16 DONE 0.2s
+
+#17 exporting to image
+#17 exporting layers
+#17 exporting layers 0.5s done
+#17 exporting manifest sha256:f8e2a865609eb37745788f440e249ad4c3bcf405fd64523ea124a6f4085dc58e 0.0s done
+#17 exporting config sha256:2ffa454ca64c011f5c2fbd3ca3e6303f7725e96a663aa2aec8f046c0a571d3ff 0.0s done
+#17 exporting attestation manifest sha256:0545661c3aed63629b02a4d482552ffce019f43e60f07ea19e81a962ee46ea7a 0.0s done
+#17 exporting manifest list sha256:38ac5997792939406f11e5c56e893447b02151e68577d91e21341a28fcd9e662 0.0s done
+#17 naming to docker.io/library/sinergi-security-frontend:local 0.0s done
+#17 unpacking to docker.io/library/sinergi-security-frontend:local
+#17 unpacking to docker.io/library/sinergi-security-frontend:local 0.2s done
+#17 DONE 0.9s

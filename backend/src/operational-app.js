@@ -12,14 +12,19 @@ import { buildActiveAssetCatalog,queryActiveAssets } from './domain/active-datas
 import { serializeActiveDatasetKml } from './domain/active-dataset-kml.js'
 import { requireAdministrator,HEARTBEAT_INTERVAL_MS,ONLINE_TIMEOUT_MS } from './security/authorization.js'
 import {DatasetCheckpoints} from './storage/dataset-checkpoints.js'
+import {LoginLimiter,createClientAddressResolver,logSecurity} from './security/login-security.js'
 
-export function createOperationalApp({repository,importService,fileStore,config,authenticator,accountStore}) {
+export function createOperationalApp({repository,importService,fileStore,config,authenticator,accountStore,loginLimiter=new LoginLimiter(),securityLogger=record=>console.info(JSON.stringify(record))}) {
+  const clientAddress=createClientAddressResolver(config.trustedProxies)
   const versions=repository.checkpoints??new DatasetCheckpoints({repository,fileStore})
   const basemap=createOpenFreeMapProxy({directory:path.join(config.dataRoot,'basemap-cache')})
   return http.createServer(async(request,response)=>{
     response.setHeader('x-content-type-options','nosniff');response.setHeader('x-frame-options','DENY')
+    response.setHeader('content-security-policy',"default-src 'none'; frame-ancestors 'none'; base-uri 'none'");response.setHeader('permissions-policy','camera=(), microphone=(), geolocation=()');
     response.setHeader('referrer-policy','same-origin');response.setHeader('cache-control','private, no-store')
     const correlationId=newId('request');response.setHeader('x-correlation-id',correlationId)
+    let actorId,loginRequest=false
+    const security=(event,status)=>logSecurity(securityLogger,event,{requestId:correlationId,actorId,status})
     const send=(status,body)=>{
       const bytes=Buffer.from(JSON.stringify(body));response.statusCode=status;response.setHeader('content-type','application/json; charset=utf-8')
       if(bytes.length>1024&&/\bgzip\b/.test(request.headers['accept-encoding'] ?? '')) {response.setHeader('content-encoding','gzip');response.setHeader('vary','Accept-Encoding');response.end(gzipSync(bytes))}
@@ -32,12 +37,17 @@ export function createOperationalApp({repository,importService,fileStore,config,
       }
       if(request.method==='GET'&&url.pathname.startsWith('/api/basemap/openfreemap/')) return await basemap.handle(url.pathname,response,request)
       if(request.method==='POST'&&url.pathname==='/api/auth/login') {
-        const body=await readJson(request,4096),user=await accountStore.verify(body.identifier,body.password)
-        if(!user) throw new AppError('Username atau kata sandi salah.',{code:'invalid_credentials',statusCode:401})
+        loginRequest=true
+        const body=await readJson(request,4096),finish=loginLimiter.begin(clientAddress(request),body.identifier)
+        let user
+        try{user=await accountStore.verify(body.identifier,body.password)}catch(error){finish();throw error}
+        finish(!!user)
+        if(!user) {security('auth.login_failed',401);throw new AppError('Username atau kata sandi salah.',{code:'invalid_credentials',statusCode:401})}
+        actorId=user.id;security('auth.login_succeeded',200)
         await accountStore.markSeen(user.id)
         return send(200,{...authenticator.issueSession(user),user:publicUser(user)})
       }
-      let user=authenticator.authenticate(request)
+      let user=authenticator.authenticate(request);actorId=user.id
       if(authenticator.isSession(request)){
         try{user=await accountStore.resolveSession(user)}catch(error){if(error.code==='session_revoked')authenticator.revokeUser(user.id);throw error}
         authenticator.updateSessionUser(request,user)
@@ -45,7 +55,7 @@ export function createOperationalApp({repository,importService,fileStore,config,
       }
       if(url.pathname==='/api/auth/me'&&request.method==='GET') return send(200,{user:publicUser(user)})
       if(url.pathname==='/api/auth/heartbeat'&&request.method==='POST')return send(200,{user:publicUser(user),heartbeatIntervalSeconds:HEARTBEAT_INTERVAL_MS/1000,onlineTimeoutSeconds:ONLINE_TIMEOUT_MS/1000})
-      if(url.pathname==='/api/auth/logout'&&request.method==='POST') {authenticator.revoke(request);return send(200,{loggedOut:true})}
+      if(url.pathname==='/api/auth/logout'&&request.method==='POST') {authenticator.revoke(request);security('auth.logout',200);return send(200,{loggedOut:true})}
       const admin=()=>requireAdministrator(request,authenticator)
       if(parts[0]==='api'&&parts[1]==='admin'&&parts[2]==='users'){
         admin()
@@ -170,7 +180,9 @@ export function createOperationalApp({repository,importService,fileStore,config,
       throw new AppError('Endpoint tidak ditemukan.',{code:'not_found',statusCode:404})
     } catch(error) {
       const appError=asAppError(error)
-      if(!appError.expose) console.error(`[${correlationId}] ${error.code ?? error.name}: ${error.message}`)
+      if(appError.statusCode===429){response.setHeader('retry-after',String(appError.retryAfter ?? 60));security('auth.login_throttled',429)}
+      else if([401,403].includes(appError.statusCode)&&!loginRequest)security('auth.access_denied',appError.statusCode)
+      if(!appError.expose)security('request.failed',500)
       if(!response.headersSent) send(appError.statusCode,{error:{code:appError.code,message:appError.expose?appError.message:'Terjadi kesalahan internal.',details:appError.expose?appError.details:undefined}})
       else response.destroy()
     }

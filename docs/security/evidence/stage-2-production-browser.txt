@@ -1,0 +1,79 @@
+
+Running 16 tests using 1 worker
+
+(node:17912) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x   1 [desktop-edge] › e2e\production-security.spec.js:5:1 › production CSP permits map workers, import preview, and SVG/PNG exports while blocking inline scripts (30.3s)
+(node:30476) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  2 [desktop-edge] › e2e\spa-portals.spec.js:5:1 › portal links navigate through the SPA and confirm a dirty import draft only once (4.3s)
+  ok  3 [desktop-edge] › e2e\spa-portals.spec.js:11:1 › explicit map navigation resets URL selection with a guarded draft while view history retains its canvas (4.0s)
+  ok  4 [desktop-edge] › e2e\spa.spec.js:8:1 › SPA keeps one document/session through all main protected pages and browser history (4.0s)
+  ok  5 [desktop-edge] › e2e\spa.spec.js:16:1 › Viewer mobile dark navigation and protected admin redirects remain in the same document (3.6s)
+  ok  6 [desktop-edge] › e2e\spa.spec.js:21:1 › dirty topology protects internal links and browser Back without losing the draft (4.3s)
+  ok  7 [desktop-edge] › e2e\spa.spec.js:28:1 › map selection Back/Forward preserves its canvas and URL state inside the SPA (2.7s)
+  ok  8 [desktop-edge] › e2e\spa.spec.js:33:1 › leaving a pending topology read aborts it and ignores its late result (2.2s)
+  ok  9 [desktop-edge] › e2e\spa.spec.js:37:238 › direct URL and refresh Administrator /peta?datasetId=dataset-semarang&area=ft-semarang (4.0s)
+  ok 10 [desktop-edge] › e2e\spa.spec.js:37:238 › direct URL and refresh Administrator /topologi?datasetId=dataset-semarang&area=ft-semarang (2.2s)
+  ok 11 [desktop-edge] › e2e\spa.spec.js:37:238 › direct URL and refresh Administrator /admin/users (1.7s)
+  ok 12 [desktop-edge] › e2e\spa.spec.js:37:238 › direct URL and refresh Administrator /admin/datasets/import/baseline-import/preview (2.4s)
+  ok 13 [desktop-edge] › e2e\spa.spec.js:37:238 › direct URL and refresh Viewer /peta?datasetId=dataset-semarang&area=ft-semarang (2.3s)
+  ok 14 [desktop-edge] › e2e\spa.spec.js:37:238 › direct URL and refresh Viewer /topologi?datasetId=dataset-semarang&area=ft-semarang (1.7s)
+  ok 15 [desktop-edge] › e2e\spa.spec.js:37:238 › direct URL and refresh Viewer /admin/users (2.3s)
+  ok 16 [desktop-edge] › e2e\spa.spec.js:37:238 › direct URL and refresh Viewer /admin/datasets/import/baseline-import/preview (2.2s)
+
+
+  1) [desktop-edge] › e2e\production-security.spec.js:5:1 › production CSP permits map workers, import preview, and SVG/PNG exports while blocking inline scripts
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.click: Test timeout of 30000ms exceeded.
+    Browser logs:
+
+    <launching> C:\Users\NITRO V 15\AppData\Local\ms-playwright\chromium_headless_shell-1248\chrome-headless-shell-win64\chrome-headless-shell.exe --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,AvoidCorsURLLoaderRestartOnRedirect,Translate,AutoDeElevate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=C:\Users\NITROV~1\AppData\Local\Temp\playwright_chromiumdev_profile-B7IGvc --remote-debugging-pipe --no-startup-window
+    <launched> pid=24248
+    [pid=24248][err] [1025/084531.407:ERROR:gpu\command_buffer\service\gl_utils.cc:431] [.WebGL-0x52a400430800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels
+    [pid=24248][err] [1025/084531.483:INFO:CONSOLE:0] "[.WebGL-0x52a400430800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels", source: http://127.0.0.1:5186/map?datasetId=dataset-semarang&area=ft-semarang&selectedNetworkIds=network%3Acctv (0)
+    [pid=24248][err] [1025/084531.552:ERROR:gpu\command_buffer\service\gl_utils.cc:431] [.WebGL-0x52a400430800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels
+    [pid=24248][err] [1025/084531.683:INFO:CONSOLE:0] "[.WebGL-0x52a400430800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels", source: http://127.0.0.1:5186/map?datasetId=dataset-semarang&area=ft-semarang&selectedNetworkIds=network%3Acctv (0)
+    [pid=24248][err] [1025/084531.748:ERROR:gpu\command_buffer\service\gl_utils.cc:431] [.WebGL-0x52a400430800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels
+    [pid=24248][err] [1025/084531.778:INFO:CONSOLE:0] "[.WebGL-0x52a400430800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels", source: http://127.0.0.1:5186/map?datasetId=dataset-semarang&area=ft-semarang&selectedNetworkIds=network%3Acctv (0)
+    [pid=24248][err] [1025/084531.792:ERROR:gpu\command_buffer\service\gl_utils.cc:431] [.WebGL-0x52a400430800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels (this message will no longer repeat)
+    [pid=24248][err] [1025/084531.824:INFO:CONSOLE:0] "[.WebGL-0x52a400430800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels (this message will no longer repeat)", source: http://127.0.0.1:5186/map?datasetId=dataset-semarang&area=ft-semarang&selectedNetworkIds=network%3Acctv (0)
+    [pid=24248] <gracefully close start>
+    Call log:
+      - waiting for locator('button.diagram-toggle')
+        - locator resolved to <button type="button" aria-label="Diagram Topologi" class="tool-button diagram-toggle map-action-secondary">…</button>
+      - attempting click action
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+        - waiting 20ms
+        2 × waiting for element to be visible, enabled and stable
+          - element is not visible
+        - retrying click action
+          - waiting 100ms
+        52 × waiting for element to be visible, enabled and stable
+           - element is not visible
+         - retrying click action
+           - waiting 500ms
+        - waiting for element to be visible, enabled and stable
+
+        at C:\Users\NITRO V 15\Downloads\SINERGI-PERTAMINA (2)\SINERGI-PERTAMINA\frontend\e2e\production-security.spec.js:16:46)
+        at C:\Users\NITRO V 15\Downloads\SINERGI-PERTAMINA (2)\SINERGI-PERTAMINA\frontend\node_modules\playwright\lib\worker\workerProcessEntry.js:1654:9)
+        at C:\Users\NITRO V 15\Downloads\SINERGI-PERTAMINA (2)\SINERGI-PERTAMINA\frontend\node_modules\playwright\lib\worker\workerProcessEntry.js:1134:11)
+        at C:\Users\NITRO V 15\Downloads\SINERGI-PERTAMINA (2)\SINERGI-PERTAMINA\frontend\node_modules\playwright\lib\worker\workerProcessEntry.js:1652:7)
+
+    Error Context: test-results\production-security-produc-779c0-ile-blocking-inline-scripts-desktop-edge\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\production-security-produc-779c0-ile-blocking-inline-scripts-desktop-edge\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\production-security-produc-779c0-ile-blocking-inline-scripts-desktop-edge\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [desktop-edge] › e2e\production-security.spec.js:5:1 › production CSP permits map workers, import preview, and SVG/PNG exports while blocking inline scripts
+  15 passed (1.3m)

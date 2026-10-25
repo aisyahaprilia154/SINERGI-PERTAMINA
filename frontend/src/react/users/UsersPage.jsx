@@ -57,13 +57,13 @@ function UserEditor({ selected, users, save, onClose, onSaved }) {
     <form data-user-form hidden={!!discard} onSubmit={submit}>
       {mode === 'password' ? <>
         <p>{selected.username}</p>
-        <label>Password baru<input ref={field} type="password" name="password" autoComplete="new-password" minLength={8} maxLength={1024} required value={draft.password} onChange={change} disabled={saving} /></label>
+        <label>Password baru<input ref={field} type="password" name="password" autoComplete="new-password" minLength={15} maxLength={1024} required value={draft.password} onChange={change} disabled={saving} /></label>
         <small>Sesi pengguna akan diakhiri setelah password diubah.</small>
       </> : <>
         <label>Username<input ref={selected ? undefined : field} name="username" readOnly={!!selected} pattern="[a-zA-Z0-9._-]{1,64}" maxLength={64} required value={draft.username} onChange={change} disabled={saving} /></label>
         <label>Email (opsional)<input ref={selected ? field : undefined} name="email" type="email" maxLength={254} value={draft.email} onChange={change} disabled={saving} /></label>
         <label>Peran<select name="role" disabled={lastAdmin || saving} value={lastAdmin ? selected.role : draft.role} onChange={change}><option>Viewer</option><option>Administrator</option></select></label>
-        {!selected && <label>Password awal<input name="password" type="password" autoComplete="new-password" minLength={8} maxLength={1024} required value={draft.password} onChange={change} disabled={saving} /></label>}
+        {!selected && <label>Password awal<input name="password" type="password" autoComplete="new-password" minLength={15} maxLength={1024} required value={draft.password} onChange={change} disabled={saving} /></label>}
         {lastAdmin && <small>Administrator terakhir harus tetap tersedia.</small>}
         {selected && <button type="button" className="au-button" data-reset-password disabled={saving} onClick={() => request(reset)}>Reset password</button>}
       </>}

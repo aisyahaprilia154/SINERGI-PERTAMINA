@@ -2,7 +2,7 @@
 
 Acuan: 01_Security_Checklist_Aplikasi_External_Hosting.xlsx, sheet Security Checklist, 45 poin. File sumber tidak diubah.
 
-Status tahap 1: baseline/pemetaan. **Terverifikasi lokal** bukan persetujuan produksi, sertifikasi, atau hasil penetration test. Bukti historis tidak otomatis berlaku untuk runtime sekarang.
+Status tahap 2: pengamanan aplikasi. **Terverifikasi lokal** bukan persetujuan produksi, sertifikasi, atau hasil penetration test. Bukti historis tidak otomatis berlaku untuk runtime sekarang.
 
 | No | Kategori | Checklist | Status | Bukti / kondisi | Tindakan berikutnya |
 |---|---|---|---|---|---|
@@ -27,16 +27,16 @@ Status tahap 1: baseline/pemetaan. **Terverifikasi lokal** bukan persetujuan pro
 | 19 | Application Security | Source Code Repository aman | sebagian | .env dan backup diabaikan Git; CI contents:read. | Verifikasi repository private, MFA pengelola, proteksi branch dan secret scanning di GitHub. |
 | 20 | Identity & Access | Single Sign-On (SSO) terintegrasi dengan AD/Azure AD | belum | Belum ada bukti yang diverifikasi dalam workspace. | Memerlukan data, pelaksanaan atau persetujuan owner/IT/hosting sesuai runbook. |
 | 21 | Identity & Access | Multi-Factor Authentication (MFA) diterapkan | belum | Belum ada bukti yang diverifikasi dalam workspace. | Memerlukan data, pelaksanaan atau persetujuan owner/IT/hosting sesuai runbook. |
-| 22 | Identity & Access | Role Based Access Control (RBAC) diterapkan | sebagian | Administrator/Viewer diperiksa backend. | Uji negatif API dan pencabutan sesi pada database uji. |
+| 22 | Identity & Access | Role Based Access Control (RBAC) diterapkan | terverifikasi lokal | RBAC backend dan 401/403 diuji HTTP; role Administrator/Viewer diuji browser produksi. | Ulangi integrasi dengan database uji pada tahap 3; hak akses produksi tetap memerlukan review owner. |
 | 23 | Identity & Access | Tidak menggunakan shared account | sebagian | Akun individual didukung; belum ada bukti pemakaian per orang. | Owner memastikan akun tidak dibagi. |
 | 24 | Identity & Access | Privileged Account dipisahkan | sebagian | Role Administrator dan Viewer terpisah; runtime DB masih memakai owner. | Pisahkan role runtime/migrasi dan akun harian/admin. |
 | 25 | Infrastructure & Cloud | Lokasi data center diketahui dan disetujui | belum | Belum ada bukti yang diverifikasi dalam workspace. | Memerlukan data, pelaksanaan atau persetujuan owner/IT/hosting sesuai runbook. |
 | 26 | Infrastructure & Cloud | Cloud Provider memiliki sertifikasi ISO 27001/SOC 2 | belum | Belum ada bukti yang diverifikasi dalam workspace. | Memerlukan data, pelaksanaan atau persetujuan owner/IT/hosting sesuai runbook. |
 | 27 | Infrastructure & Cloud | Firewall/WAF digunakan | belum | Belum ada bukti yang diverifikasi dalam workspace. | Memerlukan data, pelaksanaan atau persetujuan owner/IT/hosting sesuai runbook. |
 | 28 | Infrastructure & Cloud | Network Segmentation diterapkan | sebagian | Port database/backend hanya bind localhost pada Compose lokal. | Konfigurasi produksi tanpa publikasi port dan jaringan terpisah. |
-| 29 | Infrastructure & Cloud | Security Hardening telah dilakukan | sebagian | Backend berjalan sebagai node non-root; validasi input dan upload ada. | Lengkapi throttle, header/CSP dan privilege DB. |
+| 29 | Infrastructure & Cloud | Security Hardening telah dilakukan | sebagian | Non-root backend, validasi upload, pembatas login, proxy trust, header/CSP dan password baru 15 karakter; lihat STAGE-2.md. | Pisahkan privilege DB dan buktikan konfigurasi produksi pada tahap 3. |
 | 30 | Infrastructure & Cloud | Endpoint Protection tersedia | belum | Belum ada bukti yang diverifikasi dalam workspace. | Memerlukan data, pelaksanaan atau persetujuan owner/IT/hosting sesuai runbook. |
-| 31 | Monitoring | Audit Log aktif | sebagian | Audit perubahan disimpan append-only dalam PostgreSQL. | Tambahkan log autentikasi tersanitasi dan bukti pengujian. |
+| 31 | Monitoring | Audit Log aktif | sebagian | Audit perubahan append-only tersedia; log autentikasi JSON tersanitasi dan pemeriksaan sink lulus. | Buktikan audit pada PostgreSQL terpisah dan tetapkan retensi/pengiriman log. |
 | 32 | Monitoring | Log dikirim ke SIEM/SOC | belum | Belum ada bukti yang diverifikasi dalam workspace. | Memerlukan data, pelaksanaan atau persetujuan owner/IT/hosting sesuai runbook. |
 | 33 | Monitoring | Alert keamanan tersedia | belum | Belum ada bukti yang diverifikasi dalam workspace. | Memerlukan data, pelaksanaan atau persetujuan owner/IT/hosting sesuai runbook. |
 | 34 | Monitoring | Incident Response Procedure tersedia | sebagian | Runbook historis tersedia tetapi menyebut metrics runtime lama. | Tulis runbook sesuai runtime operasional aktif. |

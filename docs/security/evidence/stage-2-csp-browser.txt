@@ -1,0 +1,8 @@
+
+Running 1 test using 1 worker
+
+(node:21532) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 1 [desktop-edge] › e2e\production-security.spec.js:5:1 › production CSP permits map workers, import preview, and SVG/PNG exports while blocking inline scripts (7.1s)
+
+  1 passed (10.6s)
