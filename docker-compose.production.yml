@@ -1,0 +1,95 @@
+name: sinergi-production
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sinergi}
+      POSTGRES_USER: ${POSTGRES_USER:-sinergi_owner}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a dedicated migration-owner secret}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [database]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -h 127.0.0.1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    logging: *logging
+
+  migrate:
+    image: ${SINERGI_BACKEND_IMAGE:-sinergi-backend:local}
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    environment:
+      SINERGI_DATABASE_URL: "postgresql://${POSTGRES_USER:-sinergi_owner}:${POSTGRES_PASSWORD:?Owner secret required}@db:5432/${POSTGRES_DB:-sinergi}"
+      SINERGI_RUNTIME_DB_PASSWORD: ${SINERGI_RUNTIME_DB_PASSWORD:?Set a separate 64-character random hex secret}
+    command: [sh, -c, 'node scripts/operational-bootstrap.mjs && node scripts/provision-runtime-role.mjs']
+    networks: [database]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    logging: *logging
+
+  backend:
+    image: ${SINERGI_BACKEND_IMAGE:-sinergi-backend:local}
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    environment:
+      NODE_ENV: production
+      SINERGI_HOST: 0.0.0.0
+      SINERGI_PORT: 5000
+      SINERGI_DATA_ROOT: /app/.data
+      SINERGI_DATABASE_URL: "postgresql://sinergi_runtime:${SINERGI_RUNTIME_DB_PASSWORD:?Runtime secret required}@db:5432/${POSTGRES_DB:-sinergi}"
+      SINERGI_TRUSTED_PROXIES: ${SINERGI_PROXY_SUBNET:-172.30.221.0/24}
+    volumes:
+      - app-data:/app/.data
+    networks: [edge, database]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging: *logging
+
+  frontend:
+    image: ${SINERGI_FRONTEND_IMAGE:-sinergi-frontend:local}
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    ports:
+      - "${SINERGI_HTTP_BIND_ADDRESS:-127.0.0.1}:${SINERGI_HTTP_PORT:-80}:8080"
+      - "${SINERGI_HTTP_BIND_ADDRESS:-127.0.0.1}:${SINERGI_HTTPS_PORT:-443}:8443"
+    volumes:
+      - ./docker/nginx.production.conf:/etc/nginx/nginx.conf:ro
+      - ${SINERGI_TLS_DIR:?Set directory containing fullchain.pem and privkey.pem}:/etc/nginx/tls:ro
+    networks: [edge]
+    depends_on:
+      backend:
+        condition: service_healthy
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging: *logging
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: ${SINERGI_PROXY_SUBNET:-172.30.221.0/24}
+  database:
+    internal: true
+
+volumes:
+  postgres-data:
+  app-data:

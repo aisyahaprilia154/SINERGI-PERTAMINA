@@ -43,3 +43,7 @@ __pycache__/
 *.sw?
 frontend/playwright-report/
 frontend/test-results/
+
+# Private TLS material
+*.pem
+*.key

@@ -63,3 +63,9 @@ Kode renderer/binder vanilla dipindahkan ke `frontend/test-support/legacy/` untu
 Build tetap menghasilkan `frontend/dist/client` dan worker `frontend/dist/server/index.js`, tanpa SSR. Nginx mempertahankan proxy `/api` dan fallback `index.html` untuk URL langsung. Menjalankan `docker build -f docker/frontend.Dockerfile -t sinergi-frontend:local .` dari root hanya membangun image; penggantian container operasional tetap langkah terpisah.
 
 Checklist dan bukti migrasi tersedia di [docs/react-migration/CHECKLIST.md](docs/react-migration/CHECKLIST.md). Semua pengujian operasi tulis UI memakai API mock; tes integrasi database memerlukan `SINERGI_TEST_DATABASE_URL` yang terpisah dari database operasional.
+
+## Keamanan dan persiapan hosting
+
+[Matriks 45 poin](docs/security/CHECKLIST.md) membedakan bukti lokal dari persetujuan/operasional produksi. [Runbook keamanan](docs/security/RUNBOOK.md) memuat akun, proxy/CSP, backup/restore, patch, insiden dan serah terima data. File `docker-compose.production.yml` merupakan konfigurasi deployment terpisah, dengan TLS dan role database runtime terbatas; belum diterapkan ke layanan operasional.
+
+Ulangi pengujian stack sintetis dengan `npm --prefix backend run test:security:stack` (Docker dan OpenSSL diperlukan). Runner memakai proyek/volume/database baru dan membersihkan resource pengujiannya. Jangan menggunakan sertifikat/secret uji sebagai kredensial produksi.

@@ -43,9 +43,11 @@ export function createOperationalApp({repository,importService,fileStore,config,
         try{user=await accountStore.verify(body.identifier,body.password)}catch(error){finish();throw error}
         finish(!!user)
         if(!user) {security('auth.login_failed',401);throw new AppError('Username atau kata sandi salah.',{code:'invalid_credentials',statusCode:401})}
-        actorId=user.id;security('auth.login_succeeded',200)
+        actorId=user.id
         await accountStore.markSeen(user.id)
-        return send(200,{...authenticator.issueSession(user),user:publicUser(user)})
+        const session=authenticator.issueSession(user)
+        security('auth.login_succeeded',200)
+        return send(200,{...session,user:publicUser(user)})
       }
       let user=authenticator.authenticate(request);actorId=user.id
       if(authenticator.isSession(request)){

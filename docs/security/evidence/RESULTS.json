@@ -1,0 +1,52 @@
+{
+  "date": "2026-10-25",
+  "timezone": "Asia/Jakarta",
+  "branch": "react-migration-baseline",
+  "stage1": "f8da358",
+  "stage2": "6ade93c",
+  "checklist": {
+    "total": 45,
+    "verifiedLocal": 7,
+    "partial": 14,
+    "pending": 24
+  },
+  "frontend": {
+    "nodePassed": 341,
+    "reactPassed": 196,
+    "browserPassed": 95,
+    "browserProductionOnlySkippedInVite": 1,
+    "productionSpaPassed": 15,
+    "productionCspPassed": 1
+  },
+  "backendFinal": {
+    "passed": 98,
+    "skipped": 0,
+    "httpSecurityPassed": 7
+  },
+  "stackChecksPassed": 9,
+  "restore": {
+    "tables": 13,
+    "sourceFiles": 1,
+    "checksumsVerified": true,
+    "loginAndSourceDownload": true
+  },
+  "dependencies": {
+    "rootHighCritical": 0,
+    "backendHighCritical": 0,
+    "frontendHighCritical": 0,
+    "evidence": "final-dependency-audit.json"
+  },
+  "operationalDatabaseTouched": false,
+  "operationalContainersRebuilt": false,
+  "testResourcesRemoved": true,
+  "push": false,
+  "deployment": false,
+  "originalWorkbookModified": false,
+  "limitations": [
+    "Local evidence does not constitute production approval/compliance",
+    "SSO/MFA/pentest/SIEM/alerts deferred",
+    "Disk and backup encryption require hosting evidence",
+    "Business retention/RTO/RPO/owners awaiting approval",
+    "Session token remains JavaScript-readable; limiter is single-process"
+  ]
+}

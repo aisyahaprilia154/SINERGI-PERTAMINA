@@ -14,6 +14,7 @@
     "db:operational": "node scripts/migrate-operational.mjs",
     "db:backup-operational": "node scripts/backup-operational.mjs",
     "test:operational": "node scripts/run-operational-tests.mjs",
+    "test:security:stack": "node scripts/verify-security-stack.mjs",
     "db:verify-operational": "node scripts/verify-operational-baseline.mjs",
     "db:retire-legacy": "node scripts/retire-legacy-schema.mjs"
   },

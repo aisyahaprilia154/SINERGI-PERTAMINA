@@ -78,10 +78,10 @@ test('account CLI rejects a short password from stdin before connecting', () => 
 })
 
 test('HTTP throttling, generic errors, old-password login, headers, revocation and sanitized security logs', async () => {
-  let now = 100_000
+  let now = 100_000, failPresence = false
   const logs = [], user = { id: 'known-user', name: 'admin', role: 'Administrator' }
   const auth = new TokenAuthenticator({}, { now: () => now })
-  const accounts = { async verify(identifier, password) { return identifier === 'admin' && password === 'old' ? user : null }, async markSeen() {}, async resolveSession(value) { return value } }
+  const accounts = { async verify(identifier, password) { return identifier === 'admin' && password === 'old' ? user : null }, async markSeen() { if(failPresence)throw new Error('private database failure payload') }, async resolveSession(value) { return value } }
   const repository = { checkpoints: {}, pool: { async query() { return { rows: [] } } } }
   const server = createOperationalApp({ repository, importService: {}, fileStore: {}, config: createConfig({}, { dataRoot: path.join(os.tmpdir(), 'sinergi-security-http') }), authenticator: auth, accountStore: accounts, loginLimiter: new LoginLimiter({ now: () => now }), securityLogger: record => logs.push(record) })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -110,9 +110,14 @@ test('HTTP throttling, generic errors, old-password login, headers, revocation a
     const fresh = await (await login('admin', 'old')).json()
     now += 8 * 60 * 60 * 1000
     assert.equal((await fetch(url + '/api/auth/me', { headers: { authorization: `Bearer ${fresh.token}` } })).status, 401)
+    failPresence=true
+    const successes=logs.filter(record=>record.event==='auth.login_succeeded').length
+    assert.equal((await login('admin','old')).status,500)
+    assert.equal(logs.filter(record=>record.event==='auth.login_succeeded').length,successes)
+    failPresence=false
     for (const event of ['auth.login_failed', 'auth.login_throttled', 'auth.login_succeeded', 'auth.logout', 'auth.access_denied']) assert.ok(logs.some(record => record.event === event), event)
     const serialized = JSON.stringify(logs)
-    for (const secret of ['secret-identifier', 'secret-password', session.token, fresh.token, '1.2.3.']) assert.equal(serialized.includes(secret), false)
+    for (const secret of ['secret-identifier', 'secret-password', 'private database failure payload', session.token, fresh.token, '1.2.3.']) assert.equal(serialized.includes(secret), false)
     for (const record of logs) assert.deepEqual(Object.keys(record).sort(), ['actorId', 'event', 'requestId', 'status', 'timestamp'].filter(key => key !== 'actorId' || record.actorId).sort())
   } finally { await new Promise(resolve => server.close(resolve)) }
 })

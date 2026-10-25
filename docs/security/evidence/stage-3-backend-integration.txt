@@ -1,0 +1,127 @@
+✔ resource cache retries failures, expires entries, bounds disk storage and repairs corruption (115.7118ms)
+✔ memory pressure never evicts a shared download that is still in flight (3.1019ms)
+✔ canonical identity map keeps stable IDs canonical and exposes onboarding and legacy aliases (6.6185ms)
+✔ legacy records migrate folder/name IDs to onboarding canonical IDs without losing aliases (1.2753ms)
+✔ duplicate stable IDs invalidate the identity map instead of silently resolving an alias (1.765ms)
+✔ automatic identity assigns deterministic internal IDs only to unique onboarding objects (3.6566ms)
+✔ automatic identity backfills a stable source key from an existing source feature mapping (1.3892ms)
+✔ operational migration declares the indexed entity contract and reversible drops (10.5544ms)
+✔ migration runner applies and rolls back in one transaction (7.3054ms)
+✔ migration runner rolls back when SQL or metadata write fails (1.9122ms)
+✔ migration loader reads both directions from the repository (3.0224ms)
+✔ legacy LF/CRLF checksums accept identical SQL without replaying or rewriting migration history (2.6688ms)
+✔ line-ending compatibility still rejects changes to SQL content or an explicit checksum (0.8912ms)
+✔ active pointer migration adds one publication boundary per dataset branch (2.6695ms)
+✔ PostgreSQL primary runtime migration adds durable queue state columns (1.6806ms)
+✔ Fase 1 migration adds publication profile, identity registry, and diff projection (1.9936ms)
+✔ checkpoint serialization is deterministic and compression validates content and scope (16.9392ms)
+✔ parses GroundOverlay, gx:LatLonQuad, and LabelStyle as supported evidence (16.2403ms)
+✔ StyleMap resolution is traceable and circular references become issues (1.9974ms)
+✔ canonical evidence is deterministic, versioned, and topology bundle only contains eligible objects (31.8079ms)
+✔ specific rack evidence overrides a generic JUNCTION BOX folder and JB power pairs are distribution (6.22ms)
+✔ WP and EXP are not Extended markers without structural or explicit profile evidence (7.5627ms)
+✔ RS, CR, and SVR-OFFICE are Rack Server aliases (4.6339ms)
+✔ canonical coverage is fail-closed when parser structure and preserved features diverge (3.2311ms)
+✔ adding a new asset preserves every old feature and increments coverage exactly once (7.4047ms)
+✔ new point types keep source categories and enter review without invented relations (4.2536ms)
+✔ stored topology rebuild refreshes stale known classifications from source evidence (4.7088ms)
+✔ stored topology rebuild preserves manual relation evidence without a source feature (2.9516ms)
+✔ overlay resources resolve relative to selected KML, deduplicate by checksum, and never fetch URLs (4.4014ms)
+✔ merges every KML document and resolves a local NetworkLink inside the package (16.4749ms)
+✔ does not treat an external NetworkLink as a merged local document (1.0439ms)
+✔ parses KML folders, ExtendedData, and geometry without changing coordinate order (25.4102ms)
+✔ records NetworkLink without fetching it (3.6422ms)
+✔ parses gx:Track and recursive MultiGeometry without changing coordinate order (2.2808ms)
+✔ blocks unsupported feature-level overlays instead of silently omitting them (0.8525ms)
+✔ preserves features inside nested Document containers without double counting (2.0793ms)
+✔ rejects DTD and entity declarations before XML parsing (1.4152ms)
+✔ records longitude, latitude, short line, and invalid polygon issues without repairing values (2.0992ms)
+✔ configurable aliases match semantic folder names without treating short aliases as substrings (1.8594ms)
+✔ extracts KML and safe image resources while ignoring executable content (47.8027ms)
+✔ reads one allowlisted overlay resource directly from the verified KMZ bytes (15.9873ms)
+✔ rejects zip slip entries before writing outside the workspace (9.0341ms)
+✔ rejects encrypted, oversized, over-count, and corrupt archives (40.7975ms)
+✔ five failures, independent clients, recovery, normalization and successful reset (5.3194ms)
+✔ IP limits survive changing usernames and parallel attempts cannot bypass pair limits (2.0957ms)
+✔ bounded storage fails closed and expired entries are automatically released (0.5663ms)
+✔ forwarded addresses require explicit trust; invalid chains fail back to the peer (8.4569ms)
+✔ all create/reset entrypoints reject short passwords before touching the database (1.8758ms)
+✔ account CLI rejects a short password from stdin before connecting (225.3909ms)
+✔ HTTP throttling, generic errors, old-password login, headers, revocation and sanitized security logs (142.552ms)
+✔ new generic device connects to a JB existing only in the baseline (5.1335ms)
+✔ source aliases preserve corrected and deleted existing assets (0.6418ms)
+✔ facility folder aliases match the same inventory without changing the source folder (0.7078ms)
+✔ duplicates and multiple identity matches require explicit resolution (1.5322ms)
+✔ an unchanged source fingerprint distinguishes existing repeated names (0.6055ms)
+✔ ambiguous line endpoints are never selected by nearest distance (0.5117ms)
+✔ admin deleted connections are not resurrected by another import (0.398ms)
+✔ explicit endpoint metadata resolves colocated devices without guessing (0.5611ms)
+✔ intermediate JB vertex splits a path into operational connections (0.7314ms)
+✔ a new generic endpoint is mounted only when the source explicitly says so (1.046ms)
+✔ an unknown category under a Server folder remains an endpoint (1.3249ms)
+✔ a new endpoint can complete a line already present in the baseline (0.7931ms)
+{"timestamp":"2026-10-25T06:22:53.592Z","event":"auth.login_succeeded","requestId":"request-dc4d073a-7e63-455a-a8ea-94bfc0cabd0e","status":200,"actorId":"4098fafe-b2ce-43aa-9ef2-4c4a90549982"}
+{"timestamp":"2026-10-25T06:22:53.728Z","event":"auth.login_failed","requestId":"request-4d143367-473f-4c33-9d82-610c49bf0045","status":401}
+▶ operational PostgreSQL workflow and atomic edits
+  ✔ database accounts authenticate and expose only their role (351.9013ms)
+{"timestamp":"2026-10-25T06:22:53.822Z","event":"auth.access_denied","requestId":"request-7201b861-144e-4a93-b320-7ea97fbd6d9c","status":403,"actorId":"test-viewer"}
+{"timestamp":"2026-10-25T06:22:53.891Z","event":"auth.login_succeeded","requestId":"request-8f1125c4-8d9b-4d30-8eaa-63a04f1bf927","status":200,"actorId":"0ed30193-5a02-4594-abd7-360e7e204f40"}
+{"timestamp":"2026-10-25T06:22:53.949Z","event":"auth.login_succeeded","requestId":"request-6d6d9054-80a5-4671-a346-6b4bd79efa2f","status":200,"actorId":"0ed30193-5a02-4594-abd7-360e7e204f40"}
+{"timestamp":"2026-10-25T06:22:53.968Z","event":"auth.logout","requestId":"request-f2c5d03d-46c3-4884-a23e-a5fea892f5b4","status":200,"actorId":"0ed30193-5a02-4594-abd7-360e7e204f40"}
+{"timestamp":"2026-10-25T06:22:54.002Z","event":"auth.logout","requestId":"request-1f766e4d-3ce5-4795-9c99-1d2232e6cf56","status":200,"actorId":"0ed30193-5a02-4594-abd7-360e7e204f40"}
+{"timestamp":"2026-10-25T06:22:54.066Z","event":"auth.login_succeeded","requestId":"request-795e40f7-5688-4380-8e7f-8fb948d36af3","status":200,"actorId":"0ed30193-5a02-4594-abd7-360e7e204f40"}
+{"timestamp":"2026-10-25T06:22:54.179Z","event":"auth.login_succeeded","requestId":"request-56a1d2f2-6e42-4b1c-a21c-958d1353d120","status":200,"actorId":"0ed30193-5a02-4594-abd7-360e7e204f40"}
+{"timestamp":"2026-10-25T06:22:54.255Z","event":"auth.access_denied","requestId":"request-031aec72-9f3f-4553-a6c6-1cbca813225b","status":401}
+{"timestamp":"2026-10-25T06:22:54.316Z","event":"auth.login_failed","requestId":"request-2ade8e6b-a8b8-49ac-8d4b-613ece189c47","status":401}
+{"timestamp":"2026-10-25T06:22:54.387Z","event":"auth.login_succeeded","requestId":"request-21e108af-6e32-48f6-b3fe-87f7c4513017","status":200,"actorId":"0ed30193-5a02-4594-abd7-360e7e204f40"}
+{"timestamp":"2026-10-25T06:22:54.405Z","event":"auth.access_denied","requestId":"request-cced5fcd-1b5f-47d6-ae74-5d69738ea7d5","status":401}
+{"timestamp":"2026-10-25T06:22:54.478Z","event":"auth.login_succeeded","requestId":"request-0ddb430d-0091-4402-9c86-db968d170719","status":200,"actorId":"0ed30193-5a02-4594-abd7-360e7e204f40"}
+{"timestamp":"2026-10-25T06:22:54.594Z","event":"auth.logout","requestId":"request-94a73dab-2d5e-4614-aab8-297107c9338d","status":200,"actorId":"0ed30193-5a02-4594-abd7-360e7e204f40"}
+  ✔ real account presence, multiple sessions, timeout and administrative changes (863.4189ms)
+  ✔ upload creates preview; generic fridge connects to baseline JB (370.9231ms)
+  ✔ apply writes one cumulative operational dataset (218.691ms)
+{"timestamp":"2026-10-25T06:22:55.210Z","event":"auth.access_denied","requestId":"request-272ba2c2-339b-4e21-8ca6-1f58c3ae27fd","status":403,"actorId":"test-viewer"}
+  ✔ Viewer can read all facilities and cannot write (24.7176ms)
+  ✔ stale edit cannot change data (30.1336ms)
+  ✔ delete persists as tombstone and revisions agree across views (126.2264ms)
+  ✔ same KMZ/KML recognizes old assets and preserves tombstones (265.4034ms)
+  ✔ failure in audit rolls back icon and revision (75.1382ms)
+  ✔ restart recovers an expired import job; an edited baseline makes its preview stale (291.443ms)
+  ✔ Printer keeps its category name and endpoint hierarchy (188.6494ms)
+  ✔ manual connection and mounting share map/diagram revision without moving geography (125.8645ms)
+{"timestamp":"2026-10-25T06:22:56.500Z","event":"auth.access_denied","requestId":"request-b16c9561-6b8a-46ad-a6de-a5f5ea46e90c","status":403,"actorId":"test-viewer"}
+{"timestamp":"2026-10-25T06:22:56.502Z","event":"auth.access_denied","requestId":"request-1ac55e81-b875-4f31-865f-fa16315645af","status":403,"actorId":"test-viewer"}
+{"timestamp":"2026-10-25T06:22:56.506Z","event":"auth.access_denied","requestId":"request-aa299c2b-3e15-49b4-8fed-b70de4c2913a","status":403,"actorId":"test-viewer"}
+  ✔ versions restore A → B → C exactly while revision, accounts and audit keep moving (2585.175ms)
+✔ operational PostgreSQL workflow and atomic edits (5646.4305ms)
+[import-worker] job: job_lease_lost
+✔ a lost lease cannot mark the replacement worker import failed (3.1801ms)
+✔ a recovered expired job carries its new owner into processing (0.546ms)
+✔ Point fixture preserves longitude-latitude-altitude order and sanitizes description (21.8367ms)
+✔ LineString fixture preserves coordinate sequence and validates minimum length (6.2542ms)
+✔ Polygon fixture closes rings deterministically and records each normalization (3.2958ms)
+✔ MultiGeometry fixture keeps child geometry identity and coordinates separate (4.7514ms)
+✔ nested Folder fixture preserves hierarchy, maps known names, and warns for unmapped names (3.1791ms)
+✔ folder category mapping can be overridden without dropping unmatched folders (4.1804ms)
+✔ ExtendedData preserves original source metadata (4.3062ms)
+✔ server authorization permits Administrator and forbids a regular user (2.7604ms)
+✔ sanitizes user filenames and never returns path components (0.5979ms)
+✔ validates branch IDs against server configuration (0.4881ms)
+✔ rejects zip slip, absolute paths, and drive paths (0.6177ms)
+✔ orders KMZ candidates deterministically with root doc.kml first (27.7006ms)
+✔ validates extension, MIME type, size, and file signature together (22.9008ms)
+✔ bare Server remains a root even inside a Junction Box folder (2.4711ms)
+✔ JB family parser supports decorated parent and child labels (2.4887ms)
+✔ online expires without a heartbeat and returns on authenticated activity (2.5572ms)
+✔ logout clears one session; another live session still keeps the user online (0.5422ms)
+✔ a backend restart shows no online user until a new valid session exists (0.2565ms)
+✔ the last administrator cannot be downgraded (0.3137ms)
+✔ removed account status is rejected before writing or opening a transaction (0.7992ms)
+ℹ tests 98
+ℹ suites 0
+ℹ pass 98
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10174.2185

@@ -1,0 +1,15 @@
+✔ five failures, independent clients, recovery, normalization and successful reset (6.4928ms)
+✔ IP limits survive changing usernames and parallel attempts cannot bypass pair limits (3.1802ms)
+✔ bounded storage fails closed and expired entries are automatically released (1.2938ms)
+✔ forwarded addresses require explicit trust; invalid chains fail back to the peer (10.5004ms)
+✔ all create/reset entrypoints reject short passwords before touching the database (1.9618ms)
+✔ account CLI rejects a short password from stdin before connecting (259.4454ms)
+✔ HTTP throttling, generic errors, old-password login, headers, revocation and sanitized security logs (148.0092ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 905.4614
