@@ -28,7 +28,7 @@ try {
   const accountClient=await pool.connect()
   try{await runMigration(accountClient,accounts)}finally{accountClient.release()}
   const count=(await pool.query("SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema='sinergi' AND table_type='BASE TABLE'")).rows[0].n
-  if(count!==13)throw new Error('Operational schema must have exactly 13 application tables.')
+  if(![13,15].includes(count))throw new Error('Operational schema must have 13 or 15 application tables.')
   const repository=new OperationalRepository(pool),versions=new DatasetCheckpoints({repository,fileStore:new ImportFileStore(config.dataRoot)})
   for(const {id} of (await pool.query('SELECT id FROM sinergi.dataset_state ORDER BY id')).rows) {
     await repository.transaction(async client=>{
