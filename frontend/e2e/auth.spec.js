@@ -20,7 +20,8 @@ async function installApi(page, { role = 'Administrator', authenticated = false 
       return route.fulfill({ status: state.authenticated ? 200 : 401, json: state.authenticated ? { user } : { error: { message: 'Sesi berakhir' } } })
     }
     let data
-    if (pathname === '/api/admin/users') data = { users: [fixtures.user, fixtures.viewer], serverTime: '2026-10-23T00:00:00Z' }
+    if (pathname === '/api/admin/access-requests') data = {requests:[],pendingCount:0}
+    else if (pathname === '/api/admin/users') data = { users: [fixtures.user, fixtures.viewer], serverTime: '2026-10-23T00:00:00Z' }
     else if (pathname === '/api/import-config') data = { datasets: [{ id: 'dataset-semarang', name: 'SINERGI' }], maxFileSize: 60 * 1024 * 1024 }
     else if (pathname === '/api/imports') data = { imports: [fixtures.imported] }
     else if (pathname.endsWith('/preview')) data = fixtures.preview

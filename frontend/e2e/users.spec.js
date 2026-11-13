@@ -13,6 +13,7 @@ async function setup(page) {
     const request = route.request(), path = new URL(request.url()).pathname
     state.calls.push({ path, method: request.method(), body: request.postDataJSON(), token: request.headers().authorization })
     if (path === '/api/auth/me' || path === '/api/auth/heartbeat') return route.fulfill({ json: { user: fixtures.user } })
+    if (path === '/api/admin/access-requests') return route.fulfill({json:{requests:[],pendingCount:0}})
     if (path === '/api/admin/users' && request.method() === 'GET') return route.fulfill({ status: state.listFailure || 200, json: state.listFailure ? { error: { message: 'Koneksi daftar gagal' } } : { users: state.users, serverTime: '2026-10-23T00:00:00Z' } })
     if (path.startsWith('/api/admin/users')) {
       if (state.gate) await state.gate

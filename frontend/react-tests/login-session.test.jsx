@@ -12,6 +12,8 @@ import { documentNavigation } from '../src/services/document-navigation.js'
 import { pageRedirect } from '../src/domain/page-access.js'
 
 const admin = { id: 'a', username: 'admin', role: 'Administrator' }
+// Google and help flows have their own integration tests; keep password/session assertions isolated.
+vi.mock('../src/react/components/GoogleSignIn.jsx',()=>({GoogleSignIn:()=>null}))
 const viewer = { id: 'v', username: 'viewer', role: 'Viewer' }
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
 beforeEach(() => {

@@ -6,6 +6,7 @@ import { Drawer } from '../components/Drawer.jsx'
 import { Icon } from '../components/Icon.jsx'
 import { useSession } from '../session/session-context.js'
 import { useUsers } from './useUsers.js'
+import {AccessRequestsPanel} from './AccessRequestsPanel.jsx'
 
 function lastSeenLabel(value, serverTime) {
   if (!value) return 'Belum pernah masuk'
@@ -77,6 +78,7 @@ export function UsersPage() {
   const { user } = useSession()
   const { users, serverTime, lastLoaded, unconfirmed, loading, error, refresh, save } = useUsers(user?.id)
   const [query, setQuery] = useState(''), [role, setRole] = useState(''), [editor, setEditor] = useState(null), [notice, setNotice] = useState('')
+  const [tab,setTab]=useState('users'),[pending,setPending]=useState(0)
   const filtered = users.filter(item => (!role || item.role === role) && `${item.username} ${item.email ?? ''}`.toLocaleLowerCase('id').includes(query.toLocaleLowerCase('id')))
   const columns = [
     { key: 'username', header: 'Pengguna', render: item => <><strong>{item.username}</strong>{item.email && <small>{item.email}</small>}</> },
@@ -87,10 +89,14 @@ export function UsersPage() {
   return <AdminLayout active="users" title="Kelola pengguna — SINERGI">
     <section className="au-main">
       <div className="au-heading"><div><h1>Kelola pengguna</h1></div><button type="button" className="au-button au-primary" data-new-user onClick={() => setEditor({ selected: null })}><Icon>add</Icon>Tambah pengguna</button></div>
+      <div className="access-tabs" aria-label="Bagian kelola pengguna"><button type="button" aria-pressed={tab==='users'} onClick={()=>setTab('users')}>Pengguna</button><button type="button" aria-pressed={tab==='requests'} onClick={()=>setTab('requests')}>Permintaan akses &amp; bantuan{pending>0&&<span className="request-count">{pending}</span>}</button></div>
+      <div hidden={tab!=='users'}>
       <div className="au-toolbar"><label className="au-search"><Icon>search</Icon><input data-search placeholder="Cari username atau email" aria-label="Cari pengguna" value={query} onChange={event => setQuery(event.target.value)} /></label><select data-role aria-label="Filter peran" value={role} onChange={event => setRole(event.target.value)}><option value="">Semua peran</option><option>Administrator</option><option>Viewer</option></select><button className="au-button" type="button" data-refresh disabled={loading} onClick={() => void refresh()}>Muat ulang</button></div>
       <p data-error className="au-error" role="alert" hidden={!error}>{error}</p><p data-notice className="au-notice" role="status" hidden={!notice}>{notice}</p>
       <DataTable columns={columns} rows={filtered} loading={loading} loadingMessage="Memuat pengguna…" emptyMessage="Tidak ada pengguna yang sesuai." ariaLabel="Pengguna" className="au-table-wrap" />
       <div className="au-table-footer"><span data-count>{loading && !lastLoaded ? '' : `${filtered.length} pengguna`}</span><span data-updated>{lastLoaded ? `Diperbarui ${new Date(lastLoaded).toLocaleTimeString('id-ID')}` : ''}</span></div>
+      </div>
+      <AccessRequestsPanel hidden={tab!=='requests'} onCount={setPending} onChanged={refresh}/>
     </section>
     {editor && <UserEditor selected={editor.selected} users={users} save={save} onClose={() => setEditor(null)} onSaved={mode => { setEditor(null); setNotice(mode === 'password' ? 'Password diubah dan sesi pengguna diakhiri.' : 'Data pengguna tersimpan.') }} />}
   </AdminLayout>

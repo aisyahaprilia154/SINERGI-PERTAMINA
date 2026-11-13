@@ -4,7 +4,7 @@ SINERGI memakai satu dataset kumulatif untuk seluruh fasilitas. Administrator me
 
 ## Skema untuk DBeaver
 
-Buka **Databases → sinergi → Schemas → sinergi → Tables**. Skema aplikasi memiliki 13 tabel:
+Buka **Databases → sinergi → Schemas → sinergi → Tables**. Skema aplikasi memiliki 15 tabel:
 
 | Tabel | Fungsi |
 | --- | --- |
@@ -18,11 +18,13 @@ Buka **Databases → sinergi → Schemas → sinergi → Tables**. Skema aplikas
 | `imports` | File asli, checksum, pengunggah, status, ringkasan, metadata arsip |
 | `import_items` | Tambahan/konflik, keputusan admin, hasil penerapan |
 | `jobs` | Progres, pemilik pemrosesan, batas retry, pemulihan job |
-| `app_users` | Akun Administrator/Viewer dengan hash kata sandi |
+| `app_users` | Akun Administrator/Viewer; password lokal opsional untuk akun Google |
+| `auth_identities` | Hubungan identitas Google dengan satu akun SINERGI |
+| `access_requests` | Pengajuan akses, bantuan reset, dan keputusan admin |
 | `audit_events` | Riwayat tindakan penting; tidak dapat ditulis ulang |
 | `dataset_checkpoints` | Maksimal 10 versi operasional terkompresi per dataset untuk pemulihan |
 
-`public.schema_migrations` dan tabel bawaan PostGIS berada di luar 13 tabel aplikasi. Tabel versi/graph/interface/component/approval lama telah dihentikan. Checkpoint hanya dibaca saat menyimpan/memulihkan versi; bukan arsip graph untuk pembacaan peta. Migrasi SQL lama tetap menjadi riwayat perubahan skema.
+`public.schema_migrations` dan tabel bawaan PostGIS berada di luar 15 tabel aplikasi. Tabel versi/graph/interface/component/approval lama telah dihentikan. Checkpoint hanya dibaca saat menyimpan/memulihkan versi; bukan arsip graph untuk pembacaan peta. Migrasi SQL lama tetap menjadi riwayat perubahan skema.
 
 Untuk demonstrasi, tunjukkan fasilitas dan kategori, lalu hubungan `assets → source_objects` dan `relations`. Setelah impor diterapkan di web, tunjukkan tambahan baris serta perubahan revision/audit. Gunakan DBeaver untuk memeriksa data; edit melalui web agar revision, validasi, dan audit berjalan bersama.
 

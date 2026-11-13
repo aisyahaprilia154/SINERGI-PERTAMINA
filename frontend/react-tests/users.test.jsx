@@ -9,6 +9,8 @@ import { ThemeProvider } from '../src/react/theme/ThemeProvider.jsx'
 import { documentNavigation } from '../src/services/document-navigation.js'
 
 const admin = { id: 'a', username: 'admin', role: 'Administrator', online: true, updatedAt: 'v1' }
+// Request polling/review is covered separately from the existing user editor lifecycle.
+vi.mock('../src/react/users/AccessRequestsPanel.jsx',()=>({AccessRequestsPanel:()=>null}))
 const viewer = { id: 'v', username: 'viewer', email: 'viewer@example.test', role: 'Viewer', online: false, updatedAt: 'v2' }
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
 let state

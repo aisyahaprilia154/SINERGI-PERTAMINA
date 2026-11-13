@@ -13,9 +13,13 @@ import { serializeActiveDatasetKml } from './domain/active-dataset-kml.js'
 import { requireAdministrator,HEARTBEAT_INTERVAL_MS,ONLINE_TIMEOUT_MS } from './security/authorization.js'
 import {DatasetCheckpoints} from './storage/dataset-checkpoints.js'
 import {LoginLimiter,createClientAddressResolver,logSecurity} from './security/login-security.js'
+import {AccessRequests,RequestLimiter} from './security/access-requests.js'
+import {GoogleIdentity} from './security/google-identity.js'
 
 export function createOperationalApp({repository,importService,fileStore,config,authenticator,accountStore,loginLimiter=new LoginLimiter(),securityLogger=record=>console.info(JSON.stringify(record))}) {
   const clientAddress=createClientAddressResolver(config.trustedProxies)
+  const accessRequests=new AccessRequests(repository.pool),requestLimiter=new RequestLimiter()
+  const google=new GoogleIdentity({pool:repository.pool,clientId:config.googleClientId,origins:config.authOrigins??[]})
   const versions=repository.checkpoints??new DatasetCheckpoints({repository,fileStore})
   const basemap=createOpenFreeMapProxy({directory:path.join(config.dataRoot,'basemap-cache')})
   return http.createServer(async(request,response)=>{
@@ -36,6 +40,25 @@ export function createOperationalApp({repository,importService,fileStore,config,
         await repository.pool.query('SELECT 1 FROM sinergi.dataset_state LIMIT 1');return send(200,{status:'ok',schema:2})
       }
       if(request.method==='GET'&&url.pathname.startsWith('/api/basemap/openfreemap/')) return await basemap.handle(url.pathname,response,request)
+      if(request.method==='GET'&&url.pathname==='/api/auth/options')return send(200,{googleEnabled:!!config.googleClientId})
+      if(request.method==='GET'&&url.pathname==='/api/auth/google/challenge'){
+        requestLimiter.check(`google:${clientAddress(request)}`);return send(200,google.challenge(request,response))
+      }
+      if(request.method==='POST'&&url.pathname==='/api/auth/requests'){
+        google.assertOrigin(request);requestLimiter.check(`requests:${clientAddress(request)}`)
+        const body=await readJson(request,8192),profile=body.applicationToken?google.application(request,body.applicationToken):null
+        if(profile&&body.kind!=='access')throw new AppError('Jenis pengajuan Google tidak valid.',{code:'invalid_request',statusCode:400})
+        const result=await accessRequests.submit(body,profile)
+        if(body.applicationToken)google.applications.delete(body.applicationToken)
+        return send(202,result)
+      }
+      if(request.method==='POST'&&url.pathname==='/api/auth/google/login'){
+        requestLimiter.check(`google-login:${clientAddress(request)}`)
+        const result=await google.login(request,await readJson(request,16384))
+        if(!result.user)return send(200,result)
+        await accountStore.markSeen(result.user.id)
+        return send(200,{...authenticator.issueSession(result.user),user:publicUser(result.user)})
+      }
       if(request.method==='POST'&&url.pathname==='/api/auth/login') {
         loginRequest=true
         const body=await readJson(request,4096),finish=loginLimiter.begin(clientAddress(request),body.identifier)
@@ -59,6 +82,19 @@ export function createOperationalApp({repository,importService,fileStore,config,
       if(url.pathname==='/api/auth/heartbeat'&&request.method==='POST')return send(200,{user:publicUser(user),heartbeatIntervalSeconds:HEARTBEAT_INTERVAL_MS/1000,onlineTimeoutSeconds:ONLINE_TIMEOUT_MS/1000})
       if(url.pathname==='/api/auth/logout'&&request.method==='POST') {authenticator.revoke(request);security('auth.logout',200);return send(200,{loggedOut:true})}
       const admin=()=>requireAdministrator(request,authenticator)
+      if(request.method==='POST'&&url.pathname==='/api/auth/google/link'){
+        requestLimiter.check(`link:${user.id}`)
+        return send(200,await google.link(request,await readJson(request,16384),user,accountStore))
+      }
+      if(parts[0]==='api'&&parts[1]==='admin'&&parts[2]==='access-requests'){
+        admin()
+        if(request.method==='GET'&&parts.length===3)return send(200,await accessRequests.list())
+        if(request.method==='POST'&&parts.length===5&&parts[4]==='review'){
+          const result=await accessRequests.review(parts[3],await readJson(request,8192),user.id)
+          if(result.sessionsRevoked)authenticator.revokeUser(result.userId)
+          return send(200,result)
+        }
+      }
       if(parts[0]==='api'&&parts[1]==='admin'&&parts[2]==='users'){
         admin()
         if(request.method==='GET'&&!parts[3])return send(200,{users:(await accountStore.list()).map(a=>({...a,online:authenticator.isOnline(a.id)})),serverTime:new Date().toISOString(),onlineTimeoutSeconds:ONLINE_TIMEOUT_MS/1000})
@@ -196,7 +232,7 @@ async function readJson(request,limit=256*1024) {
   for await(const chunk of request){size+=chunk.length;if(size>limit) throw new AppError('Request terlalu besar.',{code:'request_too_large',statusCode:413});chunks.push(chunk)}
   try{const body=JSON.parse(Buffer.concat(chunks).toString());if(!body||Array.isArray(body)||typeof body!=='object')throw new Error();return body}catch{throw new AppError('JSON tidak valid.',{code:'invalid_json',statusCode:400})}
 }
-function publicUser(user){return {id:user.id,name:user.name,username:user.username,role:user.role,email:user.email}}
+function publicUser(user){return {id:user.id,name:user.name,username:user.username,role:user.role,email:user.email,hasGoogle:!!user.hasGoogle,hasPassword:user.hasPassword??true}}
 function buildCatalog(view) {
   return buildActiveAssetCatalog({record:view,topologyGraph:view.topologyGraph}).map(item=>({...item,siteId:item.rawAsset.facilityId,
     categoryId:item.rawAsset.categoryId,facilityId:item.rawAsset.facilityId,diagramRole:item.rawAsset.diagramRole}))

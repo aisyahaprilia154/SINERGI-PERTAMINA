@@ -130,7 +130,7 @@ async function main() {
   const refuseExisting=spawnSync(process.execPath,backupArgs,{cwd:root,encoding:'utf8',env:{...process.env,SINERGI_DOCKER_BIN:docker}})
   assert.equal(refuseExisting.status,1);assert.match(refuseExisting.stderr,/Database restore sudah ada/)
   check('Backup refuses to overwrite an existing restore database')
-  assert.equal(backup.proof.length,13);assert.ok(backup.sourceFiles.length>0);assert.equal(backup.consistentBackendStopped,true)
+  assert.equal(backup.proof.length,15);assert.ok(backup.sourceFiles.length>0);assert.equal(backup.consistentBackendStopped,true)
   const restoredData=path.join(work,'restored-source');await cp(path.join(backup.backupDirectory,'source-storage'),restoredData,{recursive:true})
   for(const file of backup.sourceFiles){assert.ok(!file.path.includes('..'));const bytes=await readFile(path.join(restoredData,file.path));assert.equal(bytes.length,file.size);assert.equal(createHash('sha256').update(bytes).digest('hex'),file.sha256)}
   overrides.services.restored={image:'sinergi-security-backend:local',environment:{NODE_ENV:'production',SINERGI_HOST:'0.0.0.0',SINERGI_PORT:'5000',SINERGI_DATA_ROOT:'/app/.data',SINERGI_DATABASE_URL:`postgresql://sinergi_runtime:${runtimePassword}@db:5432/sinergi_security_restore`},volumes:[`${restoredData.replaceAll('\\','/')}:/app/.data`],networks:['edge','database'],ports:['127.0.0.1:0:5000']}
@@ -142,8 +142,8 @@ async function main() {
   const source=await fetch(restoredUrl+`/api/imports/${importId}/source-file`,{headers:{authorization:`Bearer ${restoredToken}`}})
   assert.equal(source.status,200);assert.equal(await source.text(),kml)
   assert.equal((await fetch(restoredUrl+'/api/datasets/security-dataset/active',{headers:{authorization:`Bearer ${restoredToken}`}})).status,200)
-  summary.restore={tables:13,sourceFiles:backup.sourceFiles.length,checksumsVerified:true,loginAndSourceDownload:true}
-  check('Restore reproduces all 13 table digests, every file hash, working login, active dataset and original KML')
+  summary.restore={tables:15,sourceFiles:backup.sourceFiles.length,checksumsVerified:true,loginAndSourceDownload:true}
+  check('Restore reproduces all 15 table digests, every file hash, working login, active dataset and original KML')
 }
 
 try { await main() } catch(error) { console.error(`Security verification failed: ${error.message.replaceAll(ownerPassword,'[redacted]').replaceAll(runtimePassword,'[redacted]').replaceAll(accountPassword,'[redacted]').replaceAll(legacyPassword,'[redacted]')}`);process.exitCode=1 }

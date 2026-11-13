@@ -18,7 +18,8 @@ export class PostgresAccountStore {
       return null
     }
     const result = await this.pool.query(
-      `SELECT id, username, email, password_hash, role,auth_version
+      `SELECT id, username, email, password_hash, role,auth_version,display_name,
+       EXISTS(SELECT 1 FROM sinergi.auth_identities i WHERE i.user_id=app_users.id) AS has_google
        FROM sinergi.app_users
        WHERE (username = $1 OR lower(email) = $1)
        LIMIT 1`,
@@ -29,26 +30,28 @@ export class PostgresAccountStore {
     const expected = digest && /^[a-f0-9]{128}$/.test(digest)
       ? Buffer.from(digest, 'hex') : Buffer.alloc(64)
     const derived = await scrypt(password, salt || DUMMY_SALT, 64)
-    if (!account || !timingSafeEqual(derived, expected)) return null
+    if (!account?.password_hash || !timingSafeEqual(derived, expected)) return null
     return {
       id: account.id,
-      name: account.username,
+      name: account.display_name || account.username,
       username: account.username,
       email: account.email,
       role: account.role,
       authVersion:Number(account.auth_version),
+      hasGoogle:!!account.has_google,
+      hasPassword:true,
     }
   }
 
   async resolveSession(user){
-    const row=(await this.pool.query('SELECT id,username,email,role,auth_version FROM sinergi.app_users WHERE id=$1',[user.id])).rows[0]
+    const row=(await this.pool.query('SELECT u.*,EXISTS(SELECT 1 FROM sinergi.auth_identities i WHERE i.user_id=u.id) AS has_google FROM sinergi.app_users u WHERE id=$1',[user.id])).rows[0]
     if(!row||Number(row.auth_version)!==user.authVersion)throw new AppError('Sesi sudah berakhir. Masuk kembali.',{code:'session_revoked',statusCode:401})
-    return {id:row.id,username:row.username,name:row.username,email:row.email,role:row.role,authVersion:Number(row.auth_version)}
+    return {id:row.id,username:row.username,name:row.display_name||row.username,email:row.email,role:row.role,authVersion:Number(row.auth_version),hasGoogle:row.has_google,hasPassword:!!row.password_hash}
   }
 
   async markSeen(userId){await this.pool.query('UPDATE sinergi.app_users SET last_seen_at=now() WHERE id=$1',[userId])}
 
-  async list(){return (await this.pool.query('SELECT id,username,email,role,created_at,updated_at,last_seen_at FROM sinergi.app_users ORDER BY username')).rows.map(publicAccount)}
+  async list(){return (await this.pool.query('SELECT u.*,EXISTS(SELECT 1 FROM sinergi.auth_identities i WHERE i.user_id=u.id) AS has_google FROM sinergi.app_users u ORDER BY username')).rows.map(publicAccount)}
 
   async manage({actorId,userId=null,body={},resetPassword=false}){
     if(Object.hasOwn(body,'active'))throw new AppError('Status akun tidak lagi didukung.',{code:'unsupported_account_status',statusCode:400})
@@ -109,7 +112,7 @@ export class PostgresAccountStore {
 }
 
 async function hashPassword(password){const salt=randomBytes(16).toString('hex');return `scrypt$${salt}$${(await scrypt(password,salt,64)).toString('hex')}`}
-function publicAccount(row){return {id:row.id,username:row.username,email:row.email,role:row.role,createdAt:row.created_at,updatedAt:row.updated_at,lastSeenAt:row.last_seen_at}}
+function publicAccount(row){return {id:row.id,username:row.username,email:row.email,role:row.role,createdAt:row.created_at,updatedAt:row.updated_at,lastSeenAt:row.last_seen_at,fullName:row.display_name,unit:row.unit_name,hasPassword:!!row.password_hash,hasGoogle:!!row.has_google}}
 export function protectLastAdministrator(before,next,count){
   if(before.role==='Administrator'&&next.role!=='Administrator'&&count<=1)throw new AppError('Administrator terakhir harus tetap tersedia.',{code:'last_administrator',statusCode:409})
 }

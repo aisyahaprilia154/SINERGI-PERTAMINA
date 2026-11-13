@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getSessionToken, login, logout, restoreSession } from '../../services/account-session.js'
+import { getSessionToken, login, logout, restoreSession,loadCurrentUser,saveSession } from '../../services/account-session.js'
 import { startSessionPresence } from '../../services/session-presence.js'
 import { documentNavigation } from '../../services/document-navigation.js'
 import { SessionContext } from './session-context.js'
@@ -71,5 +71,15 @@ export function SessionProvider({ children, presence = true }) {
     return promise
   }, [])
 
-  return <SessionContext value={{ ...session, signIn, signOut }}>{children}</SessionContext>
+  const refreshUser=useCallback(async()=>{
+    const signal=checkController.current?.signal
+    if(!signal||signal.aborted)return
+    const user=await loadCurrentUser({signal})
+    if(!signal.aborted)setSession(previous=>({...previous,user}))
+  },[])
+  const completeSignIn=useCallback(result=>{
+    saveSession(result)
+    setSession({status:'authenticated',user:result.user,entry:'login'})
+  },[])
+  return <SessionContext value={{ ...session, signIn, signOut,refreshUser,completeSignIn }}>{children}</SessionContext>
 }

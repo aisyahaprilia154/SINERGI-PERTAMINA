@@ -14,7 +14,7 @@ const config=createConfig(process.env,{dataRoot:process.env.SINERGI_DATA_ROOT ??
 if(!config.database.databaseUrl) throw new Error('SINERGI_DATABASE_URL required for the operational database.')
 const pool=await createPostgresPool({connectionString:config.database.databaseUrl,max:config.database.poolMax,ssl:config.database.ssl})
 const count=(await pool.query("SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema='sinergi' AND table_type='BASE TABLE'")).rows[0].n
-if(![13,15].includes(count)) {await closePostgresPool(pool);throw new Error('Operational schema is not migrated; run db:migrate first.')}
+if(count!==15) {await closePostgresPool(pool);throw new Error('Operational schema is not migrated; run db:migrate first.')}
 await pool.query('SELECT auth_version,last_seen_at FROM sinergi.app_users LIMIT 0')
 const repository=new OperationalRepository(pool),fileStore=new ImportFileStore(config.dataRoot)
 await fileStore.initialize()

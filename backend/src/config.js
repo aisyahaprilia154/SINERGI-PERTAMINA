@@ -101,7 +101,7 @@ export function createConfig(env=process.env,overrides={}) {
  const json=(value,fallback)=>value?JSON.parse(value):fallback
  const number=(value,fallback)=>{const n=Number(value);return Number.isFinite(n)&&n>0?n:fallback}
  const databaseUrl=overrides.database?.databaseUrl ?? env.SINERGI_DATABASE_URL ?? null
- return {host:overrides.host ?? env.SINERGI_HOST ?? '127.0.0.1',port:overrides.port ?? number(env.SINERGI_PORT,5000),
+ return {googleClientId:env.SINERGI_GOOGLE_CLIENT_ID ?? '',authOrigins:(env.SINERGI_PUBLIC_ORIGINS ?? (env.NODE_ENV==='production'?'':'http://127.0.0.1:5173,http://localhost:5173')).split(',').map(v=>v.trim()).filter(Boolean),host:overrides.host ?? env.SINERGI_HOST ?? '127.0.0.1',port:overrides.port ?? number(env.SINERGI_PORT,5000),
   dataRoot:path.resolve(overrides.dataRoot ?? env.SINERGI_DATA_ROOT ?? '.data'),storageMode:'postgres',
   database:{databaseUrl,poolMax:overrides.database?.poolMax ?? number(env.SINERGI_DATABASE_POOL_MAX,10),ssl:overrides.database?.ssl ?? env.SINERGI_DATABASE_SSL==='true'},
   authTokens:overrides.authTokens ?? json(env.SINERGI_AUTH_TOKENS,{}),

@@ -47,6 +47,8 @@ services:
       dockerfile: docker/backend.Dockerfile
     environment:
       NODE_ENV: production
+      SINERGI_GOOGLE_CLIENT_ID: ${SINERGI_GOOGLE_CLIENT_ID:-}
+      SINERGI_PUBLIC_ORIGINS: ${SINERGI_PUBLIC_ORIGINS:?Set the public HTTPS origin for authentication}
       SINERGI_HOST: 0.0.0.0
       SINERGI_PORT: 5000
       SINERGI_DATA_ROOT: /app/.data
