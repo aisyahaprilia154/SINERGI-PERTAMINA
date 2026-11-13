@@ -55,6 +55,19 @@ async function select(id='C-01',admin=true){await userEvent.click(within(screen.
 async function addPicker(){await userEvent.click(drawer().getByRole('button',{name:'Tambah atau ganti relasi'}));return drawer().getByRole('searchbox',{name:'Cari aset untuk menambah relasi'})}
 async function remove(){await userEvent.click(drawer().getByRole('button',{name:'Hapus relasi dengan SW-01'}))}
 describe('React asset detail and editing',()=>{
+  it.each(['Administrator','Viewer'])('opens the current topology page from asset details for %s with dataset, facility and asset context',async role=>{
+    await mount(role);await select('C-01',role==='Administrator')
+    const area=screen.getByLabelText('Area fasilitas').value
+    await userEvent.click(drawer().getByRole('button',{name:'Diagram topologi'}))
+    expect(documentNavigation.assign).toHaveBeenCalledOnce()
+    const target=new URL(documentNavigation.assign.mock.calls[0][0],window.location.origin)
+    expect(target.pathname).toBe('/topology')
+    expect(target.searchParams.get('datasetId')).toBe('dataset-semarang')
+    expect(target.searchParams.get('area')).toBe(area)
+    expect(target.searchParams.get('selectedAssetId')).toBe('C-01')
+    expect(document.querySelector('.schematic-dialog')).toBeNull()
+    expect(writes()).toEqual([])
+  })
   it('reads operational revision detail and keeps Viewer read-only, connected navigation and map focus',async()=>{
     await mount('Viewer');await select('C-01',false)
     expect(drawer().getByRole('heading',{name:'Relasi aset'})).toBeVisible()

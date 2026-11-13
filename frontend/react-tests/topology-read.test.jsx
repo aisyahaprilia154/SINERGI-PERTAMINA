@@ -93,7 +93,16 @@ describe('React topology editing',()=>{
   state.failSave=false;state.writePending=deferred();await userEvent.dblClick(screen.getByRole('button',{name:'Simpan perubahan'}));expect(writes()).toHaveLength(2);expect(screen.getByRole('button',{name:'Batal',exact:true})).toBeDisabled();await act(async()=>state.writePending.resolve());await waitFor(()=>expect(document.querySelector('[data-draft-bar]')).not.toBeVisible());expect(screen.queryByRole('button',{name:'Hapus relasi dengan SW-01'})).not.toBeInTheDocument()
  })
  it('keeps relation search controlled, stages a new relation and restores it on cancel',async()=>{
-  await ready();select();await userEvent.type(screen.getByPlaceholderText('Cari aset untuk dihubungkan…'),'JB-01');await userEvent.click(screen.getByRole('listbox',{name:'Aset yang dapat dihubungkan'}).querySelector('button'));expect(screen.getByRole('button',{name:'Hapus relasi dengan JB-01'})).toBeVisible();expect(screen.getByPlaceholderText('Cari aset untuk dihubungkan…')).toHaveValue('');expect(writes()).toHaveLength(0);await userEvent.click(screen.getByRole('button',{name:'Batal',exact:true}));expect(screen.queryByRole('button',{name:'Hapus relasi dengan JB-01'})).not.toBeInTheDocument()
+  await ready();select();await userEvent.type(screen.getByPlaceholderText('Cari aset untuk dihubungkan…'),'jb01');await userEvent.click(screen.getByRole('listbox',{name:'Aset yang dapat dihubungkan'}).querySelector('button'));expect(screen.getByRole('button',{name:'Hapus relasi dengan JB-01'})).toBeVisible();expect(screen.getByPlaceholderText('Cari aset untuk dihubungkan…')).toHaveValue('');expect(writes()).toHaveLength(0);await userEvent.click(screen.getByRole('button',{name:'Batal',exact:true}));expect(screen.queryByRole('button',{name:'Hapus relasi dengan JB-01'})).not.toBeInTheDocument()
+ })
+ it('normalizes pole IDs and separators in frame searches',async()=>{
+  await ready();await userEvent.click(screen.getByRole('button',{name:'Tambah frame',exact:true}))
+  const search=screen.getByRole('searchbox',{name:'Cari jenis frame atau tiang'})
+  await userEvent.type(search,'t1')
+  expect(screen.getByRole('option',{name:/T-01/})).toBeVisible()
+  await userEvent.clear(search);await userEvent.type(search,'non tiang')
+  expect(screen.getByRole('option',{name:/Non-tiang/})).toBeVisible()
+  expect(writes()).toHaveLength(0)
  })
  it('creates a provisional frame, discards on Escape, and stages the chosen indoor frame',async()=>{
   await ready();await userEvent.click(screen.getByRole('button',{name:'Tambah frame',exact:true}));expect(screen.getByRole('heading',{name:'Frame baru'})).toBeVisible();expect(screen.getByRole('searchbox',{name:'Cari jenis frame atau tiang'})).toHaveFocus();await userEvent.keyboard('{Escape}');expect(screen.queryByRole('heading',{name:'Frame baru'})).not.toBeInTheDocument();expect(document.querySelector('[data-draft-bar]')).not.toBeVisible()

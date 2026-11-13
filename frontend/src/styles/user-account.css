@@ -59,6 +59,10 @@
   transform: rotate(180deg);
 }
 
+.map-body:has(.user-account-menu.is-open) .map-floating-top {
+  display: none;
+}
+
 .map-body .user-menu-dropdown {
   width: 224px;
   top: calc(100% + 6px);

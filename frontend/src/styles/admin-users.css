@@ -13,8 +13,9 @@
 .admin-section>.admin-caption{margin:0 0 12px}
 .au-button,.au-icon,.admin-body .operational-import button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:38px;padding:8px 13px;border-radius:var(--ui-radius-control);border:1px solid var(--app-glass-border);background:var(--app-glass-control);font-weight:600}
 .au-button:hover,.au-icon:hover,.admin-body .operational-import button:hover{background:var(--app-control)}
-.admin-body :is(.au-primary,.operational-primary){background:var(--app-accent-active);border-color:var(--app-accent-active);color:#fff}
-.admin-body :is(.au-primary,.operational-primary):hover{background:var(--app-accent-active);filter:brightness(.95)}
+.admin-body :is(.au-primary,.operational-primary),.admin-body .operational-import :is(.au-primary,.operational-primary){background:var(--app-accent-active);border-color:var(--app-accent-active);color:#fff}
+.admin-body :is(.au-primary,.operational-primary):hover:not(:disabled),.admin-body .operational-import :is(.au-primary,.operational-primary):hover:not(:disabled){background:var(--app-accent-active);filter:brightness(.95)}
+.admin-body :is(.au-primary,.operational-primary):disabled,.admin-body .operational-import :is(.au-primary,.operational-primary):disabled{color:var(--app-muted);background:var(--app-control);border-color:var(--app-border);opacity:1;filter:none;cursor:not-allowed}
 .au-danger{color:var(--app-danger);background:color-mix(in srgb,var(--app-danger) 9%,var(--app-surface));border-color:color-mix(in srgb,var(--app-danger) 25%,var(--app-border))}
 .au-icon,.admin-body .operational-import .au-icon{width:38px;min-width:38px;padding:0}
 .au-icon .material-symbols-outlined{font-size:19px}

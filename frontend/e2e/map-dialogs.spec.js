@@ -18,6 +18,8 @@ async function setup(page,{role='Administrator'}={}){
   if(path.startsWith('/api/auth/'))return route.fulfill({json:{user:{...fixtures.user,role}}})
   if(path.endsWith('/active'))return route.fulfill({json:fixtures.active})
   if(path.includes('/active/assets/'))return route.fulfill({json:fixtures.detail(decodeURIComponent(path.split('/').at(-1)))})
+  if(path.endsWith('/topology/graph'))return route.fulfill({json:{graph:fixtures.active.topologyGraph}})
+  if(path.endsWith('/overlays'))return route.fulfill({json:{overlays:[]}})
   if(path.endsWith('/planet'))return route.fulfill({json:fixtures.basemap})
   if(path.includes('/fonts/'))return route.fulfill({body:Buffer.alloc(0)})
   if(path==='/api/import-config')return route.fulfill({status:state.configFailure||200,json:state.configFailure?{error:{message:'Konfigurasi gagal'}}:{maxFileSize:1000000,datasets:[{id:'dataset-semarang',name:'SINERGI'}]}})
@@ -39,7 +41,7 @@ async function fillImport(page){await page.getByLabel('Nama impor').fill('Tambah
 async function openDiagram(page,asset=false){
  if(asset){await page.getByLabel('Daftar aset pada peta').getByRole('button',{name:'C-01',exact:true}).focus();await page.keyboard.press('Enter');await expect(page.getByRole('button',{name:'Ubah ikon aset',includeHidden:true})).toBeEnabled();await page.getByRole('button',{name:'Diagram topologi',exact:true}).click()}
  else await page.locator('button.diagram-toggle').click()
- await expect(page.locator('dialog.schematic-dialog svg.schematic-svg')).toBeVisible();await expect(page.getByRole('button',{name:'Export SVG'})).toBeEnabled();return page.locator('dialog.schematic-dialog')
+ await expect(page).toHaveURL(/\/topology\?/);await expect(page.locator('[data-topology-frame] svg')).toBeVisible();await expect(page.locator('dialog.schematic-dialog')).toHaveCount(0)
 }
 test('React transfer preserves failed upload draft/file and sends one upload to the returned preview',async({page})=>{
  const {state,errors,modules}=await setup(page);const dialog=await openTransfer(page);expect(await dialog.getAttribute('data-react-map-dialog')).not.toBeNull();expect(modules.some(url=>url.includes('/pages/map/map-data-transfer-dialog.js'))).toBe(false)
@@ -63,19 +65,21 @@ test('Viewer KML export uses selected network IDs, source filename survives and 
 test('empty network selection cannot export the whole dataset by accident',async({page})=>{
  const {state}=await setup(page);await page.getByRole('button',{name:'Sembunyikan Jaringan CCTV'}).click();const dialog=await openTransfer(page,'export');await dialog.getByRole('button',{name:'Ekspor KML operasional'}).click();await expect(dialog.getByText('Pilih jaringan berisi aset sebelum mengekspor KML.')).toBeVisible();expect(state.calls.filter(call=>call.path.endsWith('/exports/kml'))).toEqual([])
 })
-test('schematic dialog keeps the map canvas, supports scopes/search/zoom and downloads real SVG and PNG',async({page})=>{
- const {errors,modules}=await setup(page);await page.locator('.maplibregl-canvas').evaluate(canvas=>{window.dialogMapCanvas=canvas});const dialog=await openDiagram(page,true)
- await expect(dialog.getByRole('heading',{name:'Ringkasan aset'})).toBeVisible();await dialog.getByRole('tab',{name:/Topologi jaringan/}).click();await dialog.getByRole('tab',{name:/Jalur terpilih/}).click();await dialog.getByRole('tab',{name:/Seluruh aset/}).click()
- await dialog.getByRole('searchbox',{name:'Cari aset dalam diagram'}).fill('C-01');await page.keyboard.press('ArrowDown');await page.keyboard.press('Enter');await expect(dialog.getByRole('heading',{name:'Relasi aset terpilih'})).toBeVisible();await dialog.getByRole('button',{name:'Perbesar diagram'}).click();await dialog.getByRole('button',{name:'Reset tampilan'}).click()
- const svgEvent=page.waitForEvent('download');await dialog.getByRole('button',{name:'Export SVG'}).click();const svg=await svgEvent,xml=await readFile(await svg.path(),'utf8');expect(xml).toContain('<svg');expect(xml).toContain('data:image/png;base64,');expect(svg.suggestedFilename()).toMatch(/\.svg$/)
- const pngEvent=page.waitForEvent('download');await dialog.getByRole('button',{name:'Export PNG'}).click();const png=await pngEvent,buffer=await readFile(await png.path());expect(buffer.subarray(0,8).toString('hex')).toBe('89504e470d0a1a0a');expect(buffer.readUInt32BE(16)).toBeGreaterThan(0);expect(buffer.readUInt32BE(16)).toBeLessThanOrEqual(8192);expect(buffer.readUInt32BE(16)*buffer.readUInt32BE(20)).toBeLessThanOrEqual(40000000)
- await dialog.getByRole('button',{name:'Kembali ke peta'}).click();expect(await page.locator('.maplibregl-canvas').evaluate(canvas=>canvas===window.dialogMapCanvas)).toBe(true);await expect.poll(()=>page.evaluate(()=>window.dialogUrls.created.filter(url=>!window.dialogUrls.revoked.includes(url)).length)).toBe(0);expect(modules.some(url=>url.includes('/pages/map/diagram-dialog.js'))).toBe(false);expect(errors).toEqual([])
+test('asset detail opens the current topology workspace with dataset and asset selection',async({page})=>{
+ const {errors,modules}=await setup(page);await openDiagram(page,true)
+ await expect(page).toHaveURL(/datasetId=dataset-semarang/);await expect(page).toHaveURL(/selectedAssetId=C-01/);await expect(page.getByRole('heading',{name:'C-01',exact:true})).toBeVisible()
+ await page.getByRole('button',{name:'Perbesar diagram',exact:true}).click()
+ for(const kind of ['SVG','PNG']){await page.getByRole('button',{name:'Ekspor diagram',exact:true}).click();const pending=page.waitForEvent('download');await page.getByRole('button',{name:new RegExp(`${kind} resolusi tinggi`)}).click();const download=await pending;expect(await download.failure()).toBeNull();const bytes=await readFile(await download.path());if(kind==='PNG')expect(bytes.subarray(0,8).toString('hex')).toBe('89504e470d0a1a0a');else expect(bytes.toString()).toContain('<svg')}
+ await page.getByRole('link',{name:'Peta Aset',exact:true}).click();await expect(page.locator('.maplibregl-canvas')).toBeVisible();await expect(page).toHaveURL(/selectedAssetId=C-01/)
+ expect(modules.some(url=>url.includes('/pages/map/diagram-dialog.js'))).toBe(false);expect(errors).toEqual([])
 })
-test('mobile diagram uses fullscreen fallback, keyboard search and closes cleanly',async({page})=>{
- await page.setViewportSize({width:390,height:844});await page.addInitScript(()=>{HTMLElement.prototype.requestFullscreen=async()=>{throw new Error('Fullscreen unavailable')}});const {errors}=await setup(page);const dialog=await openDiagram(page)
- await expect(dialog.getByRole('tab',{name:/Jalur terpilih/})).toBeDisabled();await dialog.getByRole('button',{name:'Buka ruang kerja diagram layar penuh'}).click();await expect(dialog.locator('.schematic-shell')).toHaveClass(/schematic-shell-fullscreen/);await page.keyboard.press('Escape');await expect(dialog).toBeVisible();await expect(dialog.locator('.schematic-shell')).not.toHaveClass(/schematic-shell-fullscreen/)
- await dialog.getByRole('searchbox').fill('no asset');await expect(dialog.getByText('Tidak ada aset yang cocok.')).toBeVisible();await page.keyboard.press('Escape');await dialog.getByRole('button',{name:'Tutup diagram'}).click();await expect(dialog).toHaveCount(0);expect(errors).toEqual([])
+
+test('mobile map toolbar opens the current topology workspace and supports normalized search',async({page})=>{
+ await page.setViewportSize({width:390,height:844});const {errors}=await setup(page);await openDiagram(page)
+ await page.getByRole('button',{name:'Buka panel diagram',exact:true}).click();const search=page.getByRole('searchbox',{name:'Cari perangkat',exact:true});await search.fill('c1');await search.press('Enter')
+ await expect(page.getByRole('heading',{name:'C-01',exact:true})).toBeVisible();expect(errors).toEqual([])
 })
+
 test('closing during processing aborts polling and external revisions do not discard the upload draft',async({page})=>{
  const {state,errors}=await setup(page);state.processing=true;const dialog=await openTransfer(page);await fillImport(page);await page.evaluate(()=>window.dispatchEvent(new StorageEvent('storage',{key:'sinergi:revision:dataset-semarang',newValue:'5'})));await expect(dialog).toBeVisible();await expect(page.getByLabel('Nama impor')).toHaveValue('Tambahan seminar')
  await dialog.getByRole('button',{name:'Unggah dan lihat preview'}).click();await expect(dialog.getByText('Membaca file dan mencari tambahan…')).toBeVisible();const reads=state.statusReads;page.once('dialog',confirm=>confirm.accept());await dialog.getByRole('button',{name:'Tutup',exact:true}).click();await page.waitForTimeout(1400);expect(state.statusReads).toBe(reads);await expect(dialog).toHaveCount(0);expect(errors).toEqual([])

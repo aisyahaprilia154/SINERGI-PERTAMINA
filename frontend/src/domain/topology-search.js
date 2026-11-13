@@ -1,7 +1,8 @@
 import { getTopologyDiagramSearchResults } from './topology-diagram-model.js'
+import { normalizeSearchText, searchMatchScore } from './search-normalization.js'
 
 export function relationTargetsFor(model, nodeId, queryText) {
-    const query = String(queryText || '').trim().toLocaleLowerCase('id')
+    const query = normalizeSearchText(queryText)
     if (!query) return []
     const connectedIds = new Set((model.adjacency.get(nodeId) ?? []).map(({ id }) => id))
     const source = model.nodeById.get(nodeId)
@@ -9,10 +10,7 @@ export function relationTargetsFor(model, nodeId, queryText) {
       .filter((candidate) => candidate.id !== nodeId && !connectedIds.has(candidate.id))
       .filter(candidate => candidate.areaKey === source?.areaKey)
       .map((candidate) => {
-        const haystack = `${candidate.name || ''} ${candidate.id} ${candidate.type || ''}`
-          .toLocaleLowerCase('id')
-        const index = haystack.indexOf(query)
-        return { candidate, score: index === 0 ? 2 : index >= 0 ? 1 : 0 }
+        return { candidate, score: searchMatchScore([candidate.name, candidate.id, candidate.type], query) }
       })
       .filter(({ score }) => score > 0)
       .sort((left, right) => right.score - left.score

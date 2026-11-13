@@ -11,14 +11,12 @@ import { useMapDocument } from './useMapDocument.js'
 import { AssetDetailDrawer } from './AssetDetailDrawer.jsx'
 import { useMapTransfer } from './useMapTransfer.js'
 import { MapTransferDialog } from './MapTransferDialog.jsx'
-import { SchematicDialog } from './SchematicDialog.jsx'
-import { branchNameForFacility } from '../../domain/facility-branch.js'
 import { MapStage } from './MapStage.jsx'
 
 function Workspace({ model: initial, createAdapter }) {
   const { user } = useSession(), canEdit = user?.role === 'Administrator'
   const mapDocument = useMapDocument(initial, canEdit), model = mapDocument.model, transfer = useMapTransfer()
-  const [detailExpanded, setDetailExpanded] = useState(false), [diagramSnapshot,setDiagramSnapshot] = useState(null)
+  const [detailExpanded, setDetailExpanded] = useState(false)
   const [controller] = useState(() => createNetworkSelectionState({ ...model.selectionOptions, initialSelectedNetworkIds: model.urlState.selectedNetworkIds, initialSelectedAssetId: model.urlState.selectedAssetId }))
   const snapshot = useCallback(() => ({ selectedNetworkIds: controller.selectedNetworkIds, selectedAssetId: controller.selectedAssetId }), [controller])
   const [selection, setSelection] = useState(snapshot), [query, setQuery] = useState(''), [searchOpen, setSearchOpen] = useState(false)
@@ -28,7 +26,12 @@ function Workspace({ model: initial, createAdapter }) {
   const [basemap, setBasemap] = useState({ status: 'loading', mode: 'street', street: false, satellite: false })
   const api = useRef(null), search = useRef(null), results = useRef(null), reopen = useRef(null), focusReopen = useRef(false), focusSearch = useRef(false)
   const closeDetail = () => { if (mapDocument.permitLeave()) { commit('selectAsset', null); setDetailExpanded(false) } }
-  const openDiagram = () => { if (mapDocument.busy) return; setDiagramSnapshot({model,context:{...model.activeContext,branchName:branchNameForFacility(model.selectedArea,model.activeContext.branchName)},selectedAssetId:controller.selectedAssetId}) }
+  const openDiagram = () => {
+    if (!mapDocument.permitLeave(true)) return
+    const params = new URLSearchParams({ datasetId: model.activeContext.datasetId, area: model.selectedArea?.key || 'all' })
+    if (controller.selectedAssetId) params.set('selectedAssetId', controller.selectedAssetId)
+    documentNavigation.assign(`/topology?${params}`)
+  }
   const mobile = () => window.matchMedia?.('(max-width: 960px)').matches || false
   const writeUrl = useCallback(mode => {
     const params = mapSelectionQuery(window.location.search, { ...model, selection: controller })
@@ -91,7 +94,7 @@ function Workspace({ model: initial, createAdapter }) {
       {mapDocument.stale && <div className="map-revision-warning" role="alert">{mapDocument.stale}<button type="button" onClick={() => { if (mapDocument.permitLeave(true)) documentNavigation.reload() }}>Muat ulang peta</button></div>}
       {selection.selectedAssetId && <AssetDetailDrawer key={selection.selectedAssetId} mapAsset={model.assetById[selection.selectedAssetId]} document={mapDocument} canEdit={canEdit} expanded={detailExpanded} onExpand={() => setDetailExpanded(value => !value)} onClose={closeDetail} onSelect={selectAsset} onFocus={id => { api.current?.focusAsset(id); api.current?.highlightAsset(id) }} onNetwork={id => {selectNetwork(id); api.current?.focusNetwork(id)}} onDiagram={openDiagram} />}
     </MapStage>
-  </main>{transfer.snapshot&&<MapTransferDialog snapshot={transfer.snapshot} onClose={transfer.close} onGuardChange={mapDocument.setTransferGuard}/>}{diagramSnapshot&&<SchematicDialog snapshot={diagramSnapshot} onClose={()=>setDiagramSnapshot(null)} onSelectAsset={id=>{if(model.assetById[id])selectAsset(id)}}/>}</div>
+  </main>{transfer.snapshot&&<MapTransferDialog snapshot={transfer.snapshot} onClose={transfer.close} onGuardChange={mapDocument.setTransferGuard}/>}</div>
 }
 export function MapReadPage({ createAdapter = createMapReadAdapter }) {
   const { model, loading, error, retry } = useMapDataset(), { user } = useSession(), transfer = useMapTransfer()
